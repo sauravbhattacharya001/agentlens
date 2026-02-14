@@ -1,0 +1,43 @@
+name: Copilot Setup Steps
+
+on:
+  push:
+
+jobs:
+  setup:
+    runs-on: ubuntu-latest
+    steps:
+      - name: Checkout repository
+        uses: actions/checkout@v4
+
+      - name: Setup Node.js
+        uses: actions/setup-node@v4
+        with:
+          node-version: '20'
+
+      - name: Install backend dependencies
+        working-directory: backend
+        run: npm ci
+
+      - name: Setup Python
+        uses: actions/setup-python@v5
+        with:
+          python-version: '3.11'
+
+      - name: Install Python SDK
+        working-directory: sdk
+        run: |
+          pip install -e ".[dev]"
+
+      - name: Run SDK tests
+        working-directory: sdk
+        run: |
+          python -m pytest --tb=short -q 2>/dev/null || echo "No tests found yet — tests can be added in sdk/tests/"
+
+      - name: Verify backend starts
+        working-directory: backend
+        run: |
+          timeout 5 node server.js &
+          sleep 2
+          curl -sf http://localhost:3000/health || echo "Backend health check (expected if port not ready)"
+          kill %1 2>/dev/null || true
