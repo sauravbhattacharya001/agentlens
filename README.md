@@ -99,7 +99,3 @@ python mock_agent.py
 ## License
 
 MIT — see [LICENSE](LICENSE)
-
-## License
-
-MIT — see [LICENSE](LICENSE)
