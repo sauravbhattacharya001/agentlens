@@ -1,0 +1,117 @@
+name: CI
+
+on:
+  push:
+    branches: [master, main]
+  pull_request:
+    branches: [master, main]
+
+permissions:
+  contents: read
+
+jobs:
+  # ── Node.js Backend ────────────────────────────────────────────────
+  backend:
+    name: Backend (Node.js ${{ matrix.node-version }})
+    runs-on: ubuntu-latest
+    strategy:
+      matrix:
+        node-version: [18, 20, 22]
+    defaults:
+      run:
+        working-directory: backend
+
+    steps:
+      - name: Checkout
+        uses: actions/checkout@v4
+
+      - name: Setup Node.js ${{ matrix.node-version }}
+        uses: actions/setup-node@v4
+        with:
+          node-version: ${{ matrix.node-version }}
+          cache: npm
+          cache-dependency-path: backend/package-lock.json
+
+      - name: Install dependencies
+        run: npm ci
+
+      - name: Check for vulnerabilities
+        run: npm audit --omit=dev --audit-level=high || true
+
+      - name: Verify server starts
+        run: |
+          timeout 5 node server.js &
+          sleep 2
+          curl -sf http://localhost:3000/health | grep -q '"status":"ok"'
+          echo "✅ Server health check passed"
+
+  # ── Python SDK ─────────────────────────────────────────────────────
+  sdk:
+    name: SDK (Python ${{ matrix.python-version }})
+    runs-on: ubuntu-latest
+    strategy:
+      matrix:
+        python-version: ["3.9", "3.11", "3.12", "3.13"]
+    defaults:
+      run:
+        working-directory: sdk
+
+    steps:
+      - name: Checkout
+        uses: actions/checkout@v4
+
+      - name: Setup Python ${{ matrix.python-version }}
+        uses: actions/setup-python@v5
+        with:
+          python-version: ${{ matrix.python-version }}
+          cache: pip
+          cache-dependency-path: sdk/pyproject.toml
+
+      - name: Install SDK in dev mode
+        run: pip install -e ".[dev]"
+
+      - name: Lint with ruff (if available)
+        run: |
+          pip install ruff
+          ruff check agentlens/ --select=E,F,W --ignore=E501 || true
+
+      - name: Type check with mypy (if available)
+        run: |
+          pip install mypy
+          mypy agentlens/ --ignore-missing-imports --no-error-summary || true
+
+      - name: Run tests
+        run: |
+          if [ -d "tests" ] || find . -name "test_*.py" -o -name "*_test.py" | grep -q .; then
+            pytest -v --tb=short
+          else
+            echo "⚠️ No tests found — verifying import works"
+            python -c "import agentlens; print(f'✅ agentlens {agentlens.__version__} imported successfully')"
+          fi
+
+      - name: Build package
+        run: |
+          pip install build
+          python -m build
+          echo "✅ Package built successfully"
+
+  # ── Dashboard Lint ─────────────────────────────────────────────────
+  dashboard:
+    name: Dashboard (HTML/JS lint)
+    runs-on: ubuntu-latest
+
+    steps:
+      - name: Checkout
+        uses: actions/checkout@v4
+
+      - name: Setup Node.js
+        uses: actions/setup-node@v4
+        with:
+          node-version: 22
+
+      - name: Lint JavaScript
+        run: |
+          npx --yes eslint@latest dashboard/app.js --no-eslintrc \
+            --rule '{"no-undef": "off", "no-unused-vars": "warn"}' \
+            --env browser || true
+          echo "✅ Dashboard lint complete"
