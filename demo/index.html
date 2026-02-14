@@ -1,0 +1,85 @@
+<!DOCTYPE html>
+<html lang="en">
+<head>
+  <meta charset="UTF-8">
+  <meta name="viewport" content="width=device-width, initial-scale=1.0">
+  <title>AgentLens — Live Demo</title>
+  <link rel="stylesheet" href="styles.css">
+</head>
+<body>
+  <div id="app">
+    <header class="header">
+      <div class="header-left">
+        <h1 class="logo">🔍 AgentLens</h1>
+        <span class="tagline">Live Demo — Observability for AI Agents</span>
+      </div>
+      <div class="header-right">
+        <a href="../" class="btn btn-ghost" style="margin-right:8px">📖 Docs</a>
+        <a href="https://github.com/sauravbhattacharya001/agentlens" class="btn btn-ghost">⭐ GitHub</a>
+        <span class="status-dot"></span>
+        <span id="connectionStatus">Demo Mode</span>
+      </div>
+    </header>
+
+    <div class="demo-banner">
+      <strong>🎯 Interactive Demo</strong> — This dashboard is running with sample data. Click on any session to explore agent traces, token usage, and explainability features.
+      <a href="https://github.com/sauravbhattacharya001/agentlens#-quick-start" target="_blank">Get started with real data →</a>
+    </div>
+
+    <main class="main">
+      <div id="sessionListView" class="view active">
+        <div class="view-header">
+          <h2>Sessions</h2>
+          <div class="view-actions">
+            <select id="statusFilter" class="select-input">
+              <option value="">All Statuses</option>
+              <option value="active">Active</option>
+              <option value="completed">Completed</option>
+              <option value="error">Error</option>
+            </select>
+            <button class="btn btn-secondary" onclick="loadSessions()">↻ Refresh</button>
+          </div>
+        </div>
+        <div id="sessionList" class="session-list">
+          <div class="loading">Loading sessions...</div>
+        </div>
+      </div>
+
+      <div id="sessionDetailView" class="view">
+        <div class="view-header">
+          <button class="btn btn-ghost" onclick="showSessionList()">← Back to Sessions</button>
+          <h2 id="sessionTitle">Session Detail</h2>
+        </div>
+        <div id="sessionInfo" class="session-info-bar"></div>
+        <div class="tabs">
+          <button class="tab active" data-tab="timeline" onclick="switchTab('timeline')">📊 Timeline</button>
+          <button class="tab" data-tab="tokens" onclick="switchTab('tokens')">💰 Tokens</button>
+          <button class="tab" data-tab="explain" onclick="switchTab('explain')">💡 Explain</button>
+        </div>
+        <div id="timelineTab" class="tab-content active">
+          <div id="timeline" class="timeline"></div>
+        </div>
+        <div id="tokensTab" class="tab-content">
+          <div class="charts-grid">
+            <div class="chart-card">
+              <h3>Token Usage by Event</h3>
+              <canvas id="tokenChart" width="600" height="300"></canvas>
+            </div>
+            <div class="chart-card">
+              <h3>Cumulative Tokens</h3>
+              <canvas id="cumulativeChart" width="600" height="300"></canvas>
+            </div>
+          </div>
+          <div id="tokenSummary" class="token-summary"></div>
+        </div>
+        <div id="explainTab" class="tab-content">
+          <div id="explainContent" class="explain-panel"></div>
+        </div>
+      </div>
+    </main>
+  </div>
+
+  <script src="mock-data.js"></script>
+  <script src="demo-app.js"></script>
+</body>
+</html>
