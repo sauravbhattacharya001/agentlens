@@ -1,9 +1,9 @@
-"""AgentOps — Observability and Explainability for AI Agents."""
+"""AgentLens — Observability and Explainability for AI Agents."""
 
-from agentops.models import AgentEvent, ToolCall, DecisionTrace, Session
-from agentops.tracker import AgentTracker
-from agentops.decorators import track_agent, track_tool_call
-from agentops.transport import Transport
+from agentlens.models import AgentEvent, ToolCall, DecisionTrace, Session
+from agentlens.tracker import AgentTracker
+from agentlens.decorators import track_agent, track_tool_call
+from agentlens.transport import Transport
 
 __version__ = "0.1.0"
 __all__ = [
@@ -24,11 +24,11 @@ _tracker: AgentTracker | None = None
 
 
 def init(api_key: str = "default", endpoint: str = "http://localhost:3000") -> AgentTracker:
-    """Initialize the AgentOps SDK.
+    """Initialize the AgentLens SDK.
     
     Args:
-        api_key: Your AgentOps API key.
-        endpoint: The AgentOps backend URL.
+        api_key: Your AgentLens API key.
+        endpoint: The AgentLens backend URL.
     
     Returns:
         The global AgentTracker instance.
@@ -50,14 +50,14 @@ def start_session(agent_name: str = "default-agent", metadata: dict | None = Non
         A Session object.
     """
     if _tracker is None:
-        raise RuntimeError("Call agentops.init() before start_session()")
+        raise RuntimeError("Call agentlens.init() before start_session()")
     return _tracker.start_session(agent_name=agent_name, metadata=metadata)
 
 
 def end_session(session_id: str | None = None) -> None:
     """End the current or specified session and flush pending events."""
     if _tracker is None:
-        raise RuntimeError("Call agentops.init() before end_session()")
+        raise RuntimeError("Call agentlens.init() before end_session()")
     _tracker.end_session(session_id=session_id)
 
 
@@ -80,7 +80,7 @@ def track(
         The created AgentEvent.
     """
     if _tracker is None:
-        raise RuntimeError("Call agentops.init() before track()")
+        raise RuntimeError("Call agentlens.init() before track()")
     return _tracker.track(
         event_type=event_type,
         input_data=input_data,
@@ -103,5 +103,5 @@ def explain(session_id: str | None = None) -> str:
         A string explanation.
     """
     if _tracker is None:
-        raise RuntimeError("Call agentops.init() before explain()")
+        raise RuntimeError("Call agentlens.init() before explain()")
     return _tracker.explain(session_id=session_id)

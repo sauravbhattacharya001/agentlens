@@ -1,7 +1,7 @@
 {
-  "name": "agentops-backend",
+  "name": "agentlens-backend",
   "version": "0.1.0",
-  "description": "AgentOps Dashboard Backend API",
+  "description": "AgentLens Dashboard Backend API",
   "main": "server.js",
   "scripts": {
     "start": "node server.js",

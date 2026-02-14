@@ -22,7 +22,7 @@ def track_agent(func: Callable | None = None, *, model: str | None = None, name:
     def decorator(fn: Callable) -> Callable:
         @functools.wraps(fn)
         def wrapper(*args: Any, **kwargs: Any) -> Any:
-            import agentops
+            import agentlens
             
             agent_name = name or fn.__name__
             start = time.perf_counter()
@@ -38,7 +38,7 @@ def track_agent(func: Callable | None = None, *, model: str | None = None, name:
                 output_data = {"result": str(result) if result is not None else None}
                 
                 try:
-                    agentops.track(
+                    agentlens.track(
                         event_type="agent_call",
                         input_data=input_data,
                         output_data=output_data,
@@ -53,7 +53,7 @@ def track_agent(func: Callable | None = None, *, model: str | None = None, name:
             except Exception as e:
                 elapsed_ms = (time.perf_counter() - start) * 1000
                 try:
-                    agentops.track(
+                    agentlens.track(
                         event_type="agent_error",
                         input_data=input_data,
                         output_data={"error": str(e), "error_type": type(e).__name__},
@@ -87,7 +87,7 @@ def track_tool_call(func: Callable | None = None, *, tool_name: str | None = Non
     def decorator(fn: Callable) -> Callable:
         @functools.wraps(fn)
         def wrapper(*args: Any, **kwargs: Any) -> Any:
-            import agentops
+            import agentlens
             
             name = tool_name or fn.__name__
             start = time.perf_counter()
@@ -101,7 +101,7 @@ def track_tool_call(func: Callable | None = None, *, tool_name: str | None = Non
                 tool_output = {"result": str(result) if result is not None else None}
                 
                 try:
-                    agentops.track(
+                    agentlens.track(
                         event_type="tool_call",
                         tool_name=name,
                         tool_input=tool_input,
@@ -115,7 +115,7 @@ def track_tool_call(func: Callable | None = None, *, tool_name: str | None = Non
             except Exception as e:
                 elapsed_ms = (time.perf_counter() - start) * 1000
                 try:
-                    agentops.track(
+                    agentlens.track(
                         event_type="tool_error",
                         tool_name=name,
                         tool_input=tool_input,

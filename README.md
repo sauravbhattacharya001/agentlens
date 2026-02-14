@@ -1,14 +1,14 @@
-# AgentOps 🔍
+# AgentLens 🔍
 
 **Observability and Explainability for AI Agents**
 
-AgentOps gives you full visibility into what your AI agents are doing, why they're doing it, and how much it costs. Think of it as Datadog meets Chain-of-Thought — for agents.
+AgentLens gives you full visibility into what your AI agents are doing, why they're doing it, and how much it costs. Think of it as Datadog meets Chain-of-Thought — for agents.
 
 ## Architecture
 
 ```
 ┌─────────────┐     HTTP POST      ┌─────────────────┐     SQLite      ┌──────────┐
-│  Your Agent  │ ──────────────────▶│  AgentOps API   │ ──────────────▶│    DB    │
+│  Your Agent  │ ──────────────────▶│  AgentLens API  │ ──────────────▶│    DB    │
 │  + SDK       │    /events         │  (Express.js)   │                 └──────────┘
 └─────────────┘                     └────────┬────────┘
                                              │ REST API
@@ -52,19 +52,19 @@ pip install -e .
 ```
 
 ```python
-import agentops
+import agentlens
 
-agentops.init(api_key="your-key", endpoint="http://localhost:3000")
-session = agentops.start_session(agent_name="my-agent")
+agentlens.init(api_key="your-key", endpoint="http://localhost:3000")
+session = agentlens.start_session(agent_name="my-agent")
 
 # Automatic tracking with decorators
-@agentops.track_agent
+@agentlens.track_agent
 def my_agent(prompt):
     response = call_llm(prompt)
     return response
 
 # Or manual tracking
-agentops.track(
+agentlens.track(
     event_type="llm_call",
     input_data={"prompt": "Hello"},
     output_data={"response": "Hi there!"},
@@ -74,7 +74,7 @@ agentops.track(
 )
 
 # Get human-readable explanation of agent behavior
-explanation = agentops.explain()
+explanation = agentlens.explain()
 print(explanation)
 
 session.end()
@@ -95,6 +95,10 @@ python mock_agent.py
 - 🧠 **Decision traces** — Capture *why* an agent made each choice
 - 📈 **Visual timeline** — See agent actions on an interactive timeline
 - 💡 **Explainability** — Human-readable summaries of agent behavior
+
+## License
+
+MIT — see [LICENSE](LICENSE)
 
 ## License
 

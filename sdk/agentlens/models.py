@@ -1,4 +1,4 @@
-"""Pydantic models for AgentOps events, sessions, and traces."""
+"""Pydantic models for AgentLens events, sessions, and traces."""
 
 from __future__ import annotations
 

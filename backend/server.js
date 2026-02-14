@@ -33,6 +33,6 @@ app.get("/", (req, res) => {
 getDb();
 
 app.listen(PORT, () => {
-  console.log(`🔍 AgentOps backend running on http://localhost:${PORT}`);
+  console.log(`🔍 AgentLens backend running on http://localhost:${PORT}`);
   console.log(`📊 Dashboard available at http://localhost:${PORT}`);
 });

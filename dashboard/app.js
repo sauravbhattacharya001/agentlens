@@ -1,4 +1,4 @@
-/* ── AgentOps Dashboard — App Logic ──────────────────────────────────── */
+/* ── AgentLens Dashboard — App Logic ──────────────────────────────────── */
 
 const API_BASE = window.location.origin;
 

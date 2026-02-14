@@ -1,4 +1,4 @@
-# AgentOps Python SDK
+# AgentLens Python SDK
 
 Lightweight Python SDK for tracking AI agent behavior with full observability.
 
@@ -11,16 +11,16 @@ pip install -e .
 ## Quick Start
 
 ```python
-import agentops
+import agentlens
 
 # Initialize
-agentops.init(api_key="your-key", endpoint="http://localhost:3000")
+agentlens.init(api_key="your-key", endpoint="http://localhost:3000")
 
 # Start a session
-session = agentops.start_session(agent_name="my-agent")
+session = agentlens.start_session(agent_name="my-agent")
 
 # Track events manually
-agentops.track(
+agentlens.track(
     event_type="llm_call",
     input_data={"prompt": "What is 2+2?"},
     output_data={"response": "4"},
@@ -31,7 +31,7 @@ agentops.track(
 )
 
 # Track tool calls
-agentops.track(
+agentlens.track(
     event_type="tool_call",
     tool_name="calculator",
     tool_input={"expression": "2+2"},
@@ -39,16 +39,16 @@ agentops.track(
 )
 
 # Get explanation
-print(agentops.explain())
+print(agentlens.explain())
 
 # End session
-agentops.end_session()
+agentlens.end_session()
 ```
 
 ## Decorators
 
 ```python
-from agentops import track_agent, track_tool_call
+from agentlens import track_agent, track_tool_call
 
 @track_agent(model="gpt-4")
 def my_agent(prompt):

@@ -1,4 +1,4 @@
-"""HTTP transport for sending events to the AgentOps backend."""
+"""HTTP transport for sending events to the AgentLens backend."""
 
 from __future__ import annotations
 
@@ -10,11 +10,11 @@ from typing import Any
 
 import httpx
 
-logger = logging.getLogger("agentops.transport")
+logger = logging.getLogger("agentlens.transport")
 
 
 class Transport:
-    """Batched HTTP transport for sending events to the AgentOps API."""
+    """Batched HTTP transport for sending events to the AgentLens API."""
 
     def __init__(
         self,

@@ -5,8 +5,8 @@ from __future__ import annotations
 import time
 from typing import Any
 
-from agentops.models import AgentEvent, ToolCall, DecisionTrace, Session
-from agentops.transport import Transport
+from agentlens.models import AgentEvent, ToolCall, DecisionTrace, Session
+from agentlens.transport import Transport
 
 
 class AgentTracker:

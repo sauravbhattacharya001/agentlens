@@ -1,4 +1,4 @@
-"""Example: Mock AI agent instrumented with AgentOps SDK.
+"""Example: Mock AI agent instrumented with AgentLens SDK.
 
 This demonstrates a realistic agent workflow with:
 - LLM calls with token tracking
@@ -7,7 +7,7 @@ This demonstrates a realistic agent workflow with:
 - Session management
 
 Run with: python mock_agent.py
-Make sure the AgentOps backend is running on http://localhost:3000
+Make sure the AgentLens backend is running on http://localhost:3000
 """
 
 import random
@@ -18,8 +18,8 @@ import os
 # Add SDK to path for development
 sys.path.insert(0, os.path.join(os.path.dirname(__file__), ".."))
 
-import agentops
-from agentops import track_agent, track_tool_call
+import agentlens
+from agentlens import track_agent, track_tool_call
 
 
 # ── Tool definitions ──────────────────────────────────────────────────
@@ -67,7 +67,7 @@ def research_agent(user_query: str) -> str:
     """A mock research agent that uses tools to answer questions."""
     
     # Step 1: Analyze the query
-    agentops.track(
+    agentlens.track(
         event_type="llm_call",
         input_data={"prompt": f"Analyze this query and decide what tools to use: {user_query}"},
         output_data={"response": "I'll search the web for current information, then synthesize."},
@@ -84,7 +84,7 @@ def research_agent(user_query: str) -> str:
     # Step 3: Maybe use calculator if math-related
     if any(word in user_query.lower() for word in ["calculate", "math", "compute", "how much"]):
         calc_result = calculator("42 * 1.15")
-        agentops.track(
+        agentlens.track(
             event_type="llm_call",
             input_data={"prompt": "Interpret the calculation result", "calc_result": calc_result},
             output_data={"response": f"The calculation gives us {calc_result}"},
@@ -98,7 +98,7 @@ def research_agent(user_query: str) -> str:
     file_data = read_file("knowledge_base/topic.md")
     
     # Step 5: Synthesize final answer
-    agentops.track(
+    agentlens.track(
         event_type="llm_call",
         input_data={
             "prompt": "Synthesize the search results and file data into a final answer",
@@ -123,7 +123,7 @@ def research_agent(user_query: str) -> str:
 def code_agent(task: str) -> str:
     """A mock coding agent."""
     
-    agentops.track(
+    agentlens.track(
         event_type="llm_call",
         input_data={"prompt": f"Write code for: {task}"},
         output_data={"response": "def solution():\n    return 'implemented'"},
@@ -134,7 +134,7 @@ def code_agent(task: str) -> str:
     )
     time.sleep(0.15)
     
-    agentops.track(
+    agentlens.track(
         event_type="llm_call",
         input_data={"prompt": "Review and test the code"},
         output_data={"response": "Code looks correct. All edge cases handled."},
@@ -150,15 +150,15 @@ def code_agent(task: str) -> str:
 # ── Main ──────────────────────────────────────────────────────────────
 
 def main():
-    print("🔍 AgentOps Demo — Mock Agent Example")
+    print("🔍 AgentLens Demo — Mock Agent Example")
     print("=" * 50)
     
-    # Initialize AgentOps
-    agentops.init(api_key="demo-key-001", endpoint="http://localhost:3000")
+    # Initialize AgentLens
+    agentlens.init(api_key="demo-key-001", endpoint="http://localhost:3000")
     
     # Session 1: Research agent
     print("\n📊 Starting research agent session...")
-    session1 = agentops.start_session(
+    session1 = agentlens.start_session(
         agent_name="research-agent-v2",
         metadata={"version": "2.1.0", "environment": "demo"},
     )
@@ -168,15 +168,15 @@ def main():
     print(f"   Result: {result1}")
     
     # Print explanation
-    explanation = agentops.explain()
+    explanation = agentlens.explain()
     print(f"\n💡 Explanation:\n{explanation}")
     
-    agentops.end_session()
+    agentlens.end_session()
     print("   ✅ Session ended")
     
     # Session 2: Code agent
     print("\n📊 Starting code agent session...")
-    session2 = agentops.start_session(
+    session2 = agentlens.start_session(
         agent_name="code-agent-v1",
         metadata={"version": "1.0.0", "language": "python"},
     )
@@ -185,10 +185,10 @@ def main():
     result2 = code_agent("Implement a binary search function")
     print(f"   Result: {result2}")
     
-    explanation2 = agentops.explain()
+    explanation2 = agentlens.explain()
     print(f"\n💡 Explanation:\n{explanation2}")
     
-    agentops.end_session()
+    agentlens.end_session()
     print("   ✅ Session ended")
     
     print("\n🎉 Demo complete! Check the dashboard at http://localhost:3000")

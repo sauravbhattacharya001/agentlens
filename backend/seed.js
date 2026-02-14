@@ -59,7 +59,7 @@ function seed() {
     {
       id: shortId(), session: s1, type: "llm_call", offset: 28.5,
       input: { prompt: "Synthesize search results into a comprehensive answer about AI agent framework trends" },
-      output: { response: "Based on my research, the AI agent framework landscape in 2026 is dominated by three major players: LangChain/LangGraph for flexible agent orchestration, CrewAI for multi-agent collaboration, and Microsoft's AutoGen 2.0 for enterprise deployments. Key trends include: 1) Multi-agent architectures becoming standard, 2) Better observability tools (like AgentOps!), 3) Shift from single-model to multi-model agent systems." },
+      output: { response: "Based on my research, the AI agent framework landscape in 2026 is dominated by three major players: LangChain/LangGraph for flexible agent orchestration, CrewAI for multi-agent collaboration, and Microsoft's AutoGen 2.0 for enterprise deployments. Key trends include: 1) Multi-agent architectures becoming standard, 2) Better observability tools (like AgentLens!), 3) Shift from single-model to multi-model agent systems." },
       model: "gpt-4-turbo", tokIn: 180, tokOut: 95,
       trace: { reasoning: "I have enough information from both web searches. Synthesizing multiple sources for a balanced, comprehensive answer. Including specific framework names and concrete trends.", step: 4 },
       duration: 2100
