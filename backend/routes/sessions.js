@@ -1,15 +1,9 @@
 const express = require("express");
 const { getDb } = require("../db");
+const { isValidSessionId, isValidStatus, safeJsonParse } = require("../lib/validation");
+const { generateExplanation } = require("../lib/explain");
 
 const router = express.Router();
-
-// ── Input validation ────────────────────────────────────────────────
-const VALID_STATUSES = new Set(["active", "completed", "error", "timeout"]);
-const SESSION_ID_RE = /^[a-zA-Z0-9_\-.:]+$/;
-
-function isValidSessionId(id) {
-  return typeof id === "string" && id.length <= 128 && SESSION_ID_RE.test(id);
-}
 
 // GET /sessions — List all sessions
 router.get("/", (req, res) => {
@@ -22,8 +16,7 @@ router.get("/", (req, res) => {
   const params = [];
 
   if (status) {
-    // Validate status to prevent query abuse
-    if (!VALID_STATUSES.has(status)) {
+    if (!isValidStatus(status)) {
       return res.status(400).json({ error: "Invalid status filter" });
     }
     query += " WHERE status = ?";
@@ -39,7 +32,6 @@ router.get("/", (req, res) => {
       .prepare(`SELECT COUNT(*) as count FROM sessions${status ? " WHERE status = ?" : ""}`)
       .get(...(status ? [status] : []));
 
-    // Parse JSON metadata safely
     const parsed = sessions.map((s) => ({
       ...s,
       metadata: safeJsonParse(s.metadata),
@@ -57,7 +49,6 @@ router.get("/:id", (req, res) => {
   const db = getDb();
   const { id } = req.params;
 
-  // Validate session ID format
   if (!isValidSessionId(id)) {
     return res.status(400).json({ error: "Invalid session ID format" });
   }
@@ -72,7 +63,6 @@ router.get("/:id", (req, res) => {
       .prepare("SELECT * FROM events WHERE session_id = ? ORDER BY timestamp ASC")
       .all(id);
 
-    // Parse JSON fields safely
     const parsedEvents = events.map((e) => ({
       ...e,
       input_data: safeJsonParse(e.input_data),
@@ -97,7 +87,6 @@ router.get("/:id/explain", (req, res) => {
   const db = getDb();
   const { id } = req.params;
 
-  // Validate session ID format
   if (!isValidSessionId(id)) {
     return res.status(400).json({ error: "Invalid session ID format" });
   }
@@ -112,7 +101,6 @@ router.get("/:id/explain", (req, res) => {
       .prepare("SELECT * FROM events WHERE session_id = ? ORDER BY timestamp ASC")
       .all(id);
 
-    // Generate explanation (MVP: rule-based; production: LLM-powered)
     const explanation = generateExplanation(session, events);
     res.json({ session_id: id, explanation });
   } catch (err) {
@@ -120,104 +108,5 @@ router.get("/:id/explain", (req, res) => {
     res.status(500).json({ error: "Failed to generate explanation" });
   }
 });
-
-function generateExplanation(session, events) {
-  const meta = safeJsonParse(session.metadata);
-  const lines = [];
-
-  lines.push(`## Agent Session: ${session.agent_name}`);
-  lines.push(`**Duration:** ${formatDuration(session.started_at, session.ended_at)}`);
-  lines.push(`**Total tokens used:** ${session.total_tokens_in + session.total_tokens_out} (${session.total_tokens_in} input, ${session.total_tokens_out} output)`);
-  lines.push("");
-  lines.push("### What happened:");
-  lines.push("");
-
-  let stepNum = 1;
-  for (const event of events) {
-    const trace = safeJsonParse(event.decision_trace);
-    const toolCall = safeJsonParse(event.tool_call);
-    const input = safeJsonParse(event.input_data);
-    const output = safeJsonParse(event.output_data);
-
-    if (event.event_type === "llm_call") {
-      const prompt = input?.prompt || "unknown prompt";
-      const response = output?.response || "unknown response";
-      lines.push(`**Step ${stepNum}:** The agent made an LLM call${event.model ? ` using ${event.model}` : ""}.`);
-      lines.push(`- *Input:* "${truncate(prompt, 120)}"`);
-      lines.push(`- *Output:* "${truncate(response, 120)}"`);
-      if (event.tokens_in || event.tokens_out) {
-        lines.push(`- *Tokens:* ${event.tokens_in} in / ${event.tokens_out} out`);
-      }
-      if (trace?.reasoning) {
-        lines.push(`- 💡 *Reasoning:* ${trace.reasoning}`);
-      }
-      lines.push("");
-      stepNum++;
-    } else if (event.event_type === "tool_call") {
-      const toolName = toolCall?.tool_name || "unknown tool";
-      lines.push(`**Step ${stepNum}:** The agent called the **${toolName}** tool.`);
-      if (toolCall?.tool_input) {
-        lines.push(`- *Input:* ${truncate(JSON.stringify(toolCall.tool_input), 120)}`);
-      }
-      if (toolCall?.tool_output) {
-        lines.push(`- *Output:* ${truncate(JSON.stringify(toolCall.tool_output), 120)}`);
-      }
-      if (event.duration_ms) {
-        lines.push(`- *Duration:* ${event.duration_ms.toFixed(1)}ms`);
-      }
-      lines.push("");
-      stepNum++;
-    } else if (event.event_type === "agent_call") {
-      lines.push(`**Step ${stepNum}:** Agent function executed.`);
-      if (trace?.reasoning) {
-        lines.push(`- 💡 *Reasoning:* ${trace.reasoning}`);
-      }
-      if (event.duration_ms) {
-        lines.push(`- *Duration:* ${event.duration_ms.toFixed(1)}ms`);
-      }
-      lines.push("");
-      stepNum++;
-    }
-  }
-
-  // Summary
-  const llmCalls = events.filter((e) => e.event_type === "llm_call").length;
-  const toolCalls = events.filter((e) => e.event_type === "tool_call").length;
-  const errors = events.filter((e) => e.event_type.includes("error")).length;
-
-  lines.push("### Summary");
-  lines.push(`- ${llmCalls} LLM call(s), ${toolCalls} tool call(s), ${errors} error(s)`);
-  lines.push(`- Total tokens: ${session.total_tokens_in + session.total_tokens_out}`);
-  lines.push(`- Session status: ${session.status}`);
-
-  return lines.join("\n");
-}
-
-function truncate(str, maxLen) {
-  if (!str) return "";
-  return str.length > maxLen ? str.slice(0, maxLen) + "…" : str;
-}
-
-function formatDuration(start, end) {
-  if (!start) return "unknown";
-  if (!end) return "ongoing";
-  const ms = new Date(end) - new Date(start);
-  if (ms < 1000) return `${ms}ms`;
-  if (ms < 60000) return `${(ms / 1000).toFixed(1)}s`;
-  return `${(ms / 60000).toFixed(1)}m`;
-}
-
-/**
- * Safely parse JSON, returning a default value on failure.
- */
-function safeJsonParse(str, fallback = {}) {
-  if (str == null) return fallback;
-  if (typeof str !== "string") return str; // already parsed
-  try {
-    return JSON.parse(str);
-  } catch {
-    return fallback;
-  }
-}
 
 module.exports = router;

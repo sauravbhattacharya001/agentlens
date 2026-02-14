@@ -1,58 +1,17 @@
 const express = require("express");
 const { v4: uuidv4 } = require("uuid");
 const { getDb } = require("../db");
+const {
+  MAX_BATCH_SIZE,
+  sanitizeString,
+  validateSessionId,
+  safeJsonStringify,
+  isValidEventType,
+  clampNonNegInt,
+  clampNonNegFloat,
+} = require("../lib/validation");
 
 const router = express.Router();
-
-// ── Input validation constants ──────────────────────────────────────
-const MAX_BATCH_SIZE = 500; // Max events per batch to prevent memory exhaustion
-const MAX_STRING_LENGTH = 1024; // Max length for identifier fields
-const MAX_DATA_LENGTH = 1024 * 256; // 256KB max for JSON data fields
-const VALID_EVENT_TYPES = new Set([
-  "session_start",
-  "session_end",
-  "llm_call",
-  "tool_call",
-  "agent_call",
-  "error",
-  "generic",
-]);
-const SESSION_ID_RE = /^[a-zA-Z0-9_\-.:]+$/;
-
-/**
- * Sanitize a string field: enforce max length, strip control characters.
- */
-function sanitizeString(val, maxLen = MAX_STRING_LENGTH) {
-  if (typeof val !== "string") return null;
-  // Strip control characters (except newlines/tabs in data fields)
-  const cleaned = val.replace(/[\x00-\x08\x0B\x0C\x0E-\x1F\x7F]/g, "");
-  return cleaned.slice(0, maxLen);
-}
-
-/**
- * Validate and sanitize a session ID.
- */
-function validateSessionId(id) {
-  if (!id || typeof id !== "string") return null;
-  const trimmed = id.slice(0, 128);
-  return SESSION_ID_RE.test(trimmed) ? trimmed : null;
-}
-
-/**
- * Safely stringify JSON data with size limit.
- */
-function safeJsonStringify(data, maxLen = MAX_DATA_LENGTH) {
-  if (data == null) return null;
-  try {
-    const str = JSON.stringify(data);
-    if (str.length > maxLen) {
-      return JSON.stringify({ _truncated: true, _original_size: str.length });
-    }
-    return str;
-  } catch {
-    return null;
-  }
-}
 
 // POST /events — Ingest events (batched)
 router.post("/", (req, res) => {
@@ -65,7 +24,6 @@ router.post("/", (req, res) => {
       .json({ error: "Missing 'events' array in request body" });
   }
 
-  // ── Security: Enforce batch size limit ────────────────────────────
   if (events.length > MAX_BATCH_SIZE) {
     return res.status(400).json({
       error: `Batch too large: ${events.length} events (max ${MAX_BATCH_SIZE})`,
@@ -105,30 +63,21 @@ router.post("/", (req, res) => {
     let skipped = 0;
 
     for (const event of eventList) {
-      // ── Validate session ID ─────────────────────────────────────
       const sessionId = validateSessionId(event.session_id);
       if (!sessionId) {
         skipped++;
         continue;
       }
 
-      // ── Validate event type ─────────────────────────────────────
       const eventType = sanitizeString(event.event_type || "generic", 64);
-      if (!VALID_EVENT_TYPES.has(eventType)) {
+      if (!isValidEventType(eventType)) {
         skipped++;
         continue;
       }
 
-      // ── Validate numeric fields ─────────────────────────────────
-      const tokensIn = Number.isFinite(event.tokens_in)
-        ? Math.max(0, Math.floor(event.tokens_in))
-        : 0;
-      const tokensOut = Number.isFinite(event.tokens_out)
-        ? Math.max(0, Math.floor(event.tokens_out))
-        : 0;
-      const durationMs = Number.isFinite(event.duration_ms)
-        ? Math.max(0, event.duration_ms)
-        : null;
+      const tokensIn = clampNonNegInt(event.tokens_in);
+      const tokensOut = clampNonNegInt(event.tokens_out);
+      const durationMs = clampNonNegFloat(event.duration_ms);
 
       // Handle session lifecycle events
       if (eventType === "session_start") {
@@ -144,12 +93,8 @@ router.post("/", (req, res) => {
       }
 
       if (eventType === "session_end") {
-        const totalTokIn = Number.isFinite(event.total_tokens_in)
-          ? Math.max(0, Math.floor(event.total_tokens_in))
-          : 0;
-        const totalTokOut = Number.isFinite(event.total_tokens_out)
-          ? Math.max(0, Math.floor(event.total_tokens_out))
-          : 0;
+        const totalTokIn = clampNonNegInt(event.total_tokens_in);
+        const totalTokOut = clampNonNegInt(event.total_tokens_out);
         endSession.run(
           sanitizeString(event.ended_at || new Date().toISOString(), 64),
           sanitizeString(event.status || "completed", 32),
@@ -205,7 +150,6 @@ router.post("/", (req, res) => {
     res.json({ status: "ok", ...result });
   } catch (err) {
     console.error("Error ingesting events:", err);
-    // ── Security: Don't leak error details to clients ─────────────
     res.status(500).json({ error: "Failed to ingest events" });
   }
 });
