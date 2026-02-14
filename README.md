@@ -11,7 +11,7 @@
 [![Node.js](https://img.shields.io/badge/Node.js-18%2B-339933?logo=node.js&logoColor=white)](https://nodejs.org)
 [![GitHub repo size](https://img.shields.io/github/repo-size/sauravbhattacharya001/agentlens)](https://github.com/sauravbhattacharya001/agentlens)
 
-[Getting Started](#-getting-started) · [Features](#-features) · [SDK Reference](#-sdk-reference) · [Dashboard](#-dashboard) · [Architecture](#-architecture) · [Contributing](#-contributing)
+[Getting Started](#-getting-started) · [Features](#-features) · [SDK Reference](#-sdk-reference) · [Dashboard](#-dashboard) · [Architecture](#-architecture) · [Contributing](#-contributing) · [📖 Full Docs](https://sauravbhattacharya001.github.io/agentlens/)
 
 </div>
 
