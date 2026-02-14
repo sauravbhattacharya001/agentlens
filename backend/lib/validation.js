@@ -17,7 +17,9 @@ const VALID_EVENT_TYPES = new Set([
   "session_end",
   "llm_call",
   "tool_call",
+  "tool_error",
   "agent_call",
+  "agent_error",
   "error",
   "generic",
 ]);
