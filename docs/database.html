@@ -1,0 +1,145 @@
+<!DOCTYPE html>
+<html lang="en">
+<head>
+  <meta charset="UTF-8">
+  <meta name="viewport" content="width=device-width, initial-scale=1.0">
+  <title>Database Schema — AgentLens Docs</title>
+  <link rel="stylesheet" href="style.css">
+</head>
+<body>
+
+<header class="header">
+  <button class="menu-toggle" onclick="document.querySelector('.sidebar').classList.toggle('open')">☰</button>
+  <a href="index.html" class="header-logo">🔍 <span>AgentLens</span> Docs</a>
+  <nav class="header-nav">
+    <a href="getting-started.html">Getting Started</a>
+    <a href="sdk-reference.html">SDK</a>
+    <a href="api.html">API</a>
+    <a href="https://github.com/sauravbhattacharya001/agentlens" class="github-link" target="_blank">⭐ GitHub</a>
+  </nav>
+</header>
+
+<aside class="sidebar">
+  <div class="sidebar-section">
+    <div class="sidebar-section-title">Overview</div>
+    <a href="index.html">Introduction</a>
+    <a href="architecture.html">Architecture</a>
+  </div>
+  <div class="sidebar-section">
+    <div class="sidebar-section-title">Guides</div>
+    <a href="getting-started.html">Getting Started</a>
+    <a href="quickstart.html">5-Minute Quickstart</a>
+    <a href="deployment.html">Deployment</a>
+  </div>
+  <div class="sidebar-section">
+    <div class="sidebar-section-title">SDK</div>
+    <a href="sdk-reference.html">Python SDK Reference</a>
+    <a href="decorators.html">Decorators</a>
+    <a href="models.html">Data Models</a>
+    <a href="transport.html">Transport &amp; Batching</a>
+  </div>
+  <div class="sidebar-section">
+    <div class="sidebar-section-title">Backend</div>
+    <a href="api.html">REST API</a>
+    <a href="database.html" class="active">Database Schema</a>
+    <a href="dashboard.html">Dashboard</a>
+  </div>
+  <div class="sidebar-section">
+    <div class="sidebar-section-title">Advanced</div>
+    <a href="explainability.html">Explainability</a>
+    <a href="integrations.html">Integrations</a>
+  </div>
+</aside>
+
+<main class="main">
+  <h1>Database Schema</h1>
+  <p class="subtitle">SQLite schema for sessions and events.</p>
+
+  <p>AgentLens uses <a href="https://github.com/WiseLibs/better-sqlite3">better-sqlite3</a> for embedded, zero-configuration persistence. The database file (<code>agentlens.db</code>) is created automatically in the <code>backend/</code> directory.</p>
+
+  <h2>Pragmas</h2>
+
+  <pre><code>PRAGMA journal_mode = WAL;     -- Write-Ahead Logging for concurrent reads/writes
+PRAGMA foreign_keys = ON;      -- Enforce foreign key constraints</code></pre>
+
+  <h2>Sessions Table</h2>
+
+  <pre><code>CREATE TABLE sessions (
+    session_id      TEXT PRIMARY KEY,
+    agent_name      TEXT NOT NULL DEFAULT 'default-agent',
+    started_at      TEXT NOT NULL,          -- ISO 8601 timestamp
+    ended_at        TEXT,                   -- NULL while active
+    metadata        TEXT DEFAULT '{}',      -- JSON string
+    total_tokens_in INTEGER DEFAULT 0,
+    total_tokens_out INTEGER DEFAULT 0,
+    status          TEXT DEFAULT 'active'   -- active | completed | error
+);</code></pre>
+
+  <table>
+    <thead><tr><th>Column</th><th>Type</th><th>Description</th></tr></thead>
+    <tbody>
+      <tr><td><code>session_id</code></td><td>TEXT (PK)</td><td>16-char hex UUID from the SDK</td></tr>
+      <tr><td><code>agent_name</code></td><td>TEXT</td><td>Name of the agent that created this session</td></tr>
+      <tr><td><code>started_at</code></td><td>TEXT</td><td>ISO 8601 timestamp of session start</td></tr>
+      <tr><td><code>ended_at</code></td><td>TEXT</td><td>ISO 8601 timestamp of session end (NULL while active)</td></tr>
+      <tr><td><code>metadata</code></td><td>TEXT</td><td>JSON-encoded arbitrary metadata</td></tr>
+      <tr><td><code>total_tokens_in</code></td><td>INTEGER</td><td>Cumulative input tokens across all events</td></tr>
+      <tr><td><code>total_tokens_out</code></td><td>INTEGER</td><td>Cumulative output tokens across all events</td></tr>
+      <tr><td><code>status</code></td><td>TEXT</td><td><code>active</code>, <code>completed</code>, or <code>error</code></td></tr>
+    </tbody>
+  </table>
+
+  <h2>Events Table</h2>
+
+  <pre><code>CREATE TABLE events (
+    event_id        TEXT PRIMARY KEY,
+    session_id      TEXT NOT NULL,
+    event_type      TEXT NOT NULL DEFAULT 'generic',
+    timestamp       TEXT NOT NULL,          -- ISO 8601
+    input_data      TEXT,                   -- JSON string
+    output_data     TEXT,                   -- JSON string
+    model           TEXT,
+    tokens_in       INTEGER DEFAULT 0,
+    tokens_out      INTEGER DEFAULT 0,
+    tool_call       TEXT,                   -- JSON string
+    decision_trace  TEXT,                   -- JSON string
+    duration_ms     REAL,
+    FOREIGN KEY (session_id) REFERENCES sessions(session_id)
+);</code></pre>
+
+  <h2>Indexes</h2>
+
+  <pre><code>CREATE INDEX idx_events_session   ON events(session_id);    -- Fast event lookup by session
+CREATE INDEX idx_events_timestamp ON events(timestamp);     -- Time-range queries
+CREATE INDEX idx_sessions_status  ON sessions(status);      -- Filter by status</code></pre>
+
+  <h2>Data Flow</h2>
+
+  <p>When the <code>/events</code> endpoint receives a batch:</p>
+
+  <ol>
+    <li><strong>Transaction:</strong> All events in the batch are processed in a single SQLite transaction for atomicity.</li>
+    <li><strong>Session auto-creation:</strong> If an event references a <code>session_id</code> that doesn't exist, a session record is created automatically with <code>INSERT OR IGNORE</code>.</li>
+    <li><strong>Token aggregation:</strong> After each event insert, the session's <code>total_tokens_in</code> and <code>total_tokens_out</code> are incremented.</li>
+    <li><strong>JSON fields:</strong> <code>input_data</code>, <code>output_data</code>, <code>tool_call</code>, <code>decision_trace</code>, and <code>metadata</code> are stored as JSON strings and parsed on read.</li>
+  </ol>
+
+  <h2>Backup</h2>
+
+  <p>To back up the database, simply copy the <code>agentlens.db</code> file (and the <code>-wal</code> and <code>-shm</code> files if they exist):</p>
+
+  <pre><code>cp backend/agentlens.db backup/agentlens-$(date +%Y%m%d).db</code></pre>
+
+  <div class="callout callout-warning">
+    <div class="callout-title">⚠️ WAL mode</div>
+    <p>When using WAL mode, the database may have <code>-wal</code> and <code>-shm</code> companion files. These are merged into the main file when the last connection closes. For a clean backup, either stop the server first or copy all three files together.</p>
+  </div>
+
+  <div class="footer">
+    <span>AgentLens v0.1.0 — MIT License</span>
+    <span><a href="https://github.com/sauravbhattacharya001/agentlens">GitHub</a></span>
+  </div>
+</main>
+
+</body>
+</html>

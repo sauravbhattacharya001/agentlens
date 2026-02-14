@@ -1,0 +1,160 @@
+<!DOCTYPE html>
+<html lang="en">
+<head>
+  <meta charset="UTF-8">
+  <meta name="viewport" content="width=device-width, initial-scale=1.0">
+  <title>Transport &amp; Batching — AgentLens Docs</title>
+  <link rel="stylesheet" href="style.css">
+</head>
+<body>
+
+<header class="header">
+  <button class="menu-toggle" onclick="document.querySelector('.sidebar').classList.toggle('open')">☰</button>
+  <a href="index.html" class="header-logo">🔍 <span>AgentLens</span> Docs</a>
+  <nav class="header-nav">
+    <a href="getting-started.html">Getting Started</a>
+    <a href="sdk-reference.html">SDK</a>
+    <a href="api.html">API</a>
+    <a href="https://github.com/sauravbhattacharya001/agentlens" class="github-link" target="_blank">⭐ GitHub</a>
+  </nav>
+</header>
+
+<aside class="sidebar">
+  <div class="sidebar-section">
+    <div class="sidebar-section-title">Overview</div>
+    <a href="index.html">Introduction</a>
+    <a href="architecture.html">Architecture</a>
+  </div>
+  <div class="sidebar-section">
+    <div class="sidebar-section-title">Guides</div>
+    <a href="getting-started.html">Getting Started</a>
+    <a href="quickstart.html">5-Minute Quickstart</a>
+    <a href="deployment.html">Deployment</a>
+  </div>
+  <div class="sidebar-section">
+    <div class="sidebar-section-title">SDK</div>
+    <a href="sdk-reference.html">Python SDK Reference</a>
+    <a href="decorators.html">Decorators</a>
+    <a href="models.html">Data Models</a>
+    <a href="transport.html" class="active">Transport &amp; Batching</a>
+  </div>
+  <div class="sidebar-section">
+    <div class="sidebar-section-title">Backend</div>
+    <a href="api.html">REST API</a>
+    <a href="database.html">Database Schema</a>
+    <a href="dashboard.html">Dashboard</a>
+  </div>
+  <div class="sidebar-section">
+    <div class="sidebar-section-title">Advanced</div>
+    <a href="explainability.html">Explainability</a>
+    <a href="integrations.html">Integrations</a>
+  </div>
+</aside>
+
+<main class="main">
+  <h1>Transport &amp; Batching</h1>
+  <p class="subtitle">How events get from your agent to the backend — reliably and efficiently.</p>
+
+  <h2>Overview</h2>
+
+  <p>The <code>Transport</code> class handles all HTTP communication between the SDK and the backend. It's designed for reliability and minimal overhead:</p>
+
+  <ul>
+    <li><strong>Batching:</strong> Events are buffered and sent in batches to reduce HTTP overhead</li>
+    <li><strong>Background flushing:</strong> A daemon thread periodically flushes the buffer</li>
+    <li><strong>Retry with backoff:</strong> Failed sends are retried with the events re-queued</li>
+    <li><strong>Bounded buffer:</strong> Hard cap (5000 events) prevents unbounded memory growth</li>
+    <li><strong>Thread-safe:</strong> All buffer operations are protected by a lock</li>
+  </ul>
+
+  <h2>Configuration</h2>
+
+  <p>When using <code>agentlens.init()</code>, the transport is created with defaults. For custom configuration, create a <code>Transport</code> directly:</p>
+
+  <pre><code>from agentlens.transport import Transport
+from agentlens.tracker import AgentTracker
+
+transport = Transport(
+    endpoint="http://localhost:3000",  # Backend URL
+    api_key="my-key",                 # Sent as X-API-Key header
+    batch_size=10,                    # Flush every N events
+    flush_interval=5.0,               # Or every N seconds
+    max_retries=3,                    # Retry failed sends N times
+)
+
+tracker = AgentTracker(transport=transport)</code></pre>
+
+  <table>
+    <thead><tr><th>Parameter</th><th>Type</th><th>Default</th><th>Description</th></tr></thead>
+    <tbody>
+      <tr><td><code>endpoint</code></td><td><code>str</code></td><td><code>"http://localhost:3000"</code></td><td>Backend URL (trailing slash is stripped)</td></tr>
+      <tr><td><code>api_key</code></td><td><code>str</code></td><td><code>"default"</code></td><td>API key for the <code>X-API-Key</code> header</td></tr>
+      <tr><td><code>batch_size</code></td><td><code>int</code></td><td><code>10</code></td><td>Flush when buffer reaches this size</td></tr>
+      <tr><td><code>flush_interval</code></td><td><code>float</code></td><td><code>5.0</code></td><td>Background flush interval in seconds</td></tr>
+      <tr><td><code>max_retries</code></td><td><code>int</code></td><td><code>3</code></td><td>Max consecutive failures before dropping events</td></tr>
+    </tbody>
+  </table>
+
+  <h2>Flush Behavior</h2>
+
+  <p>Events are flushed (sent to the backend) when either condition is met:</p>
+
+  <ol>
+    <li>The buffer reaches <code>batch_size</code> events</li>
+    <li>The background thread timer fires (every <code>flush_interval</code> seconds)</li>
+    <li><code>transport.flush()</code> or <code>agentlens.end_session()</code> is called explicitly</li>
+  </ol>
+
+  <div class="callout callout-warning">
+    <div class="callout-title">⚠️ Process exit</div>
+    <p>If your process exits without calling <code>end_session()</code>, events still in the buffer may be lost. The background flush thread is a daemon thread — it won't keep the process alive.</p>
+  </div>
+
+  <h2>Retry Logic</h2>
+
+  <p>When a flush fails (HTTP error or network issue):</p>
+
+  <ol>
+    <li>The events are <strong>prepended back</strong> into the buffer (preserving any events that arrived during the HTTP call)</li>
+    <li>A consecutive failure counter is incremented</li>
+    <li>If failures exceed <code>max_retries</code>, the events are <strong>dropped</strong> and a warning is logged</li>
+    <li>The counter resets on any successful flush</li>
+  </ol>
+
+  <h2>Buffer Overflow Protection</h2>
+
+  <p>If the backend is down for an extended period, events buffer up. To prevent unbounded memory growth, the buffer is hard-capped at <strong>5000 events</strong>. When this limit is exceeded, the oldest events are dropped.</p>
+
+  <pre><code># This is handled automatically — you don't need to do anything.
+# If it happens, you'll see this in logs:
+# WARNING agentlens.transport - Event buffer exceeded 5000 entries; dropped 42 oldest events</code></pre>
+
+  <h2>Graceful Shutdown</h2>
+
+  <p>Call <code>transport.close()</code> (or <code>agentlens.end_session()</code>) for a clean shutdown:</p>
+
+  <pre><code># This happens automatically when you call end_session()
+# For manual control:
+transport.flush()   # Send all buffered events
+transport.close()   # Flush + stop background thread + close HTTP client</code></pre>
+
+  <h2>Tuning Tips</h2>
+
+  <div class="callout callout-tip">
+    <div class="callout-title">💡 High-throughput agents</div>
+    <p>If your agent generates many events rapidly, increase <code>batch_size</code> to 50-100 to reduce HTTP requests. Each request sends all buffered events in one POST.</p>
+  </div>
+
+  <div class="callout callout-tip">
+    <div class="callout-title">💡 Low-latency dashboards</div>
+    <p>If you need events to appear on the dashboard immediately, decrease <code>flush_interval</code> to 1.0 seconds. This increases HTTP traffic but reduces the delay between event creation and visibility.</p>
+  </div>
+
+  <div class="footer">
+    <span>AgentLens v0.1.0 — MIT License</span>
+    <span><a href="https://github.com/sauravbhattacharya001/agentlens">GitHub</a></span>
+  </div>
+</main>
+
+</body>
+</html>

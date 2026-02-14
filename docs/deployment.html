@@ -1,0 +1,190 @@
+<!DOCTYPE html>
+<html lang="en">
+<head>
+  <meta charset="UTF-8">
+  <meta name="viewport" content="width=device-width, initial-scale=1.0">
+  <title>Deployment — AgentLens Docs</title>
+  <link rel="stylesheet" href="style.css">
+</head>
+<body>
+
+<header class="header">
+  <button class="menu-toggle" onclick="document.querySelector('.sidebar').classList.toggle('open')">☰</button>
+  <a href="index.html" class="header-logo">🔍 <span>AgentLens</span> Docs</a>
+  <nav class="header-nav">
+    <a href="getting-started.html">Getting Started</a>
+    <a href="sdk-reference.html">SDK</a>
+    <a href="api.html">API</a>
+    <a href="https://github.com/sauravbhattacharya001/agentlens" class="github-link" target="_blank">⭐ GitHub</a>
+  </nav>
+</header>
+
+<aside class="sidebar">
+  <div class="sidebar-section">
+    <div class="sidebar-section-title">Overview</div>
+    <a href="index.html">Introduction</a>
+    <a href="architecture.html">Architecture</a>
+  </div>
+  <div class="sidebar-section">
+    <div class="sidebar-section-title">Guides</div>
+    <a href="getting-started.html">Getting Started</a>
+    <a href="quickstart.html">5-Minute Quickstart</a>
+    <a href="deployment.html" class="active">Deployment</a>
+  </div>
+  <div class="sidebar-section">
+    <div class="sidebar-section-title">SDK</div>
+    <a href="sdk-reference.html">Python SDK Reference</a>
+    <a href="decorators.html">Decorators</a>
+    <a href="models.html">Data Models</a>
+    <a href="transport.html">Transport &amp; Batching</a>
+  </div>
+  <div class="sidebar-section">
+    <div class="sidebar-section-title">Backend</div>
+    <a href="api.html">REST API</a>
+    <a href="database.html">Database Schema</a>
+    <a href="dashboard.html">Dashboard</a>
+  </div>
+  <div class="sidebar-section">
+    <div class="sidebar-section-title">Advanced</div>
+    <a href="explainability.html">Explainability</a>
+    <a href="integrations.html">Integrations</a>
+  </div>
+</aside>
+
+<main class="main">
+  <h1>Deployment</h1>
+  <p class="subtitle">Run AgentLens in production.</p>
+
+  <h2>Docker</h2>
+
+  <p>Build and run the backend with Docker:</p>
+
+  <pre><code># Build
+docker build -t agentlens-backend ./backend
+
+# Run
+docker run -d \
+  --name agentlens \
+  -p 3000:3000 \
+  -v agentlens-data:/app/agentlens.db \
+  agentlens-backend</code></pre>
+
+  <div class="callout callout-tip">
+    <div class="callout-title">💡 Persistent data</div>
+    <p>Mount a volume for <code>/app/agentlens.db</code> to persist the SQLite database across container restarts.</p>
+  </div>
+
+  <h2>Environment Variables</h2>
+
+  <table>
+    <thead><tr><th>Variable</th><th>Default</th><th>Description</th></tr></thead>
+    <tbody>
+      <tr><td><code>PORT</code></td><td><code>3000</code></td><td>HTTP server port</td></tr>
+    </tbody>
+  </table>
+
+  <h2>Reverse Proxy (nginx)</h2>
+
+  <p>Put AgentLens behind nginx for TLS and load balancing:</p>
+
+  <pre><code>server {
+    listen 443 ssl;
+    server_name agentlens.example.com;
+
+    ssl_certificate     /etc/ssl/certs/agentlens.crt;
+    ssl_certificate_key /etc/ssl/private/agentlens.key;
+
+    location / {
+        proxy_pass http://127.0.0.1:3000;
+        proxy_set_header Host $host;
+        proxy_set_header X-Real-IP $remote_addr;
+        proxy_set_header X-Forwarded-For $proxy_add_x_forwarded_for;
+        proxy_set_header X-Forwarded-Proto $scheme;
+    }
+}</code></pre>
+
+  <h2>Process Manager (PM2)</h2>
+
+  <p>Use PM2 for auto-restart and log management:</p>
+
+  <pre><code># Install PM2
+npm install -g pm2
+
+# Start AgentLens
+cd backend
+pm2 start server.js --name agentlens
+
+# Auto-start on boot
+pm2 startup
+pm2 save
+
+# View logs
+pm2 logs agentlens</code></pre>
+
+  <h2>systemd</h2>
+
+  <p>Create a systemd service for Linux:</p>
+
+  <pre><code># /etc/systemd/system/agentlens.service
+[Unit]
+Description=AgentLens Backend
+After=network.target
+
+[Service]
+Type=simple
+User=agentlens
+WorkingDirectory=/opt/agentlens/backend
+ExecStart=/usr/bin/node server.js
+Restart=on-failure
+RestartSec=5
+Environment=PORT=3000
+
+[Install]
+WantedBy=multi-user.target</code></pre>
+
+  <pre><code>sudo systemctl enable agentlens
+sudo systemctl start agentlens</code></pre>
+
+  <h2>Security Considerations</h2>
+
+  <div class="callout callout-warning">
+    <div class="callout-title">⚠️ Production hardening</div>
+    <ul>
+      <li><strong>API authentication:</strong> The current backend doesn't enforce API key validation. For production, add middleware to verify the <code>X-API-Key</code> header.</li>
+      <li><strong>CORS:</strong> The backend currently allows all origins. Restrict to your domain in production.</li>
+      <li><strong>HTTPS:</strong> Always use TLS in production (via reverse proxy).</li>
+      <li><strong>Request size:</strong> The backend accepts up to 10MB JSON bodies. Consider reducing this for public-facing deployments.</li>
+    </ul>
+  </div>
+
+  <h2>Monitoring</h2>
+
+  <p>The <code>/health</code> endpoint returns a JSON status that you can use for health checks:</p>
+
+  <pre><code># Health check
+curl http://localhost:3000/health
+# {"status":"ok","timestamp":"2026-02-14T10:30:00.000Z"}
+
+# Use with Docker health check
+HEALTHCHECK --interval=30s --timeout=5s \
+  CMD curl -f http://localhost:3000/health || exit 1</code></pre>
+
+  <h2>Scaling Considerations</h2>
+
+  <p>AgentLens uses SQLite, which is a single-writer database. For most use cases (hundreds of concurrent agents, thousands of events per second), this is more than sufficient.</p>
+
+  <p>If you need horizontal scaling:</p>
+  <ul>
+    <li>Run multiple backend instances with separate SQLite databases</li>
+    <li>Route agents to specific instances (agent affinity)</li>
+    <li>Or consider migrating to PostgreSQL for multi-writer support (contribution welcome!)</li>
+  </ul>
+
+  <div class="footer">
+    <span>AgentLens v0.1.0 — MIT License</span>
+    <span><a href="https://github.com/sauravbhattacharya001/agentlens">GitHub</a></span>
+  </div>
+</main>
+
+</body>
+</html>

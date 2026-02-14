@@ -1,0 +1,278 @@
+<!DOCTYPE html>
+<html lang="en">
+<head>
+  <meta charset="UTF-8">
+  <meta name="viewport" content="width=device-width, initial-scale=1.0">
+  <title>Python SDK Reference — AgentLens Docs</title>
+  <link rel="stylesheet" href="style.css">
+</head>
+<body>
+
+<header class="header">
+  <button class="menu-toggle" onclick="document.querySelector('.sidebar').classList.toggle('open')">☰</button>
+  <a href="index.html" class="header-logo">🔍 <span>AgentLens</span> Docs</a>
+  <nav class="header-nav">
+    <a href="getting-started.html">Getting Started</a>
+    <a href="sdk-reference.html">SDK</a>
+    <a href="api.html">API</a>
+    <a href="https://github.com/sauravbhattacharya001/agentlens" class="github-link" target="_blank">⭐ GitHub</a>
+  </nav>
+</header>
+
+<aside class="sidebar">
+  <div class="sidebar-section">
+    <div class="sidebar-section-title">Overview</div>
+    <a href="index.html">Introduction</a>
+    <a href="architecture.html">Architecture</a>
+  </div>
+  <div class="sidebar-section">
+    <div class="sidebar-section-title">Guides</div>
+    <a href="getting-started.html">Getting Started</a>
+    <a href="quickstart.html">5-Minute Quickstart</a>
+    <a href="deployment.html">Deployment</a>
+  </div>
+  <div class="sidebar-section">
+    <div class="sidebar-section-title">SDK</div>
+    <a href="sdk-reference.html" class="active">Python SDK Reference</a>
+    <a href="decorators.html">Decorators</a>
+    <a href="models.html">Data Models</a>
+    <a href="transport.html">Transport &amp; Batching</a>
+  </div>
+  <div class="sidebar-section">
+    <div class="sidebar-section-title">Backend</div>
+    <a href="api.html">REST API</a>
+    <a href="database.html">Database Schema</a>
+    <a href="dashboard.html">Dashboard</a>
+  </div>
+  <div class="sidebar-section">
+    <div class="sidebar-section-title">Advanced</div>
+    <a href="explainability.html">Explainability</a>
+    <a href="integrations.html">Integrations</a>
+  </div>
+</aside>
+
+<main class="main">
+  <h1>Python SDK Reference</h1>
+  <p class="subtitle">Complete reference for the <code>agentlens</code> Python package.</p>
+
+  <h2>Installation</h2>
+
+  <pre><code># From source (development mode)
+cd sdk
+pip install -e .
+
+# From source (production)
+pip install ./sdk
+
+# With dev dependencies (for testing)
+pip install -e ".[dev]"</code></pre>
+
+  <h2>agentlens.init()</h2>
+
+  <p>Initialize the SDK and connect to the AgentLens backend. Must be called before any other SDK function.</p>
+
+  <pre><code>agentlens.init(
+    api_key: str = "default",
+    endpoint: str = "http://localhost:3000"
+) -> AgentTracker</code></pre>
+
+  <table>
+    <thead><tr><th>Parameter</th><th>Type</th><th>Default</th><th>Description</th></tr></thead>
+    <tbody>
+      <tr><td><code>api_key</code></td><td><code>str</code></td><td><code>"default"</code></td><td>API key for authentication (sent as <code>X-API-Key</code> header)</td></tr>
+      <tr><td><code>endpoint</code></td><td><code>str</code></td><td><code>"http://localhost:3000"</code></td><td>URL of the AgentLens backend</td></tr>
+    </tbody>
+  </table>
+
+  <p><strong>Returns:</strong> An <code>AgentTracker</code> instance (also stored globally for module-level functions).</p>
+
+  <pre><code>import agentlens
+
+tracker = agentlens.init(
+    api_key="prod-key-abc123",
+    endpoint="https://agentlens.example.com"
+)</code></pre>
+
+  <div class="callout callout-warning">
+    <div class="callout-title">⚠️ Call init() first</div>
+    <p>All other SDK functions raise <code>RuntimeError</code> if <code>init()</code> hasn't been called.</p>
+  </div>
+
+  <h2>agentlens.start_session()</h2>
+
+  <p>Create a new tracking session. All subsequent <code>track()</code> calls are associated with this session.</p>
+
+  <pre><code>agentlens.start_session(
+    agent_name: str = "default-agent",
+    metadata: dict | None = None
+) -> Session</code></pre>
+
+  <table>
+    <thead><tr><th>Parameter</th><th>Type</th><th>Default</th><th>Description</th></tr></thead>
+    <tbody>
+      <tr><td><code>agent_name</code></td><td><code>str</code></td><td><code>"default-agent"</code></td><td>Name identifying the agent</td></tr>
+      <tr><td><code>metadata</code></td><td><code>dict | None</code></td><td><code>None</code></td><td>Arbitrary metadata (version, environment, etc.)</td></tr>
+    </tbody>
+  </table>
+
+  <p><strong>Returns:</strong> A <a href="models.html"><code>Session</code></a> object with a unique <code>session_id</code>.</p>
+
+  <pre><code>session = agentlens.start_session(
+    agent_name="research-agent-v2",
+    metadata={"version": "2.1.0", "environment": "production"}
+)
+print(f"Session: {session.session_id}")</code></pre>
+
+  <h2>agentlens.track()</h2>
+
+  <p>Record a single event (LLM call, tool call, decision, error, etc.) in the current session.</p>
+
+  <pre><code>agentlens.track(
+    event_type: str = "generic",
+    input_data: dict | None = None,
+    output_data: dict | None = None,
+    model: str | None = None,
+    tokens_in: int = 0,
+    tokens_out: int = 0,
+    reasoning: str | None = None,
+    tool_name: str | None = None,
+    tool_input: dict | None = None,
+    tool_output: dict | None = None,
+    duration_ms: float | None = None,
+) -> AgentEvent</code></pre>
+
+  <table>
+    <thead><tr><th>Parameter</th><th>Type</th><th>Description</th></tr></thead>
+    <tbody>
+      <tr><td><code>event_type</code></td><td><code>str</code></td><td>Event category: <code>"llm_call"</code>, <code>"tool_call"</code>, <code>"decision"</code>, <code>"error"</code>, <code>"generic"</code></td></tr>
+      <tr><td><code>input_data</code></td><td><code>dict</code></td><td>Input to the operation (prompt, query, etc.)</td></tr>
+      <tr><td><code>output_data</code></td><td><code>dict</code></td><td>Output from the operation (response, result, etc.)</td></tr>
+      <tr><td><code>model</code></td><td><code>str</code></td><td>LLM model name (e.g., <code>"gpt-4"</code>, <code>"claude-3.5-sonnet"</code>)</td></tr>
+      <tr><td><code>tokens_in</code></td><td><code>int</code></td><td>Input/prompt token count</td></tr>
+      <tr><td><code>tokens_out</code></td><td><code>int</code></td><td>Output/completion token count</td></tr>
+      <tr><td><code>reasoning</code></td><td><code>str</code></td><td>Why the agent made this decision (creates a <code>DecisionTrace</code>)</td></tr>
+      <tr><td><code>tool_name</code></td><td><code>str</code></td><td>Tool/function name (creates a <code>ToolCall</code>)</td></tr>
+      <tr><td><code>tool_input</code></td><td><code>dict</code></td><td>Tool input parameters</td></tr>
+      <tr><td><code>tool_output</code></td><td><code>dict</code></td><td>Tool return value</td></tr>
+      <tr><td><code>duration_ms</code></td><td><code>float</code></td><td>Execution time in milliseconds</td></tr>
+    </tbody>
+  </table>
+
+  <h3>Example: Track an LLM Call</h3>
+
+  <pre><code>agentlens.track(
+    event_type="llm_call",
+    input_data={"prompt": "Summarize this article", "article_url": "https://..."},
+    output_data={"response": "The article discusses..."},
+    model="gpt-4-turbo",
+    tokens_in=1200,
+    tokens_out=350,
+    reasoning="User asked for a summary. Using GPT-4 Turbo for long context.",
+    duration_ms=2340.5,
+)</code></pre>
+
+  <h3>Example: Track a Tool Call</h3>
+
+  <pre><code>agentlens.track(
+    event_type="tool_call",
+    tool_name="web_search",
+    tool_input={"query": "latest AI safety papers 2026"},
+    tool_output={"results": [{"title": "...", "url": "..."}]},
+    duration_ms=890.2,
+)</code></pre>
+
+  <h2>agentlens.explain()</h2>
+
+  <p>Generate a human-readable explanation of all events in the current (or specified) session.</p>
+
+  <pre><code>agentlens.explain(
+    session_id: str | None = None
+) -> str</code></pre>
+
+  <p>Returns a Markdown-formatted string with a timeline of events, token counts, and reasoning traces.</p>
+
+  <pre><code>explanation = agentlens.explain()
+print(explanation)
+
+# Output:
+# ## Session Explanation: research-agent-v2
+# **Session ID:** a1b2c3d4
+# **Started:** 2026-02-14T10:30:00+00:00
+# **Status:** active
+# **Total tokens:** 1550 in / 353 out
+#
+# ### Event Timeline:
+# 1. [10:30:01.234] **llm_call** (model: gpt-4-turbo)
+#    💡 Reasoning: User asked for a summary...
+#    📊 Tokens: 1200 in / 350 out
+# 2. [10:30:02.124] **tool_call** → tool: web_search</code></pre>
+
+  <h2>agentlens.end_session()</h2>
+
+  <p>End the current session, mark it as completed, and flush all pending events to the backend.</p>
+
+  <pre><code>agentlens.end_session(
+    session_id: str | None = None
+) -> None</code></pre>
+
+  <div class="callout callout-tip">
+    <div class="callout-title">💡 Always end sessions</div>
+    <p>Calling <code>end_session()</code> ensures all buffered events are flushed to the backend. If you forget, some events may be lost if the process exits before the background flush thread runs.</p>
+  </div>
+
+  <h2>AgentTracker (Advanced)</h2>
+
+  <p>If you need more control, use the <code>AgentTracker</code> instance directly instead of the module-level functions:</p>
+
+  <pre><code>from agentlens.tracker import AgentTracker
+from agentlens.transport import Transport
+
+transport = Transport(
+    endpoint="http://localhost:3000",
+    api_key="my-key",
+    batch_size=20,         # Flush every 20 events
+    flush_interval=10.0,   # Or every 10 seconds
+    max_retries=5,         # Retry failed sends 5 times
+)
+tracker = AgentTracker(transport=transport)
+
+session = tracker.start_session(agent_name="custom-agent")
+tracker.track(event_type="llm_call", model="gpt-4", tokens_in=100, tokens_out=50)
+tracker.end_session()</code></pre>
+
+  <h3>tracker.track_tool()</h3>
+
+  <p>Convenience method for tracking tool calls:</p>
+
+  <pre><code>tracker.track_tool(
+    tool_name="database_query",
+    tool_input={"sql": "SELECT * FROM users WHERE active = 1"},
+    tool_output={"rows": 42},
+    duration_ms=15.3,
+)</code></pre>
+
+  <h2>Multiple Sessions</h2>
+
+  <p>The tracker supports multiple concurrent sessions. The most recently started session is the "current" one used by module-level functions:</p>
+
+  <pre><code># Session 1
+s1 = agentlens.start_session(agent_name="agent-a")
+agentlens.track(event_type="llm_call", model="gpt-4", tokens_in=100, tokens_out=50)
+agentlens.end_session()
+
+# Session 2
+s2 = agentlens.start_session(agent_name="agent-b")
+agentlens.track(event_type="tool_call", tool_name="search")
+agentlens.end_session()
+
+# Or end a specific session by ID
+agentlens.end_session(session_id=s1.session_id)</code></pre>
+
+  <div class="footer">
+    <span>AgentLens v0.1.0 — MIT License</span>
+    <span><a href="https://github.com/sauravbhattacharya001/agentlens">GitHub</a></span>
+  </div>
+</main>
+
+</body>
+</html>

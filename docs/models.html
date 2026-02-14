@@ -1,0 +1,198 @@
+<!DOCTYPE html>
+<html lang="en">
+<head>
+  <meta charset="UTF-8">
+  <meta name="viewport" content="width=device-width, initial-scale=1.0">
+  <title>Data Models — AgentLens Docs</title>
+  <link rel="stylesheet" href="style.css">
+</head>
+<body>
+
+<header class="header">
+  <button class="menu-toggle" onclick="document.querySelector('.sidebar').classList.toggle('open')">☰</button>
+  <a href="index.html" class="header-logo">🔍 <span>AgentLens</span> Docs</a>
+  <nav class="header-nav">
+    <a href="getting-started.html">Getting Started</a>
+    <a href="sdk-reference.html">SDK</a>
+    <a href="api.html">API</a>
+    <a href="https://github.com/sauravbhattacharya001/agentlens" class="github-link" target="_blank">⭐ GitHub</a>
+  </nav>
+</header>
+
+<aside class="sidebar">
+  <div class="sidebar-section">
+    <div class="sidebar-section-title">Overview</div>
+    <a href="index.html">Introduction</a>
+    <a href="architecture.html">Architecture</a>
+  </div>
+  <div class="sidebar-section">
+    <div class="sidebar-section-title">Guides</div>
+    <a href="getting-started.html">Getting Started</a>
+    <a href="quickstart.html">5-Minute Quickstart</a>
+    <a href="deployment.html">Deployment</a>
+  </div>
+  <div class="sidebar-section">
+    <div class="sidebar-section-title">SDK</div>
+    <a href="sdk-reference.html">Python SDK Reference</a>
+    <a href="decorators.html">Decorators</a>
+    <a href="models.html" class="active">Data Models</a>
+    <a href="transport.html">Transport &amp; Batching</a>
+  </div>
+  <div class="sidebar-section">
+    <div class="sidebar-section-title">Backend</div>
+    <a href="api.html">REST API</a>
+    <a href="database.html">Database Schema</a>
+    <a href="dashboard.html">Dashboard</a>
+  </div>
+  <div class="sidebar-section">
+    <div class="sidebar-section-title">Advanced</div>
+    <a href="explainability.html">Explainability</a>
+    <a href="integrations.html">Integrations</a>
+  </div>
+</aside>
+
+<main class="main">
+  <h1>Data Models</h1>
+  <p class="subtitle">Pydantic models that power AgentLens event tracking.</p>
+
+  <p>All data models use <a href="https://docs.pydantic.dev/">Pydantic v2</a> for validation and serialization. Import them from <code>agentlens.models</code>.</p>
+
+  <h2>AgentEvent</h2>
+
+  <p>The core model — a single observable event in an agent's execution.</p>
+
+  <pre><code>from agentlens.models import AgentEvent
+
+event = AgentEvent(
+    event_type="llm_call",
+    model="gpt-4",
+    input_data={"prompt": "Hello"},
+    output_data={"response": "Hi there"},
+    tokens_in=5,
+    tokens_out=3,
+    duration_ms=150.0,
+)</code></pre>
+
+  <table>
+    <thead><tr><th>Field</th><th>Type</th><th>Default</th><th>Description</th></tr></thead>
+    <tbody>
+      <tr><td><code>event_id</code></td><td><code>str</code></td><td>auto (UUID hex)</td><td>Unique event identifier</td></tr>
+      <tr><td><code>session_id</code></td><td><code>str</code></td><td><code>""</code></td><td>Parent session ID</td></tr>
+      <tr><td><code>event_type</code></td><td><code>str</code></td><td><code>"generic"</code></td><td>Category: <code>llm_call</code>, <code>tool_call</code>, <code>agent_call</code>, <code>agent_error</code>, <code>tool_error</code>, <code>decision</code>, <code>generic</code></td></tr>
+      <tr><td><code>timestamp</code></td><td><code>datetime</code></td><td>now (UTC)</td><td>When the event occurred</td></tr>
+      <tr><td><code>input_data</code></td><td><code>dict | None</code></td><td><code>None</code></td><td>Input to the operation</td></tr>
+      <tr><td><code>output_data</code></td><td><code>dict | None</code></td><td><code>None</code></td><td>Output from the operation</td></tr>
+      <tr><td><code>model</code></td><td><code>str | None</code></td><td><code>None</code></td><td>LLM model name</td></tr>
+      <tr><td><code>tokens_in</code></td><td><code>int</code></td><td><code>0</code></td><td>Input token count</td></tr>
+      <tr><td><code>tokens_out</code></td><td><code>int</code></td><td><code>0</code></td><td>Output token count</td></tr>
+      <tr><td><code>tool_call</code></td><td><code>ToolCall | None</code></td><td><code>None</code></td><td>Associated tool call</td></tr>
+      <tr><td><code>decision_trace</code></td><td><code>DecisionTrace | None</code></td><td><code>None</code></td><td>Associated reasoning</td></tr>
+      <tr><td><code>duration_ms</code></td><td><code>float | None</code></td><td><code>None</code></td><td>Execution time in milliseconds</td></tr>
+    </tbody>
+  </table>
+
+  <h3>Methods</h3>
+
+  <h4>to_api_dict()</h4>
+  <p>Converts the event to a dictionary suitable for the REST API (JSON-serializable, excludes <code>None</code> fields).</p>
+
+  <pre><code>event = AgentEvent(event_type="llm_call", model="gpt-4", tokens_in=100)
+api_dict = event.to_api_dict()
+# {"event_id": "a1b2c3...", "session_id": "", "event_type": "llm_call",
+#  "model": "gpt-4", "tokens_in": 100, "tokens_out": 0, ...}</code></pre>
+
+  <h2>ToolCall</h2>
+
+  <p>Represents a single tool/function call made by an agent.</p>
+
+  <pre><code>from agentlens.models import ToolCall
+
+tc = ToolCall(
+    tool_name="web_search",
+    tool_input={"query": "AI safety papers"},
+    tool_output={"results": [...]},
+    duration_ms=890.2,
+)</code></pre>
+
+  <table>
+    <thead><tr><th>Field</th><th>Type</th><th>Default</th><th>Description</th></tr></thead>
+    <tbody>
+      <tr><td><code>tool_call_id</code></td><td><code>str</code></td><td>auto (UUID hex)</td><td>Unique identifier</td></tr>
+      <tr><td><code>tool_name</code></td><td><code>str</code></td><td>required</td><td>Name of the tool</td></tr>
+      <tr><td><code>tool_input</code></td><td><code>dict</code></td><td><code>{}</code></td><td>Input parameters</td></tr>
+      <tr><td><code>tool_output</code></td><td><code>dict | None</code></td><td><code>None</code></td><td>Return value</td></tr>
+      <tr><td><code>timestamp</code></td><td><code>datetime</code></td><td>now (UTC)</td><td>When the call was made</td></tr>
+      <tr><td><code>duration_ms</code></td><td><code>float | None</code></td><td><code>None</code></td><td>Execution time in ms</td></tr>
+    </tbody>
+  </table>
+
+  <h2>DecisionTrace</h2>
+
+  <p>Captures the reasoning behind an agent decision.</p>
+
+  <pre><code>from agentlens.models import DecisionTrace
+
+dt = DecisionTrace(
+    reasoning="The user asked about weather, so I need to call the weather API rather than using cached data.",
+    step=3,
+    alternatives_considered=["Use cached data", "Ask user for location first"],
+    confidence=0.92,
+)</code></pre>
+
+  <table>
+    <thead><tr><th>Field</th><th>Type</th><th>Default</th><th>Description</th></tr></thead>
+    <tbody>
+      <tr><td><code>trace_id</code></td><td><code>str</code></td><td>auto (UUID hex)</td><td>Unique identifier</td></tr>
+      <tr><td><code>step</code></td><td><code>int</code></td><td><code>0</code></td><td>Step number in the execution sequence</td></tr>
+      <tr><td><code>reasoning</code></td><td><code>str</code></td><td><code>""</code></td><td>Why this decision was made</td></tr>
+      <tr><td><code>alternatives_considered</code></td><td><code>list[str]</code></td><td><code>[]</code></td><td>Other options the agent considered</td></tr>
+      <tr><td><code>confidence</code></td><td><code>float | None</code></td><td><code>None</code></td><td>Confidence score (0.0–1.0)</td></tr>
+      <tr><td><code>timestamp</code></td><td><code>datetime</code></td><td>now (UTC)</td><td>When the decision was made</td></tr>
+    </tbody>
+  </table>
+
+  <h2>Session</h2>
+
+  <p>Represents an agent tracking session — a collection of events for one agent run.</p>
+
+  <pre><code>from agentlens.models import Session
+
+session = Session(
+    agent_name="research-agent",
+    metadata={"version": "2.0", "env": "prod"},
+)</code></pre>
+
+  <table>
+    <thead><tr><th>Field</th><th>Type</th><th>Default</th><th>Description</th></tr></thead>
+    <tbody>
+      <tr><td><code>session_id</code></td><td><code>str</code></td><td>auto (UUID hex)</td><td>Unique session identifier</td></tr>
+      <tr><td><code>agent_name</code></td><td><code>str</code></td><td><code>"default-agent"</code></td><td>Name of the agent</td></tr>
+      <tr><td><code>started_at</code></td><td><code>datetime</code></td><td>now (UTC)</td><td>Session start time</td></tr>
+      <tr><td><code>ended_at</code></td><td><code>datetime | None</code></td><td><code>None</code></td><td>Session end time</td></tr>
+      <tr><td><code>metadata</code></td><td><code>dict</code></td><td><code>{}</code></td><td>Arbitrary metadata</td></tr>
+      <tr><td><code>events</code></td><td><code>list[AgentEvent]</code></td><td><code>[]</code></td><td>Events in this session</td></tr>
+      <tr><td><code>total_tokens_in</code></td><td><code>int</code></td><td><code>0</code></td><td>Cumulative input tokens</td></tr>
+      <tr><td><code>total_tokens_out</code></td><td><code>int</code></td><td><code>0</code></td><td>Cumulative output tokens</td></tr>
+      <tr><td><code>status</code></td><td><code>str</code></td><td><code>"active"</code></td><td><code>active</code>, <code>completed</code>, or <code>error</code></td></tr>
+    </tbody>
+  </table>
+
+  <h3>Methods</h3>
+
+  <h4>add_event(event)</h4>
+  <p>Add an event to the session. Automatically sets the event's <code>session_id</code> and updates token counters.</p>
+
+  <h4>end()</h4>
+  <p>Mark the session as completed and set <code>ended_at</code> to now.</p>
+
+  <h4>to_api_dict()</h4>
+  <p>Convert to a dictionary for the API (excludes the events list for lightweight session listing).</p>
+
+  <div class="footer">
+    <span>AgentLens v0.1.0 — MIT License</span>
+    <span><a href="https://github.com/sauravbhattacharya001/agentlens">GitHub</a></span>
+  </div>
+</main>
+
+</body>
+</html>

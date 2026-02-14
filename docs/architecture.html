@@ -1,0 +1,173 @@
+<!DOCTYPE html>
+<html lang="en">
+<head>
+  <meta charset="UTF-8">
+  <meta name="viewport" content="width=device-width, initial-scale=1.0">
+  <title>Architecture — AgentLens Docs</title>
+  <link rel="stylesheet" href="style.css">
+</head>
+<body>
+
+<header class="header">
+  <button class="menu-toggle" onclick="document.querySelector('.sidebar').classList.toggle('open')">☰</button>
+  <a href="index.html" class="header-logo">🔍 <span>AgentLens</span> Docs</a>
+  <nav class="header-nav">
+    <a href="getting-started.html">Getting Started</a>
+    <a href="sdk-reference.html">SDK</a>
+    <a href="api.html">API</a>
+    <a href="https://github.com/sauravbhattacharya001/agentlens" class="github-link" target="_blank">⭐ GitHub</a>
+  </nav>
+</header>
+
+<aside class="sidebar">
+  <div class="sidebar-section">
+    <div class="sidebar-section-title">Overview</div>
+    <a href="index.html">Introduction</a>
+    <a href="architecture.html" class="active">Architecture</a>
+  </div>
+  <div class="sidebar-section">
+    <div class="sidebar-section-title">Guides</div>
+    <a href="getting-started.html">Getting Started</a>
+    <a href="quickstart.html">5-Minute Quickstart</a>
+    <a href="deployment.html">Deployment</a>
+  </div>
+  <div class="sidebar-section">
+    <div class="sidebar-section-title">SDK</div>
+    <a href="sdk-reference.html">Python SDK Reference</a>
+    <a href="decorators.html">Decorators</a>
+    <a href="models.html">Data Models</a>
+    <a href="transport.html">Transport &amp; Batching</a>
+  </div>
+  <div class="sidebar-section">
+    <div class="sidebar-section-title">Backend</div>
+    <a href="api.html">REST API</a>
+    <a href="database.html">Database Schema</a>
+    <a href="dashboard.html">Dashboard</a>
+  </div>
+  <div class="sidebar-section">
+    <div class="sidebar-section-title">Advanced</div>
+    <a href="explainability.html">Explainability</a>
+    <a href="integrations.html">Integrations</a>
+  </div>
+</aside>
+
+<main class="main">
+  <h1>Architecture</h1>
+  <p class="subtitle">How the pieces fit together.</p>
+
+  <h2>System Overview</h2>
+
+  <div class="arch-diagram">                          AgentLens Architecture
+    ┌─────────────────────────────────────────────────────────────────────┐
+    │                         Your Application                            │
+    │  ┌──────────────┐  ┌──────────────┐  ┌──────────────┐              │
+    │  │  @track_agent │  │ @track_tool  │  │  agentlens.  │              │
+    │  │  decorator    │  │ decorator    │  │  track()     │              │
+    │  └──────┬───────┘  └──────┬───────┘  └──────┬───────┘              │
+    │         └──────────────────┼──────────────────┘                      │
+    │                            ▼                                         │
+    │                    ┌──────────────┐                                  │
+    │                    │ AgentTracker │  ← Manages sessions & events     │
+    │                    └──────┬───────┘                                  │
+    │                           ▼                                          │
+    │                    ┌──────────────┐                                  │
+    │                    │  Transport   │  ← Batching, retry, threading    │
+    │                    └──────┬───────┘                                  │
+    └───────────────────────────┼──────────────────────────────────────────┘
+                                │
+                     HTTP POST /events
+                     (batched JSON)
+                                │
+    ┌───────────────────────────┼──────────────────────────────────────────┐
+    │                           ▼              AgentLens Backend            │
+    │                    ┌──────────────┐                                  │
+    │                    │  Express.js  │  ← API server                    │
+    │                    │  Server      │                                  │
+    │                    └──────┬───────┘                                  │
+    │                     ┌─────┴─────┐                                    │
+    │                     ▼           ▼                                    │
+    │              ┌──────────┐ ┌──────────┐                              │
+    │              │  Events  │ │ Sessions │  ← Route handlers             │
+    │              │  Router  │ │  Router  │                              │
+    │              └────┬─────┘ └────┬─────┘                              │
+    │                   └─────┬──────┘                                     │
+    │                         ▼                                            │
+    │                  ┌──────────────┐                                    │
+    │                  │   SQLite DB  │  ← WAL mode, foreign keys          │
+    │                  │  (embedded)  │                                    │
+    │                  └──────────────┘                                    │
+    │                         ▲                                            │
+    │                         │ serves static files                        │
+    │                  ┌──────────────┐                                    │
+    │                  │  Dashboard   │  ← Vanilla HTML/CSS/JS             │
+    │                  │  (SPA)       │                                    │
+    │                  └──────────────┘                                    │
+    └─────────────────────────────────────────────────────────────────────┘</div>
+
+  <h2>Data Flow</h2>
+
+  <ol>
+    <li><strong>Instrumentation:</strong> Your agent code uses decorators (<code>@track_agent</code>, <code>@track_tool_call</code>) or manual <code>agentlens.track()</code> calls to create events.</li>
+    <li><strong>Buffering:</strong> The <code>Transport</code> layer buffers events in memory and flushes them in batches (default: every 10 events or 5 seconds).</li>
+    <li><strong>Ingestion:</strong> Batched events are sent via HTTP POST to <code>/events</code>. Session lifecycle events (<code>session_start</code>, <code>session_end</code>) manage session records.</li>
+    <li><strong>Storage:</strong> Events and sessions are persisted to SQLite with WAL mode for concurrent read/write performance.</li>
+    <li><strong>Visualization:</strong> The dashboard queries the API to display timelines, token charts, and explanations.</li>
+  </ol>
+
+  <h2>Component Details</h2>
+
+  <h3>Python SDK (<code>sdk/</code>)</h3>
+
+  <table>
+    <thead><tr><th>Module</th><th>Responsibility</th></tr></thead>
+    <tbody>
+      <tr><td><code>__init__.py</code></td><td>Module-level API (init, track, explain). Global tracker instance.</td></tr>
+      <tr><td><code>models.py</code></td><td>Pydantic data models (AgentEvent, ToolCall, DecisionTrace, Session)</td></tr>
+      <tr><td><code>tracker.py</code></td><td>AgentTracker — manages sessions, creates events, generates explanations</td></tr>
+      <tr><td><code>transport.py</code></td><td>Batched HTTP transport with background flush thread and retry logic</td></tr>
+      <tr><td><code>decorators.py</code></td><td>@track_agent and @track_tool_call for zero-config instrumentation</td></tr>
+    </tbody>
+  </table>
+
+  <h3>Backend (<code>backend/</code>)</h3>
+
+  <table>
+    <thead><tr><th>File</th><th>Responsibility</th></tr></thead>
+    <tbody>
+      <tr><td><code>server.js</code></td><td>Express app setup, middleware, static file serving, routes</td></tr>
+      <tr><td><code>db.js</code></td><td>SQLite connection (better-sqlite3), schema initialization</td></tr>
+      <tr><td><code>routes/events.js</code></td><td>POST /events — batch event ingestion with transaction support</td></tr>
+      <tr><td><code>routes/sessions.js</code></td><td>GET/POST sessions, session detail, explain endpoint</td></tr>
+      <tr><td><code>seed.js</code></td><td>Demo data seeder</td></tr>
+    </tbody>
+  </table>
+
+  <h3>Dashboard (<code>dashboard/</code>)</h3>
+
+  <p>A lightweight single-page application built with vanilla HTML, CSS, and JavaScript. No build step, no framework dependencies. Served directly by the Express backend.</p>
+
+  <h2>Design Decisions</h2>
+
+  <div class="callout callout-info">
+    <div class="callout-title">🗄️ Why SQLite?</div>
+    <p>Zero configuration. No external database to install or manage. SQLite with WAL mode handles concurrent reads and writes well for single-server deployments. The database file lives in the backend directory and can be backed up by copying a single file.</p>
+  </div>
+
+  <div class="callout callout-info">
+    <div class="callout-title">📦 Why batched transport?</div>
+    <p>Sending individual HTTP requests per event would add unacceptable latency to agent execution. The Transport layer buffers events and sends them in batches, using a background thread so tracking never blocks your agent's main execution path.</p>
+  </div>
+
+  <div class="callout callout-info">
+    <div class="callout-title">🎨 Why vanilla JS dashboard?</div>
+    <p>No build step means zero friction to get started. The dashboard loads instantly without webpack, Vite, or any toolchain. For an observability tool, simplicity of deployment trumps framework features.</p>
+  </div>
+
+  <div class="footer">
+    <span>AgentLens v0.1.0 — MIT License</span>
+    <span><a href="https://github.com/sauravbhattacharya001/agentlens">GitHub</a></span>
+  </div>
+</main>
+
+</body>
+</html>

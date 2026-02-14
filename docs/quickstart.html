@@ -1,0 +1,169 @@
+<!DOCTYPE html>
+<html lang="en">
+<head>
+  <meta charset="UTF-8">
+  <meta name="viewport" content="width=device-width, initial-scale=1.0">
+  <title>5-Minute Quickstart — AgentLens Docs</title>
+  <link rel="stylesheet" href="style.css">
+</head>
+<body>
+
+<header class="header">
+  <button class="menu-toggle" onclick="document.querySelector('.sidebar').classList.toggle('open')">☰</button>
+  <a href="index.html" class="header-logo">🔍 <span>AgentLens</span> Docs</a>
+  <nav class="header-nav">
+    <a href="getting-started.html">Getting Started</a>
+    <a href="sdk-reference.html">SDK</a>
+    <a href="api.html">API</a>
+    <a href="https://github.com/sauravbhattacharya001/agentlens" class="github-link" target="_blank">⭐ GitHub</a>
+  </nav>
+</header>
+
+<aside class="sidebar">
+  <div class="sidebar-section">
+    <div class="sidebar-section-title">Overview</div>
+    <a href="index.html">Introduction</a>
+    <a href="architecture.html">Architecture</a>
+  </div>
+  <div class="sidebar-section">
+    <div class="sidebar-section-title">Guides</div>
+    <a href="getting-started.html">Getting Started</a>
+    <a href="quickstart.html" class="active">5-Minute Quickstart</a>
+    <a href="deployment.html">Deployment</a>
+  </div>
+  <div class="sidebar-section">
+    <div class="sidebar-section-title">SDK</div>
+    <a href="sdk-reference.html">Python SDK Reference</a>
+    <a href="decorators.html">Decorators</a>
+    <a href="models.html">Data Models</a>
+    <a href="transport.html">Transport &amp; Batching</a>
+  </div>
+  <div class="sidebar-section">
+    <div class="sidebar-section-title">Backend</div>
+    <a href="api.html">REST API</a>
+    <a href="database.html">Database Schema</a>
+    <a href="dashboard.html">Dashboard</a>
+  </div>
+  <div class="sidebar-section">
+    <div class="sidebar-section-title">Advanced</div>
+    <a href="explainability.html">Explainability</a>
+    <a href="integrations.html">Integrations</a>
+  </div>
+</aside>
+
+<main class="main">
+  <h1>5-Minute Quickstart</h1>
+  <p class="subtitle">From zero to agent observability in 5 minutes flat.</p>
+
+  <div class="callout callout-info">
+    <div class="callout-title">📋 Prerequisites</div>
+    <p>Python 3.9+ and Node.js 18+ installed.</p>
+  </div>
+
+  <h2>Step 1: Clone &amp; Start Backend (1 min)</h2>
+
+  <pre><code>git clone https://github.com/sauravbhattacharya001/agentlens.git
+cd agentlens/backend
+npm install
+node seed.js    # demo data
+node server.js  # starts on :3000</code></pre>
+
+  <p>Open <a href="http://localhost:3000">http://localhost:3000</a> — you should see the dashboard with demo sessions.</p>
+
+  <h2>Step 2: Install SDK (30 sec)</h2>
+
+  <p>In a new terminal:</p>
+
+  <pre><code>cd agentlens/sdk
+pip install -e .</code></pre>
+
+  <h2>Step 3: Run the Demo (30 sec)</h2>
+
+  <pre><code>cd examples
+python mock_agent.py</code></pre>
+
+  <p>You'll see output like:</p>
+  <pre><code>🔍 AgentLens Demo — Mock Agent Example
+==================================================
+
+📊 Starting research agent session...
+   Session ID: a1b2c3d4e5f6g7h8
+   Result: Research complete for: What is the weather in SF?
+
+💡 Explanation:
+## Session Explanation: research-agent-v2
+...</code></pre>
+
+  <p>Refresh the dashboard — your new sessions appear with full event traces.</p>
+
+  <h2>Step 4: Instrument Your Own Agent (3 min)</h2>
+
+  <p>Create a file called <code>my_agent.py</code>:</p>
+
+  <pre><code>import agentlens
+from agentlens import track_agent, track_tool_call
+
+# 1. Connect
+agentlens.init(endpoint="http://localhost:3000")
+
+# 2. Decorate your tools
+@track_tool_call(tool_name="calculator")
+def calculate(expression: str) -> str:
+    return str(eval(expression))
+
+# 3. Decorate your agent
+@track_agent(model="gpt-4")
+def math_agent(question: str) -> str:
+    # Your real LLM call goes here
+    agentlens.track(
+        event_type="llm_call",
+        model="gpt-4",
+        input_data={"prompt": question},
+        output_data={"response": "Let me calculate that."},
+        tokens_in=20,
+        tokens_out=10,
+        reasoning="User asked a math question",
+    )
+    result = calculate("42 * 1.15")
+    return f"The answer is {result}"
+
+# 4. Run with session tracking
+session = agentlens.start_session(agent_name="math-agent")
+answer = math_agent("What is 42 times 1.15?")
+print(answer)
+print(agentlens.explain())
+agentlens.end_session()</code></pre>
+
+  <pre><code>python my_agent.py</code></pre>
+
+  <p>Check the dashboard — your math agent session is there with the full trace.</p>
+
+  <h2>What's Next?</h2>
+
+  <div class="card-grid">
+    <div class="card">
+      <h4>🎨 Decorators</h4>
+      <p>Learn all the decorator options. <a href="decorators.html">Read →</a></p>
+    </div>
+    <div class="card">
+      <h4>📖 Full SDK</h4>
+      <p>Every function and parameter. <a href="sdk-reference.html">Read →</a></p>
+    </div>
+    <div class="card">
+      <h4>🔌 REST API</h4>
+      <p>Build custom integrations. <a href="api.html">Read →</a></p>
+    </div>
+    <div class="card">
+      <h4>🚀 Deploy</h4>
+      <p>Run in production. <a href="deployment.html">Read →</a></p>
+    </div>
+  </div>
+
+  <div class="footer">
+    <span>AgentLens v0.1.0 — MIT License</span>
+    <span><a href="https://github.com/sauravbhattacharya001/agentlens">GitHub</a></span>
+  </div>
+</main>
+
+</body>
+</html>

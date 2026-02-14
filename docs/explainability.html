@@ -1,0 +1,182 @@
+<!DOCTYPE html>
+<html lang="en">
+<head>
+  <meta charset="UTF-8">
+  <meta name="viewport" content="width=device-width, initial-scale=1.0">
+  <title>Explainability — AgentLens Docs</title>
+  <link rel="stylesheet" href="style.css">
+</head>
+<body>
+
+<header class="header">
+  <button class="menu-toggle" onclick="document.querySelector('.sidebar').classList.toggle('open')">☰</button>
+  <a href="index.html" class="header-logo">🔍 <span>AgentLens</span> Docs</a>
+  <nav class="header-nav">
+    <a href="getting-started.html">Getting Started</a>
+    <a href="sdk-reference.html">SDK</a>
+    <a href="api.html">API</a>
+    <a href="https://github.com/sauravbhattacharya001/agentlens" class="github-link" target="_blank">⭐ GitHub</a>
+  </nav>
+</header>
+
+<aside class="sidebar">
+  <div class="sidebar-section">
+    <div class="sidebar-section-title">Overview</div>
+    <a href="index.html">Introduction</a>
+    <a href="architecture.html">Architecture</a>
+  </div>
+  <div class="sidebar-section">
+    <div class="sidebar-section-title">Guides</div>
+    <a href="getting-started.html">Getting Started</a>
+    <a href="quickstart.html">5-Minute Quickstart</a>
+    <a href="deployment.html">Deployment</a>
+  </div>
+  <div class="sidebar-section">
+    <div class="sidebar-section-title">SDK</div>
+    <a href="sdk-reference.html">Python SDK Reference</a>
+    <a href="decorators.html">Decorators</a>
+    <a href="models.html">Data Models</a>
+    <a href="transport.html">Transport &amp; Batching</a>
+  </div>
+  <div class="sidebar-section">
+    <div class="sidebar-section-title">Backend</div>
+    <a href="api.html">REST API</a>
+    <a href="database.html">Database Schema</a>
+    <a href="dashboard.html">Dashboard</a>
+  </div>
+  <div class="sidebar-section">
+    <div class="sidebar-section-title">Advanced</div>
+    <a href="explainability.html" class="active">Explainability</a>
+    <a href="integrations.html">Integrations</a>
+  </div>
+</aside>
+
+<main class="main">
+  <h1>Explainability</h1>
+  <p class="subtitle">Understanding the "why" — not just the "what".</p>
+
+  <h2>Overview</h2>
+
+  <p>Explainability is AgentLens's core differentiator. While most observability tools show you <em>what</em> happened, AgentLens captures and presents <em>why</em> it happened.</p>
+
+  <p>Explanations are generated from two sources:</p>
+  <ol>
+    <li><strong>Decision traces</strong> — The <code>reasoning</code> field you provide when calling <code>agentlens.track()</code></li>
+    <li><strong>Structural analysis</strong> — The sequence of events, tool calls, and token usage patterns</li>
+  </ol>
+
+  <h2>Capturing Reasoning</h2>
+
+  <p>The most valuable explanations come from explicit reasoning. When tracking events, include the <code>reasoning</code> parameter:</p>
+
+  <pre><code>agentlens.track(
+    event_type="llm_call",
+    model="gpt-4",
+    input_data={"prompt": "Should I search or use cached data?"},
+    output_data={"response": "The data is from yesterday, search for fresh results."},
+    tokens_in=40,
+    tokens_out=15,
+    reasoning="User asked about current weather. Cached data is >24h old, so I need fresh search results.",
+)</code></pre>
+
+  <p>This reasoning is stored as a <code>DecisionTrace</code> and included in explanations.</p>
+
+  <h2>SDK-Side Explanations</h2>
+
+  <p>The <code>agentlens.explain()</code> function generates explanations client-side from the in-memory session data:</p>
+
+  <pre><code>explanation = agentlens.explain()
+print(explanation)</code></pre>
+
+  <p>Output format (Markdown):</p>
+
+  <pre><code>## Session Explanation: research-agent-v2
+**Session ID:** a1b2c3d4
+**Started:** 2026-02-14T10:30:00+00:00
+**Status:** active
+**Total tokens:** 1550 in / 353 out
+
+### Event Timeline:
+1. [10:30:01.234] **llm_call** (model: gpt-4-turbo)
+   💡 Reasoning: User asked a factual question. I need to search for up-to-date
+   information rather than relying on training data.
+   📊 Tokens: 45 in / 22 out
+2. [10:30:01.890] **tool_call** → tool: web_search
+3. [10:30:02.234] **tool_call** → tool: file_reader
+4. [10:30:02.500] **llm_call** (model: gpt-4-turbo)
+   💡 Reasoning: I have enough information from the web search and knowledge
+   base to provide a comprehensive answer.
+   📊 Tokens: 180 in / 95 out</code></pre>
+
+  <h2>Server-Side Explanations</h2>
+
+  <p>The backend's <code>GET /sessions/:id/explain</code> endpoint generates explanations from stored data:</p>
+
+  <pre><code>curl http://localhost:3000/sessions/abc123/explain</code></pre>
+
+  <p>The server-side explanation includes:</p>
+
+  <ul>
+    <li><strong>Session header:</strong> Agent name, duration, total tokens</li>
+    <li><strong>Step-by-step narrative:</strong> What happened at each event</li>
+    <li><strong>Tool call details:</strong> Which tools were called and their inputs/outputs (truncated for readability)</li>
+    <li><strong>Reasoning annotations:</strong> The decision trace for each step</li>
+    <li><strong>Summary statistics:</strong> LLM calls, tool calls, errors</li>
+  </ul>
+
+  <h2>Best Practices</h2>
+
+  <h3>Write useful reasoning</h3>
+
+  <div class="card-grid">
+    <div class="card" style="border-color: var(--accent-red);">
+      <h4>❌ Bad</h4>
+      <p><code>reasoning="Made an LLM call"</code></p>
+      <p style="color: var(--text-muted); font-size: 0.8rem;">This just restates the event type. Zero value.</p>
+    </div>
+    <div class="card" style="border-color: var(--accent-green);">
+      <h4>✅ Good</h4>
+      <p><code>reasoning="User asked about current weather. Cached data is stale (>24h), so searching for fresh results."</code></p>
+      <p style="color: var(--text-muted); font-size: 0.8rem;">Explains the decision and the context that influenced it.</p>
+    </div>
+  </div>
+
+  <h3>Include alternatives</h3>
+
+  <p>The <code>DecisionTrace</code> model supports an <code>alternatives_considered</code> field:</p>
+
+  <pre><code>from agentlens.models import DecisionTrace
+
+trace = DecisionTrace(
+    reasoning="Using GPT-4 for this complex reasoning task.",
+    alternatives_considered=[
+        "GPT-3.5-turbo (cheaper but less accurate for multi-step reasoning)",
+        "Claude-3 Opus (good but higher latency)",
+    ],
+    confidence=0.85,
+)</code></pre>
+
+  <h3>Track errors with context</h3>
+
+  <pre><code>agentlens.track(
+    event_type="error",
+    input_data={"attempted_action": "database query"},
+    output_data={"error": "Connection timeout after 30s"},
+    reasoning="The database might be under heavy load. Will retry with exponential backoff.",
+)</code></pre>
+
+  <h2>Future: LLM-Powered Explanations</h2>
+
+  <div class="callout callout-info">
+    <div class="callout-title">🔮 Roadmap</div>
+    <p>The current explanation engine is rule-based. A planned enhancement is to optionally pass the event timeline through an LLM to generate more natural, contextual explanations. The rule-based engine will remain as the default for speed and cost.</p>
+  </div>
+
+  <div class="footer">
+    <span>AgentLens v0.1.0 — MIT License</span>
+    <span><a href="https://github.com/sauravbhattacharya001/agentlens">GitHub</a></span>
+  </div>
+</main>
+
+</body>
+</html>

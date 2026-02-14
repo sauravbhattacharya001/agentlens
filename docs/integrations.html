@@ -1,0 +1,196 @@
+<!DOCTYPE html>
+<html lang="en">
+<head>
+  <meta charset="UTF-8">
+  <meta name="viewport" content="width=device-width, initial-scale=1.0">
+  <title>Integrations — AgentLens Docs</title>
+  <link rel="stylesheet" href="style.css">
+</head>
+<body>
+
+<header class="header">
+  <button class="menu-toggle" onclick="document.querySelector('.sidebar').classList.toggle('open')">☰</button>
+  <a href="index.html" class="header-logo">🔍 <span>AgentLens</span> Docs</a>
+  <nav class="header-nav">
+    <a href="getting-started.html">Getting Started</a>
+    <a href="sdk-reference.html">SDK</a>
+    <a href="api.html">API</a>
+    <a href="https://github.com/sauravbhattacharya001/agentlens" class="github-link" target="_blank">⭐ GitHub</a>
+  </nav>
+</header>
+
+<aside class="sidebar">
+  <div class="sidebar-section">
+    <div class="sidebar-section-title">Overview</div>
+    <a href="index.html">Introduction</a>
+    <a href="architecture.html">Architecture</a>
+  </div>
+  <div class="sidebar-section">
+    <div class="sidebar-section-title">Guides</div>
+    <a href="getting-started.html">Getting Started</a>
+    <a href="quickstart.html">5-Minute Quickstart</a>
+    <a href="deployment.html">Deployment</a>
+  </div>
+  <div class="sidebar-section">
+    <div class="sidebar-section-title">SDK</div>
+    <a href="sdk-reference.html">Python SDK Reference</a>
+    <a href="decorators.html">Decorators</a>
+    <a href="models.html">Data Models</a>
+    <a href="transport.html">Transport &amp; Batching</a>
+  </div>
+  <div class="sidebar-section">
+    <div class="sidebar-section-title">Backend</div>
+    <a href="api.html">REST API</a>
+    <a href="database.html">Database Schema</a>
+    <a href="dashboard.html">Dashboard</a>
+  </div>
+  <div class="sidebar-section">
+    <div class="sidebar-section-title">Advanced</div>
+    <a href="explainability.html">Explainability</a>
+    <a href="integrations.html" class="active">Integrations</a>
+  </div>
+</aside>
+
+<main class="main">
+  <h1>Integrations</h1>
+  <p class="subtitle">Integrate AgentLens with popular AI frameworks.</p>
+
+  <h2>LangChain</h2>
+
+  <p>Integrate with <a href="https://python.langchain.com/">LangChain</a> by wrapping tool functions and agent calls with AgentLens decorators:</p>
+
+  <pre><code>import agentlens
+from agentlens import track_agent, track_tool_call
+from langchain.agents import initialize_agent, Tool
+from langchain.llms import OpenAI
+
+agentlens.init(endpoint="http://localhost:3000")
+
+# Wrap your tools with AgentLens tracking
+@track_tool_call(tool_name="search")
+def search_tool(query: str) -> str:
+    """Search the web."""
+    return do_search(query)
+
+# Create LangChain tools
+tools = [
+    Tool(name="search", func=search_tool, description="Search the web"),
+]
+
+# Track the agent execution
+@track_agent(model="gpt-4")
+def run_agent(query: str) -> str:
+    session = agentlens.start_session(agent_name="langchain-agent")
+    llm = OpenAI(model="gpt-4")
+    agent = initialize_agent(tools, llm, agent="zero-shot-react-description")
+    result = agent.run(query)
+    agentlens.end_session()
+    return result</code></pre>
+
+  <h2>OpenAI API</h2>
+
+  <p>Track OpenAI API calls by wrapping the completion call:</p>
+
+  <pre><code>import agentlens
+import openai
+import time
+
+agentlens.init(endpoint="http://localhost:3000")
+
+def tracked_completion(messages, model="gpt-4", **kwargs):
+    """OpenAI chat completion with AgentLens tracking."""
+    start = time.perf_counter()
+    response = openai.chat.completions.create(
+        model=model,
+        messages=messages,
+        **kwargs,
+    )
+    elapsed = (time.perf_counter() - start) * 1000
+
+    usage = response.usage
+    agentlens.track(
+        event_type="llm_call",
+        model=model,
+        input_data={"messages": [m["content"][:200] for m in messages]},
+        output_data={"response": response.choices[0].message.content[:500]},
+        tokens_in=usage.prompt_tokens,
+        tokens_out=usage.completion_tokens,
+        duration_ms=elapsed,
+    )
+    return response</code></pre>
+
+  <h2>Anthropic Claude</h2>
+
+  <pre><code>import agentlens
+import anthropic
+import time
+
+agentlens.init(endpoint="http://localhost:3000")
+
+def tracked_claude(prompt, model="claude-3-5-sonnet-20241022", **kwargs):
+    """Anthropic completion with AgentLens tracking."""
+    client = anthropic.Anthropic()
+    start = time.perf_counter()
+    response = client.messages.create(
+        model=model,
+        messages=[{"role": "user", "content": prompt}],
+        max_tokens=1024,
+        **kwargs,
+    )
+    elapsed = (time.perf_counter() - start) * 1000
+
+    agentlens.track(
+        event_type="llm_call",
+        model=model,
+        input_data={"prompt": prompt[:200]},
+        output_data={"response": response.content[0].text[:500]},
+        tokens_in=response.usage.input_tokens,
+        tokens_out=response.usage.output_tokens,
+        duration_ms=elapsed,
+    )
+    return response</code></pre>
+
+  <h2>Custom Frameworks</h2>
+
+  <p>AgentLens works with any Python code. The general pattern is:</p>
+
+  <ol>
+    <li>Call <code>agentlens.init()</code> at startup</li>
+    <li>Create a session with <code>agentlens.start_session()</code></li>
+    <li>Use <code>@track_agent</code> / <code>@track_tool_call</code> decorators on your functions</li>
+    <li>Or use <code>agentlens.track()</code> for manual instrumentation</li>
+    <li>Call <code>agentlens.end_session()</code> when done</li>
+  </ol>
+
+  <div class="callout callout-tip">
+    <div class="callout-title">💡 Non-Python agents</div>
+    <p>If your agent isn't written in Python, you can still use AgentLens by sending events directly to the <a href="api.html">REST API</a>. Any language that can make HTTP POST requests can integrate with AgentLens.</p>
+  </div>
+
+  <h2>REST API Integration</h2>
+
+  <p>For non-Python agents, send events directly:</p>
+
+  <pre><code># Create a session
+curl -X POST http://localhost:3000/events \
+  -H "Content-Type: application/json" \
+  -d '{"events": [{"event_type": "session_start", "session_id": "my-session", "agent_name": "js-agent"}]}'
+
+# Track events
+curl -X POST http://localhost:3000/events \
+  -H "Content-Type: application/json" \
+  -d '{"events": [{"event_type": "llm_call", "session_id": "my-session", "model": "gpt-4", "tokens_in": 100}]}'
+
+# End session
+curl -X POST http://localhost:3000/events \
+  -H "Content-Type: application/json" \
+  -d '{"events": [{"event_type": "session_end", "session_id": "my-session", "status": "completed"}]}'</code></pre>
+
+  <div class="footer">
+    <span>AgentLens v0.1.0 — MIT License</span>
+    <span><a href="https://github.com/sauravbhattacharya001/agentlens">GitHub</a></span>
+  </div>
+</main>
+
+</body>
+</html>

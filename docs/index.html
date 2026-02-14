@@ -1,0 +1,187 @@
+<!DOCTYPE html>
+<html lang="en">
+<head>
+  <meta charset="UTF-8">
+  <meta name="viewport" content="width=device-width, initial-scale=1.0">
+  <title>AgentLens Documentation</title>
+  <link rel="stylesheet" href="style.css">
+</head>
+<body>
+
+<header class="header">
+  <button class="menu-toggle" onclick="document.querySelector('.sidebar').classList.toggle('open')">☰</button>
+  <a href="index.html" class="header-logo">🔍 <span>AgentLens</span> Docs</a>
+  <nav class="header-nav">
+    <a href="getting-started.html">Getting Started</a>
+    <a href="sdk-reference.html">SDK</a>
+    <a href="api.html">API</a>
+    <a href="https://github.com/sauravbhattacharya001/agentlens" class="github-link" target="_blank">⭐ GitHub</a>
+  </nav>
+</header>
+
+<aside class="sidebar">
+  <div class="sidebar-section">
+    <div class="sidebar-section-title">Overview</div>
+    <a href="index.html" class="active">Introduction</a>
+    <a href="architecture.html">Architecture</a>
+  </div>
+  <div class="sidebar-section">
+    <div class="sidebar-section-title">Guides</div>
+    <a href="getting-started.html">Getting Started</a>
+    <a href="quickstart.html">5-Minute Quickstart</a>
+    <a href="deployment.html">Deployment</a>
+  </div>
+  <div class="sidebar-section">
+    <div class="sidebar-section-title">SDK</div>
+    <a href="sdk-reference.html">Python SDK Reference</a>
+    <a href="decorators.html">Decorators</a>
+    <a href="models.html">Data Models</a>
+    <a href="transport.html">Transport &amp; Batching</a>
+  </div>
+  <div class="sidebar-section">
+    <div class="sidebar-section-title">Backend</div>
+    <a href="api.html">REST API</a>
+    <a href="database.html">Database Schema</a>
+    <a href="dashboard.html">Dashboard</a>
+  </div>
+  <div class="sidebar-section">
+    <div class="sidebar-section-title">Advanced</div>
+    <a href="explainability.html">Explainability</a>
+    <a href="integrations.html">Integrations</a>
+  </div>
+</aside>
+
+<main class="main">
+  <h1>AgentLens Documentation</h1>
+  <p class="subtitle">Observability and Explainability for AI Agents — see inside the black box.</p>
+
+  <div class="badge-row">
+    <span class="badge"><span class="badge-label">version</span><span class="badge-value green">0.1.0</span></span>
+    <span class="badge"><span class="badge-label">license</span><span class="badge-value blue">MIT</span></span>
+    <span class="badge"><span class="badge-label">python</span><span class="badge-value purple">3.9+</span></span>
+    <span class="badge"><span class="badge-label">node</span><span class="badge-value green">18+</span></span>
+  </div>
+
+  <p>As AI agents become more autonomous — making decisions, calling tools, chaining actions — you need to <strong>see what they're doing</strong> and <strong>understand why</strong>. AgentLens is an open-source observability platform that gives you full visibility into agent behavior.</p>
+
+  <h2>Why AgentLens?</h2>
+
+  <div class="card-grid">
+    <div class="card">
+      <div class="card-icon">📊</div>
+      <h4>Session Tracing</h4>
+      <p>Group agent actions into sessions. See the full execution trace with timing, tokens, and decision reasoning.</p>
+    </div>
+    <div class="card">
+      <div class="card-icon">🛠️</div>
+      <h4>Tool Call Capture</h4>
+      <p>Record every tool invocation with inputs, outputs, and duration. Know exactly what your agent did and how long it took.</p>
+    </div>
+    <div class="card">
+      <div class="card-icon">💰</div>
+      <h4>Cost Tracking</h4>
+      <p>Track token consumption and costs across models. Catch runaway spending before it becomes a problem.</p>
+    </div>
+    <div class="card">
+      <div class="card-icon">🧠</div>
+      <h4>Decision Traces</h4>
+      <p>Capture the reasoning behind each agent decision. Understand the "why", not just the "what".</p>
+    </div>
+    <div class="card">
+      <div class="card-icon">💡</div>
+      <h4>Explainability</h4>
+      <p>Generate human-readable summaries of agent behavior. Audit and debug without reading raw logs.</p>
+    </div>
+    <div class="card">
+      <div class="card-icon">🎨</div>
+      <h4>Zero-Config Decorators</h4>
+      <p>Add <code>@track_agent</code> or <code>@track_tool_call</code> to your functions. Automatic instrumentation with no boilerplate.</p>
+    </div>
+  </div>
+
+  <h2>How It Works</h2>
+
+  <div class="arch-diagram">┌──────────────────┐      HTTP POST       ┌──────────────────────┐      SQLite       ┌──────────┐
+│   Your Agent     │ ───────────────────►  │   AgentLens Backend  │ ──────────────►  │    DB    │
+│   + Python SDK   │      /events          │   (Express.js)       │                  └──────────┘
+└──────────────────┘                       └──────────┬───────────┘
+                                                      │
+                                                      │ serves /
+                                                      ▼
+                                           ┌──────────────────────┐
+                                           │     Dashboard        │
+                                           │  (HTML / CSS / JS)   │
+                                           └──────────────────────┘</div>
+
+  <ol>
+    <li><strong>Instrument</strong> — Add the Python SDK to your agent. Use decorators or manual tracking.</li>
+    <li><strong>Collect</strong> — Events are batched and sent to the Express.js backend over HTTP.</li>
+    <li><strong>Store</strong> — Events and sessions are persisted in SQLite (zero external dependencies).</li>
+    <li><strong>Visualize</strong> — The built-in dashboard shows timelines, token charts, and explanations.</li>
+  </ol>
+
+  <h2>Quick Example</h2>
+
+  <pre><code><span class="code-label">Python</span>import agentlens
+from agentlens import track_agent, track_tool_call
+
+# Initialize
+agentlens.init(api_key="my-key", endpoint="http://localhost:3000")
+session = agentlens.start_session(agent_name="my-agent")
+
+# Decorate your functions — tracking is automatic
+@track_tool_call(tool_name="web_search")
+def search(query: str) -> list:
+    return do_search(query)
+
+@track_agent(model="gpt-4")
+def my_agent(prompt: str) -> str:
+    results = search(prompt)
+    return synthesize(results)
+
+# Run and explain
+my_agent("What's the weather in Seattle?")
+print(agentlens.explain())
+agentlens.end_session()</code></pre>
+
+  <h2>Components</h2>
+
+  <table>
+    <thead>
+      <tr><th>Component</th><th>Directory</th><th>Tech Stack</th><th>Purpose</th></tr>
+    </thead>
+    <tbody>
+      <tr>
+        <td><strong>Python SDK</strong></td>
+        <td><code>sdk/</code></td>
+        <td>Python 3.9+, Pydantic, httpx</td>
+        <td>Instrument agents with decorators or manual tracking</td>
+      </tr>
+      <tr>
+        <td><strong>Backend API</strong></td>
+        <td><code>backend/</code></td>
+        <td>Node.js, Express, better-sqlite3</td>
+        <td>Ingest events, serve sessions, generate explanations</td>
+      </tr>
+      <tr>
+        <td><strong>Dashboard</strong></td>
+        <td><code>dashboard/</code></td>
+        <td>Vanilla HTML/CSS/JS</td>
+        <td>Visual timeline, token charts, session browser</td>
+      </tr>
+    </tbody>
+  </table>
+
+  <div class="callout callout-tip">
+    <div class="callout-title">💡 Ready to start?</div>
+    <p>Head to the <a href="getting-started.html">Getting Started</a> guide or try the <a href="quickstart.html">5-Minute Quickstart</a>.</p>
+  </div>
+
+  <div class="footer">
+    <span>AgentLens v0.1.0 — MIT License</span>
+    <span><a href="https://github.com/sauravbhattacharya001/agentlens">GitHub</a></span>
+  </div>
+</main>
+
+</body>
+</html>

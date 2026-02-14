@@ -1,0 +1,224 @@
+<!DOCTYPE html>
+<html lang="en">
+<head>
+  <meta charset="UTF-8">
+  <meta name="viewport" content="width=device-width, initial-scale=1.0">
+  <title>Decorators — AgentLens Docs</title>
+  <link rel="stylesheet" href="style.css">
+</head>
+<body>
+
+<header class="header">
+  <button class="menu-toggle" onclick="document.querySelector('.sidebar').classList.toggle('open')">☰</button>
+  <a href="index.html" class="header-logo">🔍 <span>AgentLens</span> Docs</a>
+  <nav class="header-nav">
+    <a href="getting-started.html">Getting Started</a>
+    <a href="sdk-reference.html">SDK</a>
+    <a href="api.html">API</a>
+    <a href="https://github.com/sauravbhattacharya001/agentlens" class="github-link" target="_blank">⭐ GitHub</a>
+  </nav>
+</header>
+
+<aside class="sidebar">
+  <div class="sidebar-section">
+    <div class="sidebar-section-title">Overview</div>
+    <a href="index.html">Introduction</a>
+    <a href="architecture.html">Architecture</a>
+  </div>
+  <div class="sidebar-section">
+    <div class="sidebar-section-title">Guides</div>
+    <a href="getting-started.html">Getting Started</a>
+    <a href="quickstart.html">5-Minute Quickstart</a>
+    <a href="deployment.html">Deployment</a>
+  </div>
+  <div class="sidebar-section">
+    <div class="sidebar-section-title">SDK</div>
+    <a href="sdk-reference.html">Python SDK Reference</a>
+    <a href="decorators.html" class="active">Decorators</a>
+    <a href="models.html">Data Models</a>
+    <a href="transport.html">Transport &amp; Batching</a>
+  </div>
+  <div class="sidebar-section">
+    <div class="sidebar-section-title">Backend</div>
+    <a href="api.html">REST API</a>
+    <a href="database.html">Database Schema</a>
+    <a href="dashboard.html">Dashboard</a>
+  </div>
+  <div class="sidebar-section">
+    <div class="sidebar-section-title">Advanced</div>
+    <a href="explainability.html">Explainability</a>
+    <a href="integrations.html">Integrations</a>
+  </div>
+</aside>
+
+<main class="main">
+  <h1>Decorators</h1>
+  <p class="subtitle">Zero-config instrumentation — add observability with a single line.</p>
+
+  <p>Decorators are the easiest way to add AgentLens tracking to your code. They automatically capture inputs, outputs, timing, and errors for both synchronous and asynchronous functions.</p>
+
+  <h2>@track_agent</h2>
+
+  <p>Tracks an agent function call, including execution time and the model used.</p>
+
+  <pre><code>from agentlens import track_agent
+
+# Simple usage (no arguments)
+@track_agent
+def my_agent(prompt: str) -> str:
+    return call_llm(prompt)
+
+# With parameters
+@track_agent(model="gpt-4", name="research-agent")
+def research(query: str) -> str:
+    return do_research(query)
+
+# Async functions work too
+@track_agent(model="claude-3.5-sonnet")
+async def async_agent(prompt: str) -> str:
+    return await call_llm_async(prompt)</code></pre>
+
+  <table>
+    <thead><tr><th>Parameter</th><th>Type</th><th>Default</th><th>Description</th></tr></thead>
+    <tbody>
+      <tr><td><code>model</code></td><td><code>str | None</code></td><td><code>None</code></td><td>LLM model name to record</td></tr>
+      <tr><td><code>name</code></td><td><code>str | None</code></td><td>function name</td><td>Override the agent name in traces</td></tr>
+    </tbody>
+  </table>
+
+  <h3>What Gets Captured</h3>
+
+  <ul>
+    <li><strong>Input:</strong> Function arguments (stringified)</li>
+    <li><strong>Output:</strong> Return value (stringified)</li>
+    <li><strong>Duration:</strong> Execution time in milliseconds</li>
+    <li><strong>Event type:</strong> <code>"agent_call"</code> on success, <code>"agent_error"</code> on exception</li>
+    <li><strong>Reasoning:</strong> Auto-generated (e.g., "Agent 'research' executed successfully in 234.5ms")</li>
+  </ul>
+
+  <h3>Error Tracking</h3>
+
+  <p>If the decorated function raises an exception, the decorator records an <code>agent_error</code> event with the error type and message, then <strong>re-raises the exception</strong>. Your error handling is not affected.</p>
+
+  <pre><code>@track_agent(model="gpt-4")
+def risky_agent(prompt):
+    if not prompt:
+        raise ValueError("Empty prompt")
+    return call_llm(prompt)
+
+try:
+    risky_agent("")  # Records agent_error event, then raises ValueError
+except ValueError:
+    print("Caught the error — and it's in AgentLens too")</code></pre>
+
+  <h2>@track_tool_call</h2>
+
+  <p>Tracks a tool/function invocation with its inputs and outputs.</p>
+
+  <pre><code>from agentlens import track_tool_call
+
+# Simple usage
+@track_tool_call
+def search_web(query: str) -> list:
+    return do_search(query)
+
+# With custom tool name
+@track_tool_call(tool_name="web_search")
+def search(query: str) -> list:
+    return do_search(query)
+
+# Async
+@track_tool_call(tool_name="database_query")
+async def query_db(sql: str) -> list:
+    return await db.execute(sql)</code></pre>
+
+  <table>
+    <thead><tr><th>Parameter</th><th>Type</th><th>Default</th><th>Description</th></tr></thead>
+    <tbody>
+      <tr><td><code>tool_name</code></td><td><code>str | None</code></td><td>function name</td><td>Name of the tool in traces</td></tr>
+    </tbody>
+  </table>
+
+  <h3>What Gets Captured</h3>
+
+  <ul>
+    <li><strong>Tool input:</strong> Function arguments (stringified)</li>
+    <li><strong>Tool output:</strong> Return value (stringified)</li>
+    <li><strong>Duration:</strong> Execution time in milliseconds</li>
+    <li><strong>Event type:</strong> <code>"tool_call"</code> on success, <code>"tool_error"</code> on exception</li>
+  </ul>
+
+  <h2>Combining Decorators</h2>
+
+  <p>Use both decorators together to build fully-instrumented agents:</p>
+
+  <pre><code>import agentlens
+from agentlens import track_agent, track_tool_call
+
+agentlens.init(endpoint="http://localhost:3000")
+
+@track_tool_call(tool_name="web_search")
+def search(query: str) -> list:
+    """Searches the web. Automatically tracked."""
+    return requests.get(f"https://api.search.com?q={query}").json()
+
+@track_tool_call(tool_name="calculator")
+def calculate(expression: str) -> float:
+    """Evaluates math. Automatically tracked."""
+    return eval(expression)
+
+@track_agent(model="gpt-4")
+def research_agent(question: str) -> str:
+    """Main agent. All calls inside are tracked."""
+    session = agentlens.start_session(agent_name="researcher")
+
+    # These tool calls are automatically captured
+    results = search(question)
+    answer = synthesize(results)
+
+    agentlens.end_session()
+    return answer</code></pre>
+
+  <h2>How It Works Internally</h2>
+
+  <ol>
+    <li>The decorator wraps your function with timing logic</li>
+    <li>Before execution, it captures the function arguments</li>
+    <li>After execution, it captures the return value and elapsed time</li>
+    <li>It calls <code>agentlens.track()</code> to record the event</li>
+    <li>If <code>init()</code> hasn't been called, tracking is silently skipped (no errors)</li>
+  </ol>
+
+  <div class="callout callout-tip">
+    <div class="callout-title">💡 Safe to use everywhere</div>
+    <p>Decorators are designed to be safe in all contexts. If the SDK isn't initialized, they silently skip tracking without affecting your function's behavior. This means you can leave decorators in production code even in environments where AgentLens isn't running.</p>
+  </div>
+
+  <h2>Async Support</h2>
+
+  <p>Both decorators automatically detect <code>async</code> functions and handle them correctly:</p>
+
+  <pre><code>import asyncio
+
+@track_agent(model="gpt-4")
+async def async_agent(prompt: str) -> str:
+    result = await call_llm_async(prompt)
+    return result
+
+@track_tool_call(tool_name="async_search")
+async def async_search(query: str) -> list:
+    async with httpx.AsyncClient() as client:
+        resp = await client.get(f"https://api.search.com?q={query}")
+        return resp.json()
+
+# Works with asyncio.run, await, etc.
+asyncio.run(async_agent("Hello world"))</code></pre>
+
+  <div class="footer">
+    <span>AgentLens v0.1.0 — MIT License</span>
+    <span><a href="https://github.com/sauravbhattacharya001/agentlens">GitHub</a></span>
+  </div>
+</main>
+
+</body>
+</html>

@@ -1,0 +1,212 @@
+<!DOCTYPE html>
+<html lang="en">
+<head>
+  <meta charset="UTF-8">
+  <meta name="viewport" content="width=device-width, initial-scale=1.0">
+  <title>REST API — AgentLens Docs</title>
+  <link rel="stylesheet" href="style.css">
+</head>
+<body>
+
+<header class="header">
+  <button class="menu-toggle" onclick="document.querySelector('.sidebar').classList.toggle('open')">☰</button>
+  <a href="index.html" class="header-logo">🔍 <span>AgentLens</span> Docs</a>
+  <nav class="header-nav">
+    <a href="getting-started.html">Getting Started</a>
+    <a href="sdk-reference.html">SDK</a>
+    <a href="api.html">API</a>
+    <a href="https://github.com/sauravbhattacharya001/agentlens" class="github-link" target="_blank">⭐ GitHub</a>
+  </nav>
+</header>
+
+<aside class="sidebar">
+  <div class="sidebar-section">
+    <div class="sidebar-section-title">Overview</div>
+    <a href="index.html">Introduction</a>
+    <a href="architecture.html">Architecture</a>
+  </div>
+  <div class="sidebar-section">
+    <div class="sidebar-section-title">Guides</div>
+    <a href="getting-started.html">Getting Started</a>
+    <a href="quickstart.html">5-Minute Quickstart</a>
+    <a href="deployment.html">Deployment</a>
+  </div>
+  <div class="sidebar-section">
+    <div class="sidebar-section-title">SDK</div>
+    <a href="sdk-reference.html">Python SDK Reference</a>
+    <a href="decorators.html">Decorators</a>
+    <a href="models.html">Data Models</a>
+    <a href="transport.html">Transport &amp; Batching</a>
+  </div>
+  <div class="sidebar-section">
+    <div class="sidebar-section-title">Backend</div>
+    <a href="api.html" class="active">REST API</a>
+    <a href="database.html">Database Schema</a>
+    <a href="dashboard.html">Dashboard</a>
+  </div>
+  <div class="sidebar-section">
+    <div class="sidebar-section-title">Advanced</div>
+    <a href="explainability.html">Explainability</a>
+    <a href="integrations.html">Integrations</a>
+  </div>
+</aside>
+
+<main class="main">
+  <h1>REST API Reference</h1>
+  <p class="subtitle">HTTP endpoints for ingesting events and querying sessions.</p>
+
+  <p>The AgentLens backend exposes a RESTful API on <code>http://localhost:3000</code> (configurable via <code>PORT</code> env var). All request/response bodies use JSON.</p>
+
+  <h2>Authentication</h2>
+
+  <p>Pass your API key in the <code>X-API-Key</code> header:</p>
+
+  <pre><code>curl -H "X-API-Key: your-key" http://localhost:3000/sessions</code></pre>
+
+  <div class="callout callout-info">
+    <div class="callout-title">ℹ️ Note</div>
+    <p>The current backend does not enforce API key validation. The header is accepted and forwarded but not checked. This is intended for future use.</p>
+  </div>
+
+  <h2>Endpoints</h2>
+
+  <h3>GET /health</h3>
+
+  <p>Health check endpoint.</p>
+
+  <pre><code>curl http://localhost:3000/health</code></pre>
+
+  <p><strong>Response:</strong></p>
+  <pre><code>{
+  "status": "ok",
+  "timestamp": "2026-02-14T10:30:00.000Z"
+}</code></pre>
+
+  <h3>POST /events</h3>
+
+  <p>Ingest a batch of events. This is the primary endpoint used by the SDK.</p>
+
+  <pre><code>curl -X POST http://localhost:3000/events \
+  -H "Content-Type: application/json" \
+  -d '{
+    "events": [
+      {
+        "event_type": "session_start",
+        "session_id": "abc123",
+        "agent_name": "my-agent",
+        "metadata": {"version": "1.0"},
+        "timestamp": "2026-02-14T10:30:00Z"
+      },
+      {
+        "event_type": "llm_call",
+        "session_id": "abc123",
+        "event_id": "evt001",
+        "model": "gpt-4",
+        "input_data": {"prompt": "Hello"},
+        "output_data": {"response": "Hi"},
+        "tokens_in": 5,
+        "tokens_out": 3,
+        "duration_ms": 150.0,
+        "decision_trace": {
+          "reasoning": "Simple greeting"
+        }
+      }
+    ]
+  }'</code></pre>
+
+  <p><strong>Response:</strong></p>
+  <pre><code>{"status": "ok", "processed": 2}</code></pre>
+
+  <h4>Special Event Types</h4>
+
+  <table>
+    <thead><tr><th>Event Type</th><th>Behavior</th></tr></thead>
+    <tbody>
+      <tr><td><code>session_start</code></td><td>Creates a new session record. Requires <code>session_id</code> and <code>agent_name</code>.</td></tr>
+      <tr><td><code>session_end</code></td><td>Marks a session as completed. Sets <code>ended_at</code>, <code>status</code>, and final token counts.</td></tr>
+      <tr><td>anything else</td><td>Stored as a regular event. Auto-creates the session if it doesn't exist.</td></tr>
+    </tbody>
+  </table>
+
+  <h4>Event Fields</h4>
+
+  <table>
+    <thead><tr><th>Field</th><th>Type</th><th>Required</th><th>Description</th></tr></thead>
+    <tbody>
+      <tr><td><code>event_type</code></td><td><code>string</code></td><td>No</td><td>Defaults to <code>"generic"</code></td></tr>
+      <tr><td><code>session_id</code></td><td><code>string</code></td><td>No</td><td>Defaults to <code>"unknown"</code></td></tr>
+      <tr><td><code>event_id</code></td><td><code>string</code></td><td>No</td><td>Auto-generated UUID if not provided</td></tr>
+      <tr><td><code>timestamp</code></td><td><code>string</code></td><td>No</td><td>ISO 8601. Defaults to current time</td></tr>
+      <tr><td><code>model</code></td><td><code>string</code></td><td>No</td><td>LLM model name</td></tr>
+      <tr><td><code>input_data</code></td><td><code>object</code></td><td>No</td><td>Input to the operation</td></tr>
+      <tr><td><code>output_data</code></td><td><code>object</code></td><td>No</td><td>Output from the operation</td></tr>
+      <tr><td><code>tokens_in</code></td><td><code>integer</code></td><td>No</td><td>Input token count</td></tr>
+      <tr><td><code>tokens_out</code></td><td><code>integer</code></td><td>No</td><td>Output token count</td></tr>
+      <tr><td><code>tool_call</code></td><td><code>object</code></td><td>No</td><td>Tool call details (name, input, output)</td></tr>
+      <tr><td><code>decision_trace</code></td><td><code>object</code></td><td>No</td><td>Reasoning trace</td></tr>
+      <tr><td><code>duration_ms</code></td><td><code>number</code></td><td>No</td><td>Execution time in ms</td></tr>
+    </tbody>
+  </table>
+
+  <h3>GET /sessions</h3>
+
+  <p>List all sessions with pagination and optional status filter.</p>
+
+  <pre><code>curl "http://localhost:3000/sessions?limit=10&offset=0&status=active"</code></pre>
+
+  <table>
+    <thead><tr><th>Query Param</th><th>Type</th><th>Default</th><th>Description</th></tr></thead>
+    <tbody>
+      <tr><td><code>limit</code></td><td><code>int</code></td><td>50</td><td>Max results (capped at 200)</td></tr>
+      <tr><td><code>offset</code></td><td><code>int</code></td><td>0</td><td>Pagination offset</td></tr>
+      <tr><td><code>status</code></td><td><code>string</code></td><td>—</td><td>Filter: <code>active</code>, <code>completed</code>, <code>error</code></td></tr>
+    </tbody>
+  </table>
+
+  <p><strong>Response:</strong></p>
+  <pre><code>{
+  "sessions": [
+    {
+      "session_id": "abc123",
+      "agent_name": "research-agent",
+      "started_at": "2026-02-14T10:30:00Z",
+      "ended_at": "2026-02-14T10:31:00Z",
+      "metadata": {"version": "2.0"},
+      "total_tokens_in": 1200,
+      "total_tokens_out": 350,
+      "status": "completed"
+    }
+  ],
+  "total": 42
+}</code></pre>
+
+  <h3>GET /sessions/:id</h3>
+
+  <p>Get a single session with its full event trace.</p>
+
+  <pre><code>curl http://localhost:3000/sessions/abc123</code></pre>
+
+  <p><strong>Response:</strong> Same as session list item, plus an <code>events</code> array with all parsed events (JSON fields like <code>input_data</code>, <code>tool_call</code>, <code>decision_trace</code> are returned as objects, not strings).</p>
+
+  <h3>GET /sessions/:id/explain</h3>
+
+  <p>Get a human-readable explanation of the session's agent behavior.</p>
+
+  <pre><code>curl http://localhost:3000/sessions/abc123/explain</code></pre>
+
+  <p><strong>Response:</strong></p>
+  <pre><code>{
+  "session_id": "abc123",
+  "explanation": "## Agent Session: research-agent\n**Duration:** 45.2s\n..."
+}</code></pre>
+
+  <p>The explanation is a Markdown-formatted string with a timeline of events, token counts, and reasoning. See the <a href="explainability.html">Explainability</a> page for details on how explanations are generated.</p>
+
+  <div class="footer">
+    <span>AgentLens v0.1.0 — MIT License</span>
+    <span><a href="https://github.com/sauravbhattacharya001/agentlens">GitHub</a></span>
+  </div>
+</main>
+
+</body>
+</html>

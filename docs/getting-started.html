@@ -1,0 +1,186 @@
+<!DOCTYPE html>
+<html lang="en">
+<head>
+  <meta charset="UTF-8">
+  <meta name="viewport" content="width=device-width, initial-scale=1.0">
+  <title>Getting Started — AgentLens Docs</title>
+  <link rel="stylesheet" href="style.css">
+</head>
+<body>
+
+<header class="header">
+  <button class="menu-toggle" onclick="document.querySelector('.sidebar').classList.toggle('open')">☰</button>
+  <a href="index.html" class="header-logo">🔍 <span>AgentLens</span> Docs</a>
+  <nav class="header-nav">
+    <a href="getting-started.html">Getting Started</a>
+    <a href="sdk-reference.html">SDK</a>
+    <a href="api.html">API</a>
+    <a href="https://github.com/sauravbhattacharya001/agentlens" class="github-link" target="_blank">⭐ GitHub</a>
+  </nav>
+</header>
+
+<aside class="sidebar">
+  <div class="sidebar-section">
+    <div class="sidebar-section-title">Overview</div>
+    <a href="index.html">Introduction</a>
+    <a href="architecture.html">Architecture</a>
+  </div>
+  <div class="sidebar-section">
+    <div class="sidebar-section-title">Guides</div>
+    <a href="getting-started.html" class="active">Getting Started</a>
+    <a href="quickstart.html">5-Minute Quickstart</a>
+    <a href="deployment.html">Deployment</a>
+  </div>
+  <div class="sidebar-section">
+    <div class="sidebar-section-title">SDK</div>
+    <a href="sdk-reference.html">Python SDK Reference</a>
+    <a href="decorators.html">Decorators</a>
+    <a href="models.html">Data Models</a>
+    <a href="transport.html">Transport &amp; Batching</a>
+  </div>
+  <div class="sidebar-section">
+    <div class="sidebar-section-title">Backend</div>
+    <a href="api.html">REST API</a>
+    <a href="database.html">Database Schema</a>
+    <a href="dashboard.html">Dashboard</a>
+  </div>
+  <div class="sidebar-section">
+    <div class="sidebar-section-title">Advanced</div>
+    <a href="explainability.html">Explainability</a>
+    <a href="integrations.html">Integrations</a>
+  </div>
+</aside>
+
+<main class="main">
+  <h1>Getting Started</h1>
+  <p class="subtitle">Set up AgentLens from scratch in under 10 minutes.</p>
+
+  <h2>Prerequisites</h2>
+
+  <table>
+    <thead><tr><th>Requirement</th><th>Version</th><th>Purpose</th></tr></thead>
+    <tbody>
+      <tr><td>Python</td><td>3.9+</td><td>SDK for agent instrumentation</td></tr>
+      <tr><td>Node.js</td><td>18+</td><td>Backend API server</td></tr>
+      <tr><td>npm</td><td>comes with Node.js</td><td>Install backend dependencies</td></tr>
+      <tr><td>pip</td><td>any recent</td><td>Install Python SDK</td></tr>
+    </tbody>
+  </table>
+
+  <h2>1. Clone the Repository</h2>
+
+  <pre><code>git clone https://github.com/sauravbhattacharya001/agentlens.git
+cd agentlens</code></pre>
+
+  <h2>2. Start the Backend</h2>
+
+  <pre><code>cd backend
+npm install
+node server.js</code></pre>
+
+  <p>The backend starts on <code>http://localhost:3000</code> by default. You can override the port with the <code>PORT</code> environment variable:</p>
+
+  <pre><code>PORT=8080 node server.js</code></pre>
+
+  <div class="callout callout-info">
+    <div class="callout-title">ℹ️ Database</div>
+    <p>AgentLens uses SQLite via <code>better-sqlite3</code>. The database file (<code>agentlens.db</code>) is created automatically in the <code>backend/</code> directory on first run. No external database setup required.</p>
+  </div>
+
+  <h3>Load Demo Data (Optional)</h3>
+
+  <pre><code>node seed.js</code></pre>
+
+  <p>This creates sample sessions and events so you can explore the dashboard immediately.</p>
+
+  <h2>3. Install the Python SDK</h2>
+
+  <pre><code>cd ../sdk
+pip install -e .</code></pre>
+
+  <p>This installs the SDK in development (editable) mode. For production, you can install from the directory:</p>
+
+  <pre><code>pip install ./sdk</code></pre>
+
+  <h3>Dependencies</h3>
+  <p>The SDK depends on:</p>
+  <ul>
+    <li><strong>pydantic</strong> ≥2.0 — Data validation and serialization</li>
+    <li><strong>httpx</strong> ≥0.24 — Async-capable HTTP client</li>
+  </ul>
+
+  <h2>4. Instrument Your Agent</h2>
+
+  <pre><code>import agentlens
+
+# Connect to the backend
+agentlens.init(api_key="your-key", endpoint="http://localhost:3000")
+
+# Start a tracking session
+session = agentlens.start_session(agent_name="my-agent")
+
+# Track an LLM call
+agentlens.track(
+    event_type="llm_call",
+    input_data={"prompt": "What is 2+2?"},
+    output_data={"response": "4"},
+    model="gpt-4",
+    tokens_in=12,
+    tokens_out=3,
+    reasoning="Simple arithmetic — answered directly",
+)
+
+# Get a human-readable explanation
+print(agentlens.explain())
+
+# End the session (flushes pending events)
+agentlens.end_session()</code></pre>
+
+  <h2>5. Run the Demo</h2>
+
+  <pre><code>cd sdk/examples
+python mock_agent.py</code></pre>
+
+  <p>The demo runs two mock agents (a research agent and a code agent) that simulate realistic workflows with LLM calls, tool invocations, and decision traces. Open <a href="http://localhost:3000">http://localhost:3000</a> to see the results in the dashboard.</p>
+
+  <h2>6. View the Dashboard</h2>
+
+  <p>Open <a href="http://localhost:3000">http://localhost:3000</a> in your browser. The dashboard is served directly by the backend — no separate build step required.</p>
+
+  <p>You'll see:</p>
+  <ul>
+    <li><strong>Sessions list</strong> — All agent sessions with status, agent name, and token counts</li>
+    <li><strong>Timeline view</strong> — Click a session to see every event on an interactive timeline</li>
+    <li><strong>Token charts</strong> — Per-event and cumulative token usage</li>
+    <li><strong>Explain tab</strong> — Auto-generated human-readable behavior summaries</li>
+  </ul>
+
+  <h2>Next Steps</h2>
+
+  <div class="card-grid">
+    <div class="card">
+      <h4>📖 SDK Reference</h4>
+      <p>Deep dive into all SDK functions, parameters, and patterns. <a href="sdk-reference.html">Read →</a></p>
+    </div>
+    <div class="card">
+      <h4>🎨 Decorators</h4>
+      <p>Zero-config instrumentation with <code>@track_agent</code> and <code>@track_tool_call</code>. <a href="decorators.html">Read →</a></p>
+    </div>
+    <div class="card">
+      <h4>🔌 REST API</h4>
+      <p>Build custom integrations using the HTTP API. <a href="api.html">Read →</a></p>
+    </div>
+    <div class="card">
+      <h4>🏗️ Architecture</h4>
+      <p>Understand how the pieces fit together. <a href="architecture.html">Read →</a></p>
+    </div>
+  </div>
+
+  <div class="footer">
+    <span>AgentLens v0.1.0 — MIT License</span>
+    <span><a href="https://github.com/sauravbhattacharya001/agentlens">GitHub</a></span>
+  </div>
+</main>
+
+</body>
+</html>
