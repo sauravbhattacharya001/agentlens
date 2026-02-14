@@ -1,0 +1,17 @@
+{
+  "name": "agentops-backend",
+  "version": "0.1.0",
+  "description": "AgentOps Dashboard Backend API",
+  "main": "server.js",
+  "scripts": {
+    "start": "node server.js",
+    "seed": "node seed.js",
+    "dev": "node server.js"
+  },
+  "dependencies": {
+    "better-sqlite3": "^11.0.0",
+    "cors": "^2.8.5",
+    "express": "^4.21.0",
+    "uuid": "^9.0.0"
+  }
+}
