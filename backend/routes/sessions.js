@@ -3,17 +3,29 @@ const { getDb } = require("../db");
 
 const router = express.Router();
 
+// ── Input validation ────────────────────────────────────────────────
+const VALID_STATUSES = new Set(["active", "completed", "error", "timeout"]);
+const SESSION_ID_RE = /^[a-zA-Z0-9_\-.:]+$/;
+
+function isValidSessionId(id) {
+  return typeof id === "string" && id.length <= 128 && SESSION_ID_RE.test(id);
+}
+
 // GET /sessions — List all sessions
 router.get("/", (req, res) => {
   const db = getDb();
-  const limit = Math.min(parseInt(req.query.limit) || 50, 200);
-  const offset = parseInt(req.query.offset) || 0;
+  const limit = Math.min(Math.max(1, parseInt(req.query.limit) || 50), 200);
+  const offset = Math.max(0, parseInt(req.query.offset) || 0);
   const status = req.query.status;
 
   let query = "SELECT * FROM sessions";
   const params = [];
 
   if (status) {
+    // Validate status to prevent query abuse
+    if (!VALID_STATUSES.has(status)) {
+      return res.status(400).json({ error: "Invalid status filter" });
+    }
     query += " WHERE status = ?";
     params.push(status);
   }
@@ -27,10 +39,10 @@ router.get("/", (req, res) => {
       .prepare(`SELECT COUNT(*) as count FROM sessions${status ? " WHERE status = ?" : ""}`)
       .get(...(status ? [status] : []));
 
-    // Parse JSON metadata
+    // Parse JSON metadata safely
     const parsed = sessions.map((s) => ({
       ...s,
-      metadata: JSON.parse(s.metadata || "{}"),
+      metadata: safeJsonParse(s.metadata),
     }));
 
     res.json({ sessions: parsed, total: total.count });
@@ -45,6 +57,11 @@ router.get("/:id", (req, res) => {
   const db = getDb();
   const { id } = req.params;
 
+  // Validate session ID format
+  if (!isValidSessionId(id)) {
+    return res.status(400).json({ error: "Invalid session ID format" });
+  }
+
   try {
     const session = db.prepare("SELECT * FROM sessions WHERE session_id = ?").get(id);
     if (!session) {
@@ -55,18 +72,18 @@ router.get("/:id", (req, res) => {
       .prepare("SELECT * FROM events WHERE session_id = ? ORDER BY timestamp ASC")
       .all(id);
 
-    // Parse JSON fields
+    // Parse JSON fields safely
     const parsedEvents = events.map((e) => ({
       ...e,
-      input_data: e.input_data ? JSON.parse(e.input_data) : null,
-      output_data: e.output_data ? JSON.parse(e.output_data) : null,
-      tool_call: e.tool_call ? JSON.parse(e.tool_call) : null,
-      decision_trace: e.decision_trace ? JSON.parse(e.decision_trace) : null,
+      input_data: safeJsonParse(e.input_data),
+      output_data: safeJsonParse(e.output_data),
+      tool_call: safeJsonParse(e.tool_call),
+      decision_trace: safeJsonParse(e.decision_trace),
     }));
 
     res.json({
       ...session,
-      metadata: JSON.parse(session.metadata || "{}"),
+      metadata: safeJsonParse(session.metadata),
       events: parsedEvents,
     });
   } catch (err) {
@@ -79,6 +96,11 @@ router.get("/:id", (req, res) => {
 router.get("/:id/explain", (req, res) => {
   const db = getDb();
   const { id } = req.params;
+
+  // Validate session ID format
+  if (!isValidSessionId(id)) {
+    return res.status(400).json({ error: "Invalid session ID format" });
+  }
 
   try {
     const session = db.prepare("SELECT * FROM sessions WHERE session_id = ?").get(id);
@@ -100,7 +122,7 @@ router.get("/:id/explain", (req, res) => {
 });
 
 function generateExplanation(session, events) {
-  const meta = JSON.parse(session.metadata || "{}");
+  const meta = safeJsonParse(session.metadata);
   const lines = [];
 
   lines.push(`## Agent Session: ${session.agent_name}`);
@@ -112,10 +134,10 @@ function generateExplanation(session, events) {
 
   let stepNum = 1;
   for (const event of events) {
-    const trace = event.decision_trace ? JSON.parse(event.decision_trace) : null;
-    const toolCall = event.tool_call ? JSON.parse(event.tool_call) : null;
-    const input = event.input_data ? JSON.parse(event.input_data) : null;
-    const output = event.output_data ? JSON.parse(event.output_data) : null;
+    const trace = safeJsonParse(event.decision_trace);
+    const toolCall = safeJsonParse(event.tool_call);
+    const input = safeJsonParse(event.input_data);
+    const output = safeJsonParse(event.output_data);
 
     if (event.event_type === "llm_call") {
       const prompt = input?.prompt || "unknown prompt";
@@ -183,6 +205,19 @@ function formatDuration(start, end) {
   if (ms < 1000) return `${ms}ms`;
   if (ms < 60000) return `${(ms / 1000).toFixed(1)}s`;
   return `${(ms / 60000).toFixed(1)}m`;
+}
+
+/**
+ * Safely parse JSON, returning a default value on failure.
+ */
+function safeJsonParse(str, fallback = {}) {
+  if (str == null) return fallback;
+  if (typeof str !== "string") return str; // already parsed
+  try {
+    return JSON.parse(str);
+  } catch {
+    return fallback;
+  }
 }
 
 module.exports = router;

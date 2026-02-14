@@ -4,13 +4,76 @@ const { getDb } = require("../db");
 
 const router = express.Router();
 
+// ── Input validation constants ──────────────────────────────────────
+const MAX_BATCH_SIZE = 500; // Max events per batch to prevent memory exhaustion
+const MAX_STRING_LENGTH = 1024; // Max length for identifier fields
+const MAX_DATA_LENGTH = 1024 * 256; // 256KB max for JSON data fields
+const VALID_EVENT_TYPES = new Set([
+  "session_start",
+  "session_end",
+  "llm_call",
+  "tool_call",
+  "agent_call",
+  "error",
+  "generic",
+]);
+const SESSION_ID_RE = /^[a-zA-Z0-9_\-.:]+$/;
+
+/**
+ * Sanitize a string field: enforce max length, strip control characters.
+ */
+function sanitizeString(val, maxLen = MAX_STRING_LENGTH) {
+  if (typeof val !== "string") return null;
+  // Strip control characters (except newlines/tabs in data fields)
+  const cleaned = val.replace(/[\x00-\x08\x0B\x0C\x0E-\x1F\x7F]/g, "");
+  return cleaned.slice(0, maxLen);
+}
+
+/**
+ * Validate and sanitize a session ID.
+ */
+function validateSessionId(id) {
+  if (!id || typeof id !== "string") return null;
+  const trimmed = id.slice(0, 128);
+  return SESSION_ID_RE.test(trimmed) ? trimmed : null;
+}
+
+/**
+ * Safely stringify JSON data with size limit.
+ */
+function safeJsonStringify(data, maxLen = MAX_DATA_LENGTH) {
+  if (data == null) return null;
+  try {
+    const str = JSON.stringify(data);
+    if (str.length > maxLen) {
+      return JSON.stringify({ _truncated: true, _original_size: str.length });
+    }
+    return str;
+  } catch {
+    return null;
+  }
+}
+
 // POST /events — Ingest events (batched)
 router.post("/", (req, res) => {
   const db = getDb();
   const { events } = req.body;
 
   if (!events || !Array.isArray(events)) {
-    return res.status(400).json({ error: "Missing 'events' array in request body" });
+    return res
+      .status(400)
+      .json({ error: "Missing 'events' array in request body" });
+  }
+
+  // ── Security: Enforce batch size limit ────────────────────────────
+  if (events.length > MAX_BATCH_SIZE) {
+    return res.status(400).json({
+      error: `Batch too large: ${events.length} events (max ${MAX_BATCH_SIZE})`,
+    });
+  }
+
+  if (events.length === 0) {
+    return res.json({ status: "ok", processed: 0 });
   }
 
   const insertSession = db.prepare(`
@@ -39,30 +102,61 @@ router.post("/", (req, res) => {
 
   const transaction = db.transaction((eventList) => {
     let processed = 0;
+    let skipped = 0;
+
     for (const event of eventList) {
-      const sessionId = event.session_id || "unknown";
+      // ── Validate session ID ─────────────────────────────────────
+      const sessionId = validateSessionId(event.session_id);
+      if (!sessionId) {
+        skipped++;
+        continue;
+      }
+
+      // ── Validate event type ─────────────────────────────────────
+      const eventType = sanitizeString(event.event_type || "generic", 64);
+      if (!VALID_EVENT_TYPES.has(eventType)) {
+        skipped++;
+        continue;
+      }
+
+      // ── Validate numeric fields ─────────────────────────────────
+      const tokensIn = Number.isFinite(event.tokens_in)
+        ? Math.max(0, Math.floor(event.tokens_in))
+        : 0;
+      const tokensOut = Number.isFinite(event.tokens_out)
+        ? Math.max(0, Math.floor(event.tokens_out))
+        : 0;
+      const durationMs = Number.isFinite(event.duration_ms)
+        ? Math.max(0, event.duration_ms)
+        : null;
 
       // Handle session lifecycle events
-      if (event.event_type === "session_start") {
+      if (eventType === "session_start") {
         insertSession.run(
           sessionId,
-          event.agent_name || "default-agent",
-          event.timestamp || new Date().toISOString(),
-          JSON.stringify(event.metadata || {}),
+          sanitizeString(event.agent_name || "default-agent", 256),
+          sanitizeString(event.timestamp || new Date().toISOString(), 64),
+          safeJsonStringify(event.metadata || {}),
           "active"
         );
         processed++;
         continue;
       }
 
-      if (event.event_type === "session_end") {
-        const tokIn = event.total_tokens_in || 0;
-        const tokOut = event.total_tokens_out || 0;
+      if (eventType === "session_end") {
+        const totalTokIn = Number.isFinite(event.total_tokens_in)
+          ? Math.max(0, Math.floor(event.total_tokens_in))
+          : 0;
+        const totalTokOut = Number.isFinite(event.total_tokens_out)
+          ? Math.max(0, Math.floor(event.total_tokens_out))
+          : 0;
         endSession.run(
-          event.ended_at || new Date().toISOString(),
-          event.status || "completed",
-          tokIn, tokIn,
-          tokOut, tokOut,
+          sanitizeString(event.ended_at || new Date().toISOString(), 64),
+          sanitizeString(event.status || "completed", 32),
+          totalTokIn,
+          totalTokIn,
+          totalTokOut,
+          totalTokOut,
           sessionId
         );
         processed++;
@@ -70,13 +164,15 @@ router.post("/", (req, res) => {
       }
 
       // Regular event
-      const eventId = event.event_id || uuidv4().replace(/-/g, "").slice(0, 16);
-      
+      const eventId =
+        sanitizeString(event.event_id, 64) ||
+        uuidv4().replace(/-/g, "").slice(0, 16);
+
       // Ensure session exists
       insertSession.run(
         sessionId,
         "default-agent",
-        event.timestamp || new Date().toISOString(),
+        sanitizeString(event.timestamp || new Date().toISOString(), 64),
         "{}",
         "active"
       );
@@ -84,32 +180,33 @@ router.post("/", (req, res) => {
       insertEvent.run(
         eventId,
         sessionId,
-        event.event_type || "generic",
-        event.timestamp || new Date().toISOString(),
-        event.input_data ? JSON.stringify(event.input_data) : null,
-        event.output_data ? JSON.stringify(event.output_data) : null,
-        event.model || null,
-        event.tokens_in || 0,
-        event.tokens_out || 0,
-        event.tool_call ? JSON.stringify(event.tool_call) : null,
-        event.decision_trace ? JSON.stringify(event.decision_trace) : null,
-        event.duration_ms || null
+        eventType,
+        sanitizeString(event.timestamp || new Date().toISOString(), 64),
+        safeJsonStringify(event.input_data),
+        safeJsonStringify(event.output_data),
+        sanitizeString(event.model, 128),
+        tokensIn,
+        tokensOut,
+        safeJsonStringify(event.tool_call),
+        safeJsonStringify(event.decision_trace),
+        durationMs
       );
 
       // Update session token counts
-      updateSession.run(event.tokens_in || 0, event.tokens_out || 0, sessionId);
+      updateSession.run(tokensIn, tokensOut, sessionId);
 
       processed++;
     }
-    return processed;
+    return { processed, skipped };
   });
 
   try {
-    const processed = transaction(events);
-    res.json({ status: "ok", processed });
+    const result = transaction(events);
+    res.json({ status: "ok", ...result });
   } catch (err) {
     console.error("Error ingesting events:", err);
-    res.status(500).json({ error: "Failed to ingest events", details: err.message });
+    // ── Security: Don't leak error details to clients ─────────────
+    res.status(500).json({ error: "Failed to ingest events" });
   }
 });
 

@@ -529,8 +529,10 @@ function formatJson(obj) {
 
 function renderMarkdown(text) {
   if (!text) return "";
-  // Simple markdown rendering
-  return text
+  // ── Security: Escape HTML first, then apply markdown formatting ──
+  // This prevents XSS via injected HTML in explanation text
+  const escaped = escHtml(text);
+  return escaped
     .replace(/^## (.+)$/gm, '<h2>$1</h2>')
     .replace(/^### (.+)$/gm, '<h3>$1</h3>')
     .replace(/\*\*(.+?)\*\*/g, '<strong>$1</strong>')
