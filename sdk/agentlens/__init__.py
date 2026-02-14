@@ -12,6 +12,7 @@ __all__ = [
     "end_session",
     "track",
     "explain",
+    "export_session",
     "track_agent",
     "track_tool_call",
     "AgentEvent",
@@ -105,3 +106,23 @@ def explain(session_id: str | None = None) -> str:
     if _tracker is None:
         raise RuntimeError("Call agentlens.init() before explain()")
     return _tracker.explain(session_id=session_id)
+
+
+def export_session(session_id: str | None = None, format: str = "json"):
+    """Export session data from the backend.
+
+    Fetches the full session data (including all events) from the AgentLens
+    backend and returns it in the requested format.
+
+    Args:
+        session_id: Session to export. Defaults to the current session.
+        format: Export format — ``"json"`` returns a dict, ``"csv"`` returns
+            a CSV string.
+
+    Returns:
+        A dict (for JSON) or a string (for CSV) with session data, events,
+        and summary statistics.
+    """
+    if _tracker is None:
+        raise RuntimeError("Call agentlens.init() before export_session()")
+    return _tracker.export_session(session_id=session_id, format=format)

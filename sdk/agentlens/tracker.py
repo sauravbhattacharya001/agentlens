@@ -129,6 +129,49 @@ class AgentTracker:
             duration_ms=duration_ms,
         )
 
+    def export_session(
+        self,
+        session_id: str | None = None,
+        format: str = "json",
+    ) -> dict[str, Any] | str:
+        """Export session data from the backend.
+
+        Fetches the full session data (including all events) from the
+        AgentLens backend and returns it in the requested format.
+
+        Args:
+            session_id: Session to export. Defaults to the current session.
+            format: Export format — ``"json"`` returns a dict, ``"csv"``
+                returns a CSV string.
+
+        Returns:
+            A dict (for JSON) or a string (for CSV) containing the full
+            session data with events, token usage, and summary statistics.
+
+        Raises:
+            RuntimeError: If no session is specified and there is no current
+                session.
+            ValueError: If the format is not ``"json"`` or ``"csv"``.
+            httpx.HTTPStatusError: If the backend returns an error.
+        """
+        sid = session_id or self._current_session_id
+        if not sid:
+            raise RuntimeError("No session to export. Specify session_id or start a session first.")
+
+        if format not in ("json", "csv"):
+            raise ValueError(f"Invalid format '{format}'. Use 'json' or 'csv'.")
+
+        response = self.transport._client.get(
+            f"{self.transport.endpoint}/sessions/{sid}/export",
+            params={"format": format},
+            headers={"X-API-Key": self.transport.api_key},
+        )
+        response.raise_for_status()
+
+        if format == "json":
+            return response.json()
+        return response.text
+
     def explain(self, session_id: str | None = None) -> str:
         """Generate a human-readable explanation of the agent's behavior."""
         sid = session_id or self._current_session_id

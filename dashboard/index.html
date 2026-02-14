@@ -46,6 +46,21 @@
         <div class="view-header">
           <button class="btn btn-ghost" onclick="showSessionList()">← Back to Sessions</button>
           <h2 id="sessionTitle">Session Detail</h2>
+          <div class="export-controls">
+            <div class="export-dropdown" id="exportDropdown">
+              <button class="btn btn-export" onclick="toggleExportMenu()">
+                📥 Export <span class="caret">▾</span>
+              </button>
+              <div class="export-menu" id="exportMenu">
+                <button class="export-option" onclick="exportSession('json')">
+                  <span class="export-icon">{ }</span> Export as JSON
+                </button>
+                <button class="export-option" onclick="exportSession('csv')">
+                  <span class="export-icon">📊</span> Export as CSV
+                </button>
+              </div>
+            </div>
+          </div>
         </div>
 
         <!-- Session Info Bar -->

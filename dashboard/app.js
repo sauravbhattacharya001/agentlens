@@ -481,6 +481,76 @@ async function loadExplanation(sessionId) {
   }
 }
 
+// ── Export ───────────────────────────────────────────────────────────
+
+function toggleExportMenu() {
+  const dropdown = document.getElementById("exportDropdown");
+  dropdown.classList.toggle("open");
+}
+
+// Close export menu when clicking outside
+document.addEventListener("click", (e) => {
+  const dropdown = document.getElementById("exportDropdown");
+  if (dropdown && !dropdown.contains(e.target)) {
+    dropdown.classList.remove("open");
+  }
+});
+
+async function exportSession(format) {
+  if (!currentSession) return;
+
+  const dropdown = document.getElementById("exportDropdown");
+  dropdown.classList.remove("open");
+
+  try {
+    const res = await fetch(
+      `${API_BASE}/sessions/${currentSession.session_id}/export?format=${format}`
+    );
+
+    if (!res.ok) {
+      const err = await res.json();
+      throw new Error(err.error || "Export failed");
+    }
+
+    // Get filename from Content-Disposition header or generate one
+    const disposition = res.headers.get("Content-Disposition");
+    let filename = `agentlens-export.${format}`;
+    if (disposition) {
+      const match = disposition.match(/filename="?([^";\n]+)"?/);
+      if (match) filename = match[1];
+    }
+
+    const blob = await res.blob();
+    const url = URL.createObjectURL(blob);
+    const a = document.createElement("a");
+    a.href = url;
+    a.download = filename;
+    document.body.appendChild(a);
+    a.click();
+    document.body.removeChild(a);
+    URL.revokeObjectURL(url);
+
+    showToast(`✅ Exported as ${format.toUpperCase()}`);
+  } catch (err) {
+    showToast(`❌ Export failed: ${err.message}`);
+  }
+}
+
+function showToast(message) {
+  // Remove any existing toast
+  const existing = document.querySelector(".export-toast");
+  if (existing) existing.remove();
+
+  const toast = document.createElement("div");
+  toast.className = "export-toast";
+  toast.textContent = message;
+  document.body.appendChild(toast);
+
+  setTimeout(() => {
+    if (toast.parentNode) toast.remove();
+  }, 2500);
+}
+
 // ── Tab Switching ───────────────────────────────────────────────────
 
 function switchTab(tabName) {
