@@ -42,7 +42,7 @@ class Transport:
         self.max_retries = max_retries
 
         self._buffer: list[dict[str, Any]] = []
-        self._retry_counts: dict[int, int] = {}  # batch_hash -> attempt count
+        self._consecutive_failures: int = 0
         self._lock = threading.Lock()
         self._client = httpx.Client(timeout=10.0)
 
@@ -76,17 +76,16 @@ class Transport:
         """Internal flush — must be called with ``self._lock`` held.
 
         On failure the events are *prepended* back into the buffer (preserving
-        any events that arrived during the HTTP call) and a retry counter is
-        incremented.  After ``max_retries`` consecutive failures for the same
-        batch, the events are dropped to prevent infinite retry loops.
+        any events that arrived during the HTTP call) and a consecutive failure
+        counter is incremented.  After ``max_retries`` consecutive failures the
+        events are dropped to prevent infinite retry loops.  The counter resets
+        on any successful flush.
         """
         if not self._buffer:
             return
 
         events = self._buffer[:]
         self._buffer.clear()
-
-        batch_id = id(events)
 
         try:
             response = self._client.post(
@@ -98,7 +97,8 @@ class Transport:
                 },
             )
             if response.status_code == 200:
-                # Success — reset any retry state
+                # Success — reset consecutive failure counter
+                self._consecutive_failures = 0
                 return
 
             logger.warning(
@@ -111,28 +111,24 @@ class Transport:
             logger.warning("Failed to send %d events: %s", len(events), e)
 
         # --- Retry logic ---
-        # Use buffer length as a rough retry key (not perfect, but avoids
-        # holding references to old batches).
-        retry_key = len(events)
-        attempts = self._retry_counts.get(retry_key, 0) + 1
-        self._retry_counts[retry_key] = attempts
+        self._consecutive_failures += 1
 
-        if attempts <= self.max_retries:
+        if self._consecutive_failures <= self.max_retries:
             # Prepend failed events *before* anything new that arrived
             self._buffer[0:0] = events
             logger.info(
                 "Queued %d events for retry (attempt %d/%d)",
                 len(events),
-                attempts,
+                self._consecutive_failures,
                 self.max_retries,
             )
         else:
             logger.error(
-                "Dropping %d events after %d failed attempts",
+                "Dropping %d events after %d consecutive failures",
                 len(events),
-                attempts,
+                self._consecutive_failures,
             )
-            self._retry_counts.pop(retry_key, None)
+            self._consecutive_failures = 0
 
     def _flush_loop(self) -> None:
         """Background thread that periodically flushes the buffer."""
