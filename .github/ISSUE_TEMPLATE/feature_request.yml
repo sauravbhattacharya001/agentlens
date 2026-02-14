@@ -1,0 +1,70 @@
+name: 💡 Feature Request
+description: Suggest a new feature or improvement for AgentLens
+title: "[Feature]: "
+labels: ["enhancement"]
+body:
+  - type: markdown
+    attributes:
+      value: |
+        Have an idea for AgentLens? We'd love to hear it. Please describe the problem you're trying to solve and your proposed solution.
+
+  - type: dropdown
+    id: component
+    attributes:
+      label: Component
+      description: Which part of AgentLens would this feature affect?
+      options:
+        - Python SDK
+        - Backend API (Node.js)
+        - Dashboard (Web UI)
+        - New Integration (LangChain, CrewAI, AutoGen, etc.)
+        - CLI / Developer Experience
+        - Documentation
+        - Other
+      multiple: true
+    validations:
+      required: true
+
+  - type: textarea
+    id: problem
+    attributes:
+      label: Problem Statement
+      description: What problem does this feature solve? What's the pain point?
+      placeholder: "When debugging my LangChain agent, I need to see X but currently there's no way to..."
+    validations:
+      required: true
+
+  - type: textarea
+    id: solution
+    attributes:
+      label: Proposed Solution
+      description: How would you like this to work? Include API examples, UI mockups, or workflow descriptions.
+      placeholder: |
+        I'd like a `@tracker.metric("latency")` decorator that automatically records
+        timing data for each traced function and displays it in the dashboard as a
+        histogram/timeline.
+    validations:
+      required: true
+
+  - type: textarea
+    id: alternatives
+    attributes:
+      label: Alternatives Considered
+      description: Have you considered any workarounds or alternative approaches?
+
+  - type: dropdown
+    id: priority
+    attributes:
+      label: How important is this to you?
+      options:
+        - Nice to have
+        - Important — would significantly improve my workflow
+        - Critical — blocking my use of AgentLens
+    validations:
+      required: true
+
+  - type: textarea
+    id: context
+    attributes:
+      label: Additional Context
+      description: Any other context, screenshots, links to similar features in other tools, etc.

@@ -1,0 +1,91 @@
+name: 🐛 Bug Report
+description: Report a bug in AgentLens (SDK, Backend, or Dashboard)
+title: "[Bug]: "
+labels: ["bug", "triage"]
+body:
+  - type: markdown
+    attributes:
+      value: |
+        Thanks for reporting a bug! Please fill out the sections below so we can reproduce and fix the issue.
+
+  - type: dropdown
+    id: component
+    attributes:
+      label: Component
+      description: Which part of AgentLens is affected?
+      options:
+        - Python SDK
+        - Backend API (Node.js)
+        - Dashboard (Web UI)
+        - LangChain Integration
+        - Documentation
+        - Other
+    validations:
+      required: true
+
+  - type: textarea
+    id: description
+    attributes:
+      label: Bug Description
+      description: A clear description of what went wrong.
+      placeholder: "When I do X, I expect Y but instead Z happens."
+    validations:
+      required: true
+
+  - type: textarea
+    id: reproduction
+    attributes:
+      label: Steps to Reproduce
+      description: Minimal steps to reproduce the issue.
+      placeholder: |
+        1. Install agentlens SDK via `pip install agentlens`
+        2. Wrap an agent function with `@tracker.trace()`
+        3. Run the agent with input "..."
+        4. Check the dashboard — events are missing
+    validations:
+      required: true
+
+  - type: textarea
+    id: expected
+    attributes:
+      label: Expected Behavior
+      description: What should have happened?
+    validations:
+      required: true
+
+  - type: textarea
+    id: actual
+    attributes:
+      label: Actual Behavior
+      description: What actually happened? Include error messages, stack traces, or screenshots.
+    validations:
+      required: true
+
+  - type: textarea
+    id: environment
+    attributes:
+      label: Environment
+      description: |
+        Provide version and environment details.
+      placeholder: |
+        - AgentLens SDK version: 0.1.0
+        - Python version: 3.11
+        - Backend version: 0.1.0
+        - Node.js version: 20.x
+        - OS: Ubuntu 22.04 / macOS 14 / Windows 11
+        - Browser (if dashboard): Chrome 122
+    validations:
+      required: true
+
+  - type: textarea
+    id: logs
+    attributes:
+      label: Relevant Logs
+      description: Paste any relevant log output (SDK stderr, backend console, browser console).
+      render: shell
+
+  - type: textarea
+    id: context
+    attributes:
+      label: Additional Context
+      description: Any other context — agent framework used, number of events, concurrency level, etc.

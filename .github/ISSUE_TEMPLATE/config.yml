@@ -1,0 +1,8 @@
+blank_issues_enabled: true
+contact_links:
+  - name: 📖 Documentation
+    url: https://github.com/sauravbhattacharya001/agentlens#readme
+    about: Check the README for setup guides and API reference
+  - name: 💬 Discussions
+    url: https://github.com/sauravbhattacharya001/agentlens/discussions
+    about: Ask questions or share ideas in GitHub Discussions
