@@ -195,6 +195,168 @@ router.get("/:id/export", (req, res) => {
   }
 });
 
+// POST /sessions/compare — Compare two sessions side-by-side
+router.post("/compare", (req, res) => {
+  const db = getDb();
+  const { session_a, session_b } = req.body;
+
+  if (!session_a || !session_b) {
+    return res.status(400).json({ error: "Both session_a and session_b are required" });
+  }
+
+  if (!isValidSessionId(session_a) || !isValidSessionId(session_b)) {
+    return res.status(400).json({ error: "Invalid session ID format" });
+  }
+
+  if (session_a === session_b) {
+    return res.status(400).json({ error: "Cannot compare a session with itself" });
+  }
+
+  try {
+    const sessA = db.prepare("SELECT * FROM sessions WHERE session_id = ?").get(session_a);
+    const sessB = db.prepare("SELECT * FROM sessions WHERE session_id = ?").get(session_b);
+
+    if (!sessA) return res.status(404).json({ error: `Session ${session_a} not found` });
+    if (!sessB) return res.status(404).json({ error: `Session ${session_b} not found` });
+
+    const eventsA = db.prepare("SELECT * FROM events WHERE session_id = ? ORDER BY timestamp ASC").all(session_a);
+    const eventsB = db.prepare("SELECT * FROM events WHERE session_id = ? ORDER BY timestamp ASC").all(session_b);
+
+    const parseEvents = (events) => events.map((e) => ({
+      ...e,
+      input_data: safeJsonParse(e.input_data),
+      output_data: safeJsonParse(e.output_data),
+      tool_call: safeJsonParse(e.tool_call, null),
+      decision_trace: safeJsonParse(e.decision_trace, null),
+    }));
+
+    const parsedA = parseEvents(eventsA);
+    const parsedB = parseEvents(eventsB);
+
+    // Compute metrics for a session + events
+    const computeMetrics = (session, events) => {
+      const totalTokensIn = session.total_tokens_in || 0;
+      const totalTokensOut = session.total_tokens_out || 0;
+      const totalTokens = totalTokensIn + totalTokensOut;
+      const eventCount = events.length;
+      const totalDuration = events.reduce((sum, e) => sum + (e.duration_ms || 0), 0);
+      const avgDuration = eventCount > 0 ? totalDuration / eventCount : 0;
+
+      // Models used
+      const models = {};
+      events.forEach((e) => {
+        if (e.model) {
+          if (!models[e.model]) models[e.model] = { calls: 0, tokens_in: 0, tokens_out: 0 };
+          models[e.model].calls++;
+          models[e.model].tokens_in += e.tokens_in || 0;
+          models[e.model].tokens_out += e.tokens_out || 0;
+        }
+      });
+
+      // Event type breakdown
+      const eventTypes = {};
+      events.forEach((e) => {
+        eventTypes[e.event_type] = (eventTypes[e.event_type] || 0) + 1;
+      });
+
+      // Tool usage
+      const tools = {};
+      events.forEach((e) => {
+        if (e.tool_call && e.tool_call.tool_name) {
+          const name = e.tool_call.tool_name;
+          if (!tools[name]) tools[name] = { calls: 0, total_duration: 0 };
+          tools[name].calls++;
+          tools[name].total_duration += e.duration_ms || 0;
+        }
+      });
+
+      // Session duration (wall clock)
+      let sessionDurationMs = null;
+      if (session.started_at && session.ended_at) {
+        sessionDurationMs = new Date(session.ended_at) - new Date(session.started_at);
+      }
+
+      // Error count
+      const errorCount = events.filter((e) =>
+        e.event_type === "error" || e.event_type === "agent_error" || e.event_type === "tool_error"
+      ).length;
+
+      return {
+        session_id: session.session_id,
+        agent_name: session.agent_name,
+        status: session.status,
+        started_at: session.started_at,
+        ended_at: session.ended_at,
+        session_duration_ms: sessionDurationMs,
+        tokens_in: totalTokensIn,
+        tokens_out: totalTokensOut,
+        total_tokens: totalTokens,
+        event_count: eventCount,
+        error_count: errorCount,
+        total_processing_ms: Math.round(totalDuration * 100) / 100,
+        avg_event_duration_ms: Math.round(avgDuration * 100) / 100,
+        models,
+        event_types: eventTypes,
+        tools,
+        metadata: safeJsonParse(session.metadata),
+      };
+    };
+
+    const metricsA = computeMetrics(sessA, parsedA);
+    const metricsB = computeMetrics(sessB, parsedB);
+
+    // Compute deltas (B relative to A)
+    const pctDelta = (a, b) => {
+      if (a === 0 && b === 0) return 0;
+      if (a === 0) return b > 0 ? 100 : -100;
+      return Math.round(((b - a) / a) * 10000) / 100;
+    };
+
+    const deltas = {
+      total_tokens: { absolute: metricsB.total_tokens - metricsA.total_tokens, percent: pctDelta(metricsA.total_tokens, metricsB.total_tokens) },
+      tokens_in: { absolute: metricsB.tokens_in - metricsA.tokens_in, percent: pctDelta(metricsA.tokens_in, metricsB.tokens_in) },
+      tokens_out: { absolute: metricsB.tokens_out - metricsA.tokens_out, percent: pctDelta(metricsA.tokens_out, metricsB.tokens_out) },
+      event_count: { absolute: metricsB.event_count - metricsA.event_count, percent: pctDelta(metricsA.event_count, metricsB.event_count) },
+      error_count: { absolute: metricsB.error_count - metricsA.error_count, percent: pctDelta(metricsA.error_count, metricsB.error_count) },
+      total_processing_ms: { absolute: Math.round((metricsB.total_processing_ms - metricsA.total_processing_ms) * 100) / 100, percent: pctDelta(metricsA.total_processing_ms, metricsB.total_processing_ms) },
+      avg_event_duration_ms: { absolute: Math.round((metricsB.avg_event_duration_ms - metricsA.avg_event_duration_ms) * 100) / 100, percent: pctDelta(metricsA.avg_event_duration_ms, metricsB.avg_event_duration_ms) },
+    };
+
+    // All unique event types across both
+    const allEventTypes = [...new Set([
+      ...Object.keys(metricsA.event_types),
+      ...Object.keys(metricsB.event_types),
+    ])];
+
+    // All unique tools across both
+    const allTools = [...new Set([
+      ...Object.keys(metricsA.tools),
+      ...Object.keys(metricsB.tools),
+    ])];
+
+    // All unique models across both
+    const allModels = [...new Set([
+      ...Object.keys(metricsA.models),
+      ...Object.keys(metricsB.models),
+    ])];
+
+    res.json({
+      compared_at: new Date().toISOString(),
+      session_a: metricsA,
+      session_b: metricsB,
+      deltas,
+      shared: {
+        event_types: allEventTypes,
+        tools: allTools,
+        models: allModels,
+      },
+    });
+  } catch (err) {
+    console.error("Error comparing sessions:", err);
+    res.status(500).json({ error: "Failed to compare sessions" });
+  }
+});
+
 // GET /sessions/:id/explain — Human-readable explanation
 router.get("/:id/explain", (req, res) => {
   const db = getDb();

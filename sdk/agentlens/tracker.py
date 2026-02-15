@@ -129,6 +129,43 @@ class AgentTracker:
             duration_ms=duration_ms,
         )
 
+    def compare_sessions(
+        self,
+        session_a: str,
+        session_b: str,
+    ) -> dict[str, Any]:
+        """Compare two sessions side-by-side.
+
+        Fetches comparison metrics from the AgentLens backend including
+        token usage, event counts, tool usage, timing, and deltas between
+        the two sessions.
+
+        Args:
+            session_a: First session ID to compare.
+            session_b: Second session ID to compare.
+
+        Returns:
+            A dict containing ``session_a`` metrics, ``session_b`` metrics,
+            ``deltas`` (percentage and absolute differences), and ``shared``
+            (common event types, tools, and models).
+
+        Raises:
+            ValueError: If either session ID is empty or they are the same.
+            httpx.HTTPStatusError: If the backend returns an error.
+        """
+        if not session_a or not session_b:
+            raise ValueError("Both session_a and session_b are required.")
+        if session_a == session_b:
+            raise ValueError("Cannot compare a session with itself.")
+
+        response = self.transport._client.post(
+            f"{self.transport.endpoint}/sessions/compare",
+            json={"session_a": session_a, "session_b": session_b},
+            headers={"X-API-Key": self.transport.api_key},
+        )
+        response.raise_for_status()
+        return response.json()
+
     def export_session(
         self,
         session_id: str | None = None,

@@ -27,6 +27,12 @@
         <div class="view-header">
           <h2>Sessions</h2>
           <div class="view-actions">
+            <button id="compareBtn" class="btn btn-compare" onclick="openCompareView()" style="display:none">
+              ⚖️ Compare (<span id="compareCount">0</span>/2)
+            </button>
+            <button id="compareClearBtn" class="btn btn-secondary" onclick="clearCompareSelection()" style="display:none">
+              ✕ Clear
+            </button>
             <select id="statusFilter" class="select-input">
               <option value="">All Statuses</option>
               <option value="active">Active</option>
@@ -36,6 +42,7 @@
             <button class="btn btn-secondary" onclick="loadSessions()">↻ Refresh</button>
           </div>
         </div>
+        <p class="compare-hint" id="compareHint">💡 Tip: Click the checkboxes to select two sessions for comparison</p>
         <div id="sessionList" class="session-list">
           <div class="loading">Loading sessions...</div>
         </div>
@@ -98,6 +105,70 @@
           <div id="explainContent" class="explain-panel">
             <div class="loading">Generating explanation...</div>
           </div>
+        </div>
+      </div>
+
+      <!-- Session Compare View -->
+      <div id="sessionCompareView" class="view">
+        <div class="view-header">
+          <button class="btn btn-ghost" onclick="showSessionList()">← Back to Sessions</button>
+          <h2>⚖️ Session Comparison</h2>
+        </div>
+
+        <!-- Session Labels -->
+        <div class="compare-labels">
+          <div class="compare-label label-a">
+            <span class="compare-dot dot-a"></span>
+            <span id="compareLabelA">Session A</span>
+          </div>
+          <div class="compare-label label-b">
+            <span class="compare-dot dot-b"></span>
+            <span id="compareLabelB">Session B</span>
+          </div>
+        </div>
+
+        <!-- Overview Comparison Cards -->
+        <div id="compareOverview" class="compare-overview"></div>
+
+        <!-- Comparison Tabs -->
+        <div class="tabs">
+          <button class="tab active" data-tab="compareTokens" onclick="switchCompareTab('compareTokens')">💰 Token Comparison</button>
+          <button class="tab" data-tab="compareEvents" onclick="switchCompareTab('compareEvents')">📊 Event Breakdown</button>
+          <button class="tab" data-tab="compareTools" onclick="switchCompareTab('compareTools')">🔧 Tool Usage</button>
+        </div>
+
+        <!-- Token Comparison Tab -->
+        <div id="compareTokensTab" class="tab-content active">
+          <div class="charts-grid">
+            <div class="chart-card">
+              <h3>Token Usage Comparison</h3>
+              <canvas id="compareTokenChart" width="600" height="300"></canvas>
+            </div>
+            <div class="chart-card">
+              <h3>Token Distribution</h3>
+              <canvas id="compareDistChart" width="600" height="300"></canvas>
+            </div>
+          </div>
+          <div id="compareModelTable" class="token-summary"></div>
+        </div>
+
+        <!-- Event Breakdown Tab -->
+        <div id="compareEventsTab" class="tab-content">
+          <div class="charts-grid">
+            <div class="chart-card">
+              <h3>Event Type Distribution</h3>
+              <canvas id="compareEventChart" width="600" height="300"></canvas>
+            </div>
+            <div class="chart-card">
+              <h3>Processing Time by Event Type</h3>
+              <canvas id="compareDurationChart" width="600" height="300"></canvas>
+            </div>
+          </div>
+        </div>
+
+        <!-- Tool Usage Tab -->
+        <div id="compareToolsTab" class="tab-content">
+          <div id="compareToolTable" class="token-summary"></div>
         </div>
       </div>
     </main>

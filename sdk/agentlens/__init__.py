@@ -13,6 +13,7 @@ __all__ = [
     "track",
     "explain",
     "export_session",
+    "compare_sessions",
     "track_agent",
     "track_tool_call",
     "AgentEvent",
@@ -138,3 +139,22 @@ def export_session(session_id: str | None = None, format: str = "json"):
     if _tracker is None:
         raise RuntimeError("Call agentlens.init() before export_session()")
     return _tracker.export_session(session_id=session_id, format=format)
+
+
+def compare_sessions(session_a: str, session_b: str) -> dict:
+    """Compare two sessions side-by-side.
+
+    Fetches comparison metrics from the AgentLens backend including
+    token usage, event counts, tool usage, timing, and percentage deltas.
+
+    Args:
+        session_a: First session ID.
+        session_b: Second session ID.
+
+    Returns:
+        A dict with ``session_a`` metrics, ``session_b`` metrics,
+        ``deltas``, and ``shared`` breakdowns.
+    """
+    if _tracker is None:
+        raise RuntimeError("Call agentlens.init() before compare_sessions()")
+    return _tracker.compare_sessions(session_a=session_a, session_b=session_b)

@@ -44,6 +44,7 @@ AgentLens provides:
 | 📈 **Visual Timeline** | Interactive timeline view of agent actions in the dashboard |
 | 💡 **Explainability** | Generate human-readable summaries of agent behavior |
 | 🎨 **Decorators** | Zero-config instrumentation with Python decorators |
+| ⚖️ **Session Comparison** | Compare two sessions side-by-side — token deltas, event breakdowns, tool usage diffs |
 
 ## 🏗️ Architecture
 
@@ -207,6 +208,22 @@ print(explanation)
 #          Total tokens used: 15 (12 in, 3 out)."
 ```
 
+### Session Comparison
+
+```python
+# Compare two sessions side-by-side
+result = agentlens.compare_sessions(
+    session_a="abc123",
+    session_b="def456",
+)
+
+# Result includes metrics, deltas, and shared breakdowns
+print(f"Token delta: {result['deltas']['total_tokens']['percent']}%")
+print(f"Session A events: {result['session_a']['event_count']}")
+print(f"Session B events: {result['session_b']['event_count']}")
+print(f"Shared tools: {result['shared']['tools']}")
+```
+
 ### Data Models
 
 | Model | Description |
@@ -221,6 +238,7 @@ print(explanation)
 The dashboard provides a real-time view of your agent sessions:
 
 - **Sessions List** — Filter by status (active, completed, error)
+- **Session Comparison** — Select two sessions and compare side-by-side with visual diffs
 - **Timeline View** — Interactive timeline of every event in a session
 - **Token Charts** — Per-event and cumulative token usage visualization
 - **Explain Tab** — Human-readable behavior summaries
@@ -234,8 +252,8 @@ The dashboard is a lightweight HTML/CSS/JS app served directly by the backend �
 | `GET /health` | GET | Health check |
 | `GET /sessions` | GET | List all sessions |
 | `GET /sessions/:id` | GET | Get session details with events |
-| `POST /sessions` | POST | Create a new session |
-| `PUT /sessions/:id` | PUT | Update session (e.g., end it) |
+| `GET /sessions/:id/export` | GET | Export session data as JSON or CSV |
+| `POST /sessions/compare` | POST | Compare two sessions side-by-side |
 | `POST /events` | POST | Record a new event |
 | `GET /events?session_id=...` | GET | Get events for a session |
 

@@ -3,6 +3,7 @@
 const API_BASE = window.location.origin;
 
 let currentSession = null;
+let compareSelection = []; // Array of {id, name} for comparison
 
 // ── Initialization ──────────────────────────────────────────────────
 
@@ -34,17 +35,23 @@ async function loadSessions() {
     }
 
     listEl.innerHTML = data.sessions.map((s) => `
-      <div class="session-card" onclick="loadSessionDetail('${s.session_id}')">
-        <div class="session-card-left">
-          <div class="session-agent">${escHtml(s.agent_name)}</div>
-          <div class="session-meta">
-            <span>🆔 ${s.session_id.slice(0, 8)}…</span>
-            <span>🕐 ${formatTime(s.started_at)}</span>
-            ${s.metadata?.version ? `<span>📦 v${escHtml(s.metadata.version)}</span>` : ""}
-            ${s.metadata?.environment ? `<span>🌍 ${escHtml(s.metadata.environment)}</span>` : ""}
+      <div class="session-card ${compareSelection.some(c => c.id === s.session_id) ? 'selected' : ''}" data-session-id="${s.session_id}">
+        <div style="display:flex;align-items:center;gap:12px;flex:1;min-width:0">
+          <input type="checkbox" class="compare-checkbox"
+            ${compareSelection.some(c => c.id === s.session_id) ? 'checked' : ''}
+            onclick="event.stopPropagation(); toggleCompare('${s.session_id}', '${escHtml(s.agent_name)}')"
+            title="Select for comparison">
+          <div class="session-card-left" onclick="loadSessionDetail('${s.session_id}')">
+            <div class="session-agent">${escHtml(s.agent_name)}</div>
+            <div class="session-meta">
+              <span>🆔 ${s.session_id.slice(0, 8)}…</span>
+              <span>🕐 ${formatTime(s.started_at)}</span>
+              ${s.metadata?.version ? `<span>📦 v${escHtml(s.metadata.version)}</span>` : ""}
+              ${s.metadata?.environment ? `<span>🌍 ${escHtml(s.metadata.environment)}</span>` : ""}
+            </div>
           </div>
         </div>
-        <div class="session-card-right">
+        <div class="session-card-right" onclick="loadSessionDetail('${s.session_id}')">
           <div class="session-tokens">
             <div class="count">${(s.total_tokens_in + s.total_tokens_out).toLocaleString()}</div>
             <div>tokens</div>
@@ -80,6 +87,7 @@ async function loadSessionDetail(sessionId) {
 
 function showSessionList() {
   document.getElementById("sessionDetailView").classList.remove("active");
+  document.getElementById("sessionCompareView").classList.remove("active");
   document.getElementById("sessionListView").classList.add("active");
   currentSession = null;
 }
@@ -558,6 +566,454 @@ function switchTab(tabName) {
   document.querySelectorAll(".tab-content").forEach(t => t.classList.remove("active"));
 
   document.querySelector(`.tab[data-tab="${tabName}"]`).classList.add("active");
+  document.getElementById(`${tabName}Tab`).classList.add("active");
+}
+
+// ── Compare Selection ───────────────────────────────────────────────
+
+function toggleCompare(sessionId, agentName) {
+  const idx = compareSelection.findIndex(c => c.id === sessionId);
+  if (idx >= 0) {
+    compareSelection.splice(idx, 1);
+  } else if (compareSelection.length < 2) {
+    compareSelection.push({ id: sessionId, name: agentName });
+  } else {
+    // Replace oldest selection
+    compareSelection.shift();
+    compareSelection.push({ id: sessionId, name: agentName });
+  }
+  updateCompareUI();
+}
+
+function updateCompareUI() {
+  const btn = document.getElementById("compareBtn");
+  const clearBtn = document.getElementById("compareClearBtn");
+  const countEl = document.getElementById("compareCount");
+  const hint = document.getElementById("compareHint");
+
+  const count = compareSelection.length;
+  countEl.textContent = count;
+
+  btn.style.display = count > 0 ? "inline-flex" : "none";
+  clearBtn.style.display = count > 0 ? "inline-flex" : "none";
+  btn.disabled = count < 2;
+  hint.style.display = count === 0 ? "block" : "none";
+
+  // Update card selection state
+  document.querySelectorAll(".session-card").forEach(card => {
+    const sid = card.dataset.sessionId;
+    const cb = card.querySelector(".compare-checkbox");
+    const isSelected = compareSelection.some(c => c.id === sid);
+    card.classList.toggle("selected", isSelected);
+    if (cb) cb.checked = isSelected;
+  });
+}
+
+function clearCompareSelection() {
+  compareSelection = [];
+  updateCompareUI();
+}
+
+async function openCompareView() {
+  if (compareSelection.length !== 2) return;
+
+  document.getElementById("sessionListView").classList.remove("active");
+  document.getElementById("sessionDetailView").classList.remove("active");
+  document.getElementById("sessionCompareView").classList.add("active");
+
+  document.getElementById("compareLabelA").textContent =
+    `${compareSelection[0].name} (${compareSelection[0].id.slice(0, 8)}…)`;
+  document.getElementById("compareLabelB").textContent =
+    `${compareSelection[1].name} (${compareSelection[1].id.slice(0, 8)}…)`;
+
+  try {
+    const res = await fetch(`${API_BASE}/sessions/compare`, {
+      method: "POST",
+      headers: { "Content-Type": "application/json" },
+      body: JSON.stringify({
+        session_a: compareSelection[0].id,
+        session_b: compareSelection[1].id,
+      }),
+    });
+
+    if (!res.ok) {
+      const err = await res.json();
+      throw new Error(err.error || "Comparison failed");
+    }
+
+    const data = await res.json();
+    renderCompareOverview(data);
+    renderCompareTokenChart(data);
+    renderCompareDistChart(data);
+    renderCompareModelTable(data);
+    renderCompareEventChart(data);
+    renderCompareDurationChart(data);
+    renderCompareToolTable(data);
+  } catch (err) {
+    document.getElementById("compareOverview").innerHTML =
+      `<div class="loading">Error: ${escHtml(err.message)}</div>`;
+  }
+}
+
+function renderCompareOverview(data) {
+  const a = data.session_a;
+  const b = data.session_b;
+  const d = data.deltas;
+
+  const metrics = [
+    { label: "Total Tokens", a: a.total_tokens, b: b.total_tokens, delta: d.total_tokens, fmt: v => v.toLocaleString() },
+    { label: "Input Tokens", a: a.tokens_in, b: b.tokens_in, delta: d.tokens_in, fmt: v => v.toLocaleString() },
+    { label: "Output Tokens", a: a.tokens_out, b: b.tokens_out, delta: d.tokens_out, fmt: v => v.toLocaleString() },
+    { label: "Events", a: a.event_count, b: b.event_count, delta: d.event_count, fmt: v => v.toString() },
+    { label: "Errors", a: a.error_count, b: b.error_count, delta: d.error_count, fmt: v => v.toString() },
+    { label: "Processing Time", a: a.total_processing_ms, b: b.total_processing_ms, delta: d.total_processing_ms, fmt: v => `${v.toFixed(0)}ms` },
+    { label: "Avg Event Time", a: a.avg_event_duration_ms, b: b.avg_event_duration_ms, delta: d.avg_event_duration_ms, fmt: v => `${v.toFixed(1)}ms` },
+  ];
+
+  document.getElementById("compareOverview").innerHTML = metrics.map(m => {
+    const deltaClass = m.delta.percent > 0 ? "higher" : m.delta.percent < 0 ? "negative" : "neutral";
+    const deltaSign = m.delta.percent > 0 ? "+" : "";
+    return `
+      <div class="compare-card">
+        <div class="compare-card-title">${m.label}</div>
+        <div class="compare-values">
+          <div class="compare-val val-a">
+            <div class="val-num">${m.fmt(m.a)}</div>
+            <div class="val-label">A</div>
+          </div>
+          <div class="compare-delta ${deltaClass}">
+            ${deltaSign}${m.delta.percent.toFixed(1)}%
+          </div>
+          <div class="compare-val val-b">
+            <div class="val-num">${m.fmt(m.b)}</div>
+            <div class="val-label">B</div>
+          </div>
+        </div>
+      </div>`;
+  }).join("");
+}
+
+function renderCompareTokenChart(data) {
+  const canvas = document.getElementById("compareTokenChart");
+  const ctx = canvas.getContext("2d");
+  const w = canvas.width, h = canvas.height;
+  const padding = { top: 30, right: 20, bottom: 50, left: 60 };
+  ctx.clearRect(0, 0, w, h);
+
+  const a = data.session_a;
+  const b = data.session_b;
+  const groups = [
+    { label: "Input", a: a.tokens_in, b: b.tokens_in },
+    { label: "Output", a: a.tokens_out, b: b.tokens_out },
+    { label: "Total", a: a.total_tokens, b: b.total_tokens },
+  ];
+
+  const maxVal = Math.max(...groups.map(g => Math.max(g.a, g.b)));
+  if (maxVal === 0) {
+    ctx.fillStyle = "#6e7681"; ctx.font = "14px sans-serif"; ctx.textAlign = "center";
+    ctx.fillText("No token data", w / 2, h / 2);
+    return;
+  }
+
+  const chartW = w - padding.left - padding.right;
+  const chartH = h - padding.top - padding.bottom;
+  const groupW = chartW / groups.length;
+  const barW = groupW * 0.3;
+  const gap = groupW * 0.1;
+
+  // Grid
+  ctx.strokeStyle = "#21262d"; ctx.lineWidth = 1;
+  for (let i = 0; i <= 4; i++) {
+    const y = padding.top + (chartH / 4) * i;
+    ctx.beginPath(); ctx.moveTo(padding.left, y); ctx.lineTo(w - padding.right, y); ctx.stroke();
+    ctx.fillStyle = "#6e7681"; ctx.font = "11px sans-serif"; ctx.textAlign = "right";
+    ctx.fillText(Math.round(maxVal * (1 - i / 4)).toLocaleString(), padding.left - 8, y + 4);
+  }
+
+  groups.forEach((g, i) => {
+    const groupX = padding.left + i * groupW + gap;
+    const hA = (g.a / maxVal) * chartH;
+    const hB = (g.b / maxVal) * chartH;
+
+    // Bar A
+    ctx.fillStyle = "#58a6ff";
+    ctx.fillRect(groupX, padding.top + chartH - hA, barW, hA);
+
+    // Bar B
+    ctx.fillStyle = "#f0883e";
+    ctx.fillRect(groupX + barW + 4, padding.top + chartH - hB, barW, hB);
+
+    // Label
+    ctx.fillStyle = "#8b949e"; ctx.font = "12px sans-serif"; ctx.textAlign = "center";
+    ctx.fillText(g.label, groupX + barW + 2, h - padding.bottom + 18);
+  });
+
+  // Legend
+  ctx.fillStyle = "#58a6ff"; ctx.fillRect(w - 120, 8, 10, 10);
+  ctx.fillStyle = "#8b949e"; ctx.font = "11px sans-serif"; ctx.textAlign = "left";
+  ctx.fillText("Session A", w - 106, 17);
+  ctx.fillStyle = "#f0883e"; ctx.fillRect(w - 120, 24, 10, 10);
+  ctx.fillStyle = "#8b949e"; ctx.fillText("Session B", w - 106, 33);
+}
+
+function renderCompareDistChart(data) {
+  const canvas = document.getElementById("compareDistChart");
+  const ctx = canvas.getContext("2d");
+  const w = canvas.width, h = canvas.height;
+  ctx.clearRect(0, 0, w, h);
+
+  const a = data.session_a;
+  const b = data.session_b;
+
+  // Stacked horizontal bar chart showing input/output ratio
+  const bars = [
+    { label: "Session A", input: a.tokens_in, output: a.tokens_out, color: "#58a6ff" },
+    { label: "Session B", input: b.tokens_in, output: b.tokens_out, color: "#f0883e" },
+  ];
+
+  const padding = { top: 30, right: 20, bottom: 30, left: 90 };
+  const chartW = w - padding.left - padding.right;
+  const chartH = h - padding.top - padding.bottom;
+  const barH = Math.min(50, chartH / bars.length - 20);
+  const maxTotal = Math.max(...bars.map(b => b.input + b.output));
+
+  if (maxTotal === 0) {
+    ctx.fillStyle = "#6e7681"; ctx.font = "14px sans-serif"; ctx.textAlign = "center";
+    ctx.fillText("No token data", w / 2, h / 2);
+    return;
+  }
+
+  bars.forEach((bar, i) => {
+    const y = padding.top + i * (chartH / bars.length) + (chartH / bars.length - barH) / 2;
+    const total = bar.input + bar.output;
+    const wIn = (bar.input / maxTotal) * chartW;
+    const wOut = (bar.output / maxTotal) * chartW;
+
+    // Input portion (darker)
+    ctx.fillStyle = bar.color;
+    ctx.globalAlpha = 0.9;
+    ctx.fillRect(padding.left, y, wIn, barH);
+
+    // Output portion (lighter)
+    ctx.globalAlpha = 0.5;
+    ctx.fillRect(padding.left + wIn, y, wOut, barH);
+    ctx.globalAlpha = 1;
+
+    // Label
+    ctx.fillStyle = "#e6edf3"; ctx.font = "12px sans-serif"; ctx.textAlign = "right";
+    ctx.fillText(bar.label, padding.left - 10, y + barH / 2 + 4);
+
+    // Value
+    ctx.fillStyle = "#8b949e"; ctx.font = "11px sans-serif"; ctx.textAlign = "left";
+    ctx.fillText(`${total.toLocaleString()} (${bar.input.toLocaleString()} in / ${bar.output.toLocaleString()} out)`, padding.left + wIn + wOut + 8, y + barH / 2 + 4);
+  });
+
+  // Legend
+  ctx.globalAlpha = 0.9;
+  ctx.fillStyle = "#8b949e"; ctx.fillRect(w - 140, 8, 10, 10);
+  ctx.globalAlpha = 1;
+  ctx.fillStyle = "#8b949e"; ctx.font = "11px sans-serif"; ctx.textAlign = "left";
+  ctx.fillText("Input", w - 126, 17);
+  ctx.globalAlpha = 0.5;
+  ctx.fillStyle = "#8b949e"; ctx.fillRect(w - 70, 8, 10, 10);
+  ctx.globalAlpha = 1;
+  ctx.fillStyle = "#8b949e"; ctx.fillText("Output", w - 56, 17);
+}
+
+function renderCompareModelTable(data) {
+  const el = document.getElementById("compareModelTable");
+  const a = data.session_a;
+  const b = data.session_b;
+  const models = data.shared.models;
+
+  if (models.length === 0) {
+    el.innerHTML = "<h3>Model Usage</h3><p style='color:var(--text-muted);padding:12px'>No model data available.</p>";
+    return;
+  }
+
+  const rows = models.map(m => {
+    const ma = a.models[m] || { calls: 0, tokens_in: 0, tokens_out: 0 };
+    const mb = b.models[m] || { calls: 0, tokens_in: 0, tokens_out: 0 };
+    const totalA = ma.tokens_in + ma.tokens_out;
+    const totalB = mb.tokens_in + mb.tokens_out;
+    const maxT = Math.max(totalA, totalB) || 1;
+    return `<tr>
+      <td>${escHtml(m)}</td>
+      <td class="col-a">${ma.calls}</td>
+      <td class="col-b">${mb.calls}</td>
+      <td class="col-a">${totalA.toLocaleString()}</td>
+      <td class="col-b">${totalB.toLocaleString()}</td>
+      <td>
+        <div class="compare-bar-container">
+          <div class="compare-bar bar-a" style="width:${(totalA/maxT)*100}%"></div>
+          <div class="compare-bar bar-b" style="width:${(totalB/maxT)*100}%"></div>
+        </div>
+      </td>
+    </tr>`;
+  }).join("");
+
+  el.innerHTML = `<h3>Model Usage Comparison</h3>
+    <table class="compare-table">
+      <thead><tr><th>Model</th><th class="col-a">Calls A</th><th class="col-b">Calls B</th><th class="col-a">Tokens A</th><th class="col-b">Tokens B</th><th>Relative</th></tr></thead>
+      <tbody>${rows}</tbody>
+    </table>`;
+}
+
+function renderCompareEventChart(data) {
+  const canvas = document.getElementById("compareEventChart");
+  const ctx = canvas.getContext("2d");
+  const w = canvas.width, h = canvas.height;
+  const padding = { top: 30, right: 20, bottom: 60, left: 50 };
+  ctx.clearRect(0, 0, w, h);
+
+  const types = data.shared.event_types.filter(t => t !== "session_start" && t !== "session_end");
+  if (types.length === 0) {
+    ctx.fillStyle = "#6e7681"; ctx.font = "14px sans-serif"; ctx.textAlign = "center";
+    ctx.fillText("No events to compare", w / 2, h / 2);
+    return;
+  }
+
+  const aTypes = data.session_a.event_types;
+  const bTypes = data.session_b.event_types;
+  const maxVal = Math.max(...types.map(t => Math.max(aTypes[t] || 0, bTypes[t] || 0)));
+  const chartW = w - padding.left - padding.right;
+  const chartH = h - padding.top - padding.bottom;
+  const groupW = chartW / types.length;
+  const barW = groupW * 0.3;
+
+  // Grid
+  ctx.strokeStyle = "#21262d"; ctx.lineWidth = 1;
+  for (let i = 0; i <= 4; i++) {
+    const y = padding.top + (chartH / 4) * i;
+    ctx.beginPath(); ctx.moveTo(padding.left, y); ctx.lineTo(w - padding.right, y); ctx.stroke();
+    ctx.fillStyle = "#6e7681"; ctx.font = "11px sans-serif"; ctx.textAlign = "right";
+    ctx.fillText(Math.round(maxVal * (1 - i / 4)).toString(), padding.left - 8, y + 4);
+  }
+
+  types.forEach((t, i) => {
+    const x = padding.left + i * groupW + groupW * 0.15;
+    const hA = ((aTypes[t] || 0) / maxVal) * chartH;
+    const hB = ((bTypes[t] || 0) / maxVal) * chartH;
+
+    ctx.fillStyle = "#58a6ff";
+    ctx.fillRect(x, padding.top + chartH - hA, barW, hA);
+    ctx.fillStyle = "#f0883e";
+    ctx.fillRect(x + barW + 2, padding.top + chartH - hB, barW, hB);
+
+    // Label (rotated)
+    ctx.save();
+    ctx.fillStyle = "#8b949e"; ctx.font = "10px sans-serif"; ctx.textAlign = "right";
+    ctx.translate(x + barW, h - padding.bottom + 8);
+    ctx.rotate(-Math.PI / 4);
+    ctx.fillText(t.replace(/_/g, " "), 0, 0);
+    ctx.restore();
+  });
+
+  // Legend
+  ctx.fillStyle = "#58a6ff"; ctx.fillRect(w - 120, 8, 10, 10);
+  ctx.fillStyle = "#8b949e"; ctx.font = "11px sans-serif"; ctx.textAlign = "left";
+  ctx.fillText("Session A", w - 106, 17);
+  ctx.fillStyle = "#f0883e"; ctx.fillRect(w - 120, 24, 10, 10);
+  ctx.fillStyle = "#8b949e"; ctx.fillText("Session B", w - 106, 33);
+}
+
+function renderCompareDurationChart(data) {
+  const canvas = document.getElementById("compareDurationChart");
+  const ctx = canvas.getContext("2d");
+  const w = canvas.width, h = canvas.height;
+  ctx.clearRect(0, 0, w, h);
+
+  const a = data.session_a;
+  const b = data.session_b;
+
+  // Simple stats comparison
+  const padding = { top: 30, right: 20, bottom: 40, left: 60 };
+  const items = [
+    { label: "Total Processing", a: a.total_processing_ms, b: b.total_processing_ms },
+    { label: "Avg per Event", a: a.avg_event_duration_ms, b: b.avg_event_duration_ms },
+  ];
+
+  if (a.session_duration_ms != null) items.unshift({ label: "Session Duration", a: a.session_duration_ms, b: b.session_duration_ms || 0 });
+
+  const maxVal = Math.max(...items.map(i => Math.max(i.a, i.b)));
+  if (maxVal === 0) {
+    ctx.fillStyle = "#6e7681"; ctx.font = "14px sans-serif"; ctx.textAlign = "center";
+    ctx.fillText("No duration data", w / 2, h / 2);
+    return;
+  }
+
+  const chartW = w - padding.left - padding.right;
+  const chartH = h - padding.top - padding.bottom;
+  const groupW = chartW / items.length;
+  const barW = groupW * 0.3;
+
+  // Grid
+  ctx.strokeStyle = "#21262d"; ctx.lineWidth = 1;
+  for (let i = 0; i <= 4; i++) {
+    const y = padding.top + (chartH / 4) * i;
+    ctx.beginPath(); ctx.moveTo(padding.left, y); ctx.lineTo(w - padding.right, y); ctx.stroke();
+    ctx.fillStyle = "#6e7681"; ctx.font = "11px sans-serif"; ctx.textAlign = "right";
+    ctx.fillText(`${Math.round(maxVal * (1 - i / 4))}ms`, padding.left - 8, y + 4);
+  }
+
+  items.forEach((item, i) => {
+    const x = padding.left + i * groupW + groupW * 0.15;
+    const hA = (item.a / maxVal) * chartH;
+    const hB = (item.b / maxVal) * chartH;
+
+    ctx.fillStyle = "#58a6ff";
+    ctx.fillRect(x, padding.top + chartH - hA, barW, hA);
+    ctx.fillStyle = "#f0883e";
+    ctx.fillRect(x + barW + 4, padding.top + chartH - hB, barW, hB);
+
+    ctx.fillStyle = "#8b949e"; ctx.font = "11px sans-serif"; ctx.textAlign = "center";
+    ctx.fillText(item.label, x + barW + 2, h - padding.bottom + 16);
+  });
+}
+
+function renderCompareToolTable(data) {
+  const el = document.getElementById("compareToolTable");
+  const a = data.session_a;
+  const b = data.session_b;
+  const tools = data.shared.tools;
+
+  if (tools.length === 0) {
+    el.innerHTML = "<h3>Tool Usage Comparison</h3><p style='color:var(--text-muted);padding:12px'>No tools used in either session.</p>";
+    return;
+  }
+
+  const rows = tools.map(t => {
+    const ta = a.tools[t] || { calls: 0, total_duration: 0 };
+    const tb = b.tools[t] || { calls: 0, total_duration: 0 };
+    const maxCalls = Math.max(ta.calls, tb.calls) || 1;
+    return `<tr>
+      <td><strong>${escHtml(t)}</strong></td>
+      <td class="col-a">${ta.calls}</td>
+      <td class="col-b">${tb.calls}</td>
+      <td class="col-a">${ta.total_duration.toFixed(0)}ms</td>
+      <td class="col-b">${tb.total_duration.toFixed(0)}ms</td>
+      <td>
+        <div class="compare-bar-container">
+          <div class="compare-bar bar-a" style="width:${(ta.calls/maxCalls)*100}%"></div>
+          <div class="compare-bar bar-b" style="width:${(tb.calls/maxCalls)*100}%"></div>
+        </div>
+      </td>
+    </tr>`;
+  }).join("");
+
+  el.innerHTML = `<h3>Tool Usage Comparison</h3>
+    <table class="compare-table">
+      <thead><tr><th>Tool</th><th class="col-a">Calls A</th><th class="col-b">Calls B</th><th class="col-a">Duration A</th><th class="col-b">Duration B</th><th>Relative</th></tr></thead>
+      <tbody>${rows}</tbody>
+    </table>`;
+}
+
+function switchCompareTab(tabName) {
+  // Reset all compare tabs
+  document.querySelectorAll("#sessionCompareView .tab").forEach(t => t.classList.remove("active"));
+  document.querySelectorAll("#sessionCompareView .tab-content").forEach(t => t.classList.remove("active"));
+
+  document.querySelector(`#sessionCompareView .tab[data-tab="${tabName}"]`).classList.add("active");
   document.getElementById(`${tabName}Tab`).classList.add("active");
 }
 
