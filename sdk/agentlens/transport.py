@@ -53,6 +53,7 @@ class Transport:
 
     def send_events(self, events: list[dict[str, Any]]) -> None:
         """Add events to the buffer. Flushes when batch_size is reached."""
+        batch_to_send: list[dict[str, Any]] | None = None
         with self._lock:
             self._buffer.extend(events)
             # Drop oldest events if the buffer grows beyond the hard cap
@@ -65,27 +66,39 @@ class Transport:
                     dropped,
                 )
             if len(self._buffer) >= self.batch_size:
-                self._do_flush()
+                batch_to_send = self._drain_buffer()
+
+        if batch_to_send is not None:
+            self._send_batch(batch_to_send)
 
     def flush(self) -> None:
         """Force-flush all buffered events."""
         with self._lock:
-            self._do_flush()
+            batch = self._drain_buffer()
+        if batch:
+            self._send_batch(batch)
 
-    def _do_flush(self) -> None:
-        """Internal flush — must be called with ``self._lock`` held.
-
-        On failure the events are *prepended* back into the buffer (preserving
-        any events that arrived during the HTTP call) and a consecutive failure
-        counter is incremented.  After ``max_retries`` consecutive failures the
-        events are dropped to prevent infinite retry loops.  The counter resets
-        on any successful flush.
-        """
-        if not self._buffer:
-            return
-
+    def _drain_buffer(self) -> list[dict[str, Any]]:
+        """Drain and return buffer contents.  Must be called with lock held."""
         events = self._buffer[:]
         self._buffer.clear()
+        return events
+
+    def _send_batch(self, events: list[dict[str, Any]]) -> None:
+        """Send a batch of events to the backend.
+
+        The HTTP call runs **outside** the buffer lock so that
+        ``send_events`` and the background flush thread do not block
+        each other during network I/O.
+
+        On failure the events are re-queued into the buffer (preserving
+        any events that arrived during the HTTP call) and a consecutive
+        failure counter is incremented.  After ``max_retries`` consecutive
+        failures the events are dropped to prevent infinite retry loops.
+        The counter resets on any successful flush.
+        """
+        if not events:
+            return
 
         try:
             response = self._client.post(
@@ -98,7 +111,8 @@ class Transport:
             )
             if response.status_code == 200:
                 # Success — reset consecutive failure counter
-                self._consecutive_failures = 0
+                with self._lock:
+                    self._consecutive_failures = 0
                 return
 
             logger.warning(
@@ -111,24 +125,25 @@ class Transport:
             logger.warning("Failed to send %d events: %s", len(events), e)
 
         # --- Retry logic ---
-        self._consecutive_failures += 1
+        with self._lock:
+            self._consecutive_failures += 1
 
-        if self._consecutive_failures <= self.max_retries:
-            # Prepend failed events *before* anything new that arrived
-            self._buffer[0:0] = events
-            logger.info(
-                "Queued %d events for retry (attempt %d/%d)",
-                len(events),
-                self._consecutive_failures,
-                self.max_retries,
-            )
-        else:
-            logger.error(
-                "Dropping %d events after %d consecutive failures",
-                len(events),
-                self._consecutive_failures,
-            )
-            self._consecutive_failures = 0
+            if self._consecutive_failures <= self.max_retries:
+                # Prepend failed events *before* anything new that arrived
+                self._buffer[0:0] = events
+                logger.info(
+                    "Queued %d events for retry (attempt %d/%d)",
+                    len(events),
+                    self._consecutive_failures,
+                    self.max_retries,
+                )
+            else:
+                logger.error(
+                    "Dropping %d events after %d consecutive failures",
+                    len(events),
+                    self._consecutive_failures,
+                )
+                self._consecutive_failures = 0
 
     def _flush_loop(self) -> None:
         """Background thread that periodically flushes the buffer."""

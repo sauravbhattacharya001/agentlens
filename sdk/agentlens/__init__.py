@@ -27,6 +27,11 @@ _tracker: AgentTracker | None = None
 def init(api_key: str = "default", endpoint: str = "http://localhost:3000") -> AgentTracker:
     """Initialize the AgentLens SDK.
     
+    If the SDK was already initialized, the previous transport is closed
+    (flushing any buffered events and stopping the background thread)
+    before creating the new one.  This prevents resource leaks when
+    ``init()`` is called multiple times (e.g. in tests or notebooks).
+    
     Args:
         api_key: Your AgentLens API key.
         endpoint: The AgentLens backend URL.
@@ -35,6 +40,13 @@ def init(api_key: str = "default", endpoint: str = "http://localhost:3000") -> A
         The global AgentTracker instance.
     """
     global _tracker
+    # Clean up the previous tracker/transport to avoid leaking threads
+    # and HTTP connections.
+    if _tracker is not None:
+        try:
+            _tracker.transport.close()
+        except Exception:
+            pass
     transport = Transport(endpoint=endpoint, api_key=api_key)
     _tracker = AgentTracker(transport=transport)
     return _tracker
