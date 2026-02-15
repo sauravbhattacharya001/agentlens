@@ -5,6 +5,28 @@ const { generateExplanation } = require("../lib/explain");
 
 const router = express.Router();
 
+// ── Cached prepared statements ──────────────────────────────────────
+// Lazily initialized once, reused across all requests to avoid
+// re-compiling SQL on every call.
+let _sessionStmts = null;
+
+function getSessionStatements() {
+  if (_sessionStmts) return _sessionStmts;
+  const db = getDb();
+
+  _sessionStmts = {
+    listAll: db.prepare("SELECT * FROM sessions ORDER BY started_at DESC LIMIT ? OFFSET ?"),
+    listByStatus: db.prepare("SELECT * FROM sessions WHERE status = ? ORDER BY started_at DESC LIMIT ? OFFSET ?"),
+    countAll: db.prepare("SELECT COUNT(*) as count FROM sessions"),
+    countByStatus: db.prepare("SELECT COUNT(*) as count FROM sessions WHERE status = ?"),
+    getById: db.prepare("SELECT * FROM sessions WHERE session_id = ?"),
+    // Uses the composite index idx_events_session_ts for efficient ordered retrieval
+    eventsBySession: db.prepare("SELECT * FROM events WHERE session_id = ? ORDER BY timestamp ASC"),
+  };
+
+  return _sessionStmts;
+}
+
 // GET /sessions — List all sessions
 router.get("/", (req, res) => {
   const db = getDb();
@@ -12,25 +34,18 @@ router.get("/", (req, res) => {
   const offset = Math.max(0, parseInt(req.query.offset) || 0);
   const status = req.query.status;
 
-  let query = "SELECT * FROM sessions";
-  const params = [];
-
-  if (status) {
-    if (!isValidStatus(status)) {
-      return res.status(400).json({ error: "Invalid status filter" });
-    }
-    query += " WHERE status = ?";
-    params.push(status);
+  if (status && !isValidStatus(status)) {
+    return res.status(400).json({ error: "Invalid status filter" });
   }
 
-  query += " ORDER BY started_at DESC LIMIT ? OFFSET ?";
-  params.push(limit, offset);
-
   try {
-    const sessions = db.prepare(query).all(...params);
-    const total = db
-      .prepare(`SELECT COUNT(*) as count FROM sessions${status ? " WHERE status = ?" : ""}`)
-      .get(...(status ? [status] : []));
+    const stmts = getSessionStatements();
+    const sessions = status
+      ? stmts.listByStatus.all(status, limit, offset)
+      : stmts.listAll.all(limit, offset);
+    const total = status
+      ? stmts.countByStatus.get(status)
+      : stmts.countAll.get();
 
     const parsed = sessions.map((s) => ({
       ...s,
@@ -54,14 +69,13 @@ router.get("/:id", (req, res) => {
   }
 
   try {
-    const session = db.prepare("SELECT * FROM sessions WHERE session_id = ?").get(id);
+    const stmts = getSessionStatements();
+    const session = stmts.getById.get(id);
     if (!session) {
       return res.status(404).json({ error: "Session not found" });
     }
 
-    const events = db
-      .prepare("SELECT * FROM events WHERE session_id = ? ORDER BY timestamp ASC")
-      .all(id);
+    const events = stmts.eventsBySession.all(id);
 
     const parsedEvents = events.map((e) => ({
       ...e,
@@ -97,14 +111,13 @@ router.get("/:id/export", (req, res) => {
   }
 
   try {
-    const session = db.prepare("SELECT * FROM sessions WHERE session_id = ?").get(id);
+    const stmts = getSessionStatements();
+    const session = stmts.getById.get(id);
     if (!session) {
       return res.status(404).json({ error: "Session not found" });
     }
 
-    const events = db
-      .prepare("SELECT * FROM events WHERE session_id = ? ORDER BY timestamp ASC")
-      .all(id);
+    const events = stmts.eventsBySession.all(id);
 
     const parsedEvents = events.map((e) => ({
       event_id: e.event_id,
@@ -213,14 +226,20 @@ router.post("/compare", (req, res) => {
   }
 
   try {
-    const sessA = db.prepare("SELECT * FROM sessions WHERE session_id = ?").get(session_a);
-    const sessB = db.prepare("SELECT * FROM sessions WHERE session_id = ?").get(session_b);
+    const stmts = getSessionStatements();
+
+    // Run both lookups + event fetches in a single transaction for
+    // consistency and reduced WAL lock churn.
+    const { sessA, sessB, eventsA, eventsB } = db.transaction(() => {
+      const sessA = stmts.getById.get(session_a);
+      const sessB = stmts.getById.get(session_b);
+      const eventsA = sessA ? stmts.eventsBySession.all(session_a) : [];
+      const eventsB = sessB ? stmts.eventsBySession.all(session_b) : [];
+      return { sessA, sessB, eventsA, eventsB };
+    })();
 
     if (!sessA) return res.status(404).json({ error: `Session ${session_a} not found` });
     if (!sessB) return res.status(404).json({ error: `Session ${session_b} not found` });
-
-    const eventsA = db.prepare("SELECT * FROM events WHERE session_id = ? ORDER BY timestamp ASC").all(session_a);
-    const eventsB = db.prepare("SELECT * FROM events WHERE session_id = ? ORDER BY timestamp ASC").all(session_b);
 
     const parseEvents = (events) => events.map((e) => ({
       ...e,
@@ -367,14 +386,13 @@ router.get("/:id/explain", (req, res) => {
   }
 
   try {
-    const session = db.prepare("SELECT * FROM sessions WHERE session_id = ?").get(id);
+    const stmts = getSessionStatements();
+    const session = stmts.getById.get(id);
     if (!session) {
       return res.status(404).json({ error: "Session not found" });
     }
 
-    const events = db
-      .prepare("SELECT * FROM events WHERE session_id = ? ORDER BY timestamp ASC")
-      .all(id);
+    const events = stmts.eventsBySession.all(id);
 
     const explanation = generateExplanation(session, events);
     res.json({ session_id: id, explanation });

@@ -47,7 +47,21 @@ function initSchema() {
     CREATE INDEX IF NOT EXISTS idx_events_session ON events(session_id);
     CREATE INDEX IF NOT EXISTS idx_events_timestamp ON events(timestamp);
     CREATE INDEX IF NOT EXISTS idx_sessions_status ON sessions(status);
+
+    -- Indexes for analytics aggregation queries
+    CREATE INDEX IF NOT EXISTS idx_events_model ON events(model) WHERE model IS NOT NULL AND model != '';
+    CREATE INDEX IF NOT EXISTS idx_events_type ON events(event_type);
+    CREATE INDEX IF NOT EXISTS idx_sessions_agent ON sessions(agent_name);
+    CREATE INDEX IF NOT EXISTS idx_sessions_started ON sessions(started_at);
+
+    -- Composite index for session-scoped event ordering (used by session detail)
+    CREATE INDEX IF NOT EXISTS idx_events_session_ts ON events(session_id, timestamp);
   `);
+
+  // Performance: optimize for read-heavy analytics workload
+  db.pragma("cache_size = -8000"); // 8 MB page cache (default is ~2 MB)
+  db.pragma("temp_store = MEMORY");
+  db.pragma("mmap_size = 268435456"); // 256 MB mmap for faster reads
 }
 
 module.exports = { getDb };

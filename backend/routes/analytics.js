@@ -4,131 +4,134 @@ const { safeJsonParse } = require("../lib/validation");
 
 const router = express.Router();
 
+// ── Cached prepared statements for analytics ────────────────────────
+// These are read-only aggregation queries — safe to prepare once and
+// reuse on every request, avoiding repeated SQL compilation overhead.
+let _analyticsStmts = null;
+
+function getAnalyticsStatements() {
+  if (_analyticsStmts) return _analyticsStmts;
+  const db = getDb();
+
+  _analyticsStmts = {
+    sessionStats: db.prepare(
+      `SELECT
+        COUNT(*) as total_sessions,
+        COALESCE(SUM(total_tokens_in), 0) as total_tokens_in,
+        COALESCE(SUM(total_tokens_out), 0) as total_tokens_out,
+        COALESCE(SUM(total_tokens_in + total_tokens_out), 0) as total_tokens,
+        AVG(total_tokens_in + total_tokens_out) as avg_tokens_per_session,
+        SUM(CASE WHEN status = 'active' THEN 1 ELSE 0 END) as active_sessions,
+        SUM(CASE WHEN status = 'completed' THEN 1 ELSE 0 END) as completed_sessions,
+        SUM(CASE WHEN status = 'error' THEN 1 ELSE 0 END) as error_sessions,
+        MIN(started_at) as earliest_session,
+        MAX(started_at) as latest_session
+      FROM sessions`
+    ),
+    topAgents: db.prepare(
+      `SELECT
+        agent_name,
+        COUNT(*) as session_count,
+        COALESCE(SUM(total_tokens_in + total_tokens_out), 0) as total_tokens,
+        AVG(total_tokens_in + total_tokens_out) as avg_tokens
+      FROM sessions
+      GROUP BY agent_name
+      ORDER BY total_tokens DESC
+      LIMIT 10`
+    ),
+    modelUsage: db.prepare(
+      `SELECT
+        model,
+        COUNT(*) as call_count,
+        COALESCE(SUM(tokens_in), 0) as total_tokens_in,
+        COALESCE(SUM(tokens_out), 0) as total_tokens_out,
+        COALESCE(SUM(tokens_in + tokens_out), 0) as total_tokens,
+        AVG(duration_ms) as avg_duration_ms
+      FROM events
+      WHERE model IS NOT NULL AND model != ''
+      GROUP BY model
+      ORDER BY total_tokens DESC`
+    ),
+    eventTypes: db.prepare(
+      `SELECT
+        event_type,
+        COUNT(*) as count
+      FROM events
+      WHERE event_type NOT IN ('session_start', 'session_end')
+      GROUP BY event_type
+      ORDER BY count DESC`
+    ),
+    sessionsOverTime: db.prepare(
+      `SELECT
+        DATE(started_at) as day,
+        COUNT(*) as session_count,
+        COALESCE(SUM(total_tokens_in + total_tokens_out), 0) as total_tokens
+      FROM sessions
+      GROUP BY DATE(started_at)
+      ORDER BY day ASC
+      LIMIT 90`
+    ),
+    hourlyActivity: db.prepare(
+      `SELECT
+        CAST(strftime('%H', timestamp) AS INTEGER) as hour,
+        COUNT(*) as event_count
+      FROM events
+      GROUP BY hour
+      ORDER BY hour ASC`
+    ),
+    durationStats: db.prepare(
+      `SELECT
+        AVG(
+          CASE WHEN ended_at IS NOT NULL
+            THEN (julianday(ended_at) - julianday(started_at)) * 86400000
+            ELSE NULL
+          END
+        ) as avg_duration_ms,
+        MIN(
+          CASE WHEN ended_at IS NOT NULL
+            THEN (julianday(ended_at) - julianday(started_at)) * 86400000
+            ELSE NULL
+          END
+        ) as min_duration_ms,
+        MAX(
+          CASE WHEN ended_at IS NOT NULL
+            THEN (julianday(ended_at) - julianday(started_at)) * 86400000
+            ELSE NULL
+          END
+        ) as max_duration_ms
+      FROM sessions
+      WHERE ended_at IS NOT NULL`
+    ),
+    eventCount: db.prepare(`SELECT COUNT(*) as total FROM events`),
+  };
+
+  return _analyticsStmts;
+}
+
 // GET /analytics — Aggregate statistics across all sessions
 router.get("/", (req, res) => {
   const db = getDb();
 
   try {
-    // ── Overall session stats ──────────────────────────────────────
-    const sessionStats = db
-      .prepare(
-        `SELECT
-          COUNT(*) as total_sessions,
-          SUM(total_tokens_in) as total_tokens_in,
-          SUM(total_tokens_out) as total_tokens_out,
-          SUM(total_tokens_in + total_tokens_out) as total_tokens,
-          AVG(total_tokens_in + total_tokens_out) as avg_tokens_per_session,
-          SUM(CASE WHEN status = 'active' THEN 1 ELSE 0 END) as active_sessions,
-          SUM(CASE WHEN status = 'completed' THEN 1 ELSE 0 END) as completed_sessions,
-          SUM(CASE WHEN status = 'error' THEN 1 ELSE 0 END) as error_sessions,
-          MIN(started_at) as earliest_session,
-          MAX(started_at) as latest_session
-        FROM sessions`
-      )
-      .get();
+    const stmts = getAnalyticsStatements();
 
-    // ── Top agents by token usage ──────────────────────────────────
-    const topAgents = db
-      .prepare(
-        `SELECT
-          agent_name,
-          COUNT(*) as session_count,
-          SUM(total_tokens_in + total_tokens_out) as total_tokens,
-          AVG(total_tokens_in + total_tokens_out) as avg_tokens
-        FROM sessions
-        GROUP BY agent_name
-        ORDER BY total_tokens DESC
-        LIMIT 10`
-      )
-      .all();
+    // Run all queries inside a single deferred transaction for a
+    // consistent snapshot and to avoid acquiring/releasing the WAL
+    // read-lock 8 separate times.
+    const result = db.transaction(() => {
+      const sessionStats = stmts.sessionStats.get();
+      const topAgents = stmts.topAgents.all();
+      const modelUsage = stmts.modelUsage.all();
+      const eventTypes = stmts.eventTypes.all();
+      const sessionsOverTime = stmts.sessionsOverTime.all();
+      const hourlyActivity = stmts.hourlyActivity.all();
+      const durationStats = stmts.durationStats.get();
+      const eventCount = stmts.eventCount.get();
 
-    // ── Model usage distribution ───────────────────────────────────
-    const modelUsage = db
-      .prepare(
-        `SELECT
-          model,
-          COUNT(*) as call_count,
-          SUM(tokens_in) as total_tokens_in,
-          SUM(tokens_out) as total_tokens_out,
-          SUM(tokens_in + tokens_out) as total_tokens,
-          AVG(duration_ms) as avg_duration_ms
-        FROM events
-        WHERE model IS NOT NULL AND model != ''
-        GROUP BY model
-        ORDER BY total_tokens DESC`
-      )
-      .all();
+      return { sessionStats, topAgents, modelUsage, eventTypes, sessionsOverTime, hourlyActivity, durationStats, eventCount };
+    })();
 
-    // ── Event type distribution ────────────────────────────────────
-    const eventTypes = db
-      .prepare(
-        `SELECT
-          event_type,
-          COUNT(*) as count
-        FROM events
-        WHERE event_type NOT IN ('session_start', 'session_end')
-        GROUP BY event_type
-        ORDER BY count DESC`
-      )
-      .all();
-
-    // ── Sessions over time (daily buckets) ─────────────────────────
-    const sessionsOverTime = db
-      .prepare(
-        `SELECT
-          DATE(started_at) as day,
-          COUNT(*) as session_count,
-          SUM(total_tokens_in + total_tokens_out) as total_tokens
-        FROM sessions
-        GROUP BY DATE(started_at)
-        ORDER BY day ASC
-        LIMIT 90`
-      )
-      .all();
-
-    // ── Hourly activity heatmap data ───────────────────────────────
-    const hourlyActivity = db
-      .prepare(
-        `SELECT
-          CAST(strftime('%H', timestamp) AS INTEGER) as hour,
-          COUNT(*) as event_count
-        FROM events
-        GROUP BY hour
-        ORDER BY hour ASC`
-      )
-      .all();
-
-    // ── Average session duration ───────────────────────────────────
-    const durationStats = db
-      .prepare(
-        `SELECT
-          AVG(
-            CASE WHEN ended_at IS NOT NULL
-              THEN (julianday(ended_at) - julianday(started_at)) * 86400000
-              ELSE NULL
-            END
-          ) as avg_duration_ms,
-          MIN(
-            CASE WHEN ended_at IS NOT NULL
-              THEN (julianday(ended_at) - julianday(started_at)) * 86400000
-              ELSE NULL
-            END
-          ) as min_duration_ms,
-          MAX(
-            CASE WHEN ended_at IS NOT NULL
-              THEN (julianday(ended_at) - julianday(started_at)) * 86400000
-              ELSE NULL
-            END
-          ) as max_duration_ms
-        FROM sessions
-        WHERE ended_at IS NOT NULL`
-      )
-      .get();
-
-    // ── Total events ───────────────────────────────────────────────
-    const eventCount = db
-      .prepare(`SELECT COUNT(*) as total FROM events`)
-      .get();
+    const { sessionStats, topAgents, modelUsage, eventTypes, sessionsOverTime, hourlyActivity, durationStats, eventCount } = result;
 
     // ── Error rate ─────────────────────────────────────────────────
     const errorRate =
