@@ -10,6 +10,7 @@ const {
 } = require("./middleware");
 const eventsRouter = require("./routes/events");
 const sessionsRouter = require("./routes/sessions");
+const analyticsRouter = require("./routes/analytics");
 
 const app = express();
 const PORT = process.env.PORT || 3000;
@@ -21,11 +22,13 @@ app.use(createCorsMiddleware());
 // ── Rate limiting ───────────────────────────────────────────────────
 app.use("/sessions", createApiLimiter());
 app.use("/events", createIngestLimiter());
+app.use("/analytics", createApiLimiter());
 
 // ── API key authentication ──────────────────────────────────────────
 const { authenticateApiKey, hasApiKey } = createApiKeyAuth();
 app.use("/events", authenticateApiKey);
 app.use("/sessions", authenticateApiKey);
+app.use("/analytics", authenticateApiKey);
 
 // Body parser with size limit
 app.use(express.json({ limit: "10mb" }));
@@ -36,6 +39,7 @@ app.use(express.static(path.join(__dirname, "..", "dashboard")));
 // API routes
 app.use("/events", eventsRouter);
 app.use("/sessions", sessionsRouter);
+app.use("/analytics", analyticsRouter);
 
 // Health check (no auth required)
 app.get("/health", (req, res) => {

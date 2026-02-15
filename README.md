@@ -44,6 +44,7 @@ AgentLens provides:
 | 📈 **Visual Timeline** | Interactive timeline view of agent actions in the dashboard |
 | 💡 **Explainability** | Generate human-readable summaries of agent behavior |
 | 🎨 **Decorators** | Zero-config instrumentation with Python decorators |
+| 📈 **Analytics Dashboard** | Aggregate stats, model usage, hourly activity heatmap, sessions-over-time |
 | ⚖️ **Session Comparison** | Compare two sessions side-by-side — token deltas, event breakdowns, tool usage diffs |
 
 ## 🏗️ Architecture
@@ -239,6 +240,7 @@ The dashboard provides a real-time view of your agent sessions:
 
 - **Sessions List** — Filter by status (active, completed, error)
 - **Session Comparison** — Select two sessions and compare side-by-side with visual diffs
+- **Analytics Overview** — Click 📈 Analytics to see aggregate stats, model usage, hourly activity, and top agents
 - **Timeline View** — Interactive timeline of every event in a session
 - **Token Charts** — Per-event and cumulative token usage visualization
 - **Explain Tab** — Human-readable behavior summaries
@@ -254,6 +256,7 @@ The dashboard is a lightweight HTML/CSS/JS app served directly by the backend �
 | `GET /sessions/:id` | GET | Get session details with events |
 | `GET /sessions/:id/export` | GET | Export session data as JSON or CSV |
 | `POST /sessions/compare` | POST | Compare two sessions side-by-side |
+| `GET /analytics` | GET | Aggregate statistics across all sessions |
 | `POST /events` | POST | Record a new event |
 | `GET /events?session_id=...` | GET | Get events for a session |
 

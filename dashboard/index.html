@@ -27,6 +27,9 @@
         <div class="view-header">
           <h2>Sessions</h2>
           <div class="view-actions">
+            <button class="btn btn-analytics" onclick="toggleAnalytics()" id="analyticsToggleBtn">
+              📈 Analytics
+            </button>
             <button id="compareBtn" class="btn btn-compare" onclick="openCompareView()" style="display:none">
               ⚖️ Compare (<span id="compareCount">0</span>/2)
             </button>
@@ -42,6 +45,40 @@
             <button class="btn btn-secondary" onclick="loadSessions()">↻ Refresh</button>
           </div>
         </div>
+
+        <!-- Analytics Overview Panel (collapsible) -->
+        <div id="analyticsPanel" class="analytics-panel" style="display:none">
+          <div class="analytics-loading" id="analyticsLoading">Loading analytics...</div>
+          <div id="analyticsContent" style="display:none">
+            <!-- Overview Cards -->
+            <div class="analytics-cards" id="analyticsCards"></div>
+
+            <!-- Charts Row -->
+            <div class="analytics-charts-row">
+              <div class="chart-card analytics-chart">
+                <h3>Sessions Over Time</h3>
+                <canvas id="sessionsTimeChart" width="500" height="180"></canvas>
+              </div>
+              <div class="chart-card analytics-chart">
+                <h3>Hourly Activity</h3>
+                <canvas id="hourlyActivityChart" width="500" height="180"></canvas>
+              </div>
+            </div>
+
+            <!-- Bottom Row: Model + Agent tables -->
+            <div class="analytics-tables-row">
+              <div class="analytics-table-card">
+                <h3>🤖 Model Usage</h3>
+                <div id="modelUsageTable"></div>
+              </div>
+              <div class="analytics-table-card">
+                <h3>🏆 Top Agents</h3>
+                <div id="topAgentsTable"></div>
+              </div>
+            </div>
+          </div>
+        </div>
+
         <p class="compare-hint" id="compareHint">💡 Tip: Click the checkboxes to select two sessions for comparison</p>
         <div id="sessionList" class="session-list">
           <div class="loading">Loading sessions...</div>

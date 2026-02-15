@@ -4,6 +4,8 @@ const API_BASE = window.location.origin;
 
 let currentSession = null;
 let compareSelection = []; // Array of {id, name} for comparison
+let analyticsData = null;  // Cached analytics data
+let analyticsVisible = false;
 
 // ── Initialization ──────────────────────────────────────────────────
 
@@ -1015,6 +1017,329 @@ function switchCompareTab(tabName) {
 
   document.querySelector(`#sessionCompareView .tab[data-tab="${tabName}"]`).classList.add("active");
   document.getElementById(`${tabName}Tab`).classList.add("active");
+}
+
+// ── Analytics Overview ───────────────────────────────────────────────
+
+function toggleAnalytics() {
+  const panel = document.getElementById("analyticsPanel");
+  const btn = document.getElementById("analyticsToggleBtn");
+
+  analyticsVisible = !analyticsVisible;
+
+  if (analyticsVisible) {
+    panel.style.display = "block";
+    btn.classList.add("active");
+    loadAnalytics();
+  } else {
+    panel.style.display = "none";
+    btn.classList.remove("active");
+  }
+}
+
+async function loadAnalytics() {
+  const loadingEl = document.getElementById("analyticsLoading");
+  const contentEl = document.getElementById("analyticsContent");
+
+  loadingEl.style.display = "block";
+  contentEl.style.display = "none";
+
+  try {
+    const res = await fetch(`${API_BASE}/analytics`);
+    analyticsData = await res.json();
+
+    loadingEl.style.display = "none";
+    contentEl.style.display = "block";
+
+    renderAnalyticsCards(analyticsData);
+    renderSessionsTimeChart(analyticsData.sessions_over_time);
+    renderHourlyActivityChart(analyticsData.hourly_activity);
+    renderModelUsageTable(analyticsData.model_usage);
+    renderTopAgentsTable(analyticsData.top_agents);
+  } catch (err) {
+    loadingEl.textContent = `Error loading analytics: ${escHtml(err.message)}`;
+  }
+}
+
+function renderAnalyticsCards(data) {
+  const o = data.overview;
+  const d = data.duration;
+
+  const cards = [
+    { value: o.total_sessions, label: "Total Sessions", color: "accent" },
+    { value: o.total_events.toLocaleString(), label: "Total Events", color: "purple" },
+    { value: formatTokenCount(o.total_tokens), label: "Total Tokens", color: "green" },
+    { value: formatTokenCount(o.avg_tokens_per_session), label: "Avg Tokens/Session", color: "yellow" },
+    { value: o.active_sessions, label: "Active", color: "green" },
+    { value: o.completed_sessions, label: "Completed", color: "purple" },
+    { value: o.error_sessions, label: "Errors", color: "red" },
+    { value: `${o.error_rate}%`, label: "Error Rate", color: o.error_rate > 10 ? "red" : o.error_rate > 5 ? "yellow" : "green" },
+    { value: formatDurationShort(d.avg_ms), label: "Avg Duration", color: "orange" },
+  ];
+
+  document.getElementById("analyticsCards").innerHTML = cards
+    .map(
+      (c) => `
+    <div class="analytics-stat">
+      <div class="stat-value ${c.color}">${c.value}</div>
+      <div class="stat-label">${c.label}</div>
+    </div>`
+    )
+    .join("");
+}
+
+function renderSessionsTimeChart(sessionsOverTime) {
+  const canvas = document.getElementById("sessionsTimeChart");
+  const ctx = canvas.getContext("2d");
+  const w = canvas.width, h = canvas.height;
+  const padding = { top: 16, right: 16, bottom: 36, left: 40 };
+
+  ctx.clearRect(0, 0, w, h);
+
+  if (!sessionsOverTime || sessionsOverTime.length === 0) {
+    ctx.fillStyle = "#6e7681";
+    ctx.font = "13px sans-serif";
+    ctx.textAlign = "center";
+    ctx.fillText("No session data yet", w / 2, h / 2);
+    return;
+  }
+
+  const data = sessionsOverTime;
+  const maxSessions = Math.max(...data.map((d) => d.session_count), 1);
+  const chartW = w - padding.left - padding.right;
+  const chartH = h - padding.top - padding.bottom;
+
+  // Grid lines
+  ctx.strokeStyle = "#21262d";
+  ctx.lineWidth = 1;
+  for (let i = 0; i <= 3; i++) {
+    const y = padding.top + (chartH / 3) * i;
+    ctx.beginPath();
+    ctx.moveTo(padding.left, y);
+    ctx.lineTo(w - padding.right, y);
+    ctx.stroke();
+
+    ctx.fillStyle = "#6e7681";
+    ctx.font = "10px sans-serif";
+    ctx.textAlign = "right";
+    ctx.fillText(Math.round(maxSessions * (1 - i / 3)).toString(), padding.left - 6, y + 3);
+  }
+
+  // Area fill
+  ctx.beginPath();
+  data.forEach((d, i) => {
+    const x = padding.left + (i / (data.length - 1 || 1)) * chartW;
+    const y = padding.top + chartH - (d.session_count / maxSessions) * chartH;
+    if (i === 0) ctx.moveTo(x, y);
+    else ctx.lineTo(x, y);
+  });
+  ctx.lineTo(padding.left + chartW, padding.top + chartH);
+  ctx.lineTo(padding.left, padding.top + chartH);
+  ctx.closePath();
+  ctx.fillStyle = "rgba(188, 140, 255, 0.1)";
+  ctx.fill();
+
+  // Line
+  ctx.beginPath();
+  data.forEach((d, i) => {
+    const x = padding.left + (i / (data.length - 1 || 1)) * chartW;
+    const y = padding.top + chartH - (d.session_count / maxSessions) * chartH;
+    if (i === 0) ctx.moveTo(x, y);
+    else ctx.lineTo(x, y);
+  });
+  ctx.strokeStyle = "#bc8cff";
+  ctx.lineWidth = 2;
+  ctx.stroke();
+
+  // Dots
+  data.forEach((d, i) => {
+    const x = padding.left + (i / (data.length - 1 || 1)) * chartW;
+    const y = padding.top + chartH - (d.session_count / maxSessions) * chartH;
+    ctx.fillStyle = "#bc8cff";
+    ctx.beginPath();
+    ctx.arc(x, y, 3, 0, Math.PI * 2);
+    ctx.fill();
+  });
+
+  // X-axis labels (show first, last, and a few in between)
+  ctx.fillStyle = "#6e7681";
+  ctx.font = "9px sans-serif";
+  ctx.textAlign = "center";
+  const labelInterval = Math.max(1, Math.floor(data.length / 5));
+  data.forEach((d, i) => {
+    if (i === 0 || i === data.length - 1 || i % labelInterval === 0) {
+      const x = padding.left + (i / (data.length - 1 || 1)) * chartW;
+      const label = d.day.slice(5); // MM-DD
+      ctx.fillText(label, x, h - padding.bottom + 14);
+    }
+  });
+}
+
+function renderHourlyActivityChart(hourlyActivity) {
+  const canvas = document.getElementById("hourlyActivityChart");
+  const ctx = canvas.getContext("2d");
+  const w = canvas.width, h = canvas.height;
+  const padding = { top: 16, right: 16, bottom: 36, left: 40 };
+
+  ctx.clearRect(0, 0, w, h);
+
+  if (!hourlyActivity || hourlyActivity.length === 0) {
+    ctx.fillStyle = "#6e7681";
+    ctx.font = "13px sans-serif";
+    ctx.textAlign = "center";
+    ctx.fillText("No activity data yet", w / 2, h / 2);
+    return;
+  }
+
+  // Fill in missing hours with 0
+  const hourMap = {};
+  hourlyActivity.forEach((h) => (hourMap[h.hour] = h.event_count));
+  const fullData = Array.from({ length: 24 }, (_, i) => ({
+    hour: i,
+    count: hourMap[i] || 0,
+  }));
+
+  const maxCount = Math.max(...fullData.map((d) => d.count), 1);
+  const chartW = w - padding.left - padding.right;
+  const chartH = h - padding.top - padding.bottom;
+  const barW = chartW / 24 - 2;
+
+  // Grid lines
+  ctx.strokeStyle = "#21262d";
+  ctx.lineWidth = 1;
+  for (let i = 0; i <= 3; i++) {
+    const y = padding.top + (chartH / 3) * i;
+    ctx.beginPath();
+    ctx.moveTo(padding.left, y);
+    ctx.lineTo(w - padding.right, y);
+    ctx.stroke();
+
+    ctx.fillStyle = "#6e7681";
+    ctx.font = "10px sans-serif";
+    ctx.textAlign = "right";
+    ctx.fillText(Math.round(maxCount * (1 - i / 3)).toString(), padding.left - 6, y + 3);
+  }
+
+  // Bars with gradient intensity
+  fullData.forEach((d, i) => {
+    const x = padding.left + (i / 24) * chartW + 1;
+    const barH = (d.count / maxCount) * chartH;
+    const intensity = d.count / maxCount;
+
+    // Color intensity: dim for low, bright for high
+    const r = Math.round(88 + (167 * intensity));
+    const g = Math.round(166 - (30 * intensity));
+    const b = 255;
+    ctx.fillStyle = `rgba(${Math.min(r, 255)}, ${Math.min(g, 255)}, ${b}, ${0.3 + intensity * 0.7})`;
+    ctx.fillRect(x, padding.top + chartH - barH, barW, barH);
+  });
+
+  // X-axis labels
+  ctx.fillStyle = "#6e7681";
+  ctx.font = "9px sans-serif";
+  ctx.textAlign = "center";
+  for (let i = 0; i < 24; i += 3) {
+    const x = padding.left + (i / 24) * chartW + barW / 2;
+    ctx.fillText(`${i}h`, x, h - padding.bottom + 14);
+  }
+}
+
+function renderModelUsageTable(modelUsage) {
+  const el = document.getElementById("modelUsageTable");
+
+  if (!modelUsage || modelUsage.length === 0) {
+    el.innerHTML = '<p style="color:var(--text-muted);font-size:0.85rem">No model data yet.</p>';
+    return;
+  }
+
+  const maxTokens = Math.max(...modelUsage.map((m) => m.total_tokens), 1);
+
+  el.innerHTML = `
+    <table class="analytics-table">
+      <thead>
+        <tr>
+          <th>Model</th>
+          <th>Calls</th>
+          <th>Tokens</th>
+          <th>Avg Time</th>
+          <th style="width:80px"></th>
+        </tr>
+      </thead>
+      <tbody>
+        ${modelUsage
+          .map(
+            (m) => `
+          <tr>
+            <td class="model-name">${escHtml(m.model)}</td>
+            <td>${m.call_count.toLocaleString()}</td>
+            <td>${formatTokenCount(m.total_tokens)}</td>
+            <td>${m.avg_duration_ms.toFixed(0)}ms</td>
+            <td>
+              <div class="analytics-bar-bg">
+                <div class="analytics-bar-fill accent" style="width:${(m.total_tokens / maxTokens) * 100}%"></div>
+              </div>
+            </td>
+          </tr>`
+          )
+          .join("")}
+      </tbody>
+    </table>`;
+}
+
+function renderTopAgentsTable(topAgents) {
+  const el = document.getElementById("topAgentsTable");
+
+  if (!topAgents || topAgents.length === 0) {
+    el.innerHTML = '<p style="color:var(--text-muted);font-size:0.85rem">No agent data yet.</p>';
+    return;
+  }
+
+  const maxTokens = Math.max(...topAgents.map((a) => a.total_tokens), 1);
+
+  el.innerHTML = `
+    <table class="analytics-table">
+      <thead>
+        <tr>
+          <th>Agent</th>
+          <th>Sessions</th>
+          <th>Tokens</th>
+          <th>Avg/Session</th>
+          <th style="width:80px"></th>
+        </tr>
+      </thead>
+      <tbody>
+        ${topAgents
+          .map(
+            (a) => `
+          <tr>
+            <td class="agent-name">${escHtml(a.agent_name)}</td>
+            <td>${a.session_count}</td>
+            <td>${formatTokenCount(a.total_tokens)}</td>
+            <td>${formatTokenCount(a.avg_tokens)}</td>
+            <td>
+              <div class="analytics-bar-bg">
+                <div class="analytics-bar-fill purple" style="width:${(a.total_tokens / maxTokens) * 100}%"></div>
+              </div>
+            </td>
+          </tr>`
+          )
+          .join("")}
+      </tbody>
+    </table>`;
+}
+
+function formatTokenCount(count) {
+  if (count >= 1000000) return `${(count / 1000000).toFixed(1)}M`;
+  if (count >= 1000) return `${(count / 1000).toFixed(1)}K`;
+  return count.toString();
+}
+
+function formatDurationShort(ms) {
+  if (!ms || ms === 0) return "—";
+  if (ms < 1000) return `${Math.round(ms)}ms`;
+  if (ms < 60000) return `${(ms / 1000).toFixed(1)}s`;
+  if (ms < 3600000) return `${(ms / 60000).toFixed(1)}m`;
+  return `${(ms / 3600000).toFixed(1)}h`;
 }
 
 // ── Utilities ───────────────────────────────────────────────────────
