@@ -6,10 +6,15 @@
 
 *Datadog meets Chain-of-Thought — for autonomous agents*
 
+[![CI](https://github.com/sauravbhattacharya001/agentlens/actions/workflows/ci.yml/badge.svg)](https://github.com/sauravbhattacharya001/agentlens/actions/workflows/ci.yml)
+[![CodeQL](https://github.com/sauravbhattacharya001/agentlens/actions/workflows/codeql.yml/badge.svg)](https://github.com/sauravbhattacharya001/agentlens/actions/workflows/codeql.yml)
 [![License: MIT](https://img.shields.io/badge/License-MIT-blue.svg)](LICENSE)
 [![Python 3.9+](https://img.shields.io/badge/Python-3.9%2B-3776AB?logo=python&logoColor=white)](https://python.org)
 [![Node.js](https://img.shields.io/badge/Node.js-18%2B-339933?logo=node.js&logoColor=white)](https://nodejs.org)
 [![GitHub repo size](https://img.shields.io/github/repo-size/sauravbhattacharya001/agentlens)](https://github.com/sauravbhattacharya001/agentlens)
+[![GitHub last commit](https://img.shields.io/github/last-commit/sauravbhattacharya001/agentlens)](https://github.com/sauravbhattacharya001/agentlens/commits)
+[![GitHub issues](https://img.shields.io/github/issues/sauravbhattacharya001/agentlens)](https://github.com/sauravbhattacharya001/agentlens/issues)
+[![GitHub stars](https://img.shields.io/github/stars/sauravbhattacharya001/agentlens?style=social)](https://github.com/sauravbhattacharya001/agentlens)
 
 [Getting Started](#-getting-started) · [Features](#-features) · [SDK Reference](#-sdk-reference) · [Dashboard](#-dashboard) · [Architecture](#-architecture) · [Contributing](#-contributing) · [📖 Full Docs](https://sauravbhattacharya001.github.io/agentlens/) · [🎯 Live Demo](https://sauravbhattacharya001.github.io/agentlens/demo/)
 
