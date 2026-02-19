@@ -64,9 +64,24 @@
   <pre><code>curl -H "X-API-Key: your-key" http://localhost:3000/sessions</code></pre>
 
   <div class="callout callout-info">
-    <div class="callout-title">ℹ️ Note</div>
-    <p>The current backend does not enforce API key validation. The header is accepted and forwarded but not checked. This is intended for future use.</p>
+    <div class="callout-title">ℹ️ Dev Mode</div>
+    <p>If the <code>AGENTLENS_API_KEY</code> environment variable is not set, the backend runs in dev mode — no authentication is required. When the variable is set, the key is validated on every request to <code>/events</code>, <code>/sessions</code>, and <code>/analytics</code>.</p>
   </div>
+
+  <h2>Rate Limiting</h2>
+
+  <p>The backend enforces per-IP rate limits to prevent abuse:</p>
+
+  <table>
+    <thead><tr><th>Route</th><th>Window</th><th>Max Requests</th></tr></thead>
+    <tbody>
+      <tr><td><code>/events</code></td><td>60 seconds</td><td>60</td></tr>
+      <tr><td><code>/sessions</code></td><td>60 seconds</td><td>120</td></tr>
+      <tr><td><code>/analytics</code></td><td>60 seconds</td><td>120</td></tr>
+    </tbody>
+  </table>
+
+  <p>Rate limit headers (<code>RateLimit-Limit</code>, <code>RateLimit-Remaining</code>, <code>RateLimit-Reset</code>) are included in all responses.</p>
 
   <h2>Endpoints</h2>
 
@@ -201,6 +216,235 @@
 }</code></pre>
 
   <p>The explanation is a Markdown-formatted string with a timeline of events, token counts, and reasoning. See the <a href="explainability.html">Explainability</a> page for details on how explanations are generated.</p>
+
+  <h3>GET /sessions/:id/export</h3>
+
+  <p>Export a session's full data as JSON or CSV. Useful for offline analysis, archival, or feeding into other tools.</p>
+
+  <pre><code># JSON export (default)
+curl "http://localhost:3000/sessions/abc123/export?format=json" \
+  -H "X-API-Key: your-key"
+
+# CSV export
+curl "http://localhost:3000/sessions/abc123/export?format=csv" \
+  -H "X-API-Key: your-key" -o session.csv</code></pre>
+
+  <table>
+    <thead><tr><th>Query Param</th><th>Type</th><th>Default</th><th>Description</th></tr></thead>
+    <tbody>
+      <tr><td><code>format</code></td><td><code>string</code></td><td><code>"json"</code></td><td><code>"json"</code> or <code>"csv"</code></td></tr>
+    </tbody>
+  </table>
+
+  <p><strong>JSON Response:</strong></p>
+  <pre><code>{
+  "exported_at": "2026-02-18T10:30:00.000Z",
+  "session": {
+    "session_id": "abc123",
+    "agent_name": "research-agent",
+    "status": "completed",
+    "started_at": "2026-02-14T10:30:00Z",
+    "ended_at": "2026-02-14T10:31:00Z",
+    "total_tokens_in": 1200,
+    "total_tokens_out": 350,
+    "metadata": {"version": "2.0"}
+  },
+  "events": [
+    {
+      "event_id": "evt001",
+      "event_type": "llm_call",
+      "timestamp": "2026-02-14T10:30:05Z",
+      "model": "gpt-4",
+      "tokens_in": 50,
+      "tokens_out": 30,
+      "duration_ms": 150,
+      "input_data": {"prompt": "..."},
+      "output_data": {"response": "..."},
+      "tool_call": null,
+      "decision_trace": null
+    }
+  ],
+  "summary": {
+    "total_events": 8,
+    "total_tokens": 1550,
+    "models_used": ["gpt-4"],
+    "event_types": ["llm_call", "tool_call", "decision"],
+    "total_duration_ms": 4250.5
+  }
+}</code></pre>
+
+  <p><strong>CSV Response:</strong> The CSV export includes columns for <code>event_id</code>, <code>event_type</code>, <code>timestamp</code>, <code>model</code>, <code>tokens_in</code>, <code>tokens_out</code>, <code>duration_ms</code>, <code>input_data</code>, <code>output_data</code>, <code>tool_name</code>, <code>tool_input</code>, <code>tool_output</code>, and <code>reasoning</code>. The response includes a <code>Content-Disposition</code> header for automatic file download.</p>
+
+  <h3>POST /sessions/compare</h3>
+
+  <p>Compare two sessions side-by-side, calculating deltas for token usage, event counts, timing, and tool usage. Useful for A/B testing prompts, models, or agent configurations.</p>
+
+  <pre><code>curl -X POST http://localhost:3000/sessions/compare \
+  -H "Content-Type: application/json" \
+  -H "X-API-Key: your-key" \
+  -d '{"session_a": "abc123", "session_b": "def456"}'</code></pre>
+
+  <h4>Request Body</h4>
+
+  <table>
+    <thead><tr><th>Field</th><th>Type</th><th>Required</th><th>Description</th></tr></thead>
+    <tbody>
+      <tr><td><code>session_a</code></td><td><code>string</code></td><td>Yes</td><td>First session ID (baseline)</td></tr>
+      <tr><td><code>session_b</code></td><td><code>string</code></td><td>Yes</td><td>Second session ID (compared against baseline)</td></tr>
+    </tbody>
+  </table>
+
+  <p><strong>Response:</strong></p>
+  <pre><code>{
+  "compared_at": "2026-02-18T10:30:00.000Z",
+  "session_a": {
+    "session_id": "abc123",
+    "agent_name": "research-agent",
+    "status": "completed",
+    "tokens_in": 1200,
+    "tokens_out": 350,
+    "total_tokens": 1550,
+    "event_count": 8,
+    "error_count": 0,
+    "total_processing_ms": 4250.5,
+    "avg_event_duration_ms": 531.31,
+    "session_duration_ms": 60000,
+    "models": {
+      "gpt-4": {"calls": 5, "tokens_in": 1000, "tokens_out": 300}
+    },
+    "event_types": {"llm_call": 5, "tool_call": 3},
+    "tools": {
+      "web_search": {"calls": 2, "total_duration": 800},
+      "calculator": {"calls": 1, "total_duration": 50}
+    },
+    "metadata": {}
+  },
+  "session_b": { ... },
+  "deltas": {
+    "total_tokens": {"absolute": -200, "percent": -12.9},
+    "tokens_in": {"absolute": -150, "percent": -12.5},
+    "tokens_out": {"absolute": -50, "percent": -14.29},
+    "event_count": {"absolute": -2, "percent": -25},
+    "error_count": {"absolute": 0, "percent": 0},
+    "total_processing_ms": {"absolute": -1000.5, "percent": -23.54},
+    "avg_event_duration_ms": {"absolute": 10.2, "percent": 1.92}
+  },
+  "shared": {
+    "event_types": ["llm_call", "tool_call", "decision"],
+    "tools": ["web_search", "calculator"],
+    "models": ["gpt-4"]
+  }
+}</code></pre>
+
+  <div class="callout callout-info">
+    <div class="callout-title">📊 Delta Interpretation</div>
+    <p>Deltas are computed as <strong>B relative to A</strong>. Negative values mean session B used fewer resources. The <code>percent</code> field shows the percentage change: <code>((B - A) / A) × 100</code>.</p>
+  </div>
+
+  <h3>GET /analytics</h3>
+
+  <p>Get aggregate statistics across all sessions — overview metrics, model usage, top agents, event type breakdowns, time-series data, and hourly activity patterns.</p>
+
+  <pre><code>curl http://localhost:3000/analytics \
+  -H "X-API-Key: your-key"</code></pre>
+
+  <p><strong>Response:</strong></p>
+  <pre><code>{
+  "overview": {
+    "total_sessions": 42,
+    "active_sessions": 2,
+    "completed_sessions": 38,
+    "error_sessions": 2,
+    "error_rate": 4.76,
+    "total_events": 1250,
+    "total_tokens": 95000,
+    "total_tokens_in": 72000,
+    "total_tokens_out": 23000,
+    "avg_tokens_per_session": 2262,
+    "earliest_session": "2026-01-15T08:00:00Z",
+    "latest_session": "2026-02-18T10:30:00Z"
+  },
+  "duration": {
+    "avg_ms": 45200,
+    "min_ms": 1200,
+    "max_ms": 320000
+  },
+  "top_agents": [
+    {
+      "agent_name": "research-agent",
+      "session_count": 20,
+      "total_tokens": 50000,
+      "avg_tokens": 2500
+    }
+  ],
+  "model_usage": [
+    {
+      "model": "gpt-4",
+      "call_count": 800,
+      "total_tokens": 60000,
+      "total_tokens_in": 45000,
+      "total_tokens_out": 15000,
+      "avg_duration_ms": 250.5
+    }
+  ],
+  "event_types": [
+    {"event_type": "llm_call", "count": 600},
+    {"event_type": "tool_call", "count": 400},
+    {"event_type": "decision", "count": 250}
+  ],
+  "sessions_over_time": [
+    {"day": "2026-02-17", "session_count": 5, "total_tokens": 12000},
+    {"day": "2026-02-18", "session_count": 3, "total_tokens": 8000}
+  ],
+  "hourly_activity": [
+    {"hour": 9, "event_count": 150},
+    {"hour": 10, "event_count": 200},
+    {"hour": 14, "event_count": 180}
+  ]
+}</code></pre>
+
+  <h4>Response Fields</h4>
+
+  <table>
+    <thead><tr><th>Section</th><th>Description</th></tr></thead>
+    <tbody>
+      <tr><td><code>overview</code></td><td>Aggregate counts: sessions, events, tokens, error rate, date range</td></tr>
+      <tr><td><code>duration</code></td><td>Session wall-clock duration stats (avg/min/max in milliseconds)</td></tr>
+      <tr><td><code>top_agents</code></td><td>Top 10 agents by total token usage</td></tr>
+      <tr><td><code>model_usage</code></td><td>Per-model breakdown: call count, tokens, average latency</td></tr>
+      <tr><td><code>event_types</code></td><td>Count of events by type (excludes <code>session_start</code>/<code>session_end</code>)</td></tr>
+      <tr><td><code>sessions_over_time</code></td><td>Daily session counts and token usage (last 90 days)</td></tr>
+      <tr><td><code>hourly_activity</code></td><td>Event counts by hour of day (0–23) across all time</td></tr>
+    </tbody>
+  </table>
+
+  <h2>Environment Variables</h2>
+
+  <table>
+    <thead><tr><th>Variable</th><th>Default</th><th>Description</th></tr></thead>
+    <tbody>
+      <tr><td><code>PORT</code></td><td><code>3000</code></td><td>HTTP server port</td></tr>
+      <tr><td><code>AGENTLENS_API_KEY</code></td><td><em>none</em></td><td>API key for authentication. When unset, auth is disabled (dev mode)</td></tr>
+      <tr><td><code>CORS_ORIGINS</code></td><td><code>*</code></td><td>Comma-separated allowed origins (e.g. <code>http://localhost:3000,https://app.example.com</code>)</td></tr>
+    </tbody>
+  </table>
+
+  <h2>Error Responses</h2>
+
+  <p>All error responses follow a consistent format:</p>
+
+  <pre><code>{"error": "Description of what went wrong"}</code></pre>
+
+  <table>
+    <thead><tr><th>Status</th><th>Meaning</th></tr></thead>
+    <tbody>
+      <tr><td><code>400</code></td><td>Bad request — invalid input, missing fields, or validation failure</td></tr>
+      <tr><td><code>401</code></td><td>Unauthorized — missing or invalid API key</td></tr>
+      <tr><td><code>404</code></td><td>Not found — session ID doesn't exist</td></tr>
+      <tr><td><code>429</code></td><td>Rate limited — too many requests</td></tr>
+      <tr><td><code>500</code></td><td>Internal server error</td></tr>
+    </tbody>
+  </table>
 
   <div class="footer">
     <span>AgentLens v0.1.0 — MIT License</span>
