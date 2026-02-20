@@ -27,9 +27,18 @@ The project has three components:
 - **Key files:**
   - `server.js` — Express app setup, middleware, static serving
   - `db.js` — SQLite connection with WAL mode, schema initialization
+  - `middleware.js` — Helmet (security headers), CORS, rate limiters, API key auth
+  - `lib/validation.js` — Input sanitization, session ID validation, JSON helpers, type checkers
+  - `lib/explain.js` — Human-readable markdown explanation generator for agent sessions
   - `routes/events.js` — POST /events (batched event ingestion with transactions)
-  - `routes/sessions.js` — GET /sessions, GET /sessions/:id, GET /sessions/:id/explain
+  - `routes/sessions.js` — GET /sessions, GET /sessions/:id, GET /sessions/:id/explain, /export, /compare
+  - `routes/analytics.js` — GET /analytics (aggregate statistics, model usage, time series)
+  - `routes/pricing.js` — GET/PUT /pricing, GET /pricing/costs/:sessionId, DELETE /pricing/:model
   - `seed.js` — Demo data seeder
+- **Tests:** `cd backend && npm test` (Jest — tests in `backend/tests/`)
+  - `tests/validation.test.js` — All validation/sanitization functions (48 tests)
+  - `tests/explain.test.js` — Explanation generator, truncation, duration formatting (27 tests)
+  - `tests/middleware.test.js` — API key auth, middleware factories, CORS config (10 tests)
 - **Install:** `cd backend && npm install`
 - **Run:** `node backend/server.js` (starts on port 3000)
 - **Database:** SQLite (auto-created at `backend/agentlens.db`)
@@ -52,8 +61,11 @@ The project has three components:
 ## How to Test
 
 ```bash
+# Backend — run unit tests
+cd backend && npm install && npm test
+
 # Backend — start server and hit health endpoint
-cd backend && npm install && node server.js &
+node server.js &
 curl http://localhost:3000/health
 
 # SDK — install and run tests
