@@ -7,7 +7,7 @@
 
 const express = require("express");
 const { getDb } = require("../db");
-const { sanitizeString } = require("../lib/validation");
+const { sanitizeString, isValidSessionId } = require("../lib/validation");
 
 const router = express.Router();
 
@@ -50,6 +50,10 @@ function getPricingStatements() {
         updated_at = excluded.updated_at
     `),
     deleteModel: db.prepare("DELETE FROM model_pricing WHERE model = ?"),
+    getSession: db.prepare("SELECT * FROM sessions WHERE session_id = ?"),
+    getSessionEvents: db.prepare(
+      "SELECT event_id, event_type, model, tokens_in, tokens_out, duration_ms, timestamp FROM events WHERE session_id = ? ORDER BY timestamp ASC"
+    ),
   };
 
   return _pricingStmts;
@@ -170,7 +174,6 @@ router.delete("/:model", (req, res) => {
 // GET /pricing/costs/:sessionId — Calculate costs for a session
 router.get("/costs/:sessionId", (req, res) => {
   const { sessionId } = req.params;
-  const { isValidSessionId } = require("../lib/validation");
 
   if (!isValidSessionId(sessionId)) {
     return res.status(400).json({ error: "Invalid session ID format" });
@@ -178,7 +181,6 @@ router.get("/costs/:sessionId", (req, res) => {
 
   try {
     seedDefaults();
-    const db = getDb();
     const stmts = getPricingStatements();
 
     // Get all pricing
@@ -200,14 +202,12 @@ router.get("/costs/:sessionId", (req, res) => {
     }
 
     // Get session events
-    const session = db.prepare("SELECT * FROM sessions WHERE session_id = ?").get(sessionId);
+    const session = stmts.getSession.get(sessionId);
     if (!session) {
       return res.status(404).json({ error: "Session not found" });
     }
 
-    const events = db.prepare(
-      "SELECT event_id, event_type, model, tokens_in, tokens_out, duration_ms, timestamp FROM events WHERE session_id = ? ORDER BY timestamp ASC"
-    ).all(sessionId);
+    const events = stmts.getSessionEvents.all(sessionId);
 
     // Calculate per-event costs
     let totalCost = 0;

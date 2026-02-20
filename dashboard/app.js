@@ -6,6 +6,8 @@ let currentSession = null;
 let compareSelection = []; // Array of {id, name} for comparison
 let analyticsData = null;  // Cached analytics data
 let analyticsVisible = false;
+let costData = null;       // Cached cost data for current session
+let pricingData = null;    // Cached pricing configuration
 
 // ── Initialization ──────────────────────────────────────────────────
 
@@ -1349,9 +1351,6 @@ function formatDurationShort(ms) {
 }
 
 // ── Cost Estimation ─────────────────────────────────────────────────
-
-let costData = null;
-let pricingData = null;
 
 async function loadCosts(sessionId) {
   const loadingEl = document.getElementById("costsLoading");

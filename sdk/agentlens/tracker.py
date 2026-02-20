@@ -2,7 +2,6 @@
 
 from __future__ import annotations
 
-import time
 from typing import Any
 
 from agentlens.models import AgentEvent, ToolCall, DecisionTrace, Session
