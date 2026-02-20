@@ -5,7 +5,14 @@ Lightweight Python SDK for tracking AI agent behavior with full observability.
 ## Installation
 
 ```bash
-pip install -e .
+pip install agentlens
+```
+
+Or install from source for development:
+
+```bash
+cd sdk
+pip install -e ".[dev]"
 ```
 
 ## Quick Start

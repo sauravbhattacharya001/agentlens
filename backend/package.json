@@ -1,15 +1,49 @@
 {
   "name": "agentlens-backend",
   "version": "0.1.0",
-  "description": "AgentLens Dashboard Backend API",
+  "description": "AgentLens Dashboard Backend API — Observability and explainability for AI agents",
   "main": "server.js",
   "scripts": {
     "start": "node server.js",
     "seed": "node seed.js",
     "dev": "node server.js",
     "test": "jest --verbose",
-    "test:coverage": "jest --coverage --verbose"
+    "test:coverage": "jest --coverage --verbose",
+    "prepublishOnly": "npm test"
   },
+  "keywords": [
+    "ai",
+    "agents",
+    "observability",
+    "explainability",
+    "llm",
+    "monitoring",
+    "tracing",
+    "dashboard"
+  ],
+  "repository": {
+    "type": "git",
+    "url": "https://github.com/sauravbhattacharya001/agentlens.git",
+    "directory": "backend"
+  },
+  "homepage": "https://github.com/sauravbhattacharya001/agentlens#readme",
+  "bugs": {
+    "url": "https://github.com/sauravbhattacharya001/agentlens/issues"
+  },
+  "author": "Saurav Bhattacharya <online.saurav@gmail.com>",
+  "license": "MIT",
+  "engines": {
+    "node": ">=18.0.0"
+  },
+  "files": [
+    "server.js",
+    "db.js",
+    "middleware.js",
+    "seed.js",
+    "lib/",
+    "routes/",
+    ".env.example"
+  ],
   "dependencies": {
     "better-sqlite3": "^11.0.0",
     "cors": "^2.8.5",
