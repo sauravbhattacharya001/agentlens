@@ -376,6 +376,179 @@ router.post("/compare", (req, res) => {
   }
 });
 
+// GET /sessions/:id/events/search — Search and filter events within a session
+router.get("/:id/events/search", (req, res) => {
+  const db = getDb();
+  const { id } = req.params;
+
+  if (!isValidSessionId(id)) {
+    return res.status(400).json({ error: "Invalid session ID format" });
+  }
+
+  try {
+    const stmts = getSessionStatements();
+    const session = stmts.getById.get(id);
+    if (!session) {
+      return res.status(404).json({ error: "Session not found" });
+    }
+
+    // Get all events for the session
+    const allEvents = stmts.eventsBySession.all(id).map((e) => ({
+      ...e,
+      input_data: safeJsonParse(e.input_data),
+      output_data: safeJsonParse(e.output_data),
+      tool_call: safeJsonParse(e.tool_call, null),
+      decision_trace: safeJsonParse(e.decision_trace, null),
+    }));
+
+    // ── Apply filters ────────────────────────────────────────────────
+    let filtered = allEvents;
+
+    // Filter by event type (comma-separated list)
+    const typeFilter = req.query.type;
+    if (typeFilter) {
+      const types = typeFilter.split(",").map((t) => t.trim().toLowerCase());
+      filtered = filtered.filter((e) =>
+        types.includes(e.event_type.toLowerCase())
+      );
+    }
+
+    // Filter by model (comma-separated list, case-insensitive substring match)
+    const modelFilter = req.query.model;
+    if (modelFilter) {
+      const models = modelFilter.split(",").map((m) => m.trim().toLowerCase());
+      filtered = filtered.filter((e) =>
+        e.model && models.some((m) => e.model.toLowerCase().includes(m))
+      );
+    }
+
+    // Full-text search across input_data, output_data, tool_call, reasoning
+    const q = req.query.q;
+    if (q) {
+      const searchTerms = q.toLowerCase().split(/\s+/).filter(Boolean);
+      filtered = filtered.filter((e) => {
+        const searchable = [
+          JSON.stringify(e.input_data || ""),
+          JSON.stringify(e.output_data || ""),
+          e.tool_call ? JSON.stringify(e.tool_call) : "",
+          e.decision_trace?.reasoning || "",
+          e.event_type || "",
+          e.model || "",
+        ]
+          .join(" ")
+          .toLowerCase();
+        return searchTerms.every((term) => searchable.includes(term));
+      });
+    }
+
+    // Filter by minimum total tokens
+    const minTokens = parseInt(req.query.min_tokens);
+    if (Number.isFinite(minTokens) && minTokens > 0) {
+      filtered = filtered.filter(
+        (e) => (e.tokens_in || 0) + (e.tokens_out || 0) >= minTokens
+      );
+    }
+
+    // Filter by maximum total tokens
+    const maxTokens = parseInt(req.query.max_tokens);
+    if (Number.isFinite(maxTokens) && maxTokens > 0) {
+      filtered = filtered.filter(
+        (e) => (e.tokens_in || 0) + (e.tokens_out || 0) <= maxTokens
+      );
+    }
+
+    // Filter by time range (ISO timestamps)
+    const after = req.query.after;
+    if (after) {
+      const afterDate = new Date(after);
+      if (!isNaN(afterDate.getTime())) {
+        filtered = filtered.filter(
+          (e) => new Date(e.timestamp) >= afterDate
+        );
+      }
+    }
+
+    const before = req.query.before;
+    if (before) {
+      const beforeDate = new Date(before);
+      if (!isNaN(beforeDate.getTime())) {
+        filtered = filtered.filter(
+          (e) => new Date(e.timestamp) <= beforeDate
+        );
+      }
+    }
+
+    // Filter by minimum duration
+    const minDuration = parseFloat(req.query.min_duration_ms);
+    if (Number.isFinite(minDuration) && minDuration > 0) {
+      filtered = filtered.filter(
+        (e) => (e.duration_ms || 0) >= minDuration
+      );
+    }
+
+    // Filter for events with errors only
+    if (req.query.errors === "true") {
+      filtered = filtered.filter(
+        (e) =>
+          e.event_type === "error" ||
+          e.event_type === "agent_error" ||
+          e.event_type === "tool_error"
+      );
+    }
+
+    // Filter for events with tool calls only
+    if (req.query.has_tools === "true") {
+      filtered = filtered.filter((e) => e.tool_call != null);
+    }
+
+    // Filter for events with reasoning only
+    if (req.query.has_reasoning === "true") {
+      filtered = filtered.filter(
+        (e) => e.decision_trace?.reasoning
+      );
+    }
+
+    // ── Compute summary stats for filtered results ──────────────────
+    const totalTokensIn = filtered.reduce((s, e) => s + (e.tokens_in || 0), 0);
+    const totalTokensOut = filtered.reduce((s, e) => s + (e.tokens_out || 0), 0);
+    const totalDuration = filtered.reduce((s, e) => s + (e.duration_ms || 0), 0);
+    const eventTypes = {};
+    const models = {};
+    filtered.forEach((e) => {
+      eventTypes[e.event_type] = (eventTypes[e.event_type] || 0) + 1;
+      if (e.model) {
+        models[e.model] = (models[e.model] || 0) + 1;
+      }
+    });
+
+    // ── Pagination ──────────────────────────────────────────────────
+    const limit = Math.min(Math.max(1, parseInt(req.query.limit) || 100), 500);
+    const offset = Math.max(0, parseInt(req.query.offset) || 0);
+    const paginated = filtered.slice(offset, offset + limit);
+
+    res.json({
+      session_id: id,
+      total_events: allEvents.length,
+      matched: filtered.length,
+      returned: paginated.length,
+      offset,
+      limit,
+      summary: {
+        tokens_in: totalTokensIn,
+        tokens_out: totalTokensOut,
+        total_tokens: totalTokensIn + totalTokensOut,
+        total_duration_ms: Math.round(totalDuration * 100) / 100,
+        event_types: eventTypes,
+        models,
+      },
+      events: paginated,
+    });
+  } catch (err) {
+    console.error("Error searching events:", err);
+    res.status(500).json({ error: "Failed to search events" });
+  }
+});
+
 // GET /sessions/:id/explain — Human-readable explanation
 router.get("/:id/explain", (req, res) => {
   const db = getDb();

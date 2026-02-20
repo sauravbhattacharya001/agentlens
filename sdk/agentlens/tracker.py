@@ -308,3 +308,105 @@ class AgentTracker:
         )
         response.raise_for_status()
         return response.json()
+
+    def search_events(
+        self,
+        session_id: str | None = None,
+        *,
+        q: str | None = None,
+        event_type: str | None = None,
+        model: str | None = None,
+        min_tokens: int | None = None,
+        max_tokens: int | None = None,
+        min_duration_ms: float | None = None,
+        has_tools: bool = False,
+        has_reasoning: bool = False,
+        errors: bool = False,
+        after: str | None = None,
+        before: str | None = None,
+        limit: int = 100,
+        offset: int = 0,
+    ) -> dict[str, Any]:
+        """Search and filter events within a session.
+
+        Provides full-text search across event data (input, output, tool
+        calls, reasoning) and filtering by event type, model, token count,
+        duration, and more.
+
+        Args:
+            session_id: Session to search in. Defaults to the current session.
+            q: Full-text search query (searches input, output, tool data,
+                reasoning). Multiple space-separated terms are AND-matched.
+            event_type: Filter by event type(s). Comma-separated for
+                multiple types (e.g., ``"llm_call,tool_call"``).
+            model: Filter by model name(s). Comma-separated, case-insensitive
+                substring match.
+            min_tokens: Minimum total tokens (input + output) threshold.
+            max_tokens: Maximum total tokens (input + output) threshold.
+            min_duration_ms: Minimum event duration in milliseconds.
+            has_tools: If True, only return events with tool calls.
+            has_reasoning: If True, only return events with decision reasoning.
+            errors: If True, only return error events.
+            after: ISO timestamp — only events at or after this time.
+            before: ISO timestamp — only events at or before this time.
+            limit: Max events to return (default 100, max 500).
+            offset: Pagination offset.
+
+        Returns:
+            A dict containing:
+            - ``session_id``: The session searched.
+            - ``total_events``: Total events in the session.
+            - ``matched``: Number of events matching the filters.
+            - ``returned``: Number of events in this page.
+            - ``offset``: Current offset.
+            - ``limit``: Current limit.
+            - ``summary``: Aggregate stats for matched events (tokens,
+              duration, event type breakdown, model breakdown).
+            - ``events``: List of matched event dicts.
+
+        Raises:
+            RuntimeError: If no session is specified and there is no current
+                session.
+            httpx.HTTPStatusError: If the backend returns an error.
+        """
+        sid = session_id or self._current_session_id
+        if not sid:
+            raise RuntimeError(
+                "No session to search. Specify session_id or start a session first."
+            )
+
+        params: dict[str, str | int | float] = {
+            "limit": min(max(1, limit), 500),
+            "offset": max(0, offset),
+        }
+
+        if q:
+            params["q"] = q
+        if event_type:
+            params["type"] = event_type
+        if model:
+            params["model"] = model
+        if min_tokens is not None and min_tokens > 0:
+            params["min_tokens"] = min_tokens
+        if max_tokens is not None and max_tokens > 0:
+            params["max_tokens"] = max_tokens
+        if min_duration_ms is not None and min_duration_ms > 0:
+            params["min_duration_ms"] = min_duration_ms
+        if has_tools:
+            params["has_tools"] = "true"
+        if has_reasoning:
+            params["has_reasoning"] = "true"
+        if errors:
+            params["errors"] = "true"
+        if after:
+            params["after"] = after
+        if before:
+            params["before"] = before
+
+        response = self.transport._client.get(
+            f"{self.transport.endpoint}/sessions/{sid}/events/search",
+            params=params,
+            headers={"X-API-Key": self.transport.api_key},
+        )
+        response.raise_for_status()
+        return response.json()

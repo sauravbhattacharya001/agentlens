@@ -120,6 +120,64 @@
 
         <!-- Timeline Tab -->
         <div id="timelineTab" class="tab-content active">
+          <!-- Event Search & Filter Bar -->
+          <div class="event-search-bar" id="eventSearchBar">
+            <div class="search-row">
+              <div class="search-input-wrap">
+                <span class="search-icon">🔍</span>
+                <input type="text" id="eventSearchInput" class="search-text-input"
+                  placeholder="Search events (input, output, reasoning, tools...)"
+                  oninput="onEventSearchInput()">
+                <button class="search-clear-btn" id="searchClearBtn" onclick="clearEventSearch()" style="display:none">✕</button>
+              </div>
+              <select id="eventTypeFilter" class="search-select" onchange="applyEventFilters()">
+                <option value="">All Types</option>
+                <option value="llm_call">LLM Call</option>
+                <option value="tool_call">Tool Call</option>
+                <option value="agent_call">Agent Call</option>
+                <option value="error,agent_error,tool_error">Errors</option>
+                <option value="generic">Generic</option>
+              </select>
+              <select id="eventModelFilter" class="search-select" onchange="applyEventFilters()">
+                <option value="">All Models</option>
+              </select>
+              <button class="btn btn-filter-toggle" id="advancedFilterBtn" onclick="toggleAdvancedFilters()">
+                ⚙️ Filters
+              </button>
+            </div>
+            <!-- Advanced Filters (collapsed) -->
+            <div class="advanced-filters" id="advancedFilters" style="display:none">
+              <div class="filter-group">
+                <label>Min Tokens</label>
+                <input type="number" id="filterMinTokens" class="filter-number-input" min="0" placeholder="0" onchange="applyEventFilters()">
+              </div>
+              <div class="filter-group">
+                <label>Min Duration (ms)</label>
+                <input type="number" id="filterMinDuration" class="filter-number-input" min="0" placeholder="0" onchange="applyEventFilters()">
+              </div>
+              <div class="filter-group">
+                <label class="filter-checkbox-label">
+                  <input type="checkbox" id="filterHasTools" onchange="applyEventFilters()"> Has Tool Calls
+                </label>
+              </div>
+              <div class="filter-group">
+                <label class="filter-checkbox-label">
+                  <input type="checkbox" id="filterHasReasoning" onchange="applyEventFilters()"> Has Reasoning
+                </label>
+              </div>
+              <div class="filter-group">
+                <label class="filter-checkbox-label">
+                  <input type="checkbox" id="filterErrorsOnly" onchange="applyEventFilters()"> Errors Only
+                </label>
+              </div>
+              <button class="btn btn-secondary btn-sm" onclick="resetEventFilters()">Reset Filters</button>
+            </div>
+            <!-- Results Info Bar -->
+            <div class="search-results-bar" id="searchResultsBar" style="display:none">
+              <span id="searchResultsText"></span>
+              <span id="searchResultsStats"></span>
+            </div>
+          </div>
           <div id="timeline" class="timeline"></div>
         </div>
 

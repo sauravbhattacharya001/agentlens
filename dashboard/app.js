@@ -85,6 +85,11 @@ async function loadSessionDetail(sessionId) {
     renderTimeline(currentSession.events);
     renderTokenCharts(currentSession.events);
     loadExplanation(sessionId);
+
+    // Populate model filter for event search
+    populateModelFilter(currentSession.events || []);
+    // Reset any active filters
+    resetEventFilters();
   } catch (err) {
     console.error("Error loading session:", err);
   }
@@ -1831,6 +1836,265 @@ async function resetPricing() {
   } catch (err) {
     showToast(`❌ Failed to reset pricing: ${err.message}`);
   }
+}
+
+// ── Event Search & Filter ────────────────────────────────────────────
+
+let eventSearchTimeout = null;
+let allSessionEvents = []; // Cache of all events for current session
+let filteredEventIndices = null; // null means "no filter active"
+
+function onEventSearchInput() {
+  const input = document.getElementById("eventSearchInput");
+  const clearBtn = document.getElementById("searchClearBtn");
+  clearBtn.style.display = input.value ? "flex" : "none";
+
+  // Debounce search
+  clearTimeout(eventSearchTimeout);
+  eventSearchTimeout = setTimeout(() => applyEventFilters(), 300);
+}
+
+function clearEventSearch() {
+  document.getElementById("eventSearchInput").value = "";
+  document.getElementById("searchClearBtn").style.display = "none";
+  applyEventFilters();
+}
+
+function toggleAdvancedFilters() {
+  const panel = document.getElementById("advancedFilters");
+  const btn = document.getElementById("advancedFilterBtn");
+  const visible = panel.style.display !== "none";
+  panel.style.display = visible ? "none" : "flex";
+  btn.classList.toggle("active", !visible);
+}
+
+function resetEventFilters() {
+  document.getElementById("eventSearchInput").value = "";
+  document.getElementById("searchClearBtn").style.display = "none";
+  document.getElementById("eventTypeFilter").value = "";
+  document.getElementById("eventModelFilter").value = "";
+  document.getElementById("filterMinTokens").value = "";
+  document.getElementById("filterMinDuration").value = "";
+  document.getElementById("filterHasTools").checked = false;
+  document.getElementById("filterHasReasoning").checked = false;
+  document.getElementById("filterErrorsOnly").checked = false;
+  applyEventFilters();
+}
+
+function populateModelFilter(events) {
+  const select = document.getElementById("eventModelFilter");
+  const currentVal = select.value;
+  const models = [...new Set(events.filter((e) => e.model).map((e) => e.model))].sort();
+
+  // Preserve existing selection
+  select.innerHTML = '<option value="">All Models</option>';
+  models.forEach((m) => {
+    const opt = document.createElement("option");
+    opt.value = m;
+    opt.textContent = m;
+    select.appendChild(opt);
+  });
+  if (currentVal && models.includes(currentVal)) {
+    select.value = currentVal;
+  }
+}
+
+function hasActiveFilters() {
+  return (
+    document.getElementById("eventSearchInput").value.trim() !== "" ||
+    document.getElementById("eventTypeFilter").value !== "" ||
+    document.getElementById("eventModelFilter").value !== "" ||
+    (parseInt(document.getElementById("filterMinTokens").value) > 0) ||
+    (parseFloat(document.getElementById("filterMinDuration").value) > 0) ||
+    document.getElementById("filterHasTools").checked ||
+    document.getElementById("filterHasReasoning").checked ||
+    document.getElementById("filterErrorsOnly").checked
+  );
+}
+
+async function applyEventFilters() {
+  if (!currentSession) return;
+
+  const active = hasActiveFilters();
+  const resultsBar = document.getElementById("searchResultsBar");
+
+  if (!active) {
+    // No filters — show all events normally
+    filteredEventIndices = null;
+    resultsBar.style.display = "none";
+    renderTimeline(currentSession.events);
+    return;
+  }
+
+  // Build query params from filter controls
+  const params = new URLSearchParams();
+
+  const q = document.getElementById("eventSearchInput").value.trim();
+  if (q) params.set("q", q);
+
+  const typeFilter = document.getElementById("eventTypeFilter").value;
+  if (typeFilter) params.set("type", typeFilter);
+
+  const modelFilter = document.getElementById("eventModelFilter").value;
+  if (modelFilter) params.set("model", modelFilter);
+
+  const minTokens = parseInt(document.getElementById("filterMinTokens").value);
+  if (Number.isFinite(minTokens) && minTokens > 0) params.set("min_tokens", minTokens);
+
+  const minDuration = parseFloat(document.getElementById("filterMinDuration").value);
+  if (Number.isFinite(minDuration) && minDuration > 0) params.set("min_duration_ms", minDuration);
+
+  if (document.getElementById("filterHasTools").checked) params.set("has_tools", "true");
+  if (document.getElementById("filterHasReasoning").checked) params.set("has_reasoning", "true");
+  if (document.getElementById("filterErrorsOnly").checked) params.set("errors", "true");
+
+  params.set("limit", "500");
+
+  try {
+    const res = await fetch(
+      `${API_BASE}/sessions/${currentSession.session_id}/events/search?${params}`
+    );
+    if (!res.ok) throw new Error("Search failed");
+
+    const data = await res.json();
+
+    // Build a set of matched event IDs for highlighting
+    const matchedIds = new Set(data.events.map((e) => e.event_id));
+    filteredEventIndices = matchedIds;
+
+    // Show results bar
+    resultsBar.style.display = "flex";
+    document.getElementById("searchResultsText").textContent =
+      `${data.matched} of ${data.total_events} events match`;
+
+    const statsTokens = data.summary.total_tokens.toLocaleString();
+    const statsDuration = data.summary.total_duration_ms > 0
+      ? `${data.summary.total_duration_ms.toFixed(0)}ms`
+      : "—";
+    document.getElementById("searchResultsStats").textContent =
+      `${statsTokens} tokens · ${statsDuration} processing`;
+
+    // Re-render timeline with highlighting
+    renderFilteredTimeline(currentSession.events, matchedIds, q);
+  } catch (err) {
+    console.error("Event search error:", err);
+    resultsBar.style.display = "flex";
+    document.getElementById("searchResultsText").textContent = "Search error";
+    document.getElementById("searchResultsStats").textContent = "";
+  }
+}
+
+function renderFilteredTimeline(events, matchedIds, searchQuery) {
+  const el = document.getElementById("timeline");
+
+  if (!events || events.length === 0) {
+    el.innerHTML = '<div class="loading">No events in this session.</div>';
+    return;
+  }
+
+  el.innerHTML = events
+    .map((event, i) => {
+      const isMatch = matchedIds.has(event.event_id);
+      const highlightClass = isMatch ? "search-highlight" : "search-dimmed";
+
+      const typeClass = event.event_type;
+      const time = new Date(event.timestamp).toLocaleTimeString();
+
+      let ioHtml = "";
+      if (event.input_data || event.output_data) {
+        ioHtml = `<div class="event-io">`;
+        if (event.input_data) {
+          ioHtml += `
+          <div class="event-io-block">
+            <div class="io-label">Input</div>
+            ${highlightText(formatJson(event.input_data), searchQuery)}
+          </div>`;
+        }
+        if (event.output_data) {
+          ioHtml += `
+          <div class="event-io-block">
+            <div class="io-label">Output</div>
+            ${highlightText(formatJson(event.output_data), searchQuery)}
+          </div>`;
+        }
+        ioHtml += `</div>`;
+      }
+
+      let toolHtml = "";
+      if (event.tool_call) {
+        const tc = event.tool_call;
+        toolHtml = `
+        <div class="event-io">
+          <div class="event-io-block">
+            <div class="io-label">Tool: ${highlightText(escHtml(tc.tool_name), searchQuery)} — Input</div>
+            ${highlightText(formatJson(tc.tool_input), searchQuery)}
+          </div>
+          <div class="event-io-block">
+            <div class="io-label">Tool Output</div>
+            ${tc.tool_output ? highlightText(formatJson(tc.tool_output), searchQuery) : "<em>none</em>"}
+          </div>
+        </div>`;
+      }
+
+      let reasoningHtml = "";
+      if (event.decision_trace && event.decision_trace.reasoning) {
+        reasoningHtml = `
+        <div class="event-reasoning">
+          <div class="reasoning-label">💡 Decision Reasoning</div>
+          ${highlightText(escHtml(event.decision_trace.reasoning), searchQuery)}
+        </div>`;
+      }
+
+      let statsHtml = "";
+      const stats = [];
+      if (event.tokens_in || event.tokens_out) {
+        stats.push(
+          `<span>📊 ${event.tokens_in} → ${event.tokens_out} tokens</span>`
+        );
+      }
+      if (event.duration_ms) {
+        stats.push(`<span>⏱ ${event.duration_ms.toFixed(0)}ms</span>`);
+      }
+      if (event.model) {
+        stats.push(`<span>🤖 ${escHtml(event.model)}</span>`);
+      }
+      if (stats.length > 0) {
+        statsHtml = `<div class="event-stats">${stats.join("")}</div>`;
+      }
+
+      return `
+      <div class="timeline-event ${typeClass} ${highlightClass}">
+        <div class="event-header">
+          <div class="event-type">
+            <span class="event-type-badge ${typeClass}">${formatEventType(event.event_type)}</span>
+            ${event.model ? `<span class="event-model">${escHtml(event.model)}</span>` : ""}
+          </div>
+          <span class="event-time">${time}</span>
+        </div>
+        ${ioHtml}
+        ${toolHtml}
+        ${reasoningHtml}
+        ${statsHtml}
+      </div>
+    `;
+    })
+    .join("");
+}
+
+function highlightText(text, query) {
+  if (!query || !text) return text;
+  const terms = query
+    .toLowerCase()
+    .split(/\s+/)
+    .filter(Boolean);
+  if (terms.length === 0) return text;
+
+  // Escape regex special characters in each term
+  const escapedTerms = terms.map((t) =>
+    t.replace(/[.*+?^${}()|[\]\\]/g, "\\$&")
+  );
+  const regex = new RegExp(`(${escapedTerms.join("|")})`, "gi");
+  return text.replace(regex, '<span class="search-match-text">$1</span>');
 }
 
 // ── Utilities ───────────────────────────────────────────────────────
