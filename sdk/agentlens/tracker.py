@@ -243,3 +243,69 @@ class AgentTracker:
             lines.append(line)
 
         return "\n".join(lines)
+
+    def get_costs(
+        self,
+        session_id: str | None = None,
+    ) -> dict[str, Any]:
+        """Get cost breakdown for a session.
+
+        Fetches cost data from the AgentLens backend, calculated using
+        the configured model pricing (per 1M tokens).
+
+        Args:
+            session_id: Session to get costs for. Defaults to the current session.
+
+        Returns:
+            A dict containing ``total_cost``, ``total_input_cost``,
+            ``total_output_cost``, ``model_costs`` (per-model breakdown),
+            ``event_costs`` (per-event costs), ``currency``, and
+            ``unmatched_models`` (models without pricing).
+
+        Raises:
+            RuntimeError: If no session is specified and there is no current
+                session.
+            httpx.HTTPStatusError: If the backend returns an error.
+        """
+        sid = session_id or self._current_session_id
+        if not sid:
+            raise RuntimeError("No session to get costs for. Specify session_id or start a session first.")
+
+        response = self.transport._client.get(
+            f"{self.transport.endpoint}/pricing/costs/{sid}",
+            headers={"X-API-Key": self.transport.api_key},
+        )
+        response.raise_for_status()
+        return response.json()
+
+    def get_pricing(self) -> dict[str, Any]:
+        """Get the current model pricing configuration.
+
+        Returns:
+            A dict with ``pricing`` (current model prices) and ``defaults``
+            (built-in default prices).
+        """
+        response = self.transport._client.get(
+            f"{self.transport.endpoint}/pricing",
+            headers={"X-API-Key": self.transport.api_key},
+        )
+        response.raise_for_status()
+        return response.json()
+
+    def set_pricing(self, pricing: dict[str, dict[str, float]]) -> dict[str, Any]:
+        """Update model pricing configuration.
+
+        Args:
+            pricing: A dict mapping model names to pricing dicts with
+                ``input_cost_per_1m`` and ``output_cost_per_1m`` keys.
+
+        Returns:
+            A dict with ``status`` and ``updated`` count.
+        """
+        response = self.transport._client.put(
+            f"{self.transport.endpoint}/pricing",
+            json={"pricing": pricing},
+            headers={"X-API-Key": self.transport.api_key},
+        )
+        response.raise_for_status()
+        return response.json()

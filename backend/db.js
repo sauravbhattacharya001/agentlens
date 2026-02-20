@@ -56,6 +56,15 @@ function initSchema() {
 
     -- Composite index for session-scoped event ordering (used by session detail)
     CREATE INDEX IF NOT EXISTS idx_events_session_ts ON events(session_id, timestamp);
+
+    -- Model pricing for cost estimation
+    CREATE TABLE IF NOT EXISTS model_pricing (
+      model TEXT PRIMARY KEY,
+      input_cost_per_1m REAL NOT NULL DEFAULT 0,
+      output_cost_per_1m REAL NOT NULL DEFAULT 0,
+      currency TEXT NOT NULL DEFAULT 'USD',
+      updated_at TEXT NOT NULL
+    );
   `);
 
   // Performance: optimize for read-heavy analytics workload

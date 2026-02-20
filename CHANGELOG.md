@@ -5,6 +5,20 @@ All notable changes to AgentLens will be documented in this file.
 The format is based on [Keep a Changelog](https://keepachangelog.com/en/1.1.0/),
 and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0.html).
 
+## [1.1.0] - 2026-02-19
+
+### Added
+
+- **Cost Estimation** — Full cost tracking across sessions and events
+  - `model_pricing` DB table with default pricing for 14 popular models (GPT-4/4o/3.5, Claude 3/3.5/4, Gemini Pro/Flash)
+  - `GET /pricing` — List all model pricing configuration
+  - `PUT /pricing` — Update pricing for one or more models
+  - `DELETE /pricing/:model` — Remove custom pricing
+  - `GET /pricing/costs/:sessionId` — Calculate per-event and per-model costs with fuzzy model matching
+  - Dashboard **💲 Costs tab** with cost overview cards, per-event cost bar chart, cumulative cost line chart, cost-by-model table, top costliest events list, and inline pricing editor
+  - SDK methods: `get_costs()`, `get_pricing()`, `set_pricing()` with full module-level API
+  - 12 new SDK tests (82 total)
+
 ## [1.0.0] - 2026-02-14
 
 ### 🎉 Initial Stable Release

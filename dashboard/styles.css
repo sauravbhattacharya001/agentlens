@@ -1052,6 +1052,27 @@ body {
 .analytics-bar-fill.green { background: var(--green); }
 .analytics-bar-fill.orange { background: var(--orange); }
 
+/* ── Pricing Editor ──────────────────────────────────────────────────── */
+
+.pricing-input {
+  width: 100px;
+  padding: 4px 8px;
+  background: var(--bg-primary);
+  border: 1px solid var(--border);
+  border-radius: var(--radius-sm);
+  color: var(--text-primary);
+  font-size: 0.85rem;
+  font-family: monospace;
+}
+
+.pricing-input:focus {
+  outline: none;
+  border-color: var(--accent);
+  box-shadow: 0 0 0 2px rgba(88, 166, 255, 0.2);
+}
+
+.pricing-input::-webkit-inner-spin-button { opacity: 0.5; }
+
 @media (max-width: 768px) {
   .analytics-charts-row { grid-template-columns: 1fr; }
   .analytics-tables-row { grid-template-columns: 1fr; }

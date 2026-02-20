@@ -14,6 +14,9 @@ __all__ = [
     "explain",
     "export_session",
     "compare_sessions",
+    "get_costs",
+    "get_pricing",
+    "set_pricing",
     "track_agent",
     "track_tool_call",
     "AgentEvent",
@@ -158,3 +161,46 @@ def compare_sessions(session_a: str, session_b: str) -> dict:
     if _tracker is None:
         raise RuntimeError("Call agentlens.init() before compare_sessions()")
     return _tracker.compare_sessions(session_a=session_a, session_b=session_b)
+
+
+def get_costs(session_id: str | None = None) -> dict:
+    """Get cost breakdown for a session.
+
+    Calculates costs using configured model pricing (per 1M tokens).
+
+    Args:
+        session_id: Session to get costs for. Defaults to the current session.
+
+    Returns:
+        A dict with ``total_cost``, ``total_input_cost``, ``total_output_cost``,
+        ``model_costs``, ``event_costs``, ``currency``, and ``unmatched_models``.
+    """
+    if _tracker is None:
+        raise RuntimeError("Call agentlens.init() before get_costs()")
+    return _tracker.get_costs(session_id=session_id)
+
+
+def get_pricing() -> dict:
+    """Get the current model pricing configuration.
+
+    Returns:
+        A dict with ``pricing`` (current prices) and ``defaults`` (built-in defaults).
+    """
+    if _tracker is None:
+        raise RuntimeError("Call agentlens.init() before get_pricing()")
+    return _tracker.get_pricing()
+
+
+def set_pricing(pricing: dict) -> dict:
+    """Update model pricing configuration.
+
+    Args:
+        pricing: A dict mapping model names to pricing dicts with
+            ``input_cost_per_1m`` and ``output_cost_per_1m`` keys.
+
+    Returns:
+        A dict with ``status`` and ``updated`` count.
+    """
+    if _tracker is None:
+        raise RuntimeError("Call agentlens.init() before set_pricing()")
+    return _tracker.set_pricing(pricing=pricing)

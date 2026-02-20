@@ -72,6 +72,7 @@ async function loadSessions() {
 async function loadSessionDetail(sessionId) {
   document.getElementById("sessionListView").classList.remove("active");
   document.getElementById("sessionDetailView").classList.add("active");
+  costData = null; // Reset cost data for new session
 
   try {
     const res = await fetch(`${API_BASE}/sessions/${sessionId}`);
@@ -569,6 +570,11 @@ function switchTab(tabName) {
 
   document.querySelector(`.tab[data-tab="${tabName}"]`).classList.add("active");
   document.getElementById(`${tabName}Tab`).classList.add("active");
+
+  // Lazy-load costs when tab is first opened
+  if (tabName === "costs" && currentSession && !costData) {
+    loadCosts(currentSession.session_id);
+  }
 }
 
 // ── Compare Selection ───────────────────────────────────────────────
@@ -1340,6 +1346,492 @@ function formatDurationShort(ms) {
   if (ms < 60000) return `${(ms / 1000).toFixed(1)}s`;
   if (ms < 3600000) return `${(ms / 60000).toFixed(1)}m`;
   return `${(ms / 3600000).toFixed(1)}h`;
+}
+
+// ── Cost Estimation ─────────────────────────────────────────────────
+
+let costData = null;
+let pricingData = null;
+
+async function loadCosts(sessionId) {
+  const loadingEl = document.getElementById("costsLoading");
+  const contentEl = document.getElementById("costsContent");
+
+  loadingEl.style.display = "block";
+  contentEl.style.display = "none";
+
+  try {
+    const res = await fetch(`${API_BASE}/pricing/costs/${sessionId}`);
+    if (!res.ok) throw new Error("Failed to load costs");
+    costData = await res.json();
+
+    // Also load pricing config
+    const pricingRes = await fetch(`${API_BASE}/pricing`);
+    if (pricingRes.ok) pricingData = await pricingRes.json();
+
+    loadingEl.style.display = "none";
+    contentEl.style.display = "block";
+
+    renderCostOverview(costData);
+    renderCostBarChart(costData);
+    renderCostCumulativeChart(costData);
+    renderCostModelTable(costData);
+    renderCostEventList(costData);
+    renderCostUnmatched(costData);
+    renderPricingEditor(pricingData);
+  } catch (err) {
+    loadingEl.textContent = `Error: ${escHtml(err.message)}`;
+  }
+}
+
+function formatCost(value) {
+  if (value === 0) return "$0.00";
+  if (value < 0.01) return `$${value.toFixed(6)}`;
+  if (value < 1) return `$${value.toFixed(4)}`;
+  return `$${value.toFixed(2)}`;
+}
+
+function renderCostOverview(data) {
+  const el = document.getElementById("costOverview");
+  const costPerEvent = data.event_costs.length > 0 ? data.total_cost / data.event_costs.length : 0;
+  const pctInput = data.total_cost > 0 ? (data.total_input_cost / data.total_cost * 100) : 0;
+  const pctOutput = data.total_cost > 0 ? (data.total_output_cost / data.total_cost * 100) : 0;
+
+  el.innerHTML = `
+    <div class="info-card">
+      <div class="label">Total Cost</div>
+      <div class="value" style="color:var(--green)">${formatCost(data.total_cost)}</div>
+    </div>
+    <div class="info-card">
+      <div class="label">Input Cost</div>
+      <div class="value">${formatCost(data.total_input_cost)} <span style="font-size:0.7rem;color:var(--text-muted)">(${pctInput.toFixed(0)}%)</span></div>
+    </div>
+    <div class="info-card">
+      <div class="label">Output Cost</div>
+      <div class="value">${formatCost(data.total_output_cost)} <span style="font-size:0.7rem;color:var(--text-muted)">(${pctOutput.toFixed(0)}%)</span></div>
+    </div>
+    <div class="info-card">
+      <div class="label">Cost/Event</div>
+      <div class="value">${formatCost(costPerEvent)}</div>
+    </div>
+    <div class="info-card">
+      <div class="label">Models Priced</div>
+      <div class="value">${Object.keys(data.model_costs).length}</div>
+    </div>
+    <div class="info-card">
+      <div class="label">Currency</div>
+      <div class="value">${data.currency}</div>
+    </div>
+  `;
+}
+
+function renderCostBarChart(data) {
+  const canvas = document.getElementById("costBarChart");
+  const ctx = canvas.getContext("2d");
+  const w = canvas.width, h = canvas.height;
+  const padding = { top: 20, right: 20, bottom: 40, left: 60 };
+
+  ctx.clearRect(0, 0, w, h);
+
+  const costEvents = data.event_costs.filter(e => e.total_cost > 0);
+  if (costEvents.length === 0) {
+    ctx.fillStyle = "#6e7681";
+    ctx.font = "14px sans-serif";
+    ctx.textAlign = "center";
+    ctx.fillText("No cost data (models may not have pricing)", w / 2, h / 2);
+    return;
+  }
+
+  const maxCost = Math.max(...costEvents.map(e => e.total_cost));
+  const barWidth = Math.max(8, (w - padding.left - padding.right) / costEvents.length - 4);
+  const chartH = h - padding.top - padding.bottom;
+
+  // Grid lines
+  ctx.strokeStyle = "#21262d";
+  ctx.lineWidth = 1;
+  for (let i = 0; i <= 4; i++) {
+    const y = padding.top + (chartH / 4) * i;
+    ctx.beginPath();
+    ctx.moveTo(padding.left, y);
+    ctx.lineTo(w - padding.right, y);
+    ctx.stroke();
+
+    ctx.fillStyle = "#6e7681";
+    ctx.font = "11px sans-serif";
+    ctx.textAlign = "right";
+    const val = maxCost * (1 - i / 4);
+    ctx.fillText(formatCost(val), padding.left - 8, y + 4);
+  }
+
+  // Bars
+  costEvents.forEach((e, i) => {
+    const x = padding.left + i * (barWidth + 4);
+    const inH = (e.input_cost / maxCost) * chartH;
+    const outH = (e.output_cost / maxCost) * chartH;
+
+    // Input cost (bottom)
+    ctx.fillStyle = "#58a6ff";
+    ctx.fillRect(x, h - padding.bottom - inH, barWidth / 2, inH);
+
+    // Output cost (stacked)
+    ctx.fillStyle = "#3fb950";
+    ctx.fillRect(x + barWidth / 2, h - padding.bottom - outH, barWidth / 2, outH);
+
+    // Label
+    ctx.fillStyle = "#6e7681";
+    ctx.font = "10px sans-serif";
+    ctx.textAlign = "center";
+    ctx.fillText(`E${i + 1}`, x + barWidth / 2, h - padding.bottom + 14);
+  });
+
+  // Legend
+  ctx.fillStyle = "#58a6ff";
+  ctx.fillRect(w - 140, 8, 10, 10);
+  ctx.fillStyle = "#8b949e";
+  ctx.font = "11px sans-serif";
+  ctx.textAlign = "left";
+  ctx.fillText("Input Cost", w - 126, 17);
+
+  ctx.fillStyle = "#3fb950";
+  ctx.fillRect(w - 140, 24, 10, 10);
+  ctx.fillStyle = "#8b949e";
+  ctx.fillText("Output Cost", w - 126, 33);
+}
+
+function renderCostCumulativeChart(data) {
+  const canvas = document.getElementById("costCumulativeChart");
+  const ctx = canvas.getContext("2d");
+  const w = canvas.width, h = canvas.height;
+  const padding = { top: 20, right: 20, bottom: 40, left: 60 };
+
+  ctx.clearRect(0, 0, w, h);
+
+  const costEvents = data.event_costs.filter(e => e.total_cost > 0);
+  if (costEvents.length === 0) {
+    ctx.fillStyle = "#6e7681";
+    ctx.font = "14px sans-serif";
+    ctx.textAlign = "center";
+    ctx.fillText("No cost data", w / 2, h / 2);
+    return;
+  }
+
+  // Calculate cumulative values
+  let cumInput = 0, cumOutput = 0;
+  const points = costEvents.map(e => {
+    cumInput += e.input_cost;
+    cumOutput += e.output_cost;
+    return { cumInput, cumOutput, total: cumInput + cumOutput };
+  });
+
+  const maxTotal = points[points.length - 1].total;
+  const chartW = w - padding.left - padding.right;
+  const chartH = h - padding.top - padding.bottom;
+
+  // Grid
+  ctx.strokeStyle = "#21262d";
+  ctx.lineWidth = 1;
+  for (let i = 0; i <= 4; i++) {
+    const y = padding.top + (chartH / 4) * i;
+    ctx.beginPath();
+    ctx.moveTo(padding.left, y);
+    ctx.lineTo(w - padding.right, y);
+    ctx.stroke();
+
+    ctx.fillStyle = "#6e7681";
+    ctx.font = "11px sans-serif";
+    ctx.textAlign = "right";
+    ctx.fillText(formatCost(maxTotal * (1 - i / 4)), padding.left - 8, y + 4);
+  }
+
+  // Area fill for total
+  ctx.beginPath();
+  points.forEach((p, i) => {
+    const x = padding.left + (i / (points.length - 1 || 1)) * chartW;
+    const y = padding.top + chartH - (p.total / maxTotal) * chartH;
+    if (i === 0) ctx.moveTo(x, y);
+    else ctx.lineTo(x, y);
+  });
+  ctx.lineTo(padding.left + chartW, padding.top + chartH);
+  ctx.lineTo(padding.left, padding.top + chartH);
+  ctx.closePath();
+  ctx.fillStyle = "rgba(63, 185, 80, 0.1)";
+  ctx.fill();
+
+  // Draw line - cumulative input
+  ctx.strokeStyle = "#58a6ff";
+  ctx.lineWidth = 2;
+  ctx.beginPath();
+  points.forEach((p, i) => {
+    const x = padding.left + (i / (points.length - 1 || 1)) * chartW;
+    const y = padding.top + chartH - (p.cumInput / maxTotal) * chartH;
+    if (i === 0) ctx.moveTo(x, y);
+    else ctx.lineTo(x, y);
+  });
+  ctx.stroke();
+
+  // Draw line - cumulative total
+  ctx.strokeStyle = "#3fb950";
+  ctx.lineWidth = 2;
+  ctx.beginPath();
+  points.forEach((p, i) => {
+    const x = padding.left + (i / (points.length - 1 || 1)) * chartW;
+    const y = padding.top + chartH - (p.total / maxTotal) * chartH;
+    if (i === 0) ctx.moveTo(x, y);
+    else ctx.lineTo(x, y);
+  });
+  ctx.stroke();
+
+  // Dots
+  points.forEach((p, i) => {
+    const x = padding.left + (i / (points.length - 1 || 1)) * chartW;
+
+    ctx.fillStyle = "#58a6ff";
+    ctx.beginPath();
+    ctx.arc(x, padding.top + chartH - (p.cumInput / maxTotal) * chartH, 3, 0, Math.PI * 2);
+    ctx.fill();
+
+    ctx.fillStyle = "#3fb950";
+    ctx.beginPath();
+    ctx.arc(x, padding.top + chartH - (p.total / maxTotal) * chartH, 3, 0, Math.PI * 2);
+    ctx.fill();
+  });
+
+  // Legend
+  ctx.strokeStyle = "#58a6ff";
+  ctx.lineWidth = 2;
+  ctx.beginPath();
+  ctx.moveTo(w - 160, 13);
+  ctx.lineTo(w - 145, 13);
+  ctx.stroke();
+  ctx.fillStyle = "#8b949e";
+  ctx.font = "11px sans-serif";
+  ctx.textAlign = "left";
+  ctx.fillText("Input Cost", w - 140, 17);
+
+  ctx.strokeStyle = "#3fb950";
+  ctx.beginPath();
+  ctx.moveTo(w - 70, 13);
+  ctx.lineTo(w - 55, 13);
+  ctx.stroke();
+  ctx.fillStyle = "#8b949e";
+  ctx.fillText("Total", w - 50, 17);
+}
+
+function renderCostModelTable(data) {
+  const el = document.getElementById("costModelTable");
+  const models = Object.entries(data.model_costs);
+
+  if (models.length === 0) {
+    el.innerHTML = '<h3>💲 Cost by Model</h3><p style="color:var(--text-muted);padding:12px">No priced model usage.</p>';
+    return;
+  }
+
+  // Sort by total cost descending
+  models.sort((a, b) => b[1].total_cost - a[1].total_cost);
+  const maxCost = models[0][1].total_cost || 1;
+
+  const rows = models.map(([model, mc]) => `
+    <tr>
+      <td>${escHtml(model)} ${!mc.matched ? '<span style="color:var(--yellow);font-size:0.75rem" title="No exact pricing match">⚠️</span>' : ''}</td>
+      <td>${mc.calls}</td>
+      <td>${mc.tokens_in.toLocaleString()}</td>
+      <td>${mc.tokens_out.toLocaleString()}</td>
+      <td style="color:#58a6ff">${formatCost(mc.input_cost)}</td>
+      <td style="color:#3fb950">${formatCost(mc.output_cost)}</td>
+      <td style="font-weight:600;color:var(--green)">${formatCost(mc.total_cost)}</td>
+      <td>
+        <div class="analytics-bar-bg">
+          <div class="analytics-bar-fill green" style="width:${(mc.total_cost / maxCost) * 100}%"></div>
+        </div>
+      </td>
+    </tr>
+  `).join("");
+
+  el.innerHTML = `
+    <h3>💲 Cost by Model</h3>
+    <table class="token-table">
+      <thead>
+        <tr>
+          <th>Model</th>
+          <th>Calls</th>
+          <th>Input Tokens</th>
+          <th>Output Tokens</th>
+          <th>Input Cost</th>
+          <th>Output Cost</th>
+          <th>Total Cost</th>
+          <th style="width:80px"></th>
+        </tr>
+      </thead>
+      <tbody>
+        ${rows}
+        <tr style="font-weight:600;border-top:2px solid var(--border);">
+          <td>Total</td>
+          <td>${models.reduce((s, [, m]) => s + m.calls, 0)}</td>
+          <td>${models.reduce((s, [, m]) => s + m.tokens_in, 0).toLocaleString()}</td>
+          <td>${models.reduce((s, [, m]) => s + m.tokens_out, 0).toLocaleString()}</td>
+          <td style="color:#58a6ff">${formatCost(data.total_input_cost)}</td>
+          <td style="color:#3fb950">${formatCost(data.total_output_cost)}</td>
+          <td style="color:var(--green)">${formatCost(data.total_cost)}</td>
+          <td></td>
+        </tr>
+      </tbody>
+    </table>
+  `;
+}
+
+function renderCostEventList(data) {
+  const el = document.getElementById("costEventList");
+  const events = data.event_costs.filter(e => e.total_cost > 0 || e.model);
+
+  if (events.length === 0) {
+    el.innerHTML = "";
+    return;
+  }
+
+  // Show top 20 costliest events
+  const sorted = [...events].sort((a, b) => b.total_cost - a.total_cost).slice(0, 20);
+
+  const rows = sorted.map((e, i) => `
+    <tr>
+      <td>${i + 1}</td>
+      <td><span class="event-type-badge ${e.event_type}">${formatEventType(e.event_type)}</span></td>
+      <td>${escHtml(e.model || '—')}</td>
+      <td>${e.tokens_in.toLocaleString()} / ${e.tokens_out.toLocaleString()}</td>
+      <td style="font-weight:600;color:var(--green)">${formatCost(e.total_cost)}</td>
+      <td style="font-size:0.8rem;color:var(--text-muted)">${new Date(e.timestamp).toLocaleTimeString()}</td>
+    </tr>
+  `).join("");
+
+  el.innerHTML = `
+    <h3>📋 Top ${sorted.length} Costliest Events</h3>
+    <table class="token-table">
+      <thead>
+        <tr>
+          <th>#</th>
+          <th>Type</th>
+          <th>Model</th>
+          <th>Tokens (in/out)</th>
+          <th>Cost</th>
+          <th>Time</th>
+        </tr>
+      </thead>
+      <tbody>${rows}</tbody>
+    </table>
+  `;
+}
+
+function renderCostUnmatched(data) {
+  const el = document.getElementById("costUnmatched");
+  if (!data.unmatched_models || data.unmatched_models.length === 0) {
+    el.style.display = "none";
+    return;
+  }
+
+  el.style.display = "block";
+  el.innerHTML = `
+    <div style="background:rgba(210,153,34,0.1);border:1px solid var(--yellow);border-radius:8px;padding:12px 16px;margin-top:12px">
+      <strong style="color:var(--yellow)">⚠️ Unmatched Models</strong>
+      <p style="color:var(--text-muted);font-size:0.85rem;margin:4px 0">
+        The following models have no pricing configured. Their costs show as $0.
+        Add pricing below to include them in cost calculations.
+      </p>
+      <div style="display:flex;gap:8px;flex-wrap:wrap;margin-top:8px">
+        ${data.unmatched_models.map(m => `<code style="background:var(--card);padding:2px 8px;border-radius:4px;font-size:0.85rem">${escHtml(m)}</code>`).join("")}
+      </div>
+    </div>
+  `;
+}
+
+function renderPricingEditor(data) {
+  const el = document.getElementById("pricingEditor");
+  if (!data || !data.pricing) {
+    el.innerHTML = '<p style="color:var(--text-muted)">Could not load pricing data.</p>';
+    return;
+  }
+
+  const models = Object.entries(data.pricing).sort((a, b) => a[0].localeCompare(b[0]));
+
+  el.innerHTML = `
+    <table class="token-table" id="pricingTable">
+      <thead>
+        <tr>
+          <th>Model</th>
+          <th>Input ($/1M tokens)</th>
+          <th>Output ($/1M tokens)</th>
+        </tr>
+      </thead>
+      <tbody>
+        ${models.map(([model, p]) => `
+          <tr>
+            <td style="font-family:monospace;font-size:0.85rem">${escHtml(model)}</td>
+            <td><input type="number" step="0.01" min="0" class="pricing-input" data-model="${escHtml(model)}" data-type="input" value="${p.input_cost_per_1m}"></td>
+            <td><input type="number" step="0.01" min="0" class="pricing-input" data-model="${escHtml(model)}" data-type="output" value="${p.output_cost_per_1m}"></td>
+          </tr>
+        `).join("")}
+      </tbody>
+    </table>
+  `;
+}
+
+async function savePricing() {
+  const inputs = document.querySelectorAll(".pricing-input");
+  const pricing = {};
+
+  inputs.forEach(input => {
+    const model = input.dataset.model;
+    const type = input.dataset.type;
+    if (!pricing[model]) pricing[model] = {};
+    if (type === "input") pricing[model].input_cost_per_1m = parseFloat(input.value) || 0;
+    if (type === "output") pricing[model].output_cost_per_1m = parseFloat(input.value) || 0;
+  });
+
+  try {
+    const res = await fetch(`${API_BASE}/pricing`, {
+      method: "PUT",
+      headers: { "Content-Type": "application/json" },
+      body: JSON.stringify({ pricing }),
+    });
+
+    if (!res.ok) throw new Error("Failed to save pricing");
+    const result = await res.json();
+    showToast(`✅ Pricing updated (${result.updated} models)`);
+
+    // Refresh costs
+    if (currentSession) {
+      loadCosts(currentSession.session_id);
+    }
+  } catch (err) {
+    showToast(`❌ Failed to save pricing: ${err.message}`);
+  }
+}
+
+async function resetPricing() {
+  try {
+    // Fetch defaults and save them
+    const res = await fetch(`${API_BASE}/pricing`);
+    if (!res.ok) throw new Error("Failed to load defaults");
+    const data = await res.json();
+
+    const pricing = {};
+    for (const [model, prices] of Object.entries(data.defaults)) {
+      pricing[model] = { input_cost_per_1m: prices.input, output_cost_per_1m: prices.output };
+    }
+
+    const saveRes = await fetch(`${API_BASE}/pricing`, {
+      method: "PUT",
+      headers: { "Content-Type": "application/json" },
+      body: JSON.stringify({ pricing }),
+    });
+
+    if (!saveRes.ok) throw new Error("Failed to save defaults");
+    showToast("✅ Pricing reset to defaults");
+
+    if (currentSession) {
+      loadCosts(currentSession.session_id);
+    }
+  } catch (err) {
+    showToast(`❌ Failed to reset pricing: ${err.message}`);
+  }
 }
 
 // ── Utilities ───────────────────────────────────────────────────────

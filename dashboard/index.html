@@ -114,6 +114,7 @@
         <div class="tabs">
           <button class="tab active" data-tab="timeline" onclick="switchTab('timeline')">📊 Timeline</button>
           <button class="tab" data-tab="tokens" onclick="switchTab('tokens')">💰 Tokens</button>
+          <button class="tab" data-tab="costs" onclick="switchTab('costs')">💲 Costs</button>
           <button class="tab" data-tab="explain" onclick="switchTab('explain')">💡 Explain</button>
         </div>
 
@@ -141,6 +142,49 @@
         <div id="explainTab" class="tab-content">
           <div id="explainContent" class="explain-panel">
             <div class="loading">Generating explanation...</div>
+          </div>
+        </div>
+
+        <!-- Costs Tab -->
+        <div id="costsTab" class="tab-content">
+          <div id="costsLoading" class="loading" style="display:none">Calculating costs...</div>
+          <div id="costsContent" style="display:none">
+            <!-- Cost Overview Cards -->
+            <div id="costOverview" class="session-info-bar"></div>
+
+            <!-- Cost Charts -->
+            <div class="charts-grid">
+              <div class="chart-card">
+                <h3>Cost by Event</h3>
+                <canvas id="costBarChart" width="600" height="300"></canvas>
+              </div>
+              <div class="chart-card">
+                <h3>Cumulative Cost</h3>
+                <canvas id="costCumulativeChart" width="600" height="300"></canvas>
+              </div>
+            </div>
+
+            <!-- Cost by Model Table -->
+            <div id="costModelTable" class="token-summary"></div>
+
+            <!-- Per-Event Cost Breakdown -->
+            <div id="costEventList" class="token-summary"></div>
+
+            <!-- Unmatched Models Warning -->
+            <div id="costUnmatched" style="display:none" class="token-summary"></div>
+
+            <!-- Pricing Config -->
+            <div class="token-summary" style="margin-top:16px">
+              <h3>⚙️ Model Pricing Configuration</h3>
+              <p style="color:var(--text-muted);font-size:0.85rem;margin:8px 0 12px">
+                Prices are per 1M tokens (USD). Edit values and click Save to update.
+              </p>
+              <div id="pricingEditor"></div>
+              <div style="margin-top:12px;display:flex;gap:8px">
+                <button class="btn btn-export" onclick="savePricing()">💾 Save Pricing</button>
+                <button class="btn btn-secondary" onclick="resetPricing()">↻ Reset to Defaults</button>
+              </div>
+            </div>
           </div>
         </div>
       </div>

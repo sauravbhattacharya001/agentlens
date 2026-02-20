@@ -11,6 +11,7 @@ const {
 const eventsRouter = require("./routes/events");
 const sessionsRouter = require("./routes/sessions");
 const analyticsRouter = require("./routes/analytics");
+const pricingRouter = require("./routes/pricing");
 
 const app = express();
 const PORT = process.env.PORT || 3000;
@@ -23,12 +24,14 @@ app.use(createCorsMiddleware());
 app.use("/sessions", createApiLimiter());
 app.use("/events", createIngestLimiter());
 app.use("/analytics", createApiLimiter());
+app.use("/pricing", createApiLimiter());
 
 // ── API key authentication ──────────────────────────────────────────
 const { authenticateApiKey, hasApiKey } = createApiKeyAuth();
 app.use("/events", authenticateApiKey);
 app.use("/sessions", authenticateApiKey);
 app.use("/analytics", authenticateApiKey);
+app.use("/pricing", authenticateApiKey);
 
 // Body parser with size limit
 app.use(express.json({ limit: "10mb" }));
@@ -40,6 +43,7 @@ app.use(express.static(path.join(__dirname, "..", "dashboard")));
 app.use("/events", eventsRouter);
 app.use("/sessions", sessionsRouter);
 app.use("/analytics", analyticsRouter);
+app.use("/pricing", pricingRouter);
 
 // Health check (no auth required)
 app.get("/health", (req, res) => {

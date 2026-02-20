@@ -47,6 +47,7 @@ AgentLens provides:
 | 🎨 **Decorators** | Zero-config instrumentation with Python decorators |
 | 📈 **Analytics Dashboard** | Aggregate stats, model usage, hourly activity heatmap, sessions-over-time |
 | ⚖️ **Session Comparison** | Compare two sessions side-by-side — token deltas, event breakdowns, tool usage diffs |
+| 💲 **Cost Estimation** | Configurable model pricing, per-session/event cost tracking, cost breakdown dashboard |
 
 ## 🏗️ Architecture
 
@@ -226,6 +227,32 @@ print(f"Session B events: {result['session_b']['event_count']}")
 print(f"Shared tools: {result['shared']['tools']}")
 ```
 
+### Cost Estimation
+
+```python
+# Get cost breakdown for the current session
+costs = agentlens.get_costs()
+print(f"Total cost: ${costs['total_cost']:.4f}")
+print(f"Input cost: ${costs['total_input_cost']:.4f}")
+print(f"Output cost: ${costs['total_output_cost']:.4f}")
+
+# Per-model breakdown
+for model, mc in costs['model_costs'].items():
+    print(f"  {model}: ${mc['total_cost']:.4f} ({mc['calls']} calls)")
+
+# View/update model pricing (per 1M tokens, USD)
+pricing = agentlens.get_pricing()
+print(pricing['pricing'])  # Current pricing config
+
+# Set custom pricing
+agentlens.set_pricing({
+    "my-custom-model": {
+        "input_cost_per_1m": 5.00,
+        "output_cost_per_1m": 15.00,
+    }
+})
+```
+
 ### Data Models
 
 | Model | Description |
@@ -245,6 +272,7 @@ The dashboard provides a real-time view of your agent sessions:
 - **Timeline View** — Interactive timeline of every event in a session
 - **Token Charts** — Per-event and cumulative token usage visualization
 - **Explain Tab** — Human-readable behavior summaries
+- **Costs Tab** — Per-event and per-model cost breakdowns, cumulative cost chart, configurable model pricing
 
 The dashboard is a lightweight HTML/CSS/JS app served directly by the backend — no build step required.
 
@@ -258,6 +286,10 @@ The dashboard is a lightweight HTML/CSS/JS app served directly by the backend �
 | `GET /sessions/:id/export` | GET | Export session data as JSON or CSV |
 | `POST /sessions/compare` | POST | Compare two sessions side-by-side |
 | `GET /analytics` | GET | Aggregate statistics across all sessions |
+| `GET /pricing` | GET | Get model pricing configuration |
+| `PUT /pricing` | PUT | Update model pricing (per 1M tokens) |
+| `DELETE /pricing/:model` | DELETE | Remove custom pricing for a model |
+| `GET /pricing/costs/:id` | GET | Calculate costs for a session |
 | `POST /events` | POST | Record a new event |
 | `GET /events?session_id=...` | GET | Get events for a session |
 
