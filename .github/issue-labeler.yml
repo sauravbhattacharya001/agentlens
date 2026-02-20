@@ -1,0 +1,22 @@
+# Issue labeler configuration
+# Maps regex patterns in issue body/title to labels
+# Used by github/issue-labeler@v3.4
+
+bug:
+  - '(bug|crash|error|fail|broken|not working|doesn.t work|exception|traceback)'
+enhancement:
+  - '(feature|enhancement|request|improve|add support|would be nice|suggestion)'
+question:
+  - '(question|how to|how do|is it possible|can I|what is|wondering)'
+sdk:
+  - '(sdk|python|decorator|tracker|transport|pip install|agentlens\.)'
+backend:
+  - '(backend|server|api|endpoint|route|express|node\.js|mongodb|database)'
+dashboard:
+  - '(dashboard|ui|frontend|chart|graph|visualization|display)'
+documentation:
+  - '(doc|documentation|readme|typo|example|tutorial|guide)'
+performance:
+  - '(slow|performance|latency|memory|optimization|speed|bottleneck)'
+security:
+  - '(security|vulnerability|cve|auth|token|injection|xss|csrf)'

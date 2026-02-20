@@ -1,0 +1,87 @@
+# Auto-labeler configuration for agentlens
+# Maps file path patterns to labels applied on pull requests
+# Used by actions/labeler@v5
+
+# Component labels
+sdk:
+  - changed-files:
+    - any-glob-to-any-file:
+      - 'sdk/**'
+
+backend:
+  - changed-files:
+    - any-glob-to-any-file:
+      - 'backend/**'
+
+dashboard:
+  - changed-files:
+    - any-glob-to-any-file:
+      - 'dashboard/**'
+
+demo:
+  - changed-files:
+    - any-glob-to-any-file:
+      - 'demo/**'
+
+# Documentation
+documentation:
+  - changed-files:
+    - any-glob-to-any-file:
+      - 'docs/**'
+      - '**/*.md'
+      - 'sdk/README.md'
+
+# CI/CD and infrastructure
+ci/cd:
+  - changed-files:
+    - any-glob-to-any-file:
+      - '.github/**'
+
+# Docker and deployment
+docker:
+  - changed-files:
+    - any-glob-to-any-file:
+      - 'Dockerfile'
+      - '.dockerignore'
+      - '.github/workflows/docker.yml'
+
+# Testing
+tests:
+  - changed-files:
+    - any-glob-to-any-file:
+      - 'backend/tests/**'
+      - 'sdk/tests/**'
+      - '**/*.test.js'
+      - '**/test_*.py'
+
+# Python SDK specifics
+python:
+  - changed-files:
+    - any-glob-to-any-file:
+      - '**/*.py'
+      - 'sdk/pyproject.toml'
+
+# JavaScript/Node.js
+javascript:
+  - changed-files:
+    - any-glob-to-any-file:
+      - '**/*.js'
+      - '**/package.json'
+      - '**/package-lock.json'
+
+# Dependencies
+dependencies:
+  - changed-files:
+    - any-glob-to-any-file:
+      - 'backend/package.json'
+      - 'backend/package-lock.json'
+      - 'sdk/pyproject.toml'
+      - '.github/dependabot.yml'
+
+# Security-related changes
+security:
+  - changed-files:
+    - any-glob-to-any-file:
+      - 'backend/middleware.js'
+      - 'backend/lib/validation.js'
+      - '.github/workflows/codeql.yml'
