@@ -16,7 +16,7 @@
     "express": "^4.21.0",
     "express-rate-limit": "^7.5.0",
     "helmet": "^8.0.0",
-    "uuid": "^9.0.0"
+    "uuid": "^13.0.0"
   },
   "devDependencies": {
     "jest": "^30.2.0"
