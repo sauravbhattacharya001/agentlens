@@ -1,6 +1,6 @@
 const express = require("express");
 const { getDb } = require("../db");
-const { isValidSessionId, isValidStatus, safeJsonParse } = require("../lib/validation");
+const { isValidSessionId, isValidStatus, safeJsonParse, validateTag, validateTags, MAX_TAGS_PER_SESSION } = require("../lib/validation");
 const { generateExplanation } = require("../lib/explain");
 
 const router = express.Router();
@@ -40,12 +40,23 @@ router.get("/", (req, res) => {
 
   try {
     const stmts = getSessionStatements();
-    const sessions = status
-      ? stmts.listByStatus.all(status, limit, offset)
-      : stmts.listAll.all(limit, offset);
-    const total = status
-      ? stmts.countByStatus.get(status)
-      : stmts.countAll.get();
+    const tagFilter = req.query.tag ? validateTag(req.query.tag) : null;
+
+    let sessions, total;
+
+    if (tagFilter) {
+      // Tag-filtered query (can't use cached prepared statements due to dynamic JOIN)
+      const tagStmts = getTagStatements();
+      sessions = tagStmts.sessionsByTag.all(tagFilter, limit, offset);
+      const countResult = tagStmts.sessionsByTagCount.get(tagFilter);
+      total = { count: countResult.count };
+    } else if (status) {
+      sessions = stmts.listByStatus.all(status, limit, offset);
+      total = stmts.countByStatus.get(status);
+    } else {
+      sessions = stmts.listAll.all(limit, offset);
+      total = stmts.countAll.get();
+    }
 
     const parsed = sessions.map((s) => ({
       ...s,
@@ -56,6 +67,49 @@ router.get("/", (req, res) => {
   } catch (err) {
     console.error("Error listing sessions:", err);
     res.status(500).json({ error: "Failed to list sessions" });
+  }
+});
+
+// GET /sessions/tags — List all tags with session counts
+// (Must be before /:id to avoid matching "tags" as a session ID)
+router.get("/tags", (req, res) => {
+  try {
+    const stmts = getTagStatements();
+    const tags = stmts.allTags.all();
+    res.json({ tags });
+  } catch (err) {
+    console.error("Error listing tags:", err);
+    res.status(500).json({ error: "Internal server error" });
+  }
+});
+
+// GET /sessions/by-tag/:tag — List sessions with a specific tag
+// (Must be before /:id to avoid matching "by-tag" as a session ID)
+router.get("/by-tag/:tag", (req, res) => {
+  try {
+    const tag = validateTag(req.params.tag);
+    if (!tag) {
+      return res.status(400).json({ error: "Invalid tag" });
+    }
+
+    const limit = Math.min(Math.max(1, parseInt(req.query.limit) || 50), 200);
+    const offset = Math.max(0, parseInt(req.query.offset) || 0);
+
+    const stmts = getTagStatements();
+    const sessions = stmts.sessionsByTag.all(tag, limit, offset);
+    const { count: total } = stmts.sessionsByTagCount.get(tag);
+
+    // Attach tags to each session
+    const enriched = sessions.map((s) => ({
+      ...s,
+      metadata: safeJsonParse(s.metadata),
+      tags: stmts.getTagsForSession.all(s.session_id).map((t) => t.tag),
+    }));
+
+    res.json({ sessions: enriched, total, limit, offset, tag });
+  } catch (err) {
+    console.error("Error listing sessions by tag:", err);
+    res.status(500).json({ error: "Internal server error" });
   }
 });
 
@@ -572,6 +626,173 @@ router.get("/:id/explain", (req, res) => {
   } catch (err) {
     console.error("Error generating explanation:", err);
     res.status(500).json({ error: "Failed to generate explanation" });
+  }
+});
+
+// ── Session Tags ────────────────────────────────────────────────────
+
+// Lazily initialized tag statements
+let _tagStmts = null;
+
+function getTagStatements() {
+  if (_tagStmts) return _tagStmts;
+  const db = getDb();
+
+  _tagStmts = {
+    getTagsForSession: db.prepare(
+      "SELECT tag, created_at FROM session_tags WHERE session_id = ? ORDER BY created_at ASC"
+    ),
+    addTag: db.prepare(
+      "INSERT OR IGNORE INTO session_tags (session_id, tag, created_at) VALUES (?, ?, ?)"
+    ),
+    removeTag: db.prepare(
+      "DELETE FROM session_tags WHERE session_id = ? AND tag = ?"
+    ),
+    removeAllTags: db.prepare(
+      "DELETE FROM session_tags WHERE session_id = ?"
+    ),
+    countTags: db.prepare(
+      "SELECT COUNT(*) as count FROM session_tags WHERE session_id = ?"
+    ),
+    sessionsByTag: db.prepare(
+      `SELECT DISTINCT s.* FROM sessions s
+       INNER JOIN session_tags st ON s.session_id = st.session_id
+       WHERE st.tag = ?
+       ORDER BY s.started_at DESC
+       LIMIT ? OFFSET ?`
+    ),
+    sessionsByTagCount: db.prepare(
+      `SELECT COUNT(DISTINCT s.session_id) as count FROM sessions s
+       INNER JOIN session_tags st ON s.session_id = st.session_id
+       WHERE st.tag = ?`
+    ),
+    allTags: db.prepare(
+      `SELECT tag, COUNT(*) as session_count FROM session_tags
+       GROUP BY tag ORDER BY session_count DESC, tag ASC`
+    ),
+  };
+
+  return _tagStmts;
+}
+
+// GET /sessions/:id/tags — Get tags for a session
+router.get("/:id/tags", (req, res) => {
+  try {
+    if (!isValidSessionId(req.params.id)) {
+      return res.status(400).json({ error: "Invalid session ID" });
+    }
+
+    const stmts = getTagStatements();
+    const tags = stmts.getTagsForSession.all(req.params.id);
+    res.json({ session_id: req.params.id, tags: tags.map((t) => t.tag) });
+  } catch (err) {
+    console.error("Error getting tags:", err);
+    res.status(500).json({ error: "Internal server error" });
+  }
+});
+
+// POST /sessions/:id/tags — Add tags to a session
+router.post("/:id/tags", (req, res) => {
+  try {
+    if (!isValidSessionId(req.params.id)) {
+      return res.status(400).json({ error: "Invalid session ID" });
+    }
+
+    const { tags } = req.body || {};
+    const validTags = validateTags(tags);
+    if (!validTags) {
+      return res.status(400).json({
+        error: "Invalid tags. Provide an array of strings (alphanumeric, _-.:/ , max 64 chars each).",
+      });
+    }
+
+    // Check session exists
+    const db = getDb();
+    const session = db.prepare("SELECT session_id FROM sessions WHERE session_id = ?").get(req.params.id);
+    if (!session) {
+      return res.status(404).json({ error: "Session not found" });
+    }
+
+    // Check tag limit
+    const stmts = getTagStatements();
+    const { count: existing } = stmts.countTags.get(req.params.id);
+    if (existing + validTags.length > MAX_TAGS_PER_SESSION) {
+      return res.status(400).json({
+        error: `Tag limit exceeded. Session has ${existing} tags, adding ${validTags.length} would exceed max of ${MAX_TAGS_PER_SESSION}.`,
+      });
+    }
+
+    const now = new Date().toISOString();
+    const addMany = db.transaction(() => {
+      let added = 0;
+      for (const tag of validTags) {
+        const result = stmts.addTag.run(req.params.id, tag, now);
+        if (result.changes > 0) added++;
+      }
+      return added;
+    });
+
+    const added = addMany();
+    const allTags = stmts.getTagsForSession.all(req.params.id).map((t) => t.tag);
+
+    res.json({
+      session_id: req.params.id,
+      added,
+      tags: allTags,
+    });
+  } catch (err) {
+    console.error("Error adding tags:", err);
+    res.status(500).json({ error: "Internal server error" });
+  }
+});
+
+// DELETE /sessions/:id/tags — Remove tags from a session
+router.delete("/:id/tags", (req, res) => {
+  try {
+    if (!isValidSessionId(req.params.id)) {
+      return res.status(400).json({ error: "Invalid session ID" });
+    }
+
+    const { tags } = req.body || {};
+
+    const stmts = getTagStatements();
+
+    // If no tags specified, remove all
+    if (!tags || (Array.isArray(tags) && tags.length === 0)) {
+      const result = stmts.removeAllTags.run(req.params.id);
+      return res.json({
+        session_id: req.params.id,
+        removed: result.changes,
+        tags: [],
+      });
+    }
+
+    const validTags = validateTags(tags);
+    if (!validTags) {
+      return res.status(400).json({ error: "Invalid tags array" });
+    }
+
+    const db = getDb();
+    const removeMany = db.transaction(() => {
+      let removed = 0;
+      for (const tag of validTags) {
+        const result = stmts.removeTag.run(req.params.id, tag);
+        removed += result.changes;
+      }
+      return removed;
+    });
+
+    const removed = removeMany();
+    const remaining = stmts.getTagsForSession.all(req.params.id).map((t) => t.tag);
+
+    res.json({
+      session_id: req.params.id,
+      removed,
+      tags: remaining,
+    });
+  } catch (err) {
+    console.error("Error removing tags:", err);
+    res.status(500).json({ error: "Internal server error" });
   }
 });
 

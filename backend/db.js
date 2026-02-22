@@ -65,6 +65,17 @@ function initSchema() {
       currency TEXT NOT NULL DEFAULT 'USD',
       updated_at TEXT NOT NULL
     );
+
+    -- Session tags for filtering and organization
+    CREATE TABLE IF NOT EXISTS session_tags (
+      session_id TEXT NOT NULL,
+      tag TEXT NOT NULL,
+      created_at TEXT NOT NULL DEFAULT (datetime('now')),
+      PRIMARY KEY (session_id, tag),
+      FOREIGN KEY (session_id) REFERENCES sessions(session_id) ON DELETE CASCADE
+    );
+    CREATE INDEX IF NOT EXISTS idx_session_tags_tag ON session_tags(tag);
+    CREATE INDEX IF NOT EXISTS idx_session_tags_session ON session_tags(session_id);
   `);
 
   // Performance: optimize for read-heavy analytics workload

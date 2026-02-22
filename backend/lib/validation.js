@@ -10,6 +10,9 @@
 const MAX_BATCH_SIZE = 500;
 const MAX_STRING_LENGTH = 1024;
 const MAX_DATA_LENGTH = 1024 * 256; // 256 KB
+const MAX_TAG_LENGTH = 64;
+const MAX_TAGS_PER_SESSION = 20;
+const TAG_RE = /^[a-zA-Z0-9_\-.:/ ]+$/;
 const SESSION_ID_RE = /^[a-zA-Z0-9_\-.:]+$/;
 
 const VALID_EVENT_TYPES = new Set([
@@ -148,11 +151,48 @@ function isValidEventType(type) {
   return VALID_EVENT_TYPES.has(type);
 }
 
+/**
+ * Validate a tag string: alphanumeric + `_-.:/ `, max 64 chars, trimmed.
+ *
+ * @param {*} tag
+ * @returns {string|null} – cleaned tag or null if invalid
+ */
+function validateTag(tag) {
+  if (!tag || typeof tag !== "string") return null;
+  const trimmed = tag.trim().slice(0, MAX_TAG_LENGTH);
+  if (trimmed.length === 0) return null;
+  return TAG_RE.test(trimmed) ? trimmed : null;
+}
+
+/**
+ * Validate an array of tags. Returns an array of valid tags (deduped)
+ * or null if the input is invalid.
+ *
+ * @param {*} tags
+ * @returns {string[]|null}
+ */
+function validateTags(tags) {
+  if (!Array.isArray(tags)) return null;
+  const valid = [];
+  const seen = new Set();
+  for (const t of tags) {
+    const cleaned = validateTag(t);
+    if (cleaned && !seen.has(cleaned)) {
+      seen.add(cleaned);
+      valid.push(cleaned);
+    }
+  }
+  if (valid.length > MAX_TAGS_PER_SESSION) return null;
+  return valid.length > 0 ? valid : null;
+}
+
 module.exports = {
   // Constants
   MAX_BATCH_SIZE,
   MAX_STRING_LENGTH,
   MAX_DATA_LENGTH,
+  MAX_TAG_LENGTH,
+  MAX_TAGS_PER_SESSION,
   VALID_EVENT_TYPES,
   VALID_SESSION_STATUSES,
   // Helpers
@@ -165,4 +205,6 @@ module.exports = {
   clampNonNegFloat,
   isValidStatus,
   isValidEventType,
+  validateTag,
+  validateTags,
 };

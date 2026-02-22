@@ -1,4 +1,4 @@
-"""Core tracker that manages sessions and events."""
+﻿"""Core tracker that manages sessions and events."""
 
 from __future__ import annotations
 
@@ -526,6 +526,164 @@ class AgentTracker:
         """Get list of available metrics for alert rules."""
         response = self.transport._client.get(
             f"{self.transport.endpoint}/alerts/metrics",
+            headers={"X-API-Key": self.transport.api_key},
+        )
+        response.raise_for_status()
+        return response.json()
+
+    # -- Session Tags ---------------------------------------------------------
+
+    def add_tags(
+        self,
+        tags: list[str],
+        session_id: str | None = None,
+    ) -> dict[str, Any]:
+        """Add tags to a session for filtering and organization.
+
+        Tags are short labels (alphanumeric + ``_-.:/ ``, max 64 chars)
+        that help organize and filter sessions. Each session can have
+        up to 20 tags.
+
+        Args:
+            tags: List of tag strings to add.
+            session_id: Session to tag. Defaults to the current session.
+
+        Returns:
+            A dict with ``session_id``, ``added`` count, and ``tags``
+            (all current tags on the session).
+
+        Example::
+
+            tracker.add_tags(["production", "v2.1", "regression-test"])
+        """
+        sid = session_id or self._current_session_id
+        if not sid:
+            raise RuntimeError(
+                "No session to tag. Specify session_id or start a session first."
+            )
+        if not tags or not isinstance(tags, list):
+            raise ValueError("tags must be a non-empty list of strings.")
+
+        response = self.transport._client.post(
+            f"{self.transport.endpoint}/sessions/{sid}/tags",
+            json={"tags": tags},
+            headers={"X-API-Key": self.transport.api_key},
+        )
+        response.raise_for_status()
+        return response.json()
+
+    def remove_tags(
+        self,
+        tags: list[str] | None = None,
+        session_id: str | None = None,
+    ) -> dict[str, Any]:
+        """Remove tags from a session.
+
+        If no tags are specified, removes all tags from the session.
+
+        Args:
+            tags: List of tag strings to remove. If None or empty,
+                removes all tags.
+            session_id: Session to untag. Defaults to the current session.
+
+        Returns:
+            A dict with ``session_id``, ``removed`` count, and ``tags``
+            (remaining tags on the session).
+
+        Example::
+
+            tracker.remove_tags(["debug"])
+            tracker.remove_tags()  # removes all tags
+        """
+        sid = session_id or self._current_session_id
+        if not sid:
+            raise RuntimeError(
+                "No session to untag. Specify session_id or start a session first."
+            )
+
+        body = {"tags": tags} if tags else {}
+        response = self.transport._client.request(
+            "DELETE",
+            f"{self.transport.endpoint}/sessions/{sid}/tags",
+            json=body,
+            headers={"X-API-Key": self.transport.api_key},
+        )
+        response.raise_for_status()
+        return response.json()
+
+    def get_tags(
+        self,
+        session_id: str | None = None,
+    ) -> list[str]:
+        """Get all tags for a session.
+
+        Args:
+            session_id: Session to query. Defaults to the current session.
+
+        Returns:
+            A list of tag strings.
+        """
+        sid = session_id or self._current_session_id
+        if not sid:
+            raise RuntimeError(
+                "No session to query. Specify session_id or start a session first."
+            )
+
+        response = self.transport._client.get(
+            f"{self.transport.endpoint}/sessions/{sid}/tags",
+            headers={"X-API-Key": self.transport.api_key},
+        )
+        response.raise_for_status()
+        return response.json().get("tags", [])
+
+    def list_all_tags(self) -> list[dict[str, Any]]:
+        """List all tags across all sessions with session counts.
+
+        Returns:
+            A list of dicts with ``tag`` and ``session_count`` keys,
+            ordered by session count descending.
+
+        Example::
+
+            tags = tracker.list_all_tags()
+            # [{"tag": "production", "session_count": 42}, ...]
+        """
+        response = self.transport._client.get(
+            f"{self.transport.endpoint}/sessions/tags",
+            headers={"X-API-Key": self.transport.api_key},
+        )
+        response.raise_for_status()
+        return response.json().get("tags", [])
+
+    def list_sessions_by_tag(
+        self,
+        tag: str,
+        limit: int = 50,
+        offset: int = 0,
+    ) -> dict[str, Any]:
+        """List sessions that have a specific tag.
+
+        Args:
+            tag: Tag to filter by.
+            limit: Max sessions to return (default 50, max 200).
+            offset: Pagination offset.
+
+        Returns:
+            A dict with ``sessions``, ``total``, ``limit``, ``offset``,
+            and ``tag``.
+
+        Example::
+
+            result = tracker.list_sessions_by_tag("production")
+            for session in result["sessions"]:
+                print(session["session_id"], session["tags"])
+        """
+        if not tag or not isinstance(tag, str):
+            raise ValueError("tag must be a non-empty string.")
+
+        response = self.transport._client.get(
+            f"{self.transport.endpoint}/sessions/by-tag/{tag}",
+            params={"limit": limit, "offset": offset},
             headers={"X-API-Key": self.transport.api_key},
         )
         response.raise_for_status()
