@@ -15,6 +15,9 @@
         <span class="tagline">Observability for AI Agents</span>
       </div>
       <div class="header-right">
+        <button class="btn btn-alert-header" onclick="openAlertsModal()" id="alertsBtn">
+          🔔 Alerts <span class="alert-badge" id="alertBadge" style="display:none">0</span>
+        </button>
         <span class="status-dot"></span>
         <span id="connectionStatus">Connected</span>
       </div>
@@ -311,6 +314,94 @@
         </div>
       </div>
     </main>
+  </div>
+
+  <!-- Alerts Modal -->
+  <div id="alertsModal" class="alerts-modal" style="display:none">
+    <div class="alerts-modal-content">
+      <div class="alerts-modal-header">
+        <h2>🔔 Alert Rules</h2>
+        <button class="btn btn-ghost" onclick="closeAlertsModal()">✕</button>
+      </div>
+
+      <!-- Alert Summary Bar -->
+      <div class="alerts-summary" id="alertsSummary"></div>
+
+      <!-- Tabs: Rules | History -->
+      <div class="tabs">
+        <button class="tab active" data-tab="alertRules" onclick="switchAlertTab('alertRules')">📋 Rules</button>
+        <button class="tab" data-tab="alertHistory" onclick="switchAlertTab('alertHistory')">📜 History</button>
+      </div>
+
+      <!-- Rules Tab -->
+      <div id="alertRulesTab" class="alert-tab-content active">
+        <div class="alert-actions-bar">
+          <button class="btn btn-export" onclick="showCreateRuleForm()">+ New Rule</button>
+          <button class="btn btn-secondary" onclick="evaluateAllAlerts()">⚡ Evaluate Now</button>
+        </div>
+
+        <!-- Create/Edit Form (hidden by default) -->
+        <div id="alertRuleForm" class="alert-rule-form" style="display:none">
+          <h3 id="alertFormTitle">Create Alert Rule</h3>
+          <input type="hidden" id="alertFormRuleId">
+          <div class="form-row">
+            <label>Name</label>
+            <input type="text" id="alertFormName" class="form-input" placeholder="e.g. High Token Usage">
+          </div>
+          <div class="form-row">
+            <label>Metric</label>
+            <select id="alertFormMetric" class="form-select"></select>
+          </div>
+          <div class="form-row-inline">
+            <div>
+              <label>Operator</label>
+              <select id="alertFormOperator" class="form-select">
+                <option value=">">></option>
+                <option value="<"><</option>
+                <option value=">=">>=</option>
+                <option value="<="><=</option>
+                <option value="==">==</option>
+                <option value="!=">!=</option>
+              </select>
+            </div>
+            <div>
+              <label>Threshold</label>
+              <input type="number" id="alertFormThreshold" class="form-input" placeholder="1000">
+            </div>
+          </div>
+          <div class="form-row-inline">
+            <div>
+              <label>Window (min)</label>
+              <input type="number" id="alertFormWindow" class="form-input" value="60" min="1">
+            </div>
+            <div>
+              <label>Cooldown (min)</label>
+              <input type="number" id="alertFormCooldown" class="form-input" value="15" min="1">
+            </div>
+          </div>
+          <div class="form-row">
+            <label>Agent Filter (optional)</label>
+            <input type="text" id="alertFormAgent" class="form-input" placeholder="Leave empty for all agents">
+          </div>
+          <div class="form-buttons">
+            <button class="btn btn-export" onclick="saveAlertRule()">💾 Save</button>
+            <button class="btn btn-secondary" onclick="cancelAlertForm()">Cancel</button>
+          </div>
+        </div>
+
+        <!-- Rules List -->
+        <div id="alertRulesList" class="alert-rules-list">
+          <div class="loading">Loading rules...</div>
+        </div>
+      </div>
+
+      <!-- History Tab -->
+      <div id="alertHistoryTab" class="alert-tab-content" style="display:none">
+        <div id="alertHistoryList" class="alert-history-list">
+          <div class="loading">Loading alert history...</div>
+        </div>
+      </div>
+    </div>
   </div>
 
   <script src="app.js"></script>

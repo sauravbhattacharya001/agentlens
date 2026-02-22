@@ -410,3 +410,123 @@ class AgentTracker:
         )
         response.raise_for_status()
         return response.json()
+
+    # ── Alert Rules ──────────────────────────────────────────────────
+
+    def list_alert_rules(self, enabled: bool | None = None) -> dict:
+        """List all alert rules, optionally filtered by enabled status."""
+        params = {}
+        if enabled is not None:
+            params["enabled"] = "true" if enabled else "false"
+        response = self.transport._client.get(
+            f"{self.transport.endpoint}/alerts/rules",
+            params=params,
+            headers={"X-API-Key": self.transport.api_key},
+        )
+        response.raise_for_status()
+        return response.json()
+
+    def create_alert_rule(
+        self,
+        name: str,
+        metric: str,
+        operator: str,
+        threshold: float,
+        window_minutes: int = 60,
+        agent_filter: str | None = None,
+        cooldown_minutes: int = 15,
+    ) -> dict:
+        """Create a new alert rule.
+
+        Args:
+            name: Human-readable rule name
+            metric: Metric to monitor (total_tokens, error_rate, avg_duration_ms, etc.)
+            operator: Comparison operator (<, >, <=, >=, ==, !=)
+            threshold: Threshold value to compare against
+            window_minutes: Time window to evaluate (default 60)
+            agent_filter: Optional agent name filter
+            cooldown_minutes: Min minutes between alerts for same rule (default 15)
+        """
+        payload = {
+            "name": name,
+            "metric": metric,
+            "operator": operator,
+            "threshold": threshold,
+            "window_minutes": window_minutes,
+            "cooldown_minutes": cooldown_minutes,
+        }
+        if agent_filter:
+            payload["agent_filter"] = agent_filter
+        response = self.transport._client.post(
+            f"{self.transport.endpoint}/alerts/rules",
+            json=payload,
+            headers={"X-API-Key": self.transport.api_key},
+        )
+        response.raise_for_status()
+        return response.json()
+
+    def update_alert_rule(self, rule_id: str, **kwargs) -> dict:
+        """Update an existing alert rule. Pass any field to update."""
+        response = self.transport._client.put(
+            f"{self.transport.endpoint}/alerts/rules/{rule_id}",
+            json=kwargs,
+            headers={"X-API-Key": self.transport.api_key},
+        )
+        response.raise_for_status()
+        return response.json()
+
+    def delete_alert_rule(self, rule_id: str) -> dict:
+        """Delete an alert rule."""
+        response = self.transport._client.delete(
+            f"{self.transport.endpoint}/alerts/rules/{rule_id}",
+            headers={"X-API-Key": self.transport.api_key},
+        )
+        response.raise_for_status()
+        return response.json()
+
+    def evaluate_alerts(self) -> dict:
+        """Evaluate all enabled alert rules against current data."""
+        response = self.transport._client.post(
+            f"{self.transport.endpoint}/alerts/evaluate",
+            headers={"X-API-Key": self.transport.api_key},
+        )
+        response.raise_for_status()
+        return response.json()
+
+    def get_alert_events(
+        self,
+        rule_id: str | None = None,
+        acknowledged: bool | None = None,
+        limit: int = 50,
+    ) -> dict:
+        """Get triggered alert events."""
+        params: dict[str, Any] = {"limit": limit}
+        if rule_id:
+            params["rule_id"] = rule_id
+        if acknowledged is not None:
+            params["acknowledged"] = "true" if acknowledged else "false"
+        response = self.transport._client.get(
+            f"{self.transport.endpoint}/alerts/events",
+            params=params,
+            headers={"X-API-Key": self.transport.api_key},
+        )
+        response.raise_for_status()
+        return response.json()
+
+    def acknowledge_alert(self, alert_id: str) -> dict:
+        """Acknowledge a triggered alert event."""
+        response = self.transport._client.put(
+            f"{self.transport.endpoint}/alerts/events/{alert_id}/acknowledge",
+            headers={"X-API-Key": self.transport.api_key},
+        )
+        response.raise_for_status()
+        return response.json()
+
+    def get_alert_metrics(self) -> dict:
+        """Get list of available metrics for alert rules."""
+        response = self.transport._client.get(
+            f"{self.transport.endpoint}/alerts/metrics",
+            headers={"X-API-Key": self.transport.api_key},
+        )
+        response.raise_for_status()
+        return response.json()

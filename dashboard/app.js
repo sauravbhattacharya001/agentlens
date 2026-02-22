@@ -2150,3 +2150,300 @@ function renderMarkdown(text) {
     .replace(/\n\n/g, '<br><br>')
     .replace(/\n/g, '<br>');
 }
+
+// ── Alert Rules ─────────────────────────────────────────────────────
+
+let alertRulesCache = [];
+let alertMetricsCache = null;
+let alertEditingRuleId = null;
+
+async function openAlertsModal() {
+  document.getElementById("alertsModal").style.display = "flex";
+  await loadAlertMetrics();
+  await loadAlertRules();
+  await loadAlertSummary();
+}
+
+function closeAlertsModal() {
+  document.getElementById("alertsModal").style.display = "none";
+}
+
+// Close on backdrop click
+document.addEventListener("click", (e) => {
+  if (e.target.id === "alertsModal") closeAlertsModal();
+});
+
+function switchAlertTab(tabName) {
+  document.querySelectorAll(".alerts-modal-content .tab").forEach(t => t.classList.remove("active"));
+  document.querySelectorAll(".alert-tab-content").forEach(t => {
+    t.classList.remove("active");
+    t.style.display = "none";
+  });
+  const tab = document.getElementById(`${tabName}Tab`);
+  if (tab) { tab.classList.add("active"); tab.style.display = "block"; }
+  document.querySelectorAll(`.alerts-modal-content .tab[data-tab="${tabName}"]`).forEach(t => t.classList.add("active"));
+
+  if (tabName === "alertHistory") loadAlertHistory();
+}
+
+async function loadAlertMetrics() {
+  if (alertMetricsCache) return;
+  try {
+    const res = await fetch(`${API_BASE}/alerts/metrics`);
+    alertMetricsCache = await res.json();
+    const sel = document.getElementById("alertFormMetric");
+    sel.innerHTML = alertMetricsCache.metrics.map(m =>
+      `<option value="${m.name}" title="${escHtml(m.description)}">${m.name}</option>`
+    ).join("");
+  } catch (e) {
+    console.error("Failed to load alert metrics:", e);
+  }
+}
+
+async function loadAlertRules() {
+  const list = document.getElementById("alertRulesList");
+  try {
+    const res = await fetch(`${API_BASE}/alerts/rules`);
+    const data = await res.json();
+    alertRulesCache = data.rules || [];
+
+    if (alertRulesCache.length === 0) {
+      list.innerHTML = '<div class="loading">No alert rules configured. Click "+ New Rule" to create one.</div>';
+      return;
+    }
+
+    list.innerHTML = alertRulesCache.map(r => `
+      <div class="alert-rule-card ${r.enabled ? '' : 'disabled'}">
+        <div class="rule-status-dot ${r.enabled ? 'active' : 'disabled'}" title="${r.enabled ? 'Enabled' : 'Disabled'}"></div>
+        <div class="rule-info">
+          <div class="rule-name">${escHtml(r.name)}</div>
+          <div class="rule-condition">
+            ${escHtml(r.metric)} ${escHtml(r.operator)} ${r.threshold.toLocaleString()}
+            &nbsp;•&nbsp; ${r.window_minutes}min window
+            ${r.agent_filter ? ` • agent: ${escHtml(r.agent_filter)}` : ''}
+            &nbsp;•&nbsp; ${r.cooldown_minutes}min cooldown
+          </div>
+        </div>
+        <div class="rule-actions">
+          <button onclick="toggleAlertRule('${r.rule_id}', ${!r.enabled})" title="${r.enabled ? 'Disable' : 'Enable'}">
+            ${r.enabled ? '⏸' : '▶'}
+          </button>
+          <button onclick="editAlertRule('${r.rule_id}')" title="Edit">✏️</button>
+          <button class="btn-danger" onclick="deleteAlertRule('${r.rule_id}')" title="Delete">🗑</button>
+        </div>
+      </div>
+    `).join("");
+  } catch (e) {
+    list.innerHTML = '<div class="loading">Failed to load alert rules.</div>';
+    console.error("Error loading alert rules:", e);
+  }
+}
+
+async function loadAlertSummary() {
+  const summary = document.getElementById("alertsSummary");
+  try {
+    const [rulesRes, eventsRes] = await Promise.all([
+      fetch(`${API_BASE}/alerts/rules`),
+      fetch(`${API_BASE}/alerts/events?limit=200`),
+    ]);
+    const rulesData = await rulesRes.json();
+    const eventsData = await eventsRes.json();
+
+    const totalRules = rulesData.rules?.length || 0;
+    const enabledRules = rulesData.rules?.filter(r => r.enabled).length || 0;
+    const totalAlerts = eventsData.events?.length || 0;
+    const unacked = eventsData.events?.filter(e => !e.acknowledged).length || 0;
+
+    summary.innerHTML = `
+      <div class="alert-stat-card">
+        <div class="stat-value">${totalRules}</div>
+        <div class="stat-label">Total Rules</div>
+      </div>
+      <div class="alert-stat-card">
+        <div class="stat-value">${enabledRules}</div>
+        <div class="stat-label">Enabled</div>
+      </div>
+      <div class="alert-stat-card">
+        <div class="stat-value">${totalAlerts}</div>
+        <div class="stat-label">Alerts Fired</div>
+      </div>
+      <div class="alert-stat-card">
+        <div class="stat-value" style="color:${unacked > 0 ? '#f85149' : '#3fb950'}">${unacked}</div>
+        <div class="stat-label">Unacknowledged</div>
+      </div>
+    `;
+
+    // Update header badge
+    const badge = document.getElementById("alertBadge");
+    if (unacked > 0) {
+      badge.textContent = unacked;
+      badge.style.display = "inline";
+    } else {
+      badge.style.display = "none";
+    }
+  } catch (e) {
+    summary.innerHTML = "";
+  }
+}
+
+function showCreateRuleForm() {
+  alertEditingRuleId = null;
+  document.getElementById("alertFormTitle").textContent = "Create Alert Rule";
+  document.getElementById("alertFormRuleId").value = "";
+  document.getElementById("alertFormName").value = "";
+  document.getElementById("alertFormMetric").value = "total_tokens";
+  document.getElementById("alertFormOperator").value = ">";
+  document.getElementById("alertFormThreshold").value = "";
+  document.getElementById("alertFormWindow").value = "60";
+  document.getElementById("alertFormCooldown").value = "15";
+  document.getElementById("alertFormAgent").value = "";
+  document.getElementById("alertRuleForm").style.display = "block";
+}
+
+function editAlertRule(ruleId) {
+  const rule = alertRulesCache.find(r => r.rule_id === ruleId);
+  if (!rule) return;
+
+  alertEditingRuleId = ruleId;
+  document.getElementById("alertFormTitle").textContent = "Edit Alert Rule";
+  document.getElementById("alertFormRuleId").value = ruleId;
+  document.getElementById("alertFormName").value = rule.name;
+  document.getElementById("alertFormMetric").value = rule.metric;
+  document.getElementById("alertFormOperator").value = rule.operator;
+  document.getElementById("alertFormThreshold").value = rule.threshold;
+  document.getElementById("alertFormWindow").value = rule.window_minutes;
+  document.getElementById("alertFormCooldown").value = rule.cooldown_minutes;
+  document.getElementById("alertFormAgent").value = rule.agent_filter || "";
+  document.getElementById("alertRuleForm").style.display = "block";
+}
+
+function cancelAlertForm() {
+  document.getElementById("alertRuleForm").style.display = "none";
+  alertEditingRuleId = null;
+}
+
+async function saveAlertRule() {
+  const name = document.getElementById("alertFormName").value.trim();
+  const metric = document.getElementById("alertFormMetric").value;
+  const operator = document.getElementById("alertFormOperator").value;
+  const threshold = parseFloat(document.getElementById("alertFormThreshold").value);
+  const window_minutes = parseInt(document.getElementById("alertFormWindow").value) || 60;
+  const cooldown_minutes = parseInt(document.getElementById("alertFormCooldown").value) || 15;
+  const agent_filter = document.getElementById("alertFormAgent").value.trim() || null;
+
+  if (!name) { alert("Name is required"); return; }
+  if (isNaN(threshold)) { alert("Threshold must be a number"); return; }
+
+  const payload = { name, metric, operator, threshold, window_minutes, cooldown_minutes, agent_filter };
+
+  try {
+    if (alertEditingRuleId) {
+      await fetch(`${API_BASE}/alerts/rules/${alertEditingRuleId}`, {
+        method: "PUT", headers: { "Content-Type": "application/json" }, body: JSON.stringify(payload)
+      });
+    } else {
+      await fetch(`${API_BASE}/alerts/rules`, {
+        method: "POST", headers: { "Content-Type": "application/json" }, body: JSON.stringify(payload)
+      });
+    }
+    cancelAlertForm();
+    await loadAlertRules();
+    await loadAlertSummary();
+  } catch (e) {
+    alert("Failed to save rule: " + e.message);
+  }
+}
+
+async function deleteAlertRule(ruleId) {
+  if (!confirm("Delete this alert rule?")) return;
+  try {
+    await fetch(`${API_BASE}/alerts/rules/${ruleId}`, { method: "DELETE" });
+    await loadAlertRules();
+    await loadAlertSummary();
+  } catch (e) {
+    alert("Failed to delete rule: " + e.message);
+  }
+}
+
+async function toggleAlertRule(ruleId, enabled) {
+  try {
+    await fetch(`${API_BASE}/alerts/rules/${ruleId}`, {
+      method: "PUT",
+      headers: { "Content-Type": "application/json" },
+      body: JSON.stringify({ enabled }),
+    });
+    await loadAlertRules();
+    await loadAlertSummary();
+  } catch (e) {
+    console.error("Error toggling rule:", e);
+  }
+}
+
+async function evaluateAllAlerts() {
+  const list = document.getElementById("alertRulesList");
+  try {
+    const res = await fetch(`${API_BASE}/alerts/evaluate`, { method: "POST" });
+    const data = await res.json();
+
+    // Show evaluation results as a toast above the rules list
+    const resultsHtml = data.results.map(r => {
+      const cls = r.status === "fired" ? "fired" : r.status === "cooldown" ? "cooldown" : "ok";
+      const icon = r.status === "fired" ? "🔴" : r.status === "cooldown" ? "🟡" : "🟢";
+      return `<div>${icon} <strong>${escHtml(r.name)}</strong>: ${r.current_value.toLocaleString()} ${escHtml(r.operator)} ${r.threshold.toLocaleString()} — <span class="${cls}">${r.status}</span></div>`;
+    }).join("");
+
+    const evalDiv = document.createElement("div");
+    evalDiv.className = "alert-eval-result";
+    evalDiv.innerHTML = `<strong>⚡ Evaluation Results</strong> (${data.fired} fired, ${data.cooldown} cooldown, ${data.ok} ok)<br>${resultsHtml}`;
+
+    // Remove old eval results
+    document.querySelectorAll(".alert-eval-result").forEach(e => e.remove());
+    list.parentNode.insertBefore(evalDiv, list);
+
+    await loadAlertSummary();
+    await loadAlertRules();
+
+    // Auto-remove after 10 seconds
+    setTimeout(() => evalDiv.remove(), 10000);
+  } catch (e) {
+    alert("Failed to evaluate alerts: " + e.message);
+  }
+}
+
+async function loadAlertHistory() {
+  const list = document.getElementById("alertHistoryList");
+  try {
+    const res = await fetch(`${API_BASE}/alerts/events?limit=100`);
+    const data = await res.json();
+
+    if (!data.events || data.events.length === 0) {
+      list.innerHTML = '<div class="loading">No alerts triggered yet.</div>';
+      return;
+    }
+
+    list.innerHTML = data.events.map(e => `
+      <div class="alert-event-card ${e.acknowledged ? 'acknowledged' : 'unacknowledged'}">
+        <div class="alert-event-info">
+          <div class="alert-event-rule">${e.acknowledged ? '✅' : '🔴'} ${escHtml(e.rule_name)}</div>
+          <div class="alert-event-detail">
+            ${escHtml(e.metric)} = ${e.metric_value.toLocaleString()} (threshold: ${e.operator} ${e.threshold.toLocaleString()})
+          </div>
+        </div>
+        <div class="alert-event-time">${formatTime(e.triggered_at)}</div>
+        ${!e.acknowledged ? `<button class="btn btn-secondary" style="font-size:0.75rem;padding:4px 8px" onclick="acknowledgeAlert('${e.alert_id}')">Ack</button>` : ''}
+      </div>
+    `).join("");
+  } catch (e) {
+    list.innerHTML = '<div class="loading">Failed to load alert history.</div>';
+  }
+}
+
+async function acknowledgeAlert(alertId) {
+  try {
+    await fetch(`${API_BASE}/alerts/events/${alertId}/acknowledge`, { method: "PUT" });
+    await loadAlertHistory();
+    await loadAlertSummary();
+  } catch (e) {
+    alert("Failed to acknowledge alert: " + e.message);
+  }
+}
