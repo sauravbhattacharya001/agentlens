@@ -59,6 +59,15 @@ function getRetentionStatements() {
     deleteEvents: db.prepare("DELETE FROM events WHERE session_id = ?"),
     deleteSession: db.prepare("DELETE FROM sessions WHERE session_id = ?"),
     deleteTags: db.prepare("DELETE FROM session_tags WHERE session_id = ?"),
+    ageDistribution: db.prepare(`
+      SELECT
+        SUM(CASE WHEN julianday('now') - julianday(started_at) <= 1 THEN 1 ELSE 0 END) AS last_24h,
+        SUM(CASE WHEN julianday('now') - julianday(started_at) > 1 AND julianday('now') - julianday(started_at) <= 7 THEN 1 ELSE 0 END) AS last_7d,
+        SUM(CASE WHEN julianday('now') - julianday(started_at) > 7 AND julianday('now') - julianday(started_at) <= 30 THEN 1 ELSE 0 END) AS last_30d,
+        SUM(CASE WHEN julianday('now') - julianday(started_at) > 30 AND julianday('now') - julianday(started_at) <= 90 THEN 1 ELSE 0 END) AS last_90d,
+        SUM(CASE WHEN julianday('now') - julianday(started_at) > 90 THEN 1 ELSE 0 END) AS older
+      FROM sessions
+    `),
   };
   return _retentionStmts;
 }
@@ -263,25 +272,14 @@ router.get("/stats", (req, res) => {
     const newest = stmts.newestSession.get().newest;
 
     // Age distribution
-    const now = Date.now();
+    const ageRow = stmts.ageDistribution.get();
     const ageBreakdown = {
-      last_24h: 0,
-      last_7d: 0,
-      last_30d: 0,
-      last_90d: 0,
-      older: 0,
+      last_24h: ageRow.last_24h || 0,
+      last_7d: ageRow.last_7d || 0,
+      last_30d: ageRow.last_30d || 0,
+      last_90d: ageRow.last_90d || 0,
+      older: ageRow.older || 0,
     };
-
-    const allSessions = db.prepare("SELECT started_at FROM sessions").all();
-    for (const s of allSessions) {
-      const age = now - new Date(s.started_at).getTime();
-      const days = age / (24 * 60 * 60 * 1000);
-      if (days <= 1) ageBreakdown.last_24h++;
-      else if (days <= 7) ageBreakdown.last_7d++;
-      else if (days <= 30) ageBreakdown.last_30d++;
-      else if (days <= 90) ageBreakdown.last_90d++;
-      else ageBreakdown.older++;
-    }
 
     // Average events per session
     const avgEvents = sessionCount > 0
