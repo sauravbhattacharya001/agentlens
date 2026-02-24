@@ -1,7 +1,123 @@
 """Tests for alert rule SDK methods."""
 
+import time
+import threading
 import pytest
 from unittest.mock import MagicMock, patch
+
+from agentlens.alerts import (
+    AlertManager,
+    AlertRule,
+    Condition,
+    MetricAggregator,
+    Severity,
+)
+
+
+# ---------------------------------------------------------------------------
+# Cooldown race-condition tests (evaluate() atomicity)
+# ---------------------------------------------------------------------------
+
+class TestCooldownRaceCondition:
+    """Verify that evaluate() atomically checks and reserves the cooldown slot."""
+
+    def _make_manager_with_events(self, cooldown: int = 900) -> AlertManager:
+        """Create an AlertManager with events pre-loaded but no rules yet,
+        so no alerts fire during event recording."""
+        mgr = AlertManager([], default_window=300)
+        # Ensure aggregator exists for window=300
+        agg = MetricAggregator(300)
+        for _ in range(5):
+            agg.record({"error": True})
+        for _ in range(5):
+            agg.record({"error": False})
+        with mgr._lock:
+            mgr._aggregators[300] = agg
+        return mgr
+
+    def test_sequential_evaluate_respects_cooldown(self):
+        """Rapid sequential evaluate() calls — second should be suppressed."""
+        mgr = self._make_manager_with_events(cooldown=60)
+        rule = AlertRule(
+            name="high_errors",
+            metric="error_rate",
+            condition=Condition.GREATER_THAN,
+            threshold=0.1,
+            cooldown_seconds=60,
+        )
+        mgr.add_rule(rule)
+
+        first = mgr.evaluate()
+        second = mgr.evaluate()
+        assert len(first) == 1, "First evaluate should fire"
+        assert len(second) == 0, "Second evaluate should be suppressed by cooldown"
+
+    def test_cooldown_released_when_condition_not_met(self):
+        """If condition isn't met, cooldown reservation must be released."""
+        mgr = self._make_manager_with_events()
+        rule = AlertRule(
+            name="low_errors",
+            metric="error_rate",
+            condition=Condition.GREATER_THAN,
+            threshold=0.99,  # won't fire — error_rate is 0.5
+            cooldown_seconds=60,
+        )
+        mgr.add_rule(rule)
+
+        # Evaluate — condition not met, cooldown should NOT be consumed
+        result = mgr.evaluate()
+        assert len(result) == 0
+
+        # Cooldown should have been released (last_fired restored)
+        with mgr._lock:
+            cd = mgr._cooldowns.get("low_errors", 0)
+        assert cd == 0, "Cooldown should be released when condition not met"
+
+    def test_cooldown_released_on_value_error(self):
+        """If get_metric raises ValueError, cooldown reservation must be released."""
+        mgr = self._make_manager_with_events()
+        rule = AlertRule(
+            name="bad_metric",
+            metric="nonexistent_metric",
+            condition=Condition.GREATER_THAN,
+            threshold=1.0,
+            cooldown_seconds=60,
+        )
+        mgr.add_rule(rule)
+
+        result = mgr.evaluate()
+        assert len(result) == 0
+
+        with mgr._lock:
+            cd = mgr._cooldowns.get("bad_metric", 0)
+        assert cd == 0, "Cooldown should be released on ValueError"
+
+    def test_concurrent_evaluate_no_duplicates(self):
+        """Two threads calling evaluate() concurrently should not both fire."""
+        mgr = self._make_manager_with_events(cooldown=60)
+        rule = AlertRule(
+            name="high_errors",
+            metric="error_rate",
+            condition=Condition.GREATER_THAN,
+            threshold=0.1,
+            cooldown_seconds=60,
+        )
+        mgr.add_rule(rule)
+
+        results = [[], []]
+        barrier = threading.Barrier(2)
+
+        def worker(idx):
+            barrier.wait()
+            results[idx] = mgr.evaluate()
+
+        t1 = threading.Thread(target=worker, args=(0,))
+        t2 = threading.Thread(target=worker, args=(1,))
+        t1.start(); t2.start()
+        t1.join(); t2.join()
+
+        total_fired = len(results[0]) + len(results[1])
+        assert total_fired == 1, f"Expected exactly 1 alert, got {total_fired}"
 
 from agentlens.tracker import AgentTracker
 from agentlens.transport import Transport

@@ -314,13 +314,15 @@ class AlertManager:
             if not rule.enabled:
                 continue
 
-            # Check cooldown
+            # Atomically check cooldown AND reserve slot
             with self._lock:
                 last_fired = self._cooldowns.get(rule.name, 0)
-            if now - last_fired < rule.cooldown_seconds:
-                continue
+                if now - last_fired < rule.cooldown_seconds:
+                    continue
+                # Reserve cooldown slot to prevent concurrent duplicate fires
+                self._cooldowns[rule.name] = now
 
-            # Get aggregator for this window
+            # Get aggregator
             with self._lock:
                 agg = self._aggregators.get(rule.window_seconds)
             if agg is None:
@@ -329,6 +331,10 @@ class AlertManager:
             try:
                 value = agg.get_metric(rule.metric, agent_filter=rule.agent_filter)
             except ValueError:
+                # Rule didn't fire — release the cooldown reservation
+                with self._lock:
+                    if self._cooldowns.get(rule.name) == now:
+                        self._cooldowns[rule.name] = last_fired
                 continue
 
             if self._check_condition(rule.condition, value, rule.threshold):
@@ -345,15 +351,18 @@ class AlertManager:
                 fired.append(alert)
 
                 with self._lock:
-                    self._cooldowns[rule.name] = now
                     self._alert_history.append(alert)
 
-                # Dispatch callbacks (outside lock)
                 for cb in self._callbacks:
                     try:
                         cb(alert)
                     except Exception:
-                        pass  # Don't let a bad callback break the loop
+                        pass
+            else:
+                # Condition not met — release the cooldown reservation
+                with self._lock:
+                    if self._cooldowns.get(rule.name) == now:
+                        self._cooldowns[rule.name] = last_fired
 
         return fired
 
