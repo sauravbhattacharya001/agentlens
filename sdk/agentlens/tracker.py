@@ -7,6 +7,7 @@ from typing import Any
 from agentlens.models import AgentEvent, ToolCall, DecisionTrace, Session
 from agentlens.transport import Transport
 from agentlens.health import HealthScorer, HealthReport, HealthThresholds
+from agentlens.timeline import TimelineRenderer
 
 
 class AgentTracker:
@@ -82,6 +83,45 @@ class AgentTracker:
         session = self.sessions[sid]
         scorer = HealthScorer(thresholds)
         return scorer.score_session(session)
+
+    def timeline(
+        self,
+        session_id: str | None = None,
+        **kwargs: Any,
+    ) -> TimelineRenderer:
+        """Get a TimelineRenderer for a session.
+
+        Constructs a :class:`TimelineRenderer` from the session's events.
+        Any keyword arguments are forwarded to :meth:`TimelineRenderer.filter`.
+
+        Args:
+            session_id: Session to render. Defaults to the current session.
+
+        Returns:
+            A :class:`TimelineRenderer` instance.
+
+        Raises:
+            RuntimeError: If the session is not found.
+        """
+        sid = session_id or self._current_session_id
+        if not sid or sid not in self.sessions:
+            raise RuntimeError("Session not found")
+
+        session = self.sessions[sid]
+
+        # Convert events to raw dicts
+        raw_events: list[dict[str, Any]] = []
+        for ev in session.events:
+            d = ev.to_api_dict()
+            raw_events.append(d)
+
+        session_dict = session.to_api_dict()
+        renderer = TimelineRenderer(raw_events, session_dict)
+
+        if kwargs:
+            renderer = renderer.filter(**kwargs)
+
+        return renderer
 
     def track(
         self,
