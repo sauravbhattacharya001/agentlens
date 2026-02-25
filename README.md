@@ -50,6 +50,13 @@ AgentLens provides:
 | 📈 **Analytics Dashboard** | Aggregate stats, model usage, hourly activity heatmap, sessions-over-time |
 | ⚖️ **Session Comparison** | Compare two sessions side-by-side — token deltas, event breakdowns, tool usage diffs |
 | 💲 **Cost Estimation** | Configurable model pricing, per-session/event cost tracking, cost breakdown dashboard |
+| 🔔 **Alert Rules** | Configurable alert rules with metric thresholds and event triggers |
+| 🏷️ **Session Tags** | Tag sessions for filtering, organization, and retention exemption |
+| 📝 **Annotations** | Timestamped notes on sessions and events for auditing |
+| 🗄️ **Data Retention** | Configurable retention policies with auto-purge and exempt tags |
+| 🔍 **Event Search** | Rich filtering across sessions — by type, model, tokens, duration |
+| 🔬 **Anomaly Detection** | Z-score statistical analysis to detect latency spikes, token surges, error bursts |
+| 🏥 **Health Scoring** | Grade sessions A–F based on error rates, latency, tool failures |
 
 ## 🏗️ Architecture
 
@@ -261,6 +268,135 @@ agentlens.set_pricing({
 })
 ```
 
+### Event Search
+
+```python
+# Search events with rich filtering
+results = tracker.search_events(
+    q="error",                    # Full-text search
+    event_type="tool_call",       # Filter by type
+    model="gpt-4",               # Filter by model
+    min_tokens=100,               # Minimum token count
+    has_tools=True,               # Only events with tool calls
+    after="2024-01-01T00:00:00Z", # Date range
+    limit=50,                     # Max results
+)
+for event in results["events"]:
+    print(f"{event['event_type']}: {event.get('model', 'N/A')}")
+```
+
+### Session Tags
+
+```python
+# Add tags to the current session
+tracker.add_tags(["production", "v2.0", "critical"])
+
+# Remove specific tags
+tracker.remove_tags(["v2.0"])
+
+# Get tags for a session
+tags = tracker.get_tags()
+
+# List all tags across sessions
+all_tags = tracker.list_all_tags()
+
+# Find sessions by tag
+sessions = tracker.list_sessions_by_tag("production")
+```
+
+### Annotations
+
+```python
+# Annotate a session with timestamped notes
+tracker.annotate(
+    "Latency spike detected at step 5",
+    annotation_type="warning",
+    author="monitoring-bot",
+)
+tracker.annotate(
+    "Reached goal state",
+    annotation_type="milestone",
+)
+
+# Retrieve annotations
+annotations = tracker.get_annotations(annotation_type="warning")
+for ann in annotations["annotations"]:
+    print(f"[{ann['type']}] {ann['text']}")
+
+# Update or delete annotations
+tracker.update_annotation("ann-id-123", text="Updated note")
+tracker.delete_annotation("ann-id-456")
+```
+
+### Alert Rules
+
+```python
+# Create an alert rule
+tracker.create_alert_rule(
+    name="High Error Rate",
+    metric="error_rate",
+    condition="gt",
+    threshold=0.1,
+    description="Fires when error rate exceeds 10%",
+)
+
+# List and evaluate rules
+rules = tracker.list_alert_rules()
+alerts = tracker.evaluate_alerts()  # Check all rules against recent data
+alert_events = tracker.get_alert_events(limit=20)
+```
+
+### Anomaly Detection
+
+```python
+from agentlens import AnomalyDetector, AnomalyDetectorConfig
+
+config = AnomalyDetectorConfig(
+    warning_threshold=2.0,   # 2σ = warning
+    critical_threshold=3.0,  # 3σ = critical
+)
+detector = AnomalyDetector(config)
+
+# Analyze a session for anomalies
+report = detector.analyze(session_events)
+print(f"Found {len(report.anomalies)} anomalies")
+for anomaly in report.anomalies:
+    print(f"  [{anomaly.severity.value}] {anomaly.kind.value}: {anomaly.description}")
+```
+
+### Health Scoring
+
+```python
+from agentlens import HealthScorer, HealthThresholds
+
+scorer = HealthScorer()
+report = scorer.score(session_events)
+
+print(f"Overall: {report.overall_grade.value} ({report.overall_score:.0f}/100)")
+for metric in report.metrics:
+    print(f"  {metric.name}: {metric.grade.value} ({metric.score:.0f}/100)")
+```
+
+### Data Retention
+
+```python
+# Configure retention policy
+tracker.set_retention_config(
+    max_age_days=30,              # Delete sessions older than 30 days
+    max_sessions=10000,           # Keep max 10k sessions
+    exempt_tags=["production"],   # Never delete production sessions
+    auto_purge=True,              # Enable automatic cleanup
+)
+
+# Preview what would be purged
+preview = tracker.purge(dry_run=True)
+print(preview["message"])
+
+# Actually purge
+result = tracker.purge()
+print(f"Purged {result['purged_sessions']} sessions")
+```
+
 ### Data Models
 
 | Model | Description |
@@ -269,6 +405,9 @@ agentlens.set_pricing({
 | `ToolCall` | A tool/function invocation with input and output |
 | `DecisionTrace` | The reasoning behind an agent's decision |
 | `Session` | A collection of events for one agent run |
+| `AlertRule` | A configurable alert rule with metric and threshold |
+| `Anomaly` | A detected statistical anomaly in session metrics |
+| `HealthReport` | Graded health assessment of a session (A–F) |
 
 ## 📊 Dashboard
 
