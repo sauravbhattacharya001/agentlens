@@ -187,4 +187,178 @@ router.get("/", (req, res) => {
   }
 });
 
+// GET /analytics/performance — Percentile latencies, throughput & efficiency
+router.get("/performance", (req, res) => {
+  const db = getDb();
+
+  try {
+    // Optional filters
+    const agentName = req.query.agent;
+    const model = req.query.model;
+    const days = Math.min(Math.max(1, parseInt(req.query.days) || 30), 365);
+
+    const cutoff = new Date(Date.now() - days * 86400000).toISOString();
+
+    // Build dynamic query for events with duration
+    let eventsQuery = `
+      SELECT e.duration_ms, e.tokens_in, e.tokens_out, e.model, e.timestamp, e.event_type
+      FROM events e
+      INNER JOIN sessions s ON e.session_id = s.session_id
+      WHERE e.duration_ms IS NOT NULL AND e.duration_ms > 0
+        AND e.timestamp >= ?
+    `;
+    const params = [cutoff];
+
+    if (agentName) {
+      eventsQuery += " AND s.agent_name = ?";
+      params.push(agentName);
+    }
+    if (model) {
+      eventsQuery += " AND e.model = ?";
+      params.push(model);
+    }
+
+    eventsQuery += " ORDER BY e.duration_ms ASC";
+
+    const events = db.prepare(eventsQuery).all(...params);
+
+    if (events.length === 0) {
+      return res.json({
+        period_days: days,
+        filters: { agent: agentName || null, model: model || null },
+        sample_size: 0,
+        latency: null,
+        throughput: null,
+        efficiency: null,
+        by_model: {},
+        by_event_type: {},
+      });
+    }
+
+    // Percentile helper (data must be sorted ascending)
+    const percentile = (sorted, p) => {
+      if (sorted.length === 0) return 0;
+      const idx = (p / 100) * (sorted.length - 1);
+      const lo = Math.floor(idx);
+      const hi = Math.ceil(idx);
+      if (lo === hi) return sorted[lo];
+      return sorted[lo] + (sorted[hi] - sorted[lo]) * (idx - lo);
+    };
+
+    const durations = events.map((e) => e.duration_ms);
+    const totalDuration = durations.reduce((a, b) => a + b, 0);
+    const totalTokensIn = events.reduce((s, e) => s + (e.tokens_in || 0), 0);
+    const totalTokensOut = events.reduce((s, e) => s + (e.tokens_out || 0), 0);
+    const totalTokens = totalTokensIn + totalTokensOut;
+
+    // Time span for throughput calculation
+    const timestamps = events.map((e) => new Date(e.timestamp).getTime());
+    const timeSpanMs = Math.max(1, Math.max(...timestamps) - Math.min(...timestamps));
+    const timeSpanHours = timeSpanMs / 3600000;
+
+    // Per-model breakdown
+    const byModel = {};
+    for (const e of events) {
+      const m = e.model || "(unknown)";
+      if (!byModel[m]) byModel[m] = { durations: [], tokens_in: 0, tokens_out: 0, count: 0 };
+      byModel[m].durations.push(e.duration_ms);
+      byModel[m].tokens_in += e.tokens_in || 0;
+      byModel[m].tokens_out += e.tokens_out || 0;
+      byModel[m].count++;
+    }
+
+    const modelPerf = {};
+    for (const [m, data] of Object.entries(byModel)) {
+      data.durations.sort((a, b) => a - b);
+      const mTotalTokens = data.tokens_in + data.tokens_out;
+      const mTotalDur = data.durations.reduce((a, b) => a + b, 0);
+      modelPerf[m] = {
+        count: data.count,
+        latency: {
+          p50: Math.round(percentile(data.durations, 50) * 100) / 100,
+          p95: Math.round(percentile(data.durations, 95) * 100) / 100,
+          p99: Math.round(percentile(data.durations, 99) * 100) / 100,
+          avg: Math.round((mTotalDur / data.count) * 100) / 100,
+          min: data.durations[0],
+          max: data.durations[data.durations.length - 1],
+        },
+        tokens: {
+          total_in: data.tokens_in,
+          total_out: data.tokens_out,
+          total: mTotalTokens,
+          avg_per_call: Math.round(mTotalTokens / data.count),
+        },
+        tokens_per_second: mTotalDur > 0
+          ? Math.round((mTotalTokens / (mTotalDur / 1000)) * 100) / 100
+          : 0,
+      };
+    }
+
+    // Per event-type breakdown
+    const byType = {};
+    for (const e of events) {
+      const t = e.event_type;
+      if (!byType[t]) byType[t] = { durations: [], count: 0 };
+      byType[t].durations.push(e.duration_ms);
+      byType[t].count++;
+    }
+
+    const typePerf = {};
+    for (const [t, data] of Object.entries(byType)) {
+      data.durations.sort((a, b) => a - b);
+      const tTotalDur = data.durations.reduce((a, b) => a + b, 0);
+      typePerf[t] = {
+        count: data.count,
+        p50: Math.round(percentile(data.durations, 50) * 100) / 100,
+        p95: Math.round(percentile(data.durations, 95) * 100) / 100,
+        p99: Math.round(percentile(data.durations, 99) * 100) / 100,
+        avg: Math.round((tTotalDur / data.count) * 100) / 100,
+        min: data.durations[0],
+        max: data.durations[data.durations.length - 1],
+      };
+    }
+
+    res.json({
+      period_days: days,
+      filters: { agent: agentName || null, model: model || null },
+      sample_size: events.length,
+      latency: {
+        p50: Math.round(percentile(durations, 50) * 100) / 100,
+        p75: Math.round(percentile(durations, 75) * 100) / 100,
+        p90: Math.round(percentile(durations, 90) * 100) / 100,
+        p95: Math.round(percentile(durations, 95) * 100) / 100,
+        p99: Math.round(percentile(durations, 99) * 100) / 100,
+        avg: Math.round((totalDuration / events.length) * 100) / 100,
+        min: durations[0],
+        max: durations[durations.length - 1],
+      },
+      throughput: {
+        total_events: events.length,
+        total_tokens: totalTokens,
+        events_per_hour: Math.round((events.length / timeSpanHours) * 100) / 100,
+        tokens_per_hour: Math.round(totalTokens / timeSpanHours),
+        tokens_per_second: totalDuration > 0
+          ? Math.round((totalTokens / (totalDuration / 1000)) * 100) / 100
+          : 0,
+      },
+      efficiency: {
+        avg_tokens_per_event: Math.round(totalTokens / events.length),
+        avg_tokens_in_per_event: Math.round(totalTokensIn / events.length),
+        avg_tokens_out_per_event: Math.round(totalTokensOut / events.length),
+        output_input_ratio: totalTokensIn > 0
+          ? Math.round((totalTokensOut / totalTokensIn) * 1000) / 1000
+          : 0,
+        avg_duration_per_token_ms: totalTokens > 0
+          ? Math.round((totalDuration / totalTokens) * 1000) / 1000
+          : 0,
+      },
+      by_model: modelPerf,
+      by_event_type: typePerf,
+    });
+  } catch (err) {
+    console.error("Error fetching performance analytics:", err);
+    res.status(500).json({ error: "Failed to fetch performance analytics" });
+  }
+});
+
 module.exports = router;
