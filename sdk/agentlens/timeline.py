@@ -122,6 +122,20 @@ class TimelineRenderer:
         show_duration: bool = True,
         max_width: int = 100,
     ) -> str:
+        """Render the session timeline as a plain-text string.
+
+        Produces a box-drawing formatted timeline suitable for terminal output,
+        with event icons, timestamps, metadata, token counts, and durations.
+
+        Args:
+            show_metadata: Include event metadata (model, tags, etc.) below each event.
+            show_tokens: Show token in/out counts for events that have them.
+            show_duration: Show duration_ms for events that have it.
+            max_width: Maximum character width for the output (minimum 40).
+
+        Returns:
+            Multi-line string with the formatted timeline.
+        """
         max_width = max(40, max_width)
         lines: list[str] = []
 
@@ -248,6 +262,21 @@ class TimelineRenderer:
         show_duration: bool = True,
         include_toc: bool = True,
     ) -> str:
+        """Render the session timeline as a Markdown document.
+
+        Produces a structured Markdown document with headings, a table of
+        contents, event details with badges, and an optional summary section.
+        Suitable for embedding in reports, wikis, or issue comments.
+
+        Args:
+            show_metadata: Include event metadata as sub-items.
+            show_tokens: Show token in/out counts for each event.
+            show_duration: Show event duration in milliseconds.
+            include_toc: Prepend a table of contents with event type breakdown.
+
+        Returns:
+            Markdown-formatted string.
+        """
         summary = self.get_summary()
         sid = self.session.get("session_id", "unknown")
         agent = self.session.get("agent_name", "")
@@ -335,6 +364,23 @@ class TimelineRenderer:
         dark_mode: bool = False,
         title: str = "Session Timeline",
     ) -> str:
+        """Render the session timeline as a self-contained HTML page.
+
+        Produces a complete HTML document with inline CSS, event cards, a
+        summary header, and optional dark mode styling. The output is fully
+        self-contained (no external dependencies) and can be saved to a file
+        or embedded in a dashboard.
+
+        Args:
+            show_metadata: Include event metadata in each card.
+            show_tokens: Show token in/out counts on event cards.
+            show_duration: Show event duration on event cards.
+            dark_mode: Use dark background with light text.
+            title: HTML page title and main heading.
+
+        Returns:
+            Complete HTML document as a string.
+        """
         summary = self.get_summary()
         sid = self.session.get("session_id", "unknown")
         agent = self.session.get("agent_name", "")

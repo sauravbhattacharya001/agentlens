@@ -36,6 +36,7 @@ class AnomalySeverity(Enum):
 
     @property
     def label(self) -> str:
+        """Human-readable severity label (e.g. 'Warning', 'Critical')."""
         return self.value.capitalize()
 
 
@@ -52,6 +53,13 @@ class Anomaly:
     description: str       # human-readable description
 
     def to_dict(self) -> dict[str, Any]:
+        """Serialize the anomaly to a JSON-friendly dictionary.
+
+        Returns:
+            Dict with keys: kind, severity, metric_name, observed, expected,
+            std_dev, z_score, description. Numeric values are rounded for
+            clean serialization.
+        """
         return {
             "kind": self.kind.value,
             "severity": self.severity.value,
@@ -76,18 +84,34 @@ class MetricBaseline:
 
     @property
     def coefficient_of_variation(self) -> float:
-        """CV = std_dev / mean. Higher means more variable."""
+        """Coefficient of variation (CV = std_dev / |mean|).
+
+        Higher values indicate more variable data. Returns 0.0 if mean is zero.
+        """
         if self.mean == 0:
             return 0.0
         return self.std_dev / abs(self.mean)
 
     def z_score(self, value: float) -> float:
-        """Calculate Z-score for a value against this baseline."""
+        """Calculate how many standard deviations ``value`` is from the mean.
+
+        Args:
+            value: The observed metric value.
+
+        Returns:
+            Z-score as a float. Positive means above mean, negative means below.
+            Returns 0.0 if value equals mean with zero std_dev, or inf otherwise.
+        """
         if self.std_dev == 0:
             return 0.0 if value == self.mean else float('inf')
         return (value - self.mean) / self.std_dev
 
     def to_dict(self) -> dict[str, Any]:
+        """Serialize the baseline to a JSON-friendly dictionary.
+
+        Returns:
+            Dict with keys: name, mean, std_dev, min, max, sample_count, cv.
+        """
         return {
             "name": self.name,
             "mean": round(self.mean, 4),
@@ -108,14 +132,17 @@ class AnomalyReport:
 
     @property
     def anomaly_count(self) -> int:
+        """Total number of anomalies detected."""
         return len(self.anomalies)
 
     @property
     def has_anomalies(self) -> bool:
+        """Whether any anomalies were detected."""
         return len(self.anomalies) > 0
 
     @property
     def max_severity(self) -> AnomalySeverity | None:
+        """Highest severity among detected anomalies, or None if clean."""
         if not self.anomalies:
             return None
         if any(a.severity == AnomalySeverity.CRITICAL for a in self.anomalies):
@@ -124,6 +151,7 @@ class AnomalyReport:
 
     @property
     def by_kind(self) -> dict[AnomalyKind, list[Anomaly]]:
+        """Group anomalies by their kind (e.g. LATENCY_SPIKE, TOKEN_SURGE)."""
         result: dict[AnomalyKind, list[Anomaly]] = {}
         for a in self.anomalies:
             result.setdefault(a.kind, []).append(a)
@@ -131,6 +159,7 @@ class AnomalyReport:
 
     @property
     def by_severity(self) -> dict[AnomalySeverity, list[Anomaly]]:
+        """Group anomalies by severity level (WARNING or CRITICAL)."""
         result: dict[AnomalySeverity, list[Anomaly]] = {}
         for a in self.anomalies:
             result.setdefault(a.severity, []).append(a)
@@ -138,14 +167,22 @@ class AnomalyReport:
 
     @property
     def critical_count(self) -> int:
+        """Number of CRITICAL-severity anomalies."""
         return sum(1 for a in self.anomalies if a.severity == AnomalySeverity.CRITICAL)
 
     @property
     def warning_count(self) -> int:
+        """Number of WARNING-severity anomalies."""
         return sum(1 for a in self.anomalies if a.severity == AnomalySeverity.WARNING)
 
     @property
     def summary(self) -> str:
+        """One-line human-readable summary of the anomaly report.
+
+        Examples:
+            'Session abc123: no anomalies detected.'
+            'Session abc123: 2 anomalie(s) detected 1 critical 1 warning — error_burst, latency_spike.'
+        """
         if not self.anomalies:
             return f"Session {self.session_id}: no anomalies detected."
         parts = [f"Session {self.session_id}: {self.anomaly_count} anomalie(s) detected"]
@@ -159,6 +196,12 @@ class AnomalyReport:
         return " ".join(parts) + "."
 
     def to_dict(self) -> dict[str, Any]:
+        """Serialize the full report to a JSON-friendly dictionary.
+
+        Returns:
+            Dict with session_id, anomaly_count, has_anomalies, max_severity,
+            critical_count, warning_count, anomalies list, and summary.
+        """
         return {
             "session_id": self.session_id,
             "anomaly_count": self.anomaly_count,
@@ -173,7 +216,19 @@ class AnomalyReport:
 
 @dataclass
 class AnomalyDetectorConfig:
-    """Configuration for the anomaly detector."""
+    """Configuration for the anomaly detector.
+
+    Attributes:
+        warning_threshold: Z-score threshold for WARNING severity (default: 2.0σ).
+        critical_threshold: Z-score threshold for CRITICAL severity (default: 3.0σ).
+        min_samples: Minimum number of baseline samples required before analysis
+            can run (default: 3).
+        check_latency: Enable latency spike detection.
+        check_tokens: Enable token surge detection.
+        check_errors: Enable error burst detection.
+        check_event_count: Enable event flood/drought detection.
+        check_tool_failures: Enable tool failure spike detection.
+    """
     warning_threshold: float = 2.0    # Z-score for warning
     critical_threshold: float = 3.0   # Z-score for critical
     min_samples: int = 3              # Minimum baseline samples needed
