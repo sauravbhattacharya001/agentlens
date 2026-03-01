@@ -453,7 +453,8 @@ class AnomalyDetector:
         """Compute statistical baseline from a list of values."""
         n = len(values)
         mean = sum(values) / n
-        variance = sum((v - mean) ** 2 for v in values) / n  # population variance
+        # Use sample variance (Bessel's correction) — we're estimating from a sample
+        variance = sum((v - mean) ** 2 for v in values) / (n - 1) if n > 1 else 0.0
         std_dev = math.sqrt(variance)
         return MetricBaseline(
             name=name,
