@@ -8,6 +8,7 @@ from agentlens.alerts import AlertRule, AlertManager, MetricAggregator, Alert, S
 from agentlens.health import HealthScorer, HealthReport, HealthGrade, HealthThresholds, MetricScore
 from agentlens.anomaly import AnomalyDetector, AnomalyDetectorConfig, Anomaly, AnomalyKind, AnomalySeverity, AnomalyReport, MetricBaseline
 from agentlens.timeline import TimelineRenderer
+from agentlens.span import Span
 
 __version__ = "0.1.0"
 __all__ = [
@@ -46,6 +47,7 @@ __all__ = [
     "AnomalyReport",
     "MetricBaseline",
     "TimelineRenderer",
+    "Span",
 ]
 
 _tracker: AgentTracker | None = None

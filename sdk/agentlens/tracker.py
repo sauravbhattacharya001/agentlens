@@ -2,12 +2,15 @@
 
 from __future__ import annotations
 
-from typing import Any
+import time
+from contextlib import contextmanager
+from typing import Any, Generator
 
 from agentlens.models import AgentEvent, ToolCall, DecisionTrace, Session
 from agentlens.transport import Transport
 from agentlens.health import HealthScorer, HealthReport, HealthThresholds
 from agentlens.timeline import TimelineRenderer
+from agentlens.span import Span
 
 
 class AgentTracker:
@@ -17,12 +20,106 @@ class AgentTracker:
         self.transport = transport
         self.sessions: dict[str, Session] = {}
         self._current_session_id: str | None = None
+        self._active_spans: list[Span] = []
 
     @property
     def current_session(self) -> Session | None:
         if self._current_session_id and self._current_session_id in self.sessions:
             return self.sessions[self._current_session_id]
         return None
+
+    @property
+    def current_span(self) -> Span | None:
+        """Return the innermost active span, or None."""
+        return self._active_spans[-1] if self._active_spans else None
+
+    @contextmanager
+    def span(
+        self,
+        name: str,
+        attributes: dict[str, Any] | None = None,
+    ) -> Generator[Span, None, None]:
+        """Create a span that groups events into a logical unit.
+
+        Spans record start/end times, duration, nested children, and
+        custom attributes.  They emit ``span_start`` and ``span_end``
+        events to the backend for timeline visualization.
+
+        Spans can be nested — inner spans automatically become children
+        of the outer span.
+
+        Args:
+            name: Human-readable name for this span (e.g. ``"planning"``).
+            attributes: Optional initial attributes dict.
+
+        Yields:
+            A :class:`Span` instance.  Use :meth:`Span.set_attribute` to
+            attach metadata during execution.
+
+        Example::
+
+            with tracker.span("research") as s:
+                tracker.track(event_type="llm_call", model="gpt-4o", ...)
+                with tracker.span("web-search"):
+                    tracker.track_tool("search", tool_input={"q": "test"})
+                s.set_attribute("sources_found", 3)
+        """
+        sid = self._current_session_id or ""
+        parent = self.current_span
+
+        sp = Span(
+            name=name,
+            session_id=sid,
+            parent_id=parent.span_id if parent else None,
+            attributes=attributes or {},
+            _mono_start=time.monotonic(),
+        )
+
+        # Register as child of parent span
+        if parent:
+            parent.children.append(sp.span_id)
+
+        # Emit span_start event
+        self.transport.send_events([{
+            "event_type": "span_start",
+            "session_id": sid,
+            "span_id": sp.span_id,
+            "span_name": name,
+            "parent_span_id": sp.parent_id,
+            "timestamp": sp.started_at.isoformat(),
+            "attributes": sp.attributes,
+        }])
+
+        self._active_spans.append(sp)
+        try:
+            yield sp
+            if sp.status == "active":
+                sp.status = "completed"
+        except Exception as exc:
+            sp.status = "error"
+            sp.error = str(exc)
+            raise
+        finally:
+            from agentlens.span import _utcnow
+            sp.ended_at = _utcnow()
+            sp.duration_ms = (time.monotonic() - sp._mono_start) * 1000
+            self._active_spans.pop()
+
+            # Emit span_end event
+            self.transport.send_events([{
+                "event_type": "span_end",
+                "session_id": sid,
+                "span_id": sp.span_id,
+                "span_name": name,
+                "parent_span_id": sp.parent_id,
+                "timestamp": sp.ended_at.isoformat(),
+                "duration_ms": round(sp.duration_ms, 2),
+                "status": sp.status,
+                "error": sp.error,
+                "event_count": sp.event_count,
+                "children": sp.children,
+                "attributes": sp.attributes,
+            }])
 
     def start_session(self, agent_name: str = "default-agent", metadata: dict | None = None) -> Session:
         """Create and register a new tracking session."""
@@ -173,8 +270,16 @@ class AgentTracker:
         if self.current_session:
             self.current_session.add_event(event)
 
+        # Increment event count on active span(s)
+        for sp in self._active_spans:
+            sp.event_count += 1
+
         # Send to backend
-        self.transport.send_events([event.to_api_dict()])
+        api_dict = event.to_api_dict()
+        # Attach span context so the backend can associate events with spans
+        if self._active_spans:
+            api_dict["span_id"] = self._active_spans[-1].span_id
+        self.transport.send_events([api_dict])
 
         return event
 
