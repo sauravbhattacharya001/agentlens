@@ -9,6 +9,7 @@ from agentlens.health import HealthScorer, HealthReport, HealthGrade, HealthThre
 from agentlens.anomaly import AnomalyDetector, AnomalyDetectorConfig, Anomaly, AnomalyKind, AnomalySeverity, AnomalyReport, MetricBaseline
 from agentlens.timeline import TimelineRenderer
 from agentlens.span import Span
+from agentlens.budget import TokenBudget, BudgetTracker, BudgetReport, BudgetStatus, BudgetExceededError, BudgetEntry, estimate_cost
 
 __version__ = "0.1.0"
 __all__ = [
@@ -48,6 +49,13 @@ __all__ = [
     "MetricBaseline",
     "TimelineRenderer",
     "Span",
+    "TokenBudget",
+    "BudgetTracker",
+    "BudgetReport",
+    "BudgetStatus",
+    "BudgetExceededError",
+    "BudgetEntry",
+    "estimate_cost",
 ]
 
 _tracker: AgentTracker | None = None
