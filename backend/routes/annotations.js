@@ -1,6 +1,7 @@
 /* ── Session Annotations — notes and comments on sessions ──────────── */
 
 const express = require("express");
+const crypto = require("crypto");
 const router = express.Router();
 const { getDb } = require("../db");
 
@@ -38,7 +39,7 @@ const MAX_AUTHOR_LENGTH = 100;
 // ── Helper: generate unique ID ──────────────────────────────────────
 
 function generateId() {
-  return `ann-${Date.now().toString(36)}-${Math.random().toString(36).slice(2, 10)}`;
+  return `ann-${Date.now().toString(36)}-${crypto.randomBytes(6).toString('hex')}`;
 }
 
 // ── Helper: validate annotation input ───────────────────────────────

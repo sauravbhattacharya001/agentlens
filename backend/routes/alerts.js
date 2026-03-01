@@ -1,6 +1,7 @@
 /* ── Alert Rules — threshold-based alerting for agent observability ──── */
 
 const express = require("express");
+const crypto = require("crypto");
 const router = express.Router();
 const { getDb } = require("../db");
 
@@ -57,89 +58,103 @@ const VALID_OPERATORS = ["<", ">", "<=", ">=", "==", "!="];
 // ── Helper: generate unique ID ──────────────────────────────────────
 
 function generateId() {
-  return `${Date.now().toString(36)}-${Math.random().toString(36).slice(2, 10)}`;
+  return `${Date.now().toString(36)}-${crypto.randomBytes(6).toString('hex')}`;
 }
 
 // ── Helper: evaluate metric value for a time window ─────────────────
 
-function evaluateMetric(metric, windowMinutes, agentFilter) {
+// Cached prepared statements for metric evaluation.  Each metric needs
+// two variants: one without and one with an agent-name filter.  Lazily
+// built on first use, reused across all subsequent evaluations so the
+// SQL is only compiled once per process lifetime.
+let _metricStmts = null;
+
+function getMetricStatements() {
+  if (_metricStmts) return _metricStmts;
   const db = getDb();
+
+  const build = (sql) => ({
+    all:   db.prepare(sql),
+    agent: db.prepare(sql + " AND s.agent_name = ?"),
+  });
+
+  // Event-joined queries use "e" + "s" aliases
+  const buildE = (sql) => ({
+    all:   db.prepare(sql),
+    agent: db.prepare(sql + " AND s.agent_name = ?"),
+  });
+
+  _metricStmts = {
+    total_tokens: build(
+      `SELECT COALESCE(SUM(s.total_tokens_in + s.total_tokens_out), 0) AS val
+       FROM sessions s WHERE s.started_at >= ?`
+    ),
+    avg_tokens_per_session: build(
+      `SELECT COALESCE(AVG(s.total_tokens_in + s.total_tokens_out), 0) AS val
+       FROM sessions s WHERE s.started_at >= ?`
+    ),
+    error_rate: buildE(
+      `SELECT
+         COUNT(*) AS total,
+         SUM(CASE WHEN e.event_type = 'error' THEN 1 ELSE 0 END) AS errors
+       FROM events e
+       JOIN sessions s ON e.session_id = s.session_id
+       WHERE e.timestamp >= ?`
+    ),
+    avg_duration_ms: buildE(
+      `SELECT COALESCE(AVG(e.duration_ms), 0) AS val
+       FROM events e
+       JOIN sessions s ON e.session_id = s.session_id
+       WHERE e.timestamp >= ? AND e.duration_ms IS NOT NULL`
+    ),
+    max_duration_ms: buildE(
+      `SELECT COALESCE(MAX(e.duration_ms), 0) AS val
+       FROM events e
+       JOIN sessions s ON e.session_id = s.session_id
+       WHERE e.timestamp >= ? AND e.duration_ms IS NOT NULL`
+    ),
+    session_count: build(
+      `SELECT COUNT(*) AS val FROM sessions s
+       WHERE s.started_at >= ?`
+    ),
+    event_count: buildE(
+      `SELECT COUNT(*) AS val FROM events e
+       JOIN sessions s ON e.session_id = s.session_id
+       WHERE e.timestamp >= ?`
+    ),
+    token_rate: buildE(
+      `SELECT COALESCE(SUM(e.tokens_in + e.tokens_out), 0) AS total
+       FROM events e
+       JOIN sessions s ON e.session_id = s.session_id
+       WHERE e.timestamp >= ?`
+    ),
+  };
+
+  return _metricStmts;
+}
+
+function evaluateMetric(metric, windowMinutes, agentFilter) {
   const windowStart = new Date(Date.now() - windowMinutes * 60 * 1000).toISOString();
+  const stmts = getMetricStatements();
+  const pair = stmts[metric];
 
-  const agentClause = agentFilter ? "AND s.agent_name = ?" : "";
-  const agentParams = agentFilter ? [agentFilter] : [];
+  if (!pair) throw new Error(`Unknown metric: ${metric}`);
 
-  switch (metric) {
-    case "total_tokens": {
-      const row = db.prepare(`
-        SELECT COALESCE(SUM(s.total_tokens_in + s.total_tokens_out), 0) AS val
-        FROM sessions s WHERE s.started_at >= ? ${agentClause}
-      `).get(windowStart, ...agentParams);
-      return row.val;
-    }
-    case "avg_tokens_per_session": {
-      const row = db.prepare(`
-        SELECT COALESCE(AVG(s.total_tokens_in + s.total_tokens_out), 0) AS val
-        FROM sessions s WHERE s.started_at >= ? ${agentClause}
-      `).get(windowStart, ...agentParams);
-      return row.val;
-    }
-    case "error_rate": {
-      const row = db.prepare(`
-        SELECT
-          COUNT(*) AS total,
-          SUM(CASE WHEN e.event_type = 'error' THEN 1 ELSE 0 END) AS errors
-        FROM events e
-        JOIN sessions s ON e.session_id = s.session_id
-        WHERE e.timestamp >= ? ${agentClause}
-      `).get(windowStart, ...agentParams);
-      return row.total > 0 ? (row.errors / row.total) * 100 : 0;
-    }
-    case "avg_duration_ms": {
-      const row = db.prepare(`
-        SELECT COALESCE(AVG(e.duration_ms), 0) AS val
-        FROM events e
-        JOIN sessions s ON e.session_id = s.session_id
-        WHERE e.timestamp >= ? AND e.duration_ms IS NOT NULL ${agentClause}
-      `).get(windowStart, ...agentParams);
-      return row.val;
-    }
-    case "max_duration_ms": {
-      const row = db.prepare(`
-        SELECT COALESCE(MAX(e.duration_ms), 0) AS val
-        FROM events e
-        JOIN sessions s ON e.session_id = s.session_id
-        WHERE e.timestamp >= ? AND e.duration_ms IS NOT NULL ${agentClause}
-      `).get(windowStart, ...agentParams);
-      return row.val;
-    }
-    case "session_count": {
-      const row = db.prepare(`
-        SELECT COUNT(*) AS val FROM sessions s
-        WHERE s.started_at >= ? ${agentClause}
-      `).get(windowStart, ...agentParams);
-      return row.val;
-    }
-    case "event_count": {
-      const row = db.prepare(`
-        SELECT COUNT(*) AS val FROM events e
-        JOIN sessions s ON e.session_id = s.session_id
-        WHERE e.timestamp >= ? ${agentClause}
-      `).get(windowStart, ...agentParams);
-      return row.val;
-    }
-    case "token_rate": {
-      const row = db.prepare(`
-        SELECT COALESCE(SUM(e.tokens_in + e.tokens_out), 0) AS total
-        FROM events e
-        JOIN sessions s ON e.session_id = s.session_id
-        WHERE e.timestamp >= ? ${agentClause}
-      `).get(windowStart, ...agentParams);
-      return windowMinutes > 0 ? row.total / windowMinutes : 0;
-    }
-    default:
-      throw new Error(`Unknown metric: ${metric}`);
+  const stmt = agentFilter ? pair.agent : pair.all;
+  const params = agentFilter ? [windowStart, agentFilter] : [windowStart];
+
+  if (metric === "error_rate") {
+    const row = stmt.get(...params);
+    return row.total > 0 ? (row.errors / row.total) * 100 : 0;
   }
+
+  if (metric === "token_rate") {
+    const row = stmt.get(...params);
+    return windowMinutes > 0 ? row.total / windowMinutes : 0;
+  }
+
+  const row = stmt.get(...params);
+  return row.val;
 }
 
 // ── Helper: compare value against threshold ─────────────────────────
