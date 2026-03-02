@@ -12,6 +12,7 @@ from agentlens.span import Span
 from agentlens.budget import TokenBudget, BudgetTracker, BudgetReport, BudgetStatus, BudgetExceededError, BudgetEntry, estimate_cost
 from agentlens.forecast import CostForecaster, UsageRecord, ForecastResult, SpendingSummary, BudgetAlert, DailyPrediction
 from agentlens.compliance import ComplianceChecker, CompliancePolicy, ComplianceReport, ComplianceRule, RuleKind, RuleVerdict, RuleResult, strict_policy, permissive_policy
+from agentlens.drift import DriftDetector, DriftReport, DriftStatus, DriftDirection, MetricDrift, ToolUsageDrift
 
 __version__ = "0.1.0"
 __all__ = [
@@ -73,6 +74,12 @@ __all__ = [
     "RuleResult",
     "strict_policy",
     "permissive_policy",
+    "DriftDetector",
+    "DriftReport",
+    "DriftStatus",
+    "DriftDirection",
+    "MetricDrift",
+    "ToolUsageDrift",
 ]
 
 _tracker: AgentTracker | None = None
