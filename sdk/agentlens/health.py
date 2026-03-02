@@ -276,9 +276,15 @@ class HealthScorer:
                 detail="No duration data available",
             )
 
-        idx = int(math.floor(0.95 * len(durations)))
-        idx = min(idx, len(durations) - 1)
-        p95 = durations[idx]
+        # Percentile using linear interpolation (consistent with the
+        # backend's analytics.js).  Previous formula used
+        # floor(0.95 * len) which computed P100 (max) for small arrays
+        # instead of P95.
+        idx = 0.95 * (len(durations) - 1)
+        lo = int(math.floor(idx))
+        hi = min(lo + 1, len(durations) - 1)
+        frac = idx - lo
+        p95 = durations[lo] + (durations[hi] - durations[lo]) * frac
 
         if p95 <= 100.0:
             score = 100.0

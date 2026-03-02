@@ -33,6 +33,28 @@ jobs:
         with:
           python-version: '3.12'
 
+      - name: Validate version matches release tag
+        if: github.event_name == 'release'
+        run: |
+          TAG="${GITHUB_REF#refs/tags/}"
+          # Strip leading 'v' from tag (v1.2.3 → 1.2.3)
+          TAG_VERSION="${TAG#v}"
+          # Extract version from pyproject.toml
+          PKG_VERSION=$(python -c "
+          import re
+          with open('pyproject.toml') as f:
+              m = re.search(r'^version\s*=\s*[\"'']([^\"'']+)[\"'']', f.read(), re.MULTILINE)
+              print(m.group(1) if m else '')
+          ")
+          echo "Release tag version: $TAG_VERSION"
+          echo "Package version: $PKG_VERSION"
+          if [ "$TAG_VERSION" != "$PKG_VERSION" ]; then
+            echo "::error::Version mismatch! Release tag '$TAG_VERSION' != pyproject.toml version '$PKG_VERSION'"
+            echo "Update sdk/pyproject.toml version to match the release tag before publishing."
+            exit 1
+          fi
+          echo "✅ Version match confirmed: $PKG_VERSION"
+
       - name: Install build tools
         run: pip install build twine
 

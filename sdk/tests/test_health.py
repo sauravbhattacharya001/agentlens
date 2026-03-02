@@ -292,10 +292,12 @@ class TestP95LatencyScorer:
         assert ms.score == 0.0
 
     def test_p95_index_calculation(self):
-        # 20 events: p95 index = floor(0.95 * 20) = 19 → last element
+        # 20 events with durations 0, 100, 200, ..., 1900
+        # P95 via linear interpolation: idx = 0.95 * 19 = 18.05
+        # value = 1800 + 0.05 * (1900 - 1800) = 1805.0
         events = [{"event_type": "llm_call", "duration_ms": float(i * 100), "tokens_in": 0, "tokens_out": 0, "tool_call": None} for i in range(20)]
         ms = HealthScorer()._score_p95_latency(events)
-        assert ms.value == 1900.0  # index 19
+        assert ms.value == 1805.0
 
     def test_no_durations(self):
         events = [{"event_type": "llm_call", "tokens_in": 0, "tokens_out": 0, "tool_call": None}]
