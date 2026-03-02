@@ -10,6 +10,7 @@ from agentlens.anomaly import AnomalyDetector, AnomalyDetectorConfig, Anomaly, A
 from agentlens.timeline import TimelineRenderer
 from agentlens.span import Span
 from agentlens.budget import TokenBudget, BudgetTracker, BudgetReport, BudgetStatus, BudgetExceededError, BudgetEntry, estimate_cost
+from agentlens.forecast import CostForecaster, UsageRecord, ForecastResult, SpendingSummary, BudgetAlert, DailyPrediction
 
 __version__ = "0.1.0"
 __all__ = [
@@ -56,6 +57,12 @@ __all__ = [
     "BudgetExceededError",
     "BudgetEntry",
     "estimate_cost",
+    "CostForecaster",
+    "UsageRecord",
+    "ForecastResult",
+    "SpendingSummary",
+    "BudgetAlert",
+    "DailyPrediction",
 ]
 
 _tracker: AgentTracker | None = None
