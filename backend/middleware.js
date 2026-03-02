@@ -39,7 +39,7 @@ function createCorsMiddleware() {
 
   return cors({
     origin: ALLOWED_ORIGINS || true,
-    methods: ["GET", "POST"],
+    methods: ["GET", "POST", "PUT", "DELETE"],
     allowedHeaders: ["Content-Type", "X-API-Key"],
     maxAge: 86400,
   });

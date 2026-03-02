@@ -4,6 +4,7 @@ const express = require("express");
 const crypto = require("crypto");
 const router = express.Router();
 const { getDb } = require("../db");
+const { validateWebhookUrl } = require("../lib/validation");
 
 // ── Schema initialisation ───────────────────────────────────────────
 
@@ -242,7 +243,10 @@ router.post("/", (req, res) => {
     if (!url || typeof url !== "string") {
       return res.status(400).json({ error: "url is required" });
     }
-    try { new URL(url); } catch { return res.status(400).json({ error: "url must be a valid URL" }); }
+    const urlCheck = validateWebhookUrl(url);
+    if (!urlCheck.valid) {
+      return res.status(400).json({ error: urlCheck.error });
+    }
 
     const validFormats = ["json", "slack", "discord"];
     if (format && !validFormats.includes(format)) {
@@ -295,7 +299,10 @@ router.put("/:webhookId", (req, res) => {
 
     if (name !== undefined) updates.name = name.trim();
     if (url !== undefined) {
-      try { new URL(url); } catch { return res.status(400).json({ error: "url must be a valid URL" }); }
+      const urlCheck = validateWebhookUrl(url);
+      if (!urlCheck.valid) {
+        return res.status(400).json({ error: urlCheck.error });
+      }
       updates.url = url;
     }
     if (secret !== undefined) updates.secret = secret || null;

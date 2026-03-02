@@ -186,6 +186,76 @@ function validateTags(tags) {
   return valid.length > 0 ? valid : null;
 }
 
+/**
+ * Validate a webhook URL: must be a valid https (or http) URL pointing
+ * to a public, non-internal host.  Blocks SSRF attacks against cloud
+ * metadata endpoints, loopback addresses, and private RFC-1918 ranges.
+ *
+ * @param {string} url
+ * @returns {{ valid: boolean, error?: string }}
+ */
+function validateWebhookUrl(url) {
+  if (!url || typeof url !== "string") {
+    return { valid: false, error: "url is required" };
+  }
+
+  let parsed;
+  try {
+    parsed = new URL(url);
+  } catch {
+    return { valid: false, error: "url must be a valid URL" };
+  }
+
+  // Only allow http/https
+  if (parsed.protocol !== "http:" && parsed.protocol !== "https:") {
+    return { valid: false, error: "url must use http or https protocol" };
+  }
+
+  const hostname = parsed.hostname.toLowerCase();
+
+  // Block loopback
+  if (
+    hostname === "localhost" ||
+    hostname === "127.0.0.1" ||
+    hostname === "::1" ||
+    hostname === "[::1]" ||
+    hostname === "0.0.0.0"
+  ) {
+    return { valid: false, error: "url must not point to a loopback address" };
+  }
+
+  // Block link-local / metadata (169.254.x.x — AWS/GCP/Azure metadata)
+  if (hostname === "169.254.169.254" || hostname.startsWith("169.254.")) {
+    return { valid: false, error: "url must not point to a cloud metadata endpoint" };
+  }
+
+  // Block private RFC-1918 ranges
+  const ipv4Match = hostname.match(/^(\d{1,3})\.(\d{1,3})\.(\d{1,3})\.(\d{1,3})$/);
+  if (ipv4Match) {
+    const [, a, b] = ipv4Match.map(Number);
+    if (
+      a === 10 ||                           // 10.0.0.0/8
+      (a === 172 && b >= 16 && b <= 31) ||  // 172.16.0.0/12
+      (a === 192 && b === 168)              // 192.168.0.0/16
+    ) {
+      return { valid: false, error: "url must not point to a private network address" };
+    }
+  }
+
+  // Block common internal service hostnames
+  const blockedHostnames = [
+    "metadata.google.internal",
+    "metadata.google",
+    "kubernetes.default",
+    "kubernetes.default.svc",
+  ];
+  if (blockedHostnames.includes(hostname)) {
+    return { valid: false, error: "url must not point to an internal service" };
+  }
+
+  return { valid: true };
+}
+
 module.exports = {
   // Constants
   MAX_BATCH_SIZE,
@@ -207,4 +277,5 @@ module.exports = {
   isValidEventType,
   validateTag,
   validateTags,
+  validateWebhookUrl,
 };
