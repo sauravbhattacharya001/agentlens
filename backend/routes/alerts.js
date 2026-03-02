@@ -4,6 +4,7 @@ const express = require("express");
 const crypto = require("crypto");
 const router = express.Router();
 const { getDb } = require("../db");
+const { fireWebhooks } = require("./webhooks");
 
 // ── Schema initialisation ───────────────────────────────────────────
 
@@ -305,7 +306,7 @@ router.delete("/rules/:ruleId", (req, res) => {
 
 // ── POST /alerts/evaluate — evaluate all enabled rules now ──────────
 
-router.post("/evaluate", (req, res) => {
+router.post("/evaluate", async (req, res) => {
   try {
     ensureAlertsTable();
     const db = getDb();
@@ -347,6 +348,24 @@ router.post("/evaluate", (req, res) => {
             JSON.stringify({ threshold: rule.threshold, operator: rule.operator, window_minutes: rule.window_minutes }));
           result.alert_id = alertId;
           result.status = "fired";
+
+          // Fire webhooks for this alert
+          try {
+            result.webhooks = await fireWebhooks({
+              alert_id: alertId,
+              rule_id: rule.rule_id,
+              rule_name: rule.name,
+              metric: rule.metric,
+              operator: rule.operator,
+              threshold: rule.threshold,
+              current_value: result.current_value,
+              window_minutes: rule.window_minutes,
+              agent_filter: rule.agent_filter,
+            });
+          } catch (whErr) {
+            console.error("Webhook delivery error:", whErr);
+            result.webhooks = [];
+          }
         } else {
           result.status = "cooldown";
         }

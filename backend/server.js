@@ -17,6 +17,7 @@ const annotationsRouter = require("./routes/annotations");
 const retentionRouter = require("./routes/retention");
 const leaderboardRouter = require("./routes/leaderboard");
 const errorsRouter = require("./routes/errors");
+const webhooksRouter = require("./routes/webhooks");
 
 const app = express();
 const PORT = process.env.PORT || 3000;
@@ -35,6 +36,7 @@ app.use("/annotations", createApiLimiter());
 app.use("/retention", createApiLimiter());
 app.use("/leaderboard", createApiLimiter());
 app.use("/errors", createApiLimiter());
+app.use("/webhooks", createApiLimiter());
 
 // ── API key authentication ──────────────────────────────────────────
 const { authenticateApiKey, hasApiKey } = createApiKeyAuth();
@@ -47,6 +49,7 @@ app.use("/annotations", authenticateApiKey);
 app.use("/retention", authenticateApiKey);
 app.use("/leaderboard", authenticateApiKey);
 app.use("/errors", authenticateApiKey);
+app.use("/webhooks", authenticateApiKey);
 
 // Body parser with size limit
 app.use(express.json({ limit: "10mb" }));
@@ -64,6 +67,7 @@ app.use("/annotations", annotationsRouter);
 app.use("/retention", retentionRouter);
 app.use("/leaderboard", leaderboardRouter);
 app.use("/errors", errorsRouter);
+app.use("/webhooks", webhooksRouter);
 // Mount session-scoped annotation routes on /sessions
 app.use("/sessions", annotationsRouter);
 
