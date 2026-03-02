@@ -49,6 +49,13 @@
     <a href="explainability.html">Explainability</a>
     <a href="integrations.html">Integrations</a>
   </div>
+  <div class="sidebar-section">
+    <div class="sidebar-section-title">Analysis</div>
+    <a href="sdk-reference.html#cost-forecaster">Cost Forecaster</a>
+    <a href="sdk-reference.html#compliance-checker">Compliance Checker</a>
+    <a href="sdk-reference.html#drift-detector">Drift Detector</a>
+    <a href="sdk-reference.html#alert-rules">Alert Rules</a>
+  </div>
 </aside>
 
 <main class="main">
@@ -267,6 +274,186 @@ agentlens.end_session()
 
 # Or end a specific session by ID
 agentlens.end_session(session_id=s1.session_id)</code></pre>
+
+
+  <hr style="margin: 3rem 0; border: none; border-top: 2px solid var(--border);">
+  <h2 id="analysis-modules">Analysis Modules</h2>
+
+  <p>AgentLens includes several analysis modules beyond basic tracking. These run client-side (pure Python, no external dependencies) and work with the same <code>Session</code> and event data you already collect.</p>
+
+  <!-- ── CostForecaster ────────────────────────────────────────── -->
+  <h3 id="cost-forecaster">CostForecaster</h3>
+
+  <p>Predicts future AI costs from historical usage using linear regression, exponential moving average, or simple averaging. Useful for budget planning and overspend alerts.</p>
+
+  <pre><code>from agentlens.forecast import CostForecaster, UsageRecord
+from datetime import datetime
+
+forecaster = CostForecaster()
+
+# Feed historical data points
+forecaster.add_record(UsageRecord(
+    timestamp=datetime(2026, 3, 1, 10, 0),
+    tokens_in=5000, tokens_out=2000,
+    cost_usd=0.035, model="gpt-4o"
+))
+# ... add more records ...
+
+# Forecast next 7 days
+forecast = forecaster.forecast_daily(days=7)
+print(f"Predicted 7-day cost: ${forecast.total_predicted_cost:.2f}")
+print(f"Method used: {forecast.method}")
+for day in forecast.daily_predictions:
+    print(f"  {day.date}: ${day.predicted_cost:.4f}")
+
+# Get a spending summary
+summary = forecaster.spending_summary()
+print(f"Daily average: ${summary.daily_average:.4f}")
+print(f"Monthly projection: ${summary.monthly_projection:.2f}")
+print(f"Most expensive model: {summary.top_model}")</code></pre>
+
+  <p><strong>Forecast methods</strong> (auto-selected based on data volume):</p>
+  <ul>
+    <li><strong>Linear regression</strong> — 7+ days of data; captures trends</li>
+    <li><strong>Exponential moving average (EMA)</strong> — 3–6 days; weights recent usage more</li>
+    <li><strong>Simple average</strong> — fewer than 3 days; straightforward extrapolation</li>
+  </ul>
+
+  <p><strong>Key classes:</strong> <code>UsageRecord</code>, <code>DailyPrediction</code>, <code>ForecastResult</code>, <code>SpendingSummary</code></p>
+
+
+  <!-- ── ComplianceChecker ─────────────────────────────────────── -->
+  <h3 id="compliance-checker">ComplianceChecker</h3>
+
+  <p>Policy-based session validation. Define organizational rules (token limits, allowed models, forbidden tools, etc.) and check sessions against them. Produces structured pass/fail reports.</p>
+
+  <pre><code>from agentlens.compliance import CompliancePolicy, ComplianceChecker
+
+policy = CompliancePolicy(name="production-policy", rules=[
+    {"kind": "max_tokens", "limit": 50000},
+    {"kind": "forbidden_tools", "tools": ["execute_code", "rm"]},
+    {"kind": "allowed_models", "models": ["gpt-4o", "claude-3.5-sonnet"]},
+    {"kind": "max_events", "limit": 200},
+    {"kind": "max_duration_ms", "limit": 300000},
+    {"kind": "required_tools", "tools": ["safety_check"]},
+    {"kind": "max_error_rate", "limit": 0.05},
+    {"kind": "require_reasoning"},
+])
+
+checker = ComplianceChecker()
+report = checker.check(session, policy)
+
+print(report.render())       # Human-readable table
+print(f"Compliant: {report.compliant}")
+print(f"Passed: {report.passed}/{report.total_rules}")
+
+# Serialize for storage
+json_str = report.to_json()</code></pre>
+
+  <p><strong>Supported rule kinds:</strong></p>
+  <ul>
+    <li><code>max_tokens</code> / <code>min_tokens</code> — Total token bounds</li>
+    <li><code>allowed_models</code> / <code>forbidden_models</code> — Model allow/deny lists</li>
+    <li><code>required_tools</code> / <code>forbidden_tools</code> — Tool usage enforcement</li>
+    <li><code>max_events</code> / <code>min_events</code> — Event count bounds</li>
+    <li><code>max_duration_ms</code> — Session duration limit</li>
+    <li><code>max_tool_calls</code> — Tool call count limit</li>
+    <li><code>require_reasoning</code> — Require reasoning in decision traces</li>
+    <li><code>max_error_rate</code> — Maximum error event ratio</li>
+    <li><code>custom</code> — Custom rule with a Python callable</li>
+  </ul>
+
+
+  <!-- ── DriftDetector ─────────────────────────────────────────── -->
+  <h3 id="drift-detector">DriftDetector</h3>
+
+  <p>Detects behavioral changes by comparing metrics between a baseline window and a current window. Answers: <em>"Is my agent behaving differently than before?"</em></p>
+
+  <pre><code>from agentlens.drift import DriftDetector
+
+detector = DriftDetector()
+
+# Add sessions from two time periods
+for s in historical_sessions:
+    detector.add_baseline(s)
+for s in recent_sessions:
+    detector.add_current(s)
+
+# Detect drift
+report = detector.detect()
+print(report.format_report())
+print(f"Drift score: {report.drift_score}/100")
+print(f"Status: {report.status.value}")
+
+# Or compare two session lists directly
+report = DriftDetector.compare(baseline_sessions, current_sessions)</code></pre>
+
+  <p><strong>Metrics compared:</strong> token usage, latency, error rate, model distribution, tool usage, event type distribution. Uses Cohen's d effect size for statistical significance.</p>
+
+  <p><strong>Drift statuses:</strong></p>
+  <ul>
+    <li><code>stable</code> — No significant changes (score 0–15)</li>
+    <li><code>minor_drift</code> — Small behavioral changes (score 16–40)</li>
+    <li><code>significant_drift</code> — Notable behavioral shift (score 41–70)</li>
+    <li><code>degraded</code> — Major degradation detected (score 71–100)</li>
+  </ul>
+
+
+  <!-- ── AlertRules ────────────────────────────────────────────── -->
+  <h3 id="alert-rules">AlertRules</h3>
+
+  <p>Flexible, pattern-based alerting engine that evaluates declarative rules against streams of agent events. Supports threshold, rate, consecutive-event, regex, and aggregate conditions with composite AND/OR logic.</p>
+
+  <pre><code>from agentlens.alert_rules import (
+    AlertRule, AlertEngine, AlertSeverity,
+    ThresholdCondition, RateCondition, PatternCondition,
+    CompositeCondition
+)
+
+# Define rules
+rules = [
+    AlertRule(
+        name="High token usage",
+        condition=ThresholdCondition(
+            field="tokens_out", op="&gt;", value=10000
+        ),
+        severity=AlertSeverity.WARNING,
+    ),
+    AlertRule(
+        name="Error spike",
+        condition=RateCondition(
+            field="event_type", value="error",
+            window_seconds=300, threshold=5
+        ),
+        severity=AlertSeverity.CRITICAL,
+    ),
+    AlertRule(
+        name="Sensitive data in output",
+        condition=PatternCondition(
+            field="output_data",
+            pattern=r"\b\d{3}-\d{2}-\d{4}\b"  # SSN pattern
+        ),
+        severity=AlertSeverity.CRITICAL,
+    ),
+]
+
+# Create engine and evaluate
+engine = AlertEngine(rules=rules)
+alerts = engine.evaluate(events)
+for alert in alerts:
+    print(f"[{alert.severity.value}] {alert.rule_name}: {alert.message}")</code></pre>
+
+  <p><strong>Condition types:</strong></p>
+  <ul>
+    <li><code>ThresholdCondition</code> — Field value exceeds a threshold</li>
+    <li><code>RateCondition</code> — Events matching a criteria exceed a rate within a time window</li>
+    <li><code>ConsecutiveCondition</code> — N consecutive events match a criteria</li>
+    <li><code>PatternCondition</code> — Regex match on a string field</li>
+    <li><code>AggregateCondition</code> — Aggregate function (sum/avg/max/min) exceeds threshold</li>
+    <li><code>CompositeCondition</code> — Combine conditions with AND/OR logic</li>
+  </ul>
+
+  <hr style="margin: 3rem 0; border: none; border-top: 2px solid var(--border);">
 
   <div class="footer">
     <span>AgentLens v0.1.0 — MIT License</span>

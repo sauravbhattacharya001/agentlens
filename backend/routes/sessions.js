@@ -590,6 +590,12 @@ router.post("/compare", (req, res) => {
 });
 
 // GET /sessions/:id/events/search — Search and filter events within a session
+//
+// Performance: SQL-compatible filters (type, model, timestamp range,
+// token thresholds, duration, error/tool/reasoning flags) are pushed
+// into the WHERE clause so the database does the heavy lifting instead
+// of loading every event into JS memory. Only the full-text `q` search
+// still runs in-process since it needs parsed JSON field access.
 router.get("/:id/events/search", (req, res) => {
   const db = getDb();
   const { id } = req.params;
@@ -605,8 +611,96 @@ router.get("/:id/events/search", (req, res) => {
       return res.status(404).json({ error: "Session not found" });
     }
 
-    // Get all events for the session
-    const allEvents = stmts.eventsBySession.all(id).map((e) => ({
+    // ── Build dynamic SQL WHERE clause ──────────────────────────────
+    const conditions = ["session_id = ?"];
+    const params = [id];
+
+    // Filter by event type (comma-separated, pushed to SQL via IN)
+    const typeFilter = req.query.type;
+    if (typeFilter) {
+      const types = typeFilter.split(",").map((t) => t.trim()).filter(Boolean);
+      if (types.length > 0) {
+        conditions.push(`LOWER(event_type) IN (${types.map(() => "LOWER(?)").join(",")})`);
+        params.push(...types);
+      }
+    }
+
+    // Filter by model (comma-separated, substring match via LIKE)
+    const modelFilter = req.query.model;
+    if (modelFilter) {
+      const models = modelFilter.split(",").map((m) => m.trim()).filter(Boolean);
+      if (models.length > 0) {
+        const modelClauses = models.map(() => "LOWER(model) LIKE ?");
+        conditions.push(`model IS NOT NULL AND (${modelClauses.join(" OR ")})`);
+        params.push(...models.map((m) => `%${m.toLowerCase()}%`));
+      }
+    }
+
+    // Filter by minimum total tokens
+    const minTokens = parseInt(req.query.min_tokens);
+    if (Number.isFinite(minTokens) && minTokens > 0) {
+      conditions.push("(COALESCE(tokens_in, 0) + COALESCE(tokens_out, 0)) >= ?");
+      params.push(minTokens);
+    }
+
+    // Filter by maximum total tokens
+    const maxTokens = parseInt(req.query.max_tokens);
+    if (Number.isFinite(maxTokens) && maxTokens > 0) {
+      conditions.push("(COALESCE(tokens_in, 0) + COALESCE(tokens_out, 0)) <= ?");
+      params.push(maxTokens);
+    }
+
+    // Filter by time range (ISO timestamps)
+    const after = req.query.after;
+    if (after) {
+      const afterDate = new Date(after);
+      if (!isNaN(afterDate.getTime())) {
+        conditions.push("timestamp >= ?");
+        params.push(after);
+      }
+    }
+
+    const before = req.query.before;
+    if (before) {
+      const beforeDate = new Date(before);
+      if (!isNaN(beforeDate.getTime())) {
+        conditions.push("timestamp <= ?");
+        params.push(before);
+      }
+    }
+
+    // Filter by minimum duration
+    const minDuration = parseFloat(req.query.min_duration_ms);
+    if (Number.isFinite(minDuration) && minDuration > 0) {
+      conditions.push("COALESCE(duration_ms, 0) >= ?");
+      params.push(minDuration);
+    }
+
+    // Filter for error events only
+    if (req.query.errors === "true") {
+      conditions.push("event_type IN ('error', 'agent_error', 'tool_error')");
+    }
+
+    // Filter for events with tool calls only
+    if (req.query.has_tools === "true") {
+      conditions.push("tool_call IS NOT NULL AND tool_call != 'null'");
+    }
+
+    // Filter for events with reasoning only
+    if (req.query.has_reasoning === "true") {
+      conditions.push("decision_trace IS NOT NULL AND decision_trace != 'null' AND decision_trace LIKE '%\"reasoning\"%'");
+    }
+
+    // ── Execute SQL query ───────────────────────────────────────────
+    const whereClause = conditions.join(" AND ");
+    const sqlData = `SELECT * FROM events WHERE ${whereClause} ORDER BY timestamp ASC`;
+    const sqlCount = `SELECT COUNT(*) as total FROM events WHERE session_id = ?`;
+
+    const totalEvents = db.prepare(sqlCount).get(id).total;
+    const dbResults = db.prepare(sqlData).all(...params);
+
+    // Parse JSON columns
+    const parsed = dbResults.map((e) => ({
       ...e,
       input_data: safeJsonParse(e.input_data),
       output_data: safeJsonParse(e.output_data),
@@ -614,28 +708,8 @@ router.get("/:id/events/search", (req, res) => {
       decision_trace: safeJsonParse(e.decision_trace, null),
     }));
 
-    // ── Apply filters ────────────────────────────────────────────────
-    let filtered = allEvents;
-
-    // Filter by event type (comma-separated list)
-    const typeFilter = req.query.type;
-    if (typeFilter) {
-      const types = typeFilter.split(",").map((t) => t.trim().toLowerCase());
-      filtered = filtered.filter((e) =>
-        types.includes(e.event_type.toLowerCase())
-      );
-    }
-
-    // Filter by model (comma-separated list, case-insensitive substring match)
-    const modelFilter = req.query.model;
-    if (modelFilter) {
-      const models = modelFilter.split(",").map((m) => m.trim().toLowerCase());
-      filtered = filtered.filter((e) =>
-        e.model && models.some((m) => e.model.toLowerCase().includes(m))
-      );
-    }
-
-    // Full-text search across input_data, output_data, tool_call, reasoning
+    // ── Full-text search (must run in-process on parsed JSON) ───────
+    let filtered = parsed;
     const q = req.query.q;
     if (q) {
       const searchTerms = q.toLowerCase().split(/\s+/).filter(Boolean);
@@ -652,73 +726,6 @@ router.get("/:id/events/search", (req, res) => {
           .toLowerCase();
         return searchTerms.every((term) => searchable.includes(term));
       });
-    }
-
-    // Filter by minimum total tokens
-    const minTokens = parseInt(req.query.min_tokens);
-    if (Number.isFinite(minTokens) && minTokens > 0) {
-      filtered = filtered.filter(
-        (e) => (e.tokens_in || 0) + (e.tokens_out || 0) >= minTokens
-      );
-    }
-
-    // Filter by maximum total tokens
-    const maxTokens = parseInt(req.query.max_tokens);
-    if (Number.isFinite(maxTokens) && maxTokens > 0) {
-      filtered = filtered.filter(
-        (e) => (e.tokens_in || 0) + (e.tokens_out || 0) <= maxTokens
-      );
-    }
-
-    // Filter by time range (ISO timestamps)
-    const after = req.query.after;
-    if (after) {
-      const afterDate = new Date(after);
-      if (!isNaN(afterDate.getTime())) {
-        filtered = filtered.filter(
-          (e) => new Date(e.timestamp) >= afterDate
-        );
-      }
-    }
-
-    const before = req.query.before;
-    if (before) {
-      const beforeDate = new Date(before);
-      if (!isNaN(beforeDate.getTime())) {
-        filtered = filtered.filter(
-          (e) => new Date(e.timestamp) <= beforeDate
-        );
-      }
-    }
-
-    // Filter by minimum duration
-    const minDuration = parseFloat(req.query.min_duration_ms);
-    if (Number.isFinite(minDuration) && minDuration > 0) {
-      filtered = filtered.filter(
-        (e) => (e.duration_ms || 0) >= minDuration
-      );
-    }
-
-    // Filter for events with errors only
-    if (req.query.errors === "true") {
-      filtered = filtered.filter(
-        (e) =>
-          e.event_type === "error" ||
-          e.event_type === "agent_error" ||
-          e.event_type === "tool_error"
-      );
-    }
-
-    // Filter for events with tool calls only
-    if (req.query.has_tools === "true") {
-      filtered = filtered.filter((e) => e.tool_call != null);
-    }
-
-    // Filter for events with reasoning only
-    if (req.query.has_reasoning === "true") {
-      filtered = filtered.filter(
-        (e) => e.decision_trace?.reasoning
-      );
     }
 
     // ── Compute summary stats for filtered results ──────────────────
@@ -741,7 +748,7 @@ router.get("/:id/events/search", (req, res) => {
 
     res.json({
       session_id: id,
-      total_events: allEvents.length,
+      total_events: totalEvents,
       matched: filtered.length,
       returned: paginated.length,
       offset,
