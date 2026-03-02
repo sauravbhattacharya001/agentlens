@@ -70,6 +70,148 @@ router.get("/", (req, res) => {
   }
 });
 
+// GET /sessions/search — Search and filter sessions
+// (Must be before /:id to avoid matching "search" as a session ID)
+router.get("/search", (req, res) => {
+  const db = getDb();
+
+  try {
+    const limit = Math.min(Math.max(1, parseInt(req.query.limit) || 50), 200);
+    const offset = Math.max(0, parseInt(req.query.offset) || 0);
+    const sortBy = ["started_at", "total_tokens", "agent_name", "status"].includes(req.query.sort)
+      ? req.query.sort
+      : "started_at";
+    const sortOrder = req.query.order === "asc" ? "ASC" : "DESC";
+
+    // Build dynamic WHERE clauses
+    const conditions = [];
+    const params = [];
+
+    // Full-text search across agent_name and metadata
+    const q = req.query.q;
+    if (q) {
+      const terms = q.trim().split(/\s+/).filter(Boolean);
+      for (const term of terms) {
+        conditions.push("(s.agent_name LIKE ? OR s.metadata LIKE ?)");
+        params.push(`%${term}%`, `%${term}%`);
+      }
+    }
+
+    // Agent name filter (exact or substring)
+    const agent = req.query.agent;
+    if (agent) {
+      conditions.push("s.agent_name LIKE ?");
+      params.push(`%${agent}%`);
+    }
+
+    // Status filter
+    const status = req.query.status;
+    if (status && isValidStatus(status)) {
+      conditions.push("s.status = ?");
+      params.push(status);
+    }
+
+    // Date range filters
+    const after = req.query.after;
+    if (after) {
+      conditions.push("s.started_at >= ?");
+      params.push(after);
+    }
+    const before = req.query.before;
+    if (before) {
+      conditions.push("s.started_at <= ?");
+      params.push(before);
+    }
+
+    // Token thresholds
+    const minTokens = parseInt(req.query.min_tokens);
+    if (Number.isFinite(minTokens) && minTokens > 0) {
+      conditions.push("(s.total_tokens_in + s.total_tokens_out) >= ?");
+      params.push(minTokens);
+    }
+    const maxTokens = parseInt(req.query.max_tokens);
+    if (Number.isFinite(maxTokens) && maxTokens > 0) {
+      conditions.push("(s.total_tokens_in + s.total_tokens_out) <= ?");
+      params.push(maxTokens);
+    }
+
+    // Tag filter (comma-separated, sessions must have ALL specified tags)
+    const tagFilter = req.query.tags;
+    let tagJoin = "";
+    if (tagFilter) {
+      const tags = tagFilter.split(",").map(t => t.trim()).filter(Boolean);
+      if (tags.length > 0) {
+        tagJoin = `INNER JOIN (
+          SELECT session_id FROM session_tags
+          WHERE tag IN (${tags.map(() => "?").join(",")})
+          GROUP BY session_id
+          HAVING COUNT(DISTINCT tag) = ?
+        ) tf ON s.session_id = tf.session_id`;
+        params.unshift(...tags, tags.length);
+      }
+    }
+
+    // Sort column mapping
+    const sortColumn = sortBy === "total_tokens"
+      ? "(s.total_tokens_in + s.total_tokens_out)"
+      : `s.${sortBy}`;
+
+    const whereClause = conditions.length > 0
+      ? "WHERE " + conditions.join(" AND ")
+      : "";
+
+    // Count query
+    const countSql = `SELECT COUNT(*) as count FROM sessions s ${tagJoin} ${whereClause}`;
+    const total = db.prepare(countSql).get(...params).count;
+
+    // Data query
+    const dataSql = `SELECT s.* FROM sessions s ${tagJoin} ${whereClause} ORDER BY ${sortColumn} ${sortOrder} LIMIT ? OFFSET ?`;
+    const sessions = db.prepare(dataSql).all(...params, limit, offset);
+
+    // Batch-fetch tags for returned sessions
+    const sessionIds = sessions.map(s => s.session_id);
+    const tagMap = {};
+    if (sessionIds.length > 0) {
+      const placeholders = sessionIds.map(() => "?").join(",");
+      const tagRows = db.prepare(
+        `SELECT session_id, tag FROM session_tags WHERE session_id IN (${placeholders}) ORDER BY created_at ASC`
+      ).all(...sessionIds);
+      for (const row of tagRows) {
+        if (!tagMap[row.session_id]) tagMap[row.session_id] = [];
+        tagMap[row.session_id].push(row.tag);
+      }
+    }
+
+    const enriched = sessions.map(s => ({
+      ...s,
+      metadata: safeJsonParse(s.metadata),
+      tags: tagMap[s.session_id] || [],
+    }));
+
+    res.json({
+      sessions: enriched,
+      total,
+      limit,
+      offset,
+      sort: sortBy,
+      order: sortOrder.toLowerCase(),
+      filters: {
+        q: q || null,
+        agent: agent || null,
+        status: status || null,
+        after: after || null,
+        before: before || null,
+        min_tokens: Number.isFinite(minTokens) ? minTokens : null,
+        max_tokens: Number.isFinite(maxTokens) ? maxTokens : null,
+        tags: tagFilter ? tagFilter.split(",").map(t => t.trim()).filter(Boolean) : null,
+      },
+    });
+  } catch (err) {
+    console.error("Error searching sessions:", err);
+    res.status(500).json({ error: "Failed to search sessions" });
+  }
+});
+
 // GET /sessions/tags — List all tags with session counts
 // (Must be before /:id to avoid matching "tags" as a session ID)
 router.get("/tags", (req, res) => {

@@ -2447,3 +2447,114 @@ async function acknowledgeAlert(alertId) {
     alert("Failed to acknowledge alert: " + e.message);
   }
 }
+
+// ── Session Search ──────────────────────────────────────────────────
+
+let sessionSearchActive = false;
+
+function toggleSessionAdvFilters() {
+  const el = document.getElementById("sessionAdvFilters");
+  el.style.display = el.style.display === "none" ? "flex" : "none";
+}
+
+async function searchSessions() {
+  const q = document.getElementById("sessionSearchInput").value.trim();
+  const agent = document.getElementById("sessionAgentFilter").value.trim();
+  const status = document.getElementById("statusFilter").value;
+  const after = document.getElementById("sessionAfterDate").value;
+  const before = document.getElementById("sessionBeforeDate").value;
+  const minTokens = document.getElementById("sessionMinTokens").value;
+  const maxTokens = document.getElementById("sessionMaxTokens").value;
+  const tags = document.getElementById("sessionTagsFilter").value.trim();
+  const sort = document.getElementById("sessionSortBy").value;
+  const order = document.getElementById("sessionSortOrder").value;
+
+  // If all empty, just reload normally
+  if (!q && !agent && !status && !after && !before && !minTokens && !maxTokens && !tags) {
+    clearSessionSearch();
+    return;
+  }
+
+  const params = new URLSearchParams();
+  if (q) params.set("q", q);
+  if (agent) params.set("agent", agent);
+  if (status) params.set("status", status);
+  if (after) params.set("after", after + "T00:00:00Z");
+  if (before) params.set("before", before + "T23:59:59Z");
+  if (minTokens) params.set("min_tokens", minTokens);
+  if (maxTokens) params.set("max_tokens", maxTokens);
+  if (tags) params.set("tags", tags);
+  params.set("sort", sort);
+  params.set("order", order);
+  params.set("limit", "100");
+
+  const listEl = document.getElementById("sessionList");
+  listEl.innerHTML = '<div class="loading">Searching...</div>';
+
+  try {
+    const res = await fetch(`${API_BASE}/sessions/search?${params}`);
+    const data = await res.json();
+
+    sessionSearchActive = true;
+
+    // Show results bar
+    const bar = document.getElementById("sessionSearchResultsBar");
+    bar.style.display = "flex";
+    document.getElementById("sessionSearchResultsText").textContent =
+      `Found ${data.total} session${data.total !== 1 ? 's' : ''} matching your filters`;
+
+    if (!data.sessions || data.sessions.length === 0) {
+      listEl.innerHTML = '<div class="loading">No sessions match your search.</div>';
+      return;
+    }
+
+    listEl.innerHTML = data.sessions.map((s) => {
+      const tagsHtml = s.tags && s.tags.length > 0
+        ? `<span style="margin-left:8px">${s.tags.map(t => `<span class="status-badge" style="background:var(--accent);font-size:0.65rem;padding:1px 6px">${escHtml(t)}</span>`).join(' ')}</span>`
+        : '';
+      return `
+        <div class="session-card ${compareSelection.some(c => c.id === s.session_id) ? 'selected' : ''}" data-session-id="${s.session_id}">
+          <div style="display:flex;align-items:center;gap:12px;flex:1;min-width:0">
+            <input type="checkbox" class="compare-checkbox"
+              ${compareSelection.some(c => c.id === s.session_id) ? 'checked' : ''}
+              onclick="event.stopPropagation(); toggleCompare('${s.session_id}', '${escHtml(s.agent_name)}')"
+              title="Select for comparison">
+            <div class="session-card-left" onclick="loadSessionDetail('${s.session_id}')">
+              <div class="session-agent">${escHtml(s.agent_name)}${tagsHtml}</div>
+              <div class="session-meta">
+                <span>🆔 ${s.session_id.slice(0, 8)}…</span>
+                <span>🕐 ${formatTime(s.started_at)}</span>
+                ${s.metadata?.version ? `<span>📦 v${escHtml(s.metadata.version)}</span>` : ""}
+                ${s.metadata?.environment ? `<span>🌍 ${escHtml(s.metadata.environment)}</span>` : ""}
+              </div>
+            </div>
+          </div>
+          <div class="session-card-right" onclick="loadSessionDetail('${s.session_id}')">
+            <div class="session-tokens">
+              <div class="count">${(s.total_tokens_in + s.total_tokens_out).toLocaleString()}</div>
+              <div>tokens</div>
+            </div>
+            <span class="status-badge ${s.status}">${s.status}</span>
+          </div>
+        </div>
+      `;
+    }).join("");
+  } catch (err) {
+    listEl.innerHTML = `<div class="loading">Search error: ${escHtml(err.message)}</div>`;
+  }
+}
+
+function clearSessionSearch() {
+  sessionSearchActive = false;
+  document.getElementById("sessionSearchInput").value = "";
+  document.getElementById("sessionAgentFilter").value = "";
+  document.getElementById("sessionAfterDate").value = "";
+  document.getElementById("sessionBeforeDate").value = "";
+  document.getElementById("sessionMinTokens").value = "";
+  document.getElementById("sessionMaxTokens").value = "";
+  document.getElementById("sessionTagsFilter").value = "";
+  document.getElementById("sessionSortBy").value = "started_at";
+  document.getElementById("sessionSortOrder").value = "desc";
+  document.getElementById("sessionSearchResultsBar").style.display = "none";
+  loadSessions();
+}

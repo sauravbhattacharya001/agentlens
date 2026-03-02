@@ -860,6 +860,84 @@ class AgentTracker:
         response.raise_for_status()
         return response.json()
 
+    # -- Session Search ---------------------------------------------------------
+
+    def search_sessions(
+        self,
+        *,
+        q: str | None = None,
+        agent: str | None = None,
+        status: str | None = None,
+        after: str | None = None,
+        before: str | None = None,
+        min_tokens: int | None = None,
+        max_tokens: int | None = None,
+        tags: list[str] | None = None,
+        sort: str = "started_at",
+        order: str = "desc",
+        limit: int = 50,
+        offset: int = 0,
+    ) -> dict[str, Any]:
+        """Search and filter sessions across the AgentLens backend.
+
+        Provides full-text search across agent names and metadata, with
+        filtering by status, date range, token thresholds, and tags.
+
+        Args:
+            q: Full-text search query (searches agent name and metadata).
+            agent: Filter by agent name (substring match).
+            status: Filter by session status (active, completed, error).
+            after: ISO timestamp — only sessions started at or after this.
+            before: ISO timestamp — only sessions started at or before this.
+            min_tokens: Minimum total tokens threshold.
+            max_tokens: Maximum total tokens threshold.
+            tags: List of tags — sessions must have ALL specified tags.
+            sort: Sort field (started_at, total_tokens, agent_name, status).
+            order: Sort order (asc, desc). Default desc.
+            limit: Max sessions to return (default 50, max 200).
+            offset: Pagination offset.
+
+        Returns:
+            A dict containing ``sessions``, ``total``, ``limit``, ``offset``,
+            ``sort``, ``order``, and ``filters``.
+
+        Example::
+
+            results = tracker.search_sessions(agent="planner", min_tokens=1000)
+            for s in results["sessions"]:
+                print(s["agent_name"], s["total_tokens_in"] + s["total_tokens_out"])
+        """
+        params: dict[str, str | int] = {
+            "limit": min(max(1, limit), 200),
+            "offset": max(0, offset),
+            "sort": sort,
+            "order": order,
+        }
+        if q:
+            params["q"] = q
+        if agent:
+            params["agent"] = agent
+        if status:
+            params["status"] = status
+        if after:
+            params["after"] = after
+        if before:
+            params["before"] = before
+        if min_tokens is not None and min_tokens > 0:
+            params["min_tokens"] = min_tokens
+        if max_tokens is not None and max_tokens > 0:
+            params["max_tokens"] = max_tokens
+        if tags:
+            params["tags"] = ",".join(tags)
+
+        response = self.transport._client.get(
+            f"{self.transport.endpoint}/sessions/search",
+            params=params,
+            headers={"X-API-Key": self.transport.api_key},
+        )
+        response.raise_for_status()
+        return response.json()
+
     # -- Session Annotations --------------------------------------------------
 
     def annotate(

@@ -82,6 +82,65 @@
           </div>
         </div>
 
+        <!-- Session Search Panel -->
+        <div class="session-search-panel" id="sessionSearchPanel">
+          <div class="search-row">
+            <div class="search-input-wrap">
+              <span class="search-icon">🔍</span>
+              <input type="text" id="sessionSearchInput" class="search-text-input"
+                placeholder="Search sessions by agent name, metadata..."
+                onkeydown="if(event.key==='Enter')searchSessions()">
+            </div>
+            <input type="text" id="sessionAgentFilter" class="search-text-input" style="max-width:160px"
+              placeholder="Agent name" onkeydown="if(event.key==='Enter')searchSessions()">
+            <button class="btn btn-filter-toggle" id="sessionAdvFilterBtn" onclick="toggleSessionAdvFilters()">
+              ⚙️ Filters
+            </button>
+            <button class="btn btn-export" onclick="searchSessions()">Search</button>
+            <button class="btn btn-secondary" onclick="clearSessionSearch()">Clear</button>
+          </div>
+          <div class="advanced-filters" id="sessionAdvFilters" style="display:none">
+            <div class="filter-group">
+              <label>After</label>
+              <input type="date" id="sessionAfterDate" class="filter-number-input">
+            </div>
+            <div class="filter-group">
+              <label>Before</label>
+              <input type="date" id="sessionBeforeDate" class="filter-number-input">
+            </div>
+            <div class="filter-group">
+              <label>Min Tokens</label>
+              <input type="number" id="sessionMinTokens" class="filter-number-input" min="0" placeholder="0">
+            </div>
+            <div class="filter-group">
+              <label>Max Tokens</label>
+              <input type="number" id="sessionMaxTokens" class="filter-number-input" min="0" placeholder="∞">
+            </div>
+            <div class="filter-group">
+              <label>Tags (comma-sep)</label>
+              <input type="text" id="sessionTagsFilter" class="filter-number-input" placeholder="prod,v2" style="width:120px">
+            </div>
+            <div class="filter-group">
+              <label>Sort by</label>
+              <select id="sessionSortBy" class="search-select">
+                <option value="started_at">Date</option>
+                <option value="total_tokens">Tokens</option>
+                <option value="agent_name">Agent</option>
+              </select>
+            </div>
+            <div class="filter-group">
+              <label>Order</label>
+              <select id="sessionSortOrder" class="search-select">
+                <option value="desc">Newest</option>
+                <option value="asc">Oldest</option>
+              </select>
+            </div>
+          </div>
+          <div class="search-results-bar" id="sessionSearchResultsBar" style="display:none">
+            <span id="sessionSearchResultsText"></span>
+          </div>
+        </div>
+
         <p class="compare-hint" id="compareHint">💡 Tip: Click the checkboxes to select two sessions for comparison</p>
         <div id="sessionList" class="session-list">
           <div class="loading">Loading sessions...</div>
