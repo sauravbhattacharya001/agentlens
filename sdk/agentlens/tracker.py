@@ -1161,6 +1161,49 @@ class AgentTracker:
         response.raise_for_status()
         return response.json()
 
+    # -- Activity Heatmap -----------------------------------------------------
+
+    def heatmap(
+        self,
+        *,
+        metric: str = "events",
+        days: int = 30,
+    ) -> dict[str, Any]:
+        """Get a day-of-week × hour-of-day activity heatmap.
+
+        Returns a 7×24 matrix showing activity intensity across the week,
+        useful for identifying peak usage patterns.
+
+        Args:
+            metric: What to measure — ``"events"`` (default), ``"tokens"``,
+                or ``"sessions"``.
+            days: Number of days to look back (default 30, max 365).
+
+        Returns:
+            A dict containing:
+            - ``matrix``: 7×24 list of lists (Sun=0 … Sat=6, hours 0–23).
+            - ``peak``: The single busiest slot (day, hour, value).
+            - ``day_totals``: Per-day totals.
+            - ``hour_totals``: Per-hour totals.
+            - ``cells``: Non-zero cells with intensity (0–1).
+            - ``max_value``: Maximum cell value for normalization.
+
+        Example::
+
+            hm = tracker.heatmap(metric="tokens", days=7)
+            print(f"Peak: {hm['peak']['day_name']} at {hm['peak']['hour']}:00")
+        """
+        if metric not in ("events", "tokens", "sessions"):
+            raise ValueError(f"Invalid metric '{metric}'. Use 'events', 'tokens', or 'sessions'.")
+
+        response = self.transport._client.get(
+            f"{self.transport.endpoint}/analytics/heatmap",
+            params={"metric": metric, "days": min(max(1, days), 365)},
+            headers={"X-API-Key": self.transport.api_key},
+        )
+        response.raise_for_status()
+        return response.json()
+
     # -- Data Retention & Cleanup ---------------------------------------------
 
     def get_retention_config(self) -> dict[str, Any]:

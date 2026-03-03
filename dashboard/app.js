@@ -1069,6 +1069,7 @@ async function loadAnalytics() {
     renderHourlyActivityChart(analyticsData.hourly_activity);
     renderModelUsageTable(analyticsData.model_usage);
     renderTopAgentsTable(analyticsData.top_agents);
+    loadHeatmap();
   } catch (err) {
     loadingEl.textContent = `Error loading analytics: ${escHtml(err.message)}`;
   }
@@ -1339,6 +1340,84 @@ function renderTopAgentsTable(topAgents) {
           .join("")}
       </tbody>
     </table>`;
+}
+
+// ── Activity Heatmap ────────────────────────────────────────────────
+
+async function loadHeatmap() {
+  const container = document.getElementById("heatmapContainer");
+  const peakEl = document.getElementById("heatmapPeak");
+  if (!container) return;
+
+  const metric = document.getElementById("heatmapMetric")?.value || "events";
+  const days = document.getElementById("heatmapDays")?.value || "30";
+
+  container.innerHTML = '<div style="color:var(--text-muted);font-size:13px">Loading heatmap...</div>';
+
+  try {
+    const res = await fetch(`${API_BASE}/analytics/heatmap?metric=${metric}&days=${days}`);
+    const data = await res.json();
+    renderHeatmap(container, data);
+
+    if (data.peak && data.peak.value > 0) {
+      const hourLabel = `${data.peak.hour}:00–${data.peak.hour}:59`;
+      peakEl.textContent = `Peak: ${data.peak.day_name} ${hourLabel} (${data.peak.value.toLocaleString()} ${metric})`;
+    } else {
+      peakEl.textContent = "No activity in this period.";
+    }
+  } catch (err) {
+    container.innerHTML = `<div style="color:#f85149;font-size:13px">Failed to load heatmap: ${escHtml(err.message)}</div>`;
+  }
+}
+
+function renderHeatmap(container, data) {
+  const matrix = data.matrix; // 7×24
+  const maxVal = data.max_value || 1;
+  const dayLabels = ["Sun", "Mon", "Tue", "Wed", "Thu", "Fri", "Sat"];
+
+  // Color scale: transparent → green
+  function cellColor(value) {
+    if (value === 0) return "rgba(255,255,255,0.04)";
+    const intensity = value / maxVal;
+    const r = Math.round(13 + (39 - 13) * (1 - intensity));
+    const g = Math.round(17 + (166 - 17) * intensity);
+    const b = Math.round(23 + (65 - 23) * (1 - intensity));
+    const a = 0.3 + intensity * 0.7;
+    return `rgba(${r},${g},${b},${a})`;
+  }
+
+  let html = '<div style="display:grid;grid-template-columns:40px repeat(24,1fr);gap:2px;font-size:11px">';
+
+  // Header row (hours)
+  html += '<div></div>';
+  for (let h = 0; h < 24; h++) {
+    const label = h % 3 === 0 ? `${h}` : "";
+    html += `<div style="text-align:center;color:#8b949e;padding:2px 0">${label}</div>`;
+  }
+
+  // Data rows
+  for (let d = 0; d < 7; d++) {
+    html += `<div style="color:#8b949e;padding:4px 4px 4px 0;text-align:right;line-height:20px">${dayLabels[d]}</div>`;
+    for (let h = 0; h < 24; h++) {
+      const val = matrix[d][h];
+      const bg = cellColor(val);
+      const title = `${dayLabels[d]} ${h}:00 — ${val.toLocaleString()} ${data.metric}`;
+      html += `<div style="background:${bg};border-radius:3px;height:20px;min-width:14px" title="${title}"></div>`;
+    }
+  }
+
+  html += '</div>';
+
+  // Legend
+  html += '<div style="display:flex;align-items:center;gap:6px;margin-top:8px;font-size:11px;color:#8b949e">';
+  html += '<span>Less</span>';
+  for (let i = 0; i <= 4; i++) {
+    const fakeVal = (i / 4) * maxVal;
+    html += `<div style="width:14px;height:14px;border-radius:3px;background:${cellColor(fakeVal)}"></div>`;
+  }
+  html += '<span>More</span></div>';
+
+  container.innerHTML = html;
 }
 
 function formatTokenCount(count) {

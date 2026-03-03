@@ -361,4 +361,123 @@ router.get("/performance", (req, res) => {
   }
 });
 
+// GET /analytics/heatmap — Day-of-week × hour-of-day activity matrix
+router.get("/heatmap", (req, res) => {
+  const db = getDb();
+
+  try {
+    const days = Math.min(Math.max(1, parseInt(req.query.days) || 30), 365);
+    const metric = ["events", "tokens", "sessions"].includes(req.query.metric)
+      ? req.query.metric
+      : "events";
+
+    const cutoff = new Date(Date.now() - days * 86400000).toISOString();
+
+    let sql;
+    if (metric === "sessions") {
+      sql = `
+        SELECT
+          CAST(strftime('%w', started_at) AS INTEGER) as dow,
+          CAST(strftime('%H', started_at) AS INTEGER) as hour,
+          COUNT(*) as value
+        FROM sessions
+        WHERE started_at >= ?
+        GROUP BY dow, hour
+      `;
+    } else if (metric === "tokens") {
+      sql = `
+        SELECT
+          CAST(strftime('%w', timestamp) AS INTEGER) as dow,
+          CAST(strftime('%H', timestamp) AS INTEGER) as hour,
+          COALESCE(SUM(tokens_in + tokens_out), 0) as value
+        FROM events
+        WHERE timestamp >= ?
+        GROUP BY dow, hour
+      `;
+    } else {
+      sql = `
+        SELECT
+          CAST(strftime('%w', timestamp) AS INTEGER) as dow,
+          CAST(strftime('%H', timestamp) AS INTEGER) as hour,
+          COUNT(*) as value
+        FROM events
+        WHERE timestamp >= ?
+        GROUP BY dow, hour
+      `;
+    }
+
+    const rows = db.prepare(sql).all(cutoff);
+
+    // Build 7×24 matrix (Sun=0 .. Sat=6, hours 0-23)
+    const matrix = Array.from({ length: 7 }, () => Array(24).fill(0));
+    let maxValue = 0;
+
+    for (const row of rows) {
+      matrix[row.dow][row.hour] = row.value;
+      if (row.value > maxValue) maxValue = row.value;
+    }
+
+    const dayNames = ["Sunday", "Monday", "Tuesday", "Wednesday", "Thursday", "Friday", "Saturday"];
+
+    // Flatten for easy consumption
+    const cells = [];
+    for (let d = 0; d < 7; d++) {
+      for (let h = 0; h < 24; h++) {
+        if (matrix[d][h] > 0) {
+          cells.push({
+            day: d,
+            day_name: dayNames[d],
+            hour: h,
+            value: matrix[d][h],
+            intensity: maxValue > 0 ? Math.round((matrix[d][h] / maxValue) * 100) / 100 : 0,
+          });
+        }
+      }
+    }
+
+    // Day and hour totals
+    const dayTotals = dayNames.map((name, i) => ({
+      day: i,
+      day_name: name,
+      total: matrix[i].reduce((a, b) => a + b, 0),
+    }));
+
+    const hourTotals = Array.from({ length: 24 }, (_, h) => ({
+      hour: h,
+      total: matrix.reduce((sum, row) => sum + row[h], 0),
+    }));
+
+    // Peak detection
+    let peakDay = 0, peakHour = 0, peakValue = 0;
+    for (let d = 0; d < 7; d++) {
+      for (let h = 0; h < 24; h++) {
+        if (matrix[d][h] > peakValue) {
+          peakValue = matrix[d][h];
+          peakDay = d;
+          peakHour = h;
+        }
+      }
+    }
+
+    res.json({
+      period_days: days,
+      metric,
+      max_value: maxValue,
+      peak: {
+        day: peakDay,
+        day_name: dayNames[peakDay],
+        hour: peakHour,
+        value: peakValue,
+      },
+      matrix,
+      cells,
+      day_totals: dayTotals,
+      hour_totals: hourTotals,
+    });
+  } catch (err) {
+    console.error("Error fetching heatmap:", err);
+    res.status(500).json({ error: "Failed to fetch heatmap data" });
+  }
+});
+
 module.exports = router;
