@@ -142,16 +142,22 @@ function getEligibleSessions(config) {
     }
   }
 
-  // Filter out exempt sessions (by tag)
-  if (config.exempt_tags && config.exempt_tags.length > 0) {
-    const exemptSet = new Set(config.exempt_tags);
-    return eligible.filter(e => {
-      const tags = db
-        .prepare("SELECT tag FROM session_tags WHERE session_id = ?")
-        .all(e.session_id)
-        .map(r => r.tag);
-      return !tags.some(t => exemptSet.has(t));
-    });
+  // Filter out exempt sessions (by tag) — batch query instead of N+1
+  if (config.exempt_tags && config.exempt_tags.length > 0 && eligible.length > 0) {
+    const sessionIds = eligible.map(e => e.session_id);
+    const sessionPlaceholders = sessionIds.map(() => "?").join(",");
+    const tagPlaceholders = config.exempt_tags.map(() => "?").join(",");
+
+    const exemptRows = db
+      .prepare(
+        `SELECT DISTINCT session_id FROM session_tags
+         WHERE session_id IN (${sessionPlaceholders})
+           AND tag IN (${tagPlaceholders})`
+      )
+      .all(...sessionIds, ...config.exempt_tags);
+
+    const exemptIds = new Set(exemptRows.map(r => r.session_id));
+    return eligible.filter(e => !exemptIds.has(e.session_id));
   }
 
   return eligible;
