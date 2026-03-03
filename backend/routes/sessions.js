@@ -2,6 +2,7 @@ const express = require("express");
 const { getDb } = require("../db");
 const { isValidSessionId, isValidStatus, safeJsonParse, validateTag, validateTags, MAX_TAGS_PER_SESSION } = require("../lib/validation");
 const { generateExplanation } = require("../lib/explain");
+const { computeSessionMetrics, pctDelta } = require("../lib/session-metrics");
 
 const router = express.Router();
 
@@ -467,85 +468,10 @@ router.post("/compare", (req, res) => {
     const parsedA = eventsA.map(parseEventRow);
     const parsedB = eventsB.map(parseEventRow);
 
-    // Compute metrics for a session + events
-    const computeMetrics = (session, events) => {
-      const totalTokensIn = session.total_tokens_in || 0;
-      const totalTokensOut = session.total_tokens_out || 0;
-      const totalTokens = totalTokensIn + totalTokensOut;
-      const eventCount = events.length;
-      const totalDuration = events.reduce((sum, e) => sum + (e.duration_ms || 0), 0);
-      const avgDuration = eventCount > 0 ? totalDuration / eventCount : 0;
-
-      // Models used
-      const models = {};
-      events.forEach((e) => {
-        if (e.model) {
-          if (!models[e.model]) models[e.model] = { calls: 0, tokens_in: 0, tokens_out: 0 };
-          models[e.model].calls++;
-          models[e.model].tokens_in += e.tokens_in || 0;
-          models[e.model].tokens_out += e.tokens_out || 0;
-        }
-      });
-
-      // Event type breakdown
-      const eventTypes = {};
-      events.forEach((e) => {
-        eventTypes[e.event_type] = (eventTypes[e.event_type] || 0) + 1;
-      });
-
-      // Tool usage
-      const tools = {};
-      events.forEach((e) => {
-        if (e.tool_call && e.tool_call.tool_name) {
-          const name = e.tool_call.tool_name;
-          if (!tools[name]) tools[name] = { calls: 0, total_duration: 0 };
-          tools[name].calls++;
-          tools[name].total_duration += e.duration_ms || 0;
-        }
-      });
-
-      // Session duration (wall clock)
-      let sessionDurationMs = null;
-      if (session.started_at && session.ended_at) {
-        sessionDurationMs = new Date(session.ended_at) - new Date(session.started_at);
-      }
-
-      // Error count
-      const errorCount = events.filter((e) =>
-        e.event_type === "error" || e.event_type === "agent_error" || e.event_type === "tool_error"
-      ).length;
-
-      return {
-        session_id: session.session_id,
-        agent_name: session.agent_name,
-        status: session.status,
-        started_at: session.started_at,
-        ended_at: session.ended_at,
-        session_duration_ms: sessionDurationMs,
-        tokens_in: totalTokensIn,
-        tokens_out: totalTokensOut,
-        total_tokens: totalTokens,
-        event_count: eventCount,
-        error_count: errorCount,
-        total_processing_ms: Math.round(totalDuration * 100) / 100,
-        avg_event_duration_ms: Math.round(avgDuration * 100) / 100,
-        models,
-        event_types: eventTypes,
-        tools,
-        metadata: safeJsonParse(session.metadata),
-      };
-    };
-
-    const metricsA = computeMetrics(sessA, parsedA);
-    const metricsB = computeMetrics(sessB, parsedB);
+    const metricsA = computeSessionMetrics(sessA, parsedA);
+    const metricsB = computeSessionMetrics(sessB, parsedB);
 
     // Compute deltas (B relative to A)
-    const pctDelta = (a, b) => {
-      if (a === 0 && b === 0) return 0;
-      if (a === 0) return b > 0 ? 100 : -100;
-      return Math.round(((b - a) / a) * 10000) / 100;
-    };
-
     const deltas = {
       total_tokens: { absolute: metricsB.total_tokens - metricsA.total_tokens, percent: pctDelta(metricsA.total_tokens, metricsB.total_tokens) },
       tokens_in: { absolute: metricsB.tokens_in - metricsA.tokens_in, percent: pctDelta(metricsA.tokens_in, metricsB.tokens_in) },
