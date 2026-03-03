@@ -6,6 +6,14 @@ const router = express.Router();
 const { getDb } = require("../db");
 const { validateWebhookUrl } = require("../lib/validation");
 
+// ── Security limits ─────────────────────────────────────────────────
+// Prevent resource exhaustion via unbounded user-controlled values.
+const MAX_RETRY_COUNT = 10;       // max delivery retries per webhook
+const MAX_TIMEOUT_MS = 30000;     // max 30s per delivery attempt
+const MAX_SECRET_LENGTH = 256;    // max HMAC secret length
+const MAX_NAME_LENGTH = 128;      // max webhook name length
+const MAX_RULE_IDS = 50;          // max alert rule bindings per webhook
+
 // ── Schema initialisation ───────────────────────────────────────────
 
 function ensureWebhooksTable() {
@@ -256,6 +264,20 @@ router.post("/", (req, res) => {
       return res.status(400).json({ error: "rule_ids must be an array of rule IDs" });
     }
 
+    // Bound retry_count and timeout_ms to prevent resource exhaustion
+    const safeRetryCount = Math.min(Math.max(0, Number(retry_count) || 3), MAX_RETRY_COUNT);
+    const safeTimeoutMs = Math.min(Math.max(500, Number(timeout_ms) || 5000), MAX_TIMEOUT_MS);
+
+    // Limit rule_ids array size
+    if (rule_ids && rule_ids.length > MAX_RULE_IDS) {
+      return res.status(400).json({ error: `rule_ids cannot exceed ${MAX_RULE_IDS} entries` });
+    }
+
+    // Limit secret length
+    if (secret && typeof secret === "string" && secret.length > MAX_SECRET_LENGTH) {
+      return res.status(400).json({ error: `secret cannot exceed ${MAX_SECRET_LENGTH} characters` });
+    }
+
     const webhookId = generateId();
     const now = new Date().toISOString();
 
@@ -263,9 +285,9 @@ router.post("/", (req, res) => {
       INSERT INTO webhooks (webhook_id, name, url, secret, format, rule_ids, enabled, retry_count, timeout_ms, created_at, updated_at)
       VALUES (?, ?, ?, ?, ?, ?, 1, ?, ?, ?, ?)
     `).run(
-      webhookId, name.trim(), url, secret || null, format || "json",
+      webhookId, name.trim().slice(0, MAX_NAME_LENGTH), url, secret || null, format || "json",
       rule_ids ? JSON.stringify(rule_ids) : null,
-      Number(retry_count) || 3, Number(timeout_ms) || 5000, now, now
+      safeRetryCount, safeTimeoutMs, now, now
     );
 
     const webhook = db.prepare("SELECT * FROM webhooks WHERE webhook_id = ?").get(webhookId);
@@ -297,7 +319,7 @@ router.put("/:webhookId", (req, res) => {
     const { name, url, secret, format, rule_ids, enabled, retry_count, timeout_ms } = req.body;
     const updates = {};
 
-    if (name !== undefined) updates.name = name.trim();
+    if (name !== undefined) updates.name = name.trim().slice(0, MAX_NAME_LENGTH);
     if (url !== undefined) {
       const urlCheck = validateWebhookUrl(url);
       if (!urlCheck.valid) {
@@ -305,12 +327,28 @@ router.put("/:webhookId", (req, res) => {
       }
       updates.url = url;
     }
-    if (secret !== undefined) updates.secret = secret || null;
-    if (format !== undefined) updates.format = format;
-    if (rule_ids !== undefined) updates.rule_ids = rule_ids ? JSON.stringify(rule_ids) : null;
+    if (secret !== undefined) {
+      if (secret && typeof secret === "string" && secret.length > MAX_SECRET_LENGTH) {
+        return res.status(400).json({ error: `secret cannot exceed ${MAX_SECRET_LENGTH} characters` });
+      }
+      updates.secret = secret || null;
+    }
+    if (format !== undefined) {
+      const validFormats = ["json", "slack", "discord"];
+      if (!validFormats.includes(format)) {
+        return res.status(400).json({ error: `format must be one of: ${validFormats.join(", ")}` });
+      }
+      updates.format = format;
+    }
+    if (rule_ids !== undefined) {
+      if (rule_ids && Array.isArray(rule_ids) && rule_ids.length > MAX_RULE_IDS) {
+        return res.status(400).json({ error: `rule_ids cannot exceed ${MAX_RULE_IDS} entries` });
+      }
+      updates.rule_ids = rule_ids ? JSON.stringify(rule_ids) : null;
+    }
     if (enabled !== undefined) updates.enabled = enabled ? 1 : 0;
-    if (retry_count !== undefined) updates.retry_count = Number(retry_count);
-    if (timeout_ms !== undefined) updates.timeout_ms = Number(timeout_ms);
+    if (retry_count !== undefined) updates.retry_count = Math.min(Math.max(0, Number(retry_count)), MAX_RETRY_COUNT);
+    if (timeout_ms !== undefined) updates.timeout_ms = Math.min(Math.max(500, Number(timeout_ms)), MAX_TIMEOUT_MS);
 
     const setClauses = Object.keys(updates).map((k) => `${k} = ?`);
     setClauses.push("updated_at = ?");

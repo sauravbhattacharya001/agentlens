@@ -138,4 +138,156 @@ describe("Webhooks API", () => {
     const res = await request("DELETE", "/webhooks/nonexistent");
     assert.equal(res.status, 404);
   });
+
+  // ── Security: input bounds ─────────────────────────────────────────
+
+  it("POST /webhooks — clamps retry_count to maximum 10", async () => {
+    const res = await request("POST", "/webhooks", {
+      name: "High Retry",
+      url: "https://example.com/hook",
+      retry_count: 999999,
+    });
+    assert.equal(res.status, 201);
+    assert.ok(res.body.webhook.retry_count <= 10,
+      `retry_count should be clamped to 10, got ${res.body.webhook.retry_count}`);
+  });
+
+  it("POST /webhooks — clamps timeout_ms to maximum 30000", async () => {
+    const res = await request("POST", "/webhooks", {
+      name: "High Timeout",
+      url: "https://example.com/hook",
+      timeout_ms: 9999999,
+    });
+    assert.equal(res.status, 201);
+    assert.ok(res.body.webhook.timeout_ms <= 30000,
+      `timeout_ms should be clamped to 30000, got ${res.body.webhook.timeout_ms}`);
+  });
+
+  it("POST /webhooks — clamps timeout_ms minimum to 500", async () => {
+    const res = await request("POST", "/webhooks", {
+      name: "Low Timeout",
+      url: "https://example.com/hook",
+      timeout_ms: 1,
+    });
+    assert.equal(res.status, 201);
+    assert.ok(res.body.webhook.timeout_ms >= 500,
+      `timeout_ms should be at least 500, got ${res.body.webhook.timeout_ms}`);
+  });
+
+  it("POST /webhooks — rejects secret exceeding 256 characters", async () => {
+    const res = await request("POST", "/webhooks", {
+      name: "Long Secret",
+      url: "https://example.com/hook",
+      secret: "x".repeat(300),
+    });
+    assert.equal(res.status, 400);
+    assert.ok(res.body.error.includes("secret"));
+  });
+
+  it("POST /webhooks — rejects rule_ids exceeding 50 entries", async () => {
+    const res = await request("POST", "/webhooks", {
+      name: "Many Rules",
+      url: "https://example.com/hook",
+      rule_ids: Array.from({ length: 51 }, (_, i) => `rule-${i}`),
+    });
+    assert.equal(res.status, 400);
+    assert.ok(res.body.error.includes("rule_ids"));
+  });
+
+  it("POST /webhooks — truncates name to 128 characters", async () => {
+    const longName = "A".repeat(200);
+    const res = await request("POST", "/webhooks", {
+      name: longName,
+      url: "https://example.com/hook",
+    });
+    assert.equal(res.status, 201);
+    assert.ok(res.body.webhook.name.length <= 128,
+      `name should be truncated to 128, got ${res.body.webhook.name.length}`);
+  });
+
+  it("PUT /webhooks/:id — clamps retry_count on update", async () => {
+    // Create a webhook first
+    const create = await request("POST", "/webhooks", {
+      name: "Update Test",
+      url: "https://example.com/hook",
+    });
+    const id = create.body.webhook.webhook_id;
+
+    const res = await request("PUT", `/webhooks/${id}`, {
+      retry_count: 50,
+    });
+    assert.equal(res.status, 200);
+    assert.ok(res.body.webhook.retry_count <= 10,
+      `retry_count should be clamped to 10, got ${res.body.webhook.retry_count}`);
+  });
+
+  it("PUT /webhooks/:id — clamps timeout_ms on update", async () => {
+    const create = await request("POST", "/webhooks", {
+      name: "Timeout Update Test",
+      url: "https://example.com/hook",
+    });
+    const id = create.body.webhook.webhook_id;
+
+    const res = await request("PUT", `/webhooks/${id}`, {
+      timeout_ms: 100000,
+    });
+    assert.equal(res.status, 200);
+    assert.ok(res.body.webhook.timeout_ms <= 30000,
+      `timeout_ms should be clamped to 30000, got ${res.body.webhook.timeout_ms}`);
+  });
+
+  it("PUT /webhooks/:id — rejects invalid format on update", async () => {
+    const create = await request("POST", "/webhooks", {
+      name: "Format Test",
+      url: "https://example.com/hook",
+    });
+    const id = create.body.webhook.webhook_id;
+
+    const res = await request("PUT", `/webhooks/${id}`, {
+      format: "xml",
+    });
+    assert.equal(res.status, 400);
+    assert.ok(res.body.error.includes("format"));
+  });
+
+  it("PUT /webhooks/:id — rejects oversized secret on update", async () => {
+    const create = await request("POST", "/webhooks", {
+      name: "Secret Update Test",
+      url: "https://example.com/hook",
+    });
+    const id = create.body.webhook.webhook_id;
+
+    const res = await request("PUT", `/webhooks/${id}`, {
+      secret: "s".repeat(300),
+    });
+    assert.equal(res.status, 400);
+    assert.ok(res.body.error.includes("secret"));
+  });
+
+  it("POST /webhooks — rejects loopback URL", async () => {
+    const res = await request("POST", "/webhooks", {
+      name: "Loopback",
+      url: "http://127.0.0.1:8080/hook",
+    });
+    assert.equal(res.status, 400);
+    assert.ok(res.body.error.includes("loopback"));
+  });
+
+  it("POST /webhooks — rejects private network URL", async () => {
+    const res = await request("POST", "/webhooks", {
+      name: "Private",
+      url: "http://192.168.1.1/hook",
+    });
+    assert.equal(res.status, 400);
+    assert.ok(res.body.error.includes("private"));
+  });
+
+  it("POST /webhooks — rejects metadata endpoint URL", async () => {
+    const res = await request("POST", "/webhooks", {
+      name: "Metadata",
+      url: "http://169.254.169.254/latest/meta-data/",
+    });
+    assert.equal(res.status, 400);
+    assert.ok(res.body.error.includes("metadata"));
+  });
 });
