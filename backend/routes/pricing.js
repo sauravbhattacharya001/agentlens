@@ -231,15 +231,27 @@ router.get("/costs/:sessionId", (req, res) => {
         outputCost = (tokensOut / 1_000_000) * pricingMap[model].output;
         matched = true;
       } else if (model) {
-        // Try fuzzy match (case-insensitive, partial)
+        // Fuzzy match: find the longest pricing key that prefix-matches the model
+        // with a word boundary (key must end at a delimiter or exact end of model).
+        // e.g. "gpt-4" matches "gpt-4-turbo" but NOT "gpt-4o"
         const lowerModel = model.toLowerCase();
+        const delimiters = new Set(['-', '_', '.', '/', ' ']);
+        let bestKey = null;
+        let bestLen = 0;
         for (const [key, prices] of Object.entries(pricingMap)) {
-          if (lowerModel.includes(key.toLowerCase()) || key.toLowerCase().includes(lowerModel)) {
-            inputCost = (tokensIn / 1_000_000) * prices.input;
-            outputCost = (tokensOut / 1_000_000) * prices.output;
-            matched = true;
-            break;
+          const lowerKey = key.toLowerCase();
+          if (lowerModel.startsWith(lowerKey) && lowerKey.length > bestLen) {
+            // Require exact match OR delimiter boundary after the key
+            if (lowerKey.length === lowerModel.length || delimiters.has(lowerModel[lowerKey.length])) {
+              bestKey = key;
+              bestLen = lowerKey.length;
+            }
           }
+        }
+        if (bestKey) {
+          inputCost = (tokensIn / 1_000_000) * pricingMap[bestKey].input;
+          outputCost = (tokensOut / 1_000_000) * pricingMap[bestKey].output;
+          matched = true;
         }
         if (!matched && (tokensIn > 0 || tokensOut > 0)) {
           unmatchedModels.add(model);
