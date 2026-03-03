@@ -5,6 +5,22 @@ const { generateExplanation } = require("../lib/explain");
 
 const router = express.Router();
 
+// ── Shared event-parsing helper ─────────────────────────────────────
+// Consolidates 4 identical inline `.map()` blocks that each parse
+// the JSON text columns of an event row. This also fixes an
+// inconsistency where the first usage omitted the `null` fallback
+// for tool_call and decision_trace.
+
+function parseEventRow(e) {
+  return {
+    ...e,
+    input_data: safeJsonParse(e.input_data),
+    output_data: safeJsonParse(e.output_data),
+    tool_call: safeJsonParse(e.tool_call, null),
+    decision_trace: safeJsonParse(e.decision_trace, null),
+  };
+}
+
 // ── Cached prepared statements ──────────────────────────────────────
 // Lazily initialized once, reused across all requests to avoid
 // re-compiling SQL on every call.
@@ -290,13 +306,7 @@ router.get("/:id", (req, res) => {
 
     const events = stmts.eventsBySession.all(id);
 
-    const parsedEvents = events.map((e) => ({
-      ...e,
-      input_data: safeJsonParse(e.input_data),
-      output_data: safeJsonParse(e.output_data),
-      tool_call: safeJsonParse(e.tool_call),
-      decision_trace: safeJsonParse(e.decision_trace),
-    }));
+    const parsedEvents = events.map(parseEventRow);
 
     res.json({
       ...session,
@@ -454,16 +464,8 @@ router.post("/compare", (req, res) => {
     if (!sessA) return res.status(404).json({ error: `Session ${session_a} not found` });
     if (!sessB) return res.status(404).json({ error: `Session ${session_b} not found` });
 
-    const parseEvents = (events) => events.map((e) => ({
-      ...e,
-      input_data: safeJsonParse(e.input_data),
-      output_data: safeJsonParse(e.output_data),
-      tool_call: safeJsonParse(e.tool_call, null),
-      decision_trace: safeJsonParse(e.decision_trace, null),
-    }));
-
-    const parsedA = parseEvents(eventsA);
-    const parsedB = parseEvents(eventsB);
+    const parsedA = eventsA.map(parseEventRow);
+    const parsedB = eventsB.map(parseEventRow);
 
     // Compute metrics for a session + events
     const computeMetrics = (session, events) => {
@@ -700,13 +702,7 @@ router.get("/:id/events/search", (req, res) => {
     const dbResults = db.prepare(sqlData).all(...params);
 
     // Parse JSON columns
-    const parsed = dbResults.map((e) => ({
-      ...e,
-      input_data: safeJsonParse(e.input_data),
-      output_data: safeJsonParse(e.output_data),
-      tool_call: safeJsonParse(e.tool_call, null),
-      decision_trace: safeJsonParse(e.decision_trace, null),
-    }));
+    const parsed = dbResults.map(parseEventRow);
 
     // ── Full-text search (must run in-process on parsed JSON) ───────
     let filtered = parsed;
