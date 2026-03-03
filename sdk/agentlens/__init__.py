@@ -13,6 +13,7 @@ from agentlens.budget import TokenBudget, BudgetTracker, BudgetReport, BudgetSta
 from agentlens.forecast import CostForecaster, UsageRecord, ForecastResult, SpendingSummary, BudgetAlert, DailyPrediction
 from agentlens.compliance import ComplianceChecker, CompliancePolicy, ComplianceReport, ComplianceRule, RuleKind, RuleVerdict, RuleResult, strict_policy, permissive_policy
 from agentlens.drift import DriftDetector, DriftReport, DriftStatus, DriftDirection, MetricDrift, ToolUsageDrift
+from agentlens.sla import SLAEvaluator, SLObjective, SLAPolicy, SLAReport, ObjectiveResult, ObjectiveKind, ComplianceStatus, production_policy, development_policy
 
 __version__ = "0.1.0"
 __all__ = [
@@ -80,6 +81,15 @@ __all__ = [
     "DriftDirection",
     "MetricDrift",
     "ToolUsageDrift",
+    "SLAEvaluator",
+    "SLObjective",
+    "SLAPolicy",
+    "SLAReport",
+    "ObjectiveResult",
+    "ObjectiveKind",
+    "ComplianceStatus",
+    "production_policy",
+    "development_policy",
 ]
 
 _tracker: AgentTracker | None = None
