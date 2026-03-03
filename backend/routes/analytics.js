@@ -1,6 +1,7 @@
 const express = require("express");
 const { getDb } = require("../db");
 const { safeJsonParse } = require("../lib/validation");
+const { percentile, latencyStats, groupEventStats, buildGroupPerf, round2 } = require("../lib/stats");
 
 const router = express.Router();
 
@@ -235,16 +236,7 @@ router.get("/performance", (req, res) => {
       });
     }
 
-    // Percentile helper (data must be sorted ascending)
-    const percentile = (sorted, p) => {
-      if (sorted.length === 0) return 0;
-      const idx = (p / 100) * (sorted.length - 1);
-      const lo = Math.floor(idx);
-      const hi = Math.ceil(idx);
-      if (lo === hi) return sorted[lo];
-      return sorted[lo] + (sorted[hi] - sorted[lo]) * (idx - lo);
-    };
-
+    // ── Aggregate stats using shared utility ──────────────────────
     const durations = events.map((e) => e.duration_ms);
     const totalDuration = durations.reduce((a, b) => a + b, 0);
     const totalTokensIn = events.reduce((s, e) => s + (e.tokens_in || 0), 0);
@@ -256,89 +248,30 @@ router.get("/performance", (req, res) => {
     const timeSpanMs = Math.max(1, Math.max(...timestamps) - Math.min(...timestamps));
     const timeSpanHours = timeSpanMs / 3600000;
 
-    // Per-model breakdown
-    const byModel = {};
-    for (const e of events) {
-      const m = e.model || "(unknown)";
-      if (!byModel[m]) byModel[m] = { durations: [], tokens_in: 0, tokens_out: 0, count: 0 };
-      byModel[m].durations.push(e.duration_ms);
-      byModel[m].tokens_in += e.tokens_in || 0;
-      byModel[m].tokens_out += e.tokens_out || 0;
-      byModel[m].count++;
-    }
+    // Per-model and per-event-type breakdowns via shared helpers
+    const modelPerf = buildGroupPerf(
+      groupEventStats(events, (e) => e.model || "(unknown)")
+    );
 
-    const modelPerf = {};
-    for (const [m, data] of Object.entries(byModel)) {
-      data.durations.sort((a, b) => a - b);
-      const mTotalTokens = data.tokens_in + data.tokens_out;
-      const mTotalDur = data.durations.reduce((a, b) => a + b, 0);
-      modelPerf[m] = {
-        count: data.count,
-        latency: {
-          p50: Math.round(percentile(data.durations, 50) * 100) / 100,
-          p95: Math.round(percentile(data.durations, 95) * 100) / 100,
-          p99: Math.round(percentile(data.durations, 99) * 100) / 100,
-          avg: Math.round((mTotalDur / data.count) * 100) / 100,
-          min: data.durations[0],
-          max: data.durations[data.durations.length - 1],
-        },
-        tokens: {
-          total_in: data.tokens_in,
-          total_out: data.tokens_out,
-          total: mTotalTokens,
-          avg_per_call: Math.round(mTotalTokens / data.count),
-        },
-        tokens_per_second: mTotalDur > 0
-          ? Math.round((mTotalTokens / (mTotalDur / 1000)) * 100) / 100
-          : 0,
-      };
-    }
-
-    // Per event-type breakdown
-    const byType = {};
-    for (const e of events) {
-      const t = e.event_type;
-      if (!byType[t]) byType[t] = { durations: [], count: 0 };
-      byType[t].durations.push(e.duration_ms);
-      byType[t].count++;
-    }
-
+    const typeGroups = groupEventStats(events, (e) => e.event_type);
     const typePerf = {};
-    for (const [t, data] of Object.entries(byType)) {
-      data.durations.sort((a, b) => a - b);
-      const tTotalDur = data.durations.reduce((a, b) => a + b, 0);
-      typePerf[t] = {
-        count: data.count,
-        p50: Math.round(percentile(data.durations, 50) * 100) / 100,
-        p95: Math.round(percentile(data.durations, 95) * 100) / 100,
-        p99: Math.round(percentile(data.durations, 99) * 100) / 100,
-        avg: Math.round((tTotalDur / data.count) * 100) / 100,
-        min: data.durations[0],
-        max: data.durations[data.durations.length - 1],
-      };
+    for (const [t, data] of Object.entries(typeGroups)) {
+      const stats = latencyStats(data.durations);
+      typePerf[t] = { count: data.count, ...stats };
     }
 
     res.json({
       period_days: days,
       filters: { agent: agentName || null, model: model || null },
       sample_size: events.length,
-      latency: {
-        p50: Math.round(percentile(durations, 50) * 100) / 100,
-        p75: Math.round(percentile(durations, 75) * 100) / 100,
-        p90: Math.round(percentile(durations, 90) * 100) / 100,
-        p95: Math.round(percentile(durations, 95) * 100) / 100,
-        p99: Math.round(percentile(durations, 99) * 100) / 100,
-        avg: Math.round((totalDuration / events.length) * 100) / 100,
-        min: durations[0],
-        max: durations[durations.length - 1],
-      },
+      latency: latencyStats(durations),
       throughput: {
         total_events: events.length,
         total_tokens: totalTokens,
-        events_per_hour: Math.round((events.length / timeSpanHours) * 100) / 100,
+        events_per_hour: round2(events.length / timeSpanHours),
         tokens_per_hour: Math.round(totalTokens / timeSpanHours),
         tokens_per_second: totalDuration > 0
-          ? Math.round((totalTokens / (totalDuration / 1000)) * 100) / 100
+          ? round2(totalTokens / (totalDuration / 1000))
           : 0,
       },
       efficiency: {
