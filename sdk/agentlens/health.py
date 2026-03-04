@@ -8,7 +8,7 @@ per-metric breakdown, and actionable recommendations.
 from __future__ import annotations
 
 import math
-from dataclasses import dataclass, field
+from dataclasses import dataclass
 from enum import Enum
 from typing import Any
 

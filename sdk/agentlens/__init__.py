@@ -14,6 +14,7 @@ from agentlens.forecast import CostForecaster, UsageRecord, ForecastResult, Spen
 from agentlens.compliance import ComplianceChecker, CompliancePolicy, ComplianceReport, ComplianceRule, RuleKind, RuleVerdict, RuleResult, strict_policy, permissive_policy
 from agentlens.drift import DriftDetector, DriftReport, DriftStatus, DriftDirection, MetricDrift, ToolUsageDrift
 from agentlens.sla import SLAEvaluator, SLObjective, SLAPolicy, SLAReport, ObjectiveResult, ObjectiveKind, ComplianceStatus, production_policy, development_policy
+from agentlens.sampling import ProbabilisticSampler, RateLimitSampler, PrioritySampler, TailSampler, CompositeSampler, AlwaysSampler, NeverSampler, Sampler, SamplingDecision, SamplingReason, TraceContext, SamplerStats
 
 __version__ = "0.1.0"
 __all__ = [
@@ -90,6 +91,18 @@ __all__ = [
     "ComplianceStatus",
     "production_policy",
     "development_policy",
+    "ProbabilisticSampler",
+    "RateLimitSampler",
+    "PrioritySampler",
+    "TailSampler",
+    "CompositeSampler",
+    "AlwaysSampler",
+    "NeverSampler",
+    "Sampler",
+    "SamplingDecision",
+    "SamplingReason",
+    "TraceContext",
+    "SamplerStats",
 ]
 
 _tracker: AgentTracker | None = None

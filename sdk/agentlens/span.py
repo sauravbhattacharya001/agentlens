@@ -19,10 +19,9 @@ from __future__ import annotations
 
 import time
 import uuid
-from contextlib import contextmanager
 from dataclasses import dataclass, field
 from datetime import datetime, timezone
-from typing import Any, Generator
+from typing import Any
 
 
 def _utcnow() -> datetime:
