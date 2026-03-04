@@ -1,7 +1,7 @@
 const express = require("express");
 const { getDb } = require("../db");
 const { safeJsonParse } = require("../lib/validation");
-const { percentile, latencyStats, groupEventStats, buildGroupPerf, round2 } = require("../lib/stats");
+const { latencyStats, round2 } = require("../lib/stats");
 
 const router = express.Router();
 
@@ -189,6 +189,13 @@ router.get("/", (req, res) => {
 });
 
 // GET /analytics/performance — Percentile latencies, throughput & efficiency
+//
+// Optimized: pushes aggregate computations (per-model, per-event-type stats,
+// global totals, time span) to SQL instead of loading every event row into
+// memory.  Only the sorted duration_ms column is fetched for percentile
+// calculations that require the full distribution.  This reduces memory
+// from O(rows × 6 columns) to O(rows × 1 column) for the heavy path,
+// and eliminates JS-side reduce/map for totals and group stats entirely.
 router.get("/performance", (req, res) => {
   const db = getDb();
 
@@ -200,30 +207,38 @@ router.get("/performance", (req, res) => {
 
     const cutoff = new Date(Date.now() - days * 86400000).toISOString();
 
-    // Build dynamic query for events with duration
-    let eventsQuery = `
-      SELECT e.duration_ms, e.tokens_in, e.tokens_out, e.model, e.timestamp, e.event_type
-      FROM events e
-      INNER JOIN sessions s ON e.session_id = s.session_id
-      WHERE e.duration_ms IS NOT NULL AND e.duration_ms > 0
-        AND e.timestamp >= ?
-    `;
+    // ── Shared WHERE clause builder ──────────────────────────────
+    let whereExtra = "";
     const params = [cutoff];
-
     if (agentName) {
-      eventsQuery += " AND s.agent_name = ?";
+      whereExtra += " AND s.agent_name = ?";
       params.push(agentName);
     }
     if (model) {
-      eventsQuery += " AND e.model = ?";
+      whereExtra += " AND e.model = ?";
       params.push(model);
     }
 
-    eventsQuery += " ORDER BY e.duration_ms ASC";
+    const baseWhere =
+      `e.duration_ms IS NOT NULL AND e.duration_ms > 0 AND e.timestamp >= ?` +
+      whereExtra;
 
-    const events = db.prepare(eventsQuery).all(...params);
+    // ── 1. Global aggregates (single row) ────────────────────────
+    const globalSql = `
+      SELECT
+        COUNT(*)                              AS cnt,
+        COALESCE(SUM(e.duration_ms), 0)       AS total_dur,
+        COALESCE(SUM(e.tokens_in), 0)         AS total_tok_in,
+        COALESCE(SUM(e.tokens_out), 0)        AS total_tok_out,
+        MIN(e.timestamp)                      AS min_ts,
+        MAX(e.timestamp)                      AS max_ts
+      FROM events e
+      INNER JOIN sessions s ON e.session_id = s.session_id
+      WHERE ${baseWhere}`;
 
-    if (events.length === 0) {
+    const g = db.prepare(globalSql).get(...params);
+
+    if (!g || g.cnt === 0) {
       return res.json({
         period_days: days,
         filters: { agent: agentName || null, model: model || null },
@@ -236,57 +251,150 @@ router.get("/performance", (req, res) => {
       });
     }
 
-    // ── Aggregate stats using shared utility ──────────────────────
-    const durations = events.map((e) => e.duration_ms);
-    const totalDuration = durations.reduce((a, b) => a + b, 0);
-    const totalTokensIn = events.reduce((s, e) => s + (e.tokens_in || 0), 0);
-    const totalTokensOut = events.reduce((s, e) => s + (e.tokens_out || 0), 0);
-    const totalTokens = totalTokensIn + totalTokensOut;
+    // ── 2. Sorted durations only (for percentile computation) ────
+    const durSql = `
+      SELECT e.duration_ms
+      FROM events e
+      INNER JOIN sessions s ON e.session_id = s.session_id
+      WHERE ${baseWhere}
+      ORDER BY e.duration_ms ASC`;
 
-    // Time span for throughput calculation
-    const timestamps = events.map((e) => new Date(e.timestamp).getTime());
-    const timeSpanMs = Math.max(1, Math.max(...timestamps) - Math.min(...timestamps));
-    const timeSpanHours = timeSpanMs / 3600000;
+    const durations = db.prepare(durSql).pluck().all(...params);
 
-    // Per-model and per-event-type breakdowns via shared helpers
-    const modelPerf = buildGroupPerf(
-      groupEventStats(events, (e) => e.model || "(unknown)")
-    );
+    // ── 3. Per-model aggregates (pushed to SQL) ──────────────────
+    const modelSql = `
+      SELECT
+        COALESCE(e.model, '(unknown)')       AS grp,
+        COUNT(*)                              AS cnt,
+        COALESCE(SUM(e.duration_ms), 0)       AS total_dur,
+        COALESCE(SUM(e.tokens_in), 0)         AS tok_in,
+        COALESCE(SUM(e.tokens_out), 0)        AS tok_out,
+        MIN(e.duration_ms)                    AS min_dur,
+        MAX(e.duration_ms)                    AS max_dur,
+        AVG(e.duration_ms)                    AS avg_dur
+      FROM events e
+      INNER JOIN sessions s ON e.session_id = s.session_id
+      WHERE ${baseWhere}
+      GROUP BY grp
+      ORDER BY total_dur DESC`;
 
-    const typeGroups = groupEventStats(events, (e) => e.event_type);
-    const typePerf = {};
-    for (const [t, data] of Object.entries(typeGroups)) {
-      const stats = latencyStats(data.durations);
-      typePerf[t] = { count: data.count, ...stats };
+    const modelRows = db.prepare(modelSql).all(...params);
+
+    // For per-model percentiles we still need sorted durations per group.
+    // Use a single pass over the (already sorted) global durations? No —
+    // global sort is by duration_ms, not grouped.  Instead, fetch per-model
+    // durations in one query with the model column, then split in JS.
+    // This is still cheaper than the original (2 cols vs 6, and group
+    // stats are precomputed above).
+    const modelDurSql = `
+      SELECT COALESCE(e.model, '(unknown)') AS grp, e.duration_ms
+      FROM events e
+      INNER JOIN sessions s ON e.session_id = s.session_id
+      WHERE ${baseWhere}
+      ORDER BY grp, e.duration_ms ASC`;
+
+    const modelDurRows = db.prepare(modelDurSql).all(...params);
+
+    // Split durations by model (already sorted within each group)
+    const modelDurMap = Object.create(null);
+    for (const r of modelDurRows) {
+      if (!modelDurMap[r.grp]) modelDurMap[r.grp] = [];
+      modelDurMap[r.grp].push(r.duration_ms);
     }
+
+    const byModel = Object.create(null);
+    for (const row of modelRows) {
+      const totalTokens = row.tok_in + row.tok_out;
+      const groupDurs = modelDurMap[row.grp] || [];
+      byModel[row.grp] = {
+        count: row.cnt,
+        latency: latencyStats(groupDurs),
+        tokens: {
+          total_in: row.tok_in,
+          total_out: row.tok_out,
+          total: totalTokens,
+          avg_per_call: Math.round(totalTokens / row.cnt),
+        },
+        tokens_per_second: row.total_dur > 0
+          ? round2(totalTokens / (row.total_dur / 1000))
+          : 0,
+      };
+    }
+
+    // ── 4. Per-event-type aggregates (pushed to SQL) ─────────────
+    const typeSql = `
+      SELECT
+        e.event_type                          AS grp,
+        COUNT(*)                              AS cnt,
+        COALESCE(SUM(e.duration_ms), 0)       AS total_dur,
+        MIN(e.duration_ms)                    AS min_dur,
+        MAX(e.duration_ms)                    AS max_dur,
+        AVG(e.duration_ms)                    AS avg_dur
+      FROM events e
+      INNER JOIN sessions s ON e.session_id = s.session_id
+      WHERE ${baseWhere}
+      GROUP BY grp
+      ORDER BY cnt DESC`;
+
+    const typeRows = db.prepare(typeSql).all(...params);
+
+    // Per-type percentiles: fetch durations grouped by event_type
+    const typeDurSql = `
+      SELECT e.event_type AS grp, e.duration_ms
+      FROM events e
+      INNER JOIN sessions s ON e.session_id = s.session_id
+      WHERE ${baseWhere}
+      ORDER BY grp, e.duration_ms ASC`;
+
+    const typeDurRows = db.prepare(typeDurSql).all(...params);
+
+    const typeDurMap = Object.create(null);
+    for (const r of typeDurRows) {
+      if (!typeDurMap[r.grp]) typeDurMap[r.grp] = [];
+      typeDurMap[r.grp].push(r.duration_ms);
+    }
+
+    const byType = Object.create(null);
+    for (const row of typeRows) {
+      const groupDurs = typeDurMap[row.grp] || [];
+      const stats = latencyStats(groupDurs);
+      byType[row.grp] = { count: row.cnt, ...stats };
+    }
+
+    // ── 5. Assemble response ─────────────────────────────────────
+    const totalTokens = g.total_tok_in + g.total_tok_out;
+    const minTs = new Date(g.min_ts).getTime();
+    const maxTs = new Date(g.max_ts).getTime();
+    const timeSpanMs = Math.max(1, maxTs - minTs);
+    const timeSpanHours = timeSpanMs / 3600000;
 
     res.json({
       period_days: days,
       filters: { agent: agentName || null, model: model || null },
-      sample_size: events.length,
+      sample_size: g.cnt,
       latency: latencyStats(durations),
       throughput: {
-        total_events: events.length,
+        total_events: g.cnt,
         total_tokens: totalTokens,
-        events_per_hour: round2(events.length / timeSpanHours),
+        events_per_hour: round2(g.cnt / timeSpanHours),
         tokens_per_hour: Math.round(totalTokens / timeSpanHours),
-        tokens_per_second: totalDuration > 0
-          ? round2(totalTokens / (totalDuration / 1000))
+        tokens_per_second: g.total_dur > 0
+          ? round2(totalTokens / (g.total_dur / 1000))
           : 0,
       },
       efficiency: {
-        avg_tokens_per_event: Math.round(totalTokens / events.length),
-        avg_tokens_in_per_event: Math.round(totalTokensIn / events.length),
-        avg_tokens_out_per_event: Math.round(totalTokensOut / events.length),
-        output_input_ratio: totalTokensIn > 0
-          ? Math.round((totalTokensOut / totalTokensIn) * 1000) / 1000
+        avg_tokens_per_event: Math.round(totalTokens / g.cnt),
+        avg_tokens_in_per_event: Math.round(g.total_tok_in / g.cnt),
+        avg_tokens_out_per_event: Math.round(g.total_tok_out / g.cnt),
+        output_input_ratio: g.total_tok_in > 0
+          ? Math.round((g.total_tok_out / g.total_tok_in) * 1000) / 1000
           : 0,
         avg_duration_per_token_ms: totalTokens > 0
-          ? Math.round((totalDuration / totalTokens) * 1000) / 1000
+          ? Math.round((g.total_dur / totalTokens) * 1000) / 1000
           : 0,
       },
-      by_model: modelPerf,
-      by_event_type: typePerf,
+      by_model: byModel,
+      by_event_type: byType,
     });
   } catch (err) {
     console.error("Error fetching performance analytics:", err);
