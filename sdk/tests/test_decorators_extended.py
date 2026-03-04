@@ -130,7 +130,7 @@ class TestTrackAgentAsyncParams:
             return x
 
         with patch("agentlens.track") as mock_track:
-            result = asyncio.get_event_loop().run_until_complete(agent(42))
+            result = asyncio.run(agent(42))
             assert result == 42
             kw = mock_track.call_args[1]
             assert kw["model"] == "claude-3"
@@ -141,7 +141,7 @@ class TestTrackAgentAsyncParams:
             return "hi"
 
         with patch("agentlens.track") as mock_track:
-            asyncio.get_event_loop().run_until_complete(agent())
+            asyncio.run(agent())
             kw = mock_track.call_args[1]
             assert "my-async-agent" in kw["reasoning"]
 
@@ -152,7 +152,7 @@ class TestTrackAgentAsyncParams:
 
         with patch("agentlens.track") as mock_track:
             with pytest.raises(KeyError):
-                asyncio.get_event_loop().run_until_complete(async_type_error())
+                asyncio.run(async_type_error())
             kw = mock_track.call_args[1]
             assert kw["output_data"]["error_type"] == "KeyError"
 
@@ -169,7 +169,7 @@ class TestTrackAgentAsyncParams:
             return "ok"
 
         with patch("agentlens.track", side_effect=RuntimeError("not init")):
-            result = asyncio.get_event_loop().run_until_complete(safe_async())
+            result = asyncio.run(safe_async())
             assert result == "ok"
 
 
@@ -290,7 +290,7 @@ class TestTrackToolCallAsync:
             return f"found: {q}"
 
         with patch("agentlens.track") as mock_track:
-            result = asyncio.get_event_loop().run_until_complete(search("test"))
+            result = asyncio.run(search("test"))
             assert result == "found: test"
             kw = mock_track.call_args[1]
             assert kw["tool_name"] == "web_lookup"
@@ -302,7 +302,7 @@ class TestTrackToolCallAsync:
 
         with patch("agentlens.track") as mock_track:
             with pytest.raises(ConnectionError):
-                asyncio.get_event_loop().run_until_complete(fail_tool())
+                asyncio.run(fail_tool())
             kw = mock_track.call_args[1]
             assert kw["event_type"] == "tool_error"
 
@@ -319,7 +319,7 @@ class TestTrackToolCallAsync:
             return 42
 
         with patch("agentlens.track", side_effect=RuntimeError("not init")):
-            result = asyncio.get_event_loop().run_until_complete(safe_tool())
+            result = asyncio.run(safe_tool())
             assert result == 42
 
 

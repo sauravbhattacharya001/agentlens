@@ -67,7 +67,7 @@ class TestTrackAgent:
             return x + 1
 
         with patch("agentlens.track") as mock_track:
-            result = asyncio.get_event_loop().run_until_complete(async_agent(10))
+            result = asyncio.run(async_agent(10))
             assert result == 11
             mock_track.assert_called_once()
 
@@ -78,7 +78,7 @@ class TestTrackAgent:
 
         with patch("agentlens.track") as mock_track:
             with pytest.raises(RuntimeError, match="async boom"):
-                asyncio.get_event_loop().run_until_complete(async_fail())
+                asyncio.run(async_fail())
             call_kwargs = mock_track.call_args[1]
             assert call_kwargs["event_type"] == "agent_error"
 
@@ -142,7 +142,7 @@ class TestTrackToolCall:
             return x
 
         with patch("agentlens.track") as mock_track:
-            result = asyncio.get_event_loop().run_until_complete(async_tool(42))
+            result = asyncio.run(async_tool(42))
             assert result == 42
             mock_track.assert_called_once()
 
