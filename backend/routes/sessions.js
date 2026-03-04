@@ -54,6 +54,12 @@ function getSessionStatements() {
     getById: db.prepare("SELECT * FROM sessions WHERE session_id = ?"),
     // Uses the composite index idx_events_session_ts for efficient ordered retrieval
     eventsBySession: db.prepare("SELECT * FROM events WHERE session_id = ? ORDER BY timestamp ASC"),
+    // Paginated events query — avoids loading entire event history into memory
+    eventsBySessionPaged: db.prepare("SELECT * FROM events WHERE session_id = ? ORDER BY timestamp ASC LIMIT ? OFFSET ?"),
+    // Count events for a session (used for pagination metadata)
+    countEventsBySession: db.prepare("SELECT COUNT(*) as total FROM events WHERE session_id = ?"),
+    // Capped events query for diff endpoint — hard limit to prevent OOM
+    eventsBySessionCapped: db.prepare("SELECT * FROM events WHERE session_id = ? ORDER BY timestamp ASC LIMIT ?"),
   };
 
   return _sessionStmts;
@@ -367,13 +373,21 @@ router.get("/:id", (req, res) => {
       return res.status(404).json({ error: "Session not found" });
     }
 
-    const events = stmts.eventsBySession.all(id);
+    // Paginated event loading — defaults to 200, capped at 1000
+    const eventLimit = Math.min(Math.max(parseInt(req.query.event_limit) || 200, 1), 1000);
+    const eventOffset = Math.max(parseInt(req.query.event_offset) || 0, 0);
+
+    const { total: totalEvents } = stmts.countEventsBySession.get(id);
+    const events = stmts.eventsBySessionPaged.all(id, eventLimit, eventOffset);
 
     const parsedEvents = events.map(parseEventRow);
 
     res.json({
       ...session,
       metadata: safeJsonParse(session.metadata),
+      total_events: totalEvents,
+      event_limit: eventLimit,
+      event_offset: eventOffset,
       events: parsedEvents,
     });
   } catch (err) {
@@ -402,8 +416,8 @@ router.get("/:id/export", (req, res) => {
     return res.status(400).json({ error: "Invalid session ID format" });
   }
 
-  if (format !== "json" && format !== "csv") {
-    return res.status(400).json({ error: "Invalid format. Use 'json' or 'csv'." });
+  if (format !== "json" && format !== "csv" && format !== "ndjson") {
+    return res.status(400).json({ error: "Invalid format. Use 'json', 'csv', or 'ndjson'." });
   }
 
   try {
@@ -415,7 +429,7 @@ router.get("/:id/export", (req, res) => {
 
     const events = stmts.eventsBySession.all(id);
 
-    const parsedEvents = events.map((e) => ({
+    const parseExportEvent = (e) => ({
       event_id: e.event_id,
       event_type: e.event_type,
       timestamp: e.timestamp,
@@ -427,7 +441,33 @@ router.get("/:id/export", (req, res) => {
       output_data: safeJsonParse(e.output_data),
       tool_call: safeJsonParse(e.tool_call, null),
       decision_trace: safeJsonParse(e.decision_trace, null),
-    }));
+    });
+
+    if (format === "ndjson") {
+      // Streaming NDJSON export — uses .iterate() to avoid loading all events into memory
+      const filename = `agentlens-${session.agent_name}-${id.slice(0, 8)}.ndjson`;
+      res.setHeader("Content-Disposition", `attachment; filename="${filename}"`);
+      res.setHeader("Content-Type", "application/x-ndjson");
+
+      // Write session metadata as first line
+      res.write(JSON.stringify({
+        _type: "session",
+        session_id: session.session_id,
+        agent_name: session.agent_name,
+        status: session.status,
+        started_at: session.started_at,
+        ended_at: session.ended_at,
+        metadata: safeJsonParse(session.metadata),
+      }) + "\n");
+
+      const iter = db.prepare("SELECT * FROM events WHERE session_id = ? ORDER BY timestamp ASC").iterate(id);
+      for (const row of iter) {
+        res.write(JSON.stringify({ _type: "event", ...parseExportEvent(row) }) + "\n");
+      }
+      return res.end();
+    }
+
+    const parsedEvents = events.map(parseExportEvent);
 
     if (format === "json") {
       const exportData = {
@@ -504,6 +544,51 @@ router.get("/:id/export", (req, res) => {
   }
 });
 
+// GET /sessions/:id/events — Paginated events sub-route
+/**
+ * GET /sessions/:id/events — Retrieve paginated events for a session.
+ * Replaces the pattern of loading all events inline, keeping GET /:id lightweight.
+ *
+ * @param {string} id - Session ID (path parameter).
+ * @query {number} [limit=100] - Max events to return (1-1000).
+ * @query {number} [offset=0] - Offset for pagination.
+ * @returns {{ session_id, total, returned, limit, offset, events }}
+ */
+router.get("/:id/events", (req, res) => {
+  const { id } = req.params;
+
+  if (!isValidSessionId(id)) {
+    return res.status(400).json({ error: "Invalid session ID format" });
+  }
+
+  try {
+    const stmts = getSessionStatements();
+    const session = stmts.getById.get(id);
+    if (!session) {
+      return res.status(404).json({ error: "Session not found" });
+    }
+
+    const limit = Math.min(Math.max(parseInt(req.query.limit) || 100, 1), 1000);
+    const offset = Math.max(parseInt(req.query.offset) || 0, 0);
+
+    const { total } = stmts.countEventsBySession.get(id);
+    const events = stmts.eventsBySessionPaged.all(id, limit, offset);
+    const parsedEvents = events.map(parseEventRow);
+
+    res.json({
+      session_id: id,
+      total,
+      returned: parsedEvents.length,
+      limit,
+      offset,
+      events: parsedEvents,
+    });
+  } catch (err) {
+    console.error("Error fetching events:", err);
+    res.status(500).json({ error: "Failed to fetch events" });
+  }
+});
+
 // POST /sessions/compare — Compare two sessions side-by-side
 /**
  * POST /sessions/compare — Compare two sessions side-by-side.
@@ -535,14 +620,20 @@ router.post("/compare", (req, res) => {
   try {
     const stmts = getSessionStatements();
 
-    // Run both lookups + event fetches in a single transaction for
-    // consistency and reduced WAL lock churn.
-    const { sessA, sessB, eventsA, eventsB } = db.transaction(() => {
+    // Cap events per session to prevent OOM — 5000 events max per side
+    const DIFF_EVENT_CAP = 5000;
+    const { sessA, sessB, eventsA, eventsB, truncatedA, truncatedB } = db.transaction(() => {
       const sessA = stmts.getById.get(session_a);
       const sessB = stmts.getById.get(session_b);
-      const eventsA = sessA ? stmts.eventsBySession.all(session_a) : [];
-      const eventsB = sessB ? stmts.eventsBySession.all(session_b) : [];
-      return { sessA, sessB, eventsA, eventsB };
+      const eventsA = sessA ? stmts.eventsBySessionCapped.all(session_a, DIFF_EVENT_CAP + 1) : [];
+      const eventsB = sessB ? stmts.eventsBySessionCapped.all(session_b, DIFF_EVENT_CAP + 1) : [];
+      return {
+        sessA, sessB,
+        eventsA: eventsA.slice(0, DIFF_EVENT_CAP),
+        eventsB: eventsB.slice(0, DIFF_EVENT_CAP),
+        truncatedA: eventsA.length > DIFF_EVENT_CAP,
+        truncatedB: eventsB.length > DIFF_EVENT_CAP,
+      };
     })();
 
     if (!sessA) return res.status(404).json({ error: `Session ${session_a} not found` });
@@ -585,6 +676,7 @@ router.post("/compare", (req, res) => {
 
     res.json({
       compared_at: new Date().toISOString(),
+      truncated: { session_a: truncatedA, session_b: truncatedB },
       session_a: metricsA,
       session_b: metricsB,
       deltas,
@@ -820,7 +912,8 @@ router.get("/:id/explain", (req, res) => {
       return res.status(404).json({ error: "Session not found" });
     }
 
-    const events = stmts.eventsBySession.all(id);
+    // Cap events for explanation to prevent OOM on huge sessions
+    const events = stmts.eventsBySessionCapped.all(id, 5000);
 
     const explanation = generateExplanation(session, events);
     res.json({ session_id: id, explanation });
