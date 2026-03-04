@@ -12,6 +12,14 @@ const router = express.Router();
 // inconsistency where the first usage omitted the `null` fallback
 // for tool_call and decision_trace.
 
+/**
+ * Parse JSON text columns from a raw event database row into objects.
+ * Consolidates 4 identical inline `.map()` blocks. Applies `safeJsonParse`
+ * to `input_data`, `output_data`, `tool_call`, and `decision_trace` fields.
+ *
+ * @param {Object} e - Raw event row from the events table.
+ * @returns {Object} Event row with JSON text columns parsed into objects.
+ */
 function parseEventRow(e) {
   return {
     ...e,
@@ -27,6 +35,13 @@ function parseEventRow(e) {
 // re-compiling SQL on every call.
 let _sessionStmts = null;
 
+/**
+ * Get lazily-initialized prepared SQL statements for session queries.
+ * Statements are compiled once and reused across all requests.
+ *
+ * @returns {{ listAll: Statement, listByStatus: Statement, countAll: Statement,
+ *             countByStatus: Statement, getById: Statement, eventsBySession: Statement }}
+ */
 function getSessionStatements() {
   if (_sessionStmts) return _sessionStmts;
   const db = getDb();
@@ -44,7 +59,15 @@ function getSessionStatements() {
   return _sessionStmts;
 }
 
-// GET /sessions — List all sessions
+/**
+ * GET /sessions — List all sessions with pagination and optional filtering.
+ *
+ * @query {number} [limit=50] - Results per page (1-200).
+ * @query {number} [offset=0] - Pagination offset.
+ * @query {string} [status] - Filter by session status (e.g., "completed", "running").
+ * @query {string} [tag] - Filter sessions by tag.
+ * @returns {{ sessions: Object[], total: number }} Paginated session list.
+ */
 router.get("/", (req, res) => {
   const db = getDb();
   const limit = Math.min(Math.max(1, parseInt(req.query.limit) || 50), 200);
@@ -87,8 +110,25 @@ router.get("/", (req, res) => {
   }
 });
 
-// GET /sessions/search — Search and filter sessions
-// (Must be before /:id to avoid matching "search" as a session ID)
+/**
+ * GET /sessions/search — Search and filter sessions with multi-criteria matching.
+ * Must be defined before /:id to avoid matching "search" as a session ID.
+ *
+ * @query {string} [q] - Free-text search across session_id, agent_name, and metadata.
+ * @query {string} [status] - Filter by status.
+ * @query {string} [agent] - Filter by agent name (exact match).
+ * @query {string} [from] - Start date (ISO 8601) for date range filter.
+ * @query {string} [to] - End date (ISO 8601) for date range filter.
+ * @query {string} [sort] - Sort field (started_at, duration_ms, total_tokens, cost_usd).
+ * @query {string} [order=desc] - Sort order (asc or desc).
+ * @query {number} [minTokens] - Minimum total_tokens filter.
+ * @query {number} [maxTokens] - Maximum total_tokens filter.
+ * @query {number} [minCost] - Minimum cost_usd filter.
+ * @query {number} [maxCost] - Maximum cost_usd filter.
+ * @query {number} [limit=50] - Results per page (1-200).
+ * @query {number} [offset=0] - Pagination offset.
+ * @returns {{ sessions: Object[], total: number, filters: Object }} Filtered results with applied filter summary.
+ */
 router.get("/search", (req, res) => {
   const db = getDb();
 
@@ -231,6 +271,11 @@ router.get("/search", (req, res) => {
 
 // GET /sessions/tags — List all tags with session counts
 // (Must be before /:id to avoid matching "tags" as a session ID)
+/**
+ * GET /sessions/tags — List all distinct tags used across sessions.
+ *
+ * @returns {{ tags: string[] }} Array of unique tag strings, sorted alphabetically.
+ */
 router.get("/tags", (req, res) => {
   try {
     const stmts = getTagStatements();
@@ -244,6 +289,14 @@ router.get("/tags", (req, res) => {
 
 // GET /sessions/by-tag/:tag — List sessions with a specific tag
 // (Must be before /:id to avoid matching "by-tag" as a session ID)
+/**
+ * GET /sessions/by-tag/:tag — List sessions that have a specific tag.
+ *
+ * @param {string} tag - The tag to filter by (URL-encoded path parameter).
+ * @query {number} [limit=50] - Results per page (1-200).
+ * @query {number} [offset=0] - Pagination offset.
+ * @returns {{ sessions: Object[], total: number, tag: string }} Sessions matching the tag.
+ */
 router.get("/by-tag/:tag", (req, res) => {
   try {
     const tag = validateTag(req.params.tag);
@@ -290,6 +343,15 @@ router.get("/by-tag/:tag", (req, res) => {
 });
 
 // GET /sessions/:id — Session detail with full event trace
+/**
+ * GET /sessions/:id — Get a single session with all its events and computed metrics.
+ * Returns full session detail including parsed events, cost estimation,
+ * duration, token counts, and comparison metrics (if previous session exists).
+ *
+ * @param {string} id - Session ID (path parameter).
+ * @returns {Object} Session object with events array and metrics.
+ * @returns {404} If session not found.
+ */
 router.get("/:id", (req, res) => {
   const db = getDb();
   const { id } = req.params;
@@ -321,6 +383,16 @@ router.get("/:id", (req, res) => {
 });
 
 // GET /sessions/:id/export — Export session data as JSON or CSV
+/**
+ * GET /sessions/:id/export — Export session data in JSON, CSV, or OpenTelemetry format.
+ *
+ * @param {string} id - Session ID (path parameter).
+ * @query {string} [format=json] - Export format: "json", "csv", or "otlp".
+ * @returns {Object|string} Exported data. CSV returns text/csv content type.
+ *   JSON returns full session with events. OTLP returns OpenTelemetry-compatible trace.
+ * @returns {404} If session not found.
+ * @returns {400} If format is invalid.
+ */
 router.get("/:id/export", (req, res) => {
   const db = getDb();
   const { id } = req.params;
@@ -433,6 +505,17 @@ router.get("/:id/export", (req, res) => {
 });
 
 // POST /sessions/compare — Compare two sessions side-by-side
+/**
+ * POST /sessions/compare — Compare two sessions side-by-side.
+ * Computes per-field deltas for duration, tokens, cost, and events.
+ * Also performs structural comparison of event sequences.
+ *
+ * @body {string} sessionA - First session ID.
+ * @body {string} sessionB - Second session ID.
+ * @returns {{ sessionA: Object, sessionB: Object, deltas: Object, eventComparison: Object }}
+ * @returns {400} If either session ID is missing or invalid.
+ * @returns {404} If either session is not found.
+ */
 router.post("/compare", (req, res) => {
   const db = getDb();
   const { session_a, session_b } = req.body;
@@ -524,6 +607,27 @@ router.post("/compare", (req, res) => {
 // into the WHERE clause so the database does the heavy lifting instead
 // of loading every event into JS memory. Only the full-text `q` search
 // still runs in-process since it needs parsed JSON field access.
+/**
+ * GET /sessions/:id/events/search — Search and filter events within a session.
+ * Supports filtering by event type, time range, text search across input/output,
+ * tool call filtering, and cost/token range filters.
+ *
+ * @param {string} id - Session ID (path parameter).
+ * @query {string} [q] - Free-text search across event input_data and output_data.
+ * @query {string} [type] - Filter by event_type (e.g., "llm_call", "tool_use").
+ * @query {string} [from] - Start timestamp (ISO 8601).
+ * @query {string} [to] - End timestamp (ISO 8601).
+ * @query {boolean} [hasToolCall] - Filter events that have/lack tool_call data.
+ * @query {boolean} [hasDecisionTrace] - Filter events with/without decision traces.
+ * @query {number} [minTokens] - Minimum token count filter.
+ * @query {number} [maxTokens] - Maximum token count filter.
+ * @query {string} [sort=timestamp] - Sort field (timestamp, duration_ms, tokens, cost_usd).
+ * @query {string} [order=asc] - Sort order (asc or desc).
+ * @query {number} [limit=100] - Results per page (1-500).
+ * @query {number} [offset=0] - Pagination offset.
+ * @returns {{ events: Object[], total: number, filters: Object }}
+ * @returns {404} If session not found.
+ */
 router.get("/:id/events/search", (req, res) => {
   const db = getDb();
   const { id } = req.params;
@@ -692,6 +796,15 @@ router.get("/:id/events/search", (req, res) => {
 });
 
 // GET /sessions/:id/explain — Human-readable explanation
+/**
+ * GET /sessions/:id/explain — Generate a natural language explanation of a session.
+ * Analyzes the session's events and produces a human-readable summary
+ * of what happened, including key decisions, tool calls, and outcomes.
+ *
+ * @param {string} id - Session ID (path parameter).
+ * @returns {{ explanation: string, session_id: string, event_count: number }}
+ * @returns {404} If session not found.
+ */
 router.get("/:id/explain", (req, res) => {
   const db = getDb();
   const { id } = req.params;
@@ -722,6 +835,14 @@ router.get("/:id/explain", (req, res) => {
 // Lazily initialized tag statements
 let _tagStmts = null;
 
+/**
+ * Get lazily-initialized prepared SQL statements for session tag operations.
+ * Statements are compiled once and reused across all requests.
+ *
+ * @returns {{ allTags: Statement, tagsBySession: Statement, addTag: Statement,
+ *             removeTag: Statement, removeAllTags: Statement, countTags: Statement,
+ *             sessionsByTag: Statement, sessionsByTagCount: Statement }}
+ */
 function getTagStatements() {
   if (_tagStmts) return _tagStmts;
   const db = getDb();
@@ -764,6 +885,13 @@ function getTagStatements() {
 }
 
 // GET /sessions/:id/tags — Get tags for a session
+/**
+ * GET /sessions/:id/tags — List all tags for a session.
+ *
+ * @param {string} id - Session ID (path parameter).
+ * @returns {{ tags: string[], session_id: string }}
+ * @returns {404} If session not found.
+ */
 router.get("/:id/tags", (req, res) => {
   try {
     if (!isValidSessionId(req.params.id)) {
@@ -780,6 +908,16 @@ router.get("/:id/tags", (req, res) => {
 });
 
 // POST /sessions/:id/tags — Add tags to a session
+/**
+ * POST /sessions/:id/tags — Add tags to a session.
+ * Validates tag format and enforces per-session tag limit.
+ *
+ * @param {string} id - Session ID (path parameter).
+ * @body {string[]} tags - Array of tag strings to add (max MAX_TAGS_PER_SESSION total).
+ * @returns {{ tags: string[], added: number, session_id: string }}
+ * @returns {400} If tags are invalid or limit exceeded.
+ * @returns {404} If session not found.
+ */
 router.post("/:id/tags", (req, res) => {
   try {
     if (!isValidSessionId(req.params.id)) {
@@ -835,6 +973,15 @@ router.post("/:id/tags", (req, res) => {
 });
 
 // DELETE /sessions/:id/tags — Remove tags from a session
+/**
+ * DELETE /sessions/:id/tags — Remove tags from a session.
+ * If no tags specified in body, removes all tags.
+ *
+ * @param {string} id - Session ID (path parameter).
+ * @body {string[]} [tags] - Specific tags to remove. If omitted, removes all tags.
+ * @returns {{ tags: string[], removed: number, session_id: string }}
+ * @returns {404} If session not found.
+ */
 router.delete("/:id/tags", (req, res) => {
   try {
     if (!isValidSessionId(req.params.id)) {
