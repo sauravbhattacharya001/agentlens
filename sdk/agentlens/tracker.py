@@ -22,6 +22,13 @@ class AgentTracker:
         self._current_session_id: str | None = None
         self._active_spans: list[Span] = []
 
+    def __repr__(self) -> str:
+        return (
+            f"AgentTracker(endpoint={self.transport.endpoint!r}, "
+            f"sessions={len(self.sessions)}, "
+            f"current={self._current_session_id!r})"
+        )
+
     @property
     def current_session(self) -> Session | None:
         if self._current_session_id and self._current_session_id in self.sessions:

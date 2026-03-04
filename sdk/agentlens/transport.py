@@ -36,7 +36,7 @@ class Transport:
         max_retries: int = 3,
     ) -> None:
         self.endpoint = endpoint.rstrip("/")
-        self.api_key = api_key
+        self._api_key = api_key
         self.batch_size = batch_size
         self.flush_interval = flush_interval
         self.max_retries = max_retries
@@ -50,6 +50,24 @@ class Transport:
         self._running = True
         self._flush_thread = threading.Thread(target=self._flush_loop, daemon=True)
         self._flush_thread.start()
+
+    @property
+    def api_key(self) -> str:
+        """Return the API key.  Kept as a property so the public name stays
+        the same while the underlying attribute is private (``_api_key``),
+        preventing accidental exposure via ``__dict__`` or ``vars()``."""
+        return self._api_key
+
+    def __repr__(self) -> str:
+        masked = (
+            self._api_key[:4] + "****"
+            if len(self._api_key) > 4
+            else "****"
+        )
+        return (
+            f"Transport(endpoint={self.endpoint!r}, api_key={masked!r}, "
+            f"batch_size={self.batch_size}, buffer={len(self._buffer)})"
+        )
 
     def send_events(self, events: list[dict[str, Any]]) -> None:
         """Add events to the buffer. Flushes when batch_size is reached."""

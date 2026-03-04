@@ -57,6 +57,21 @@ function generateId() {
   return `${Date.now().toString(36)}-${crypto.randomBytes(6).toString("hex")}`;
 }
 
+// Validate webhookId: alphanumeric + hyphens, max 64 chars
+const WEBHOOK_ID_RE = /^[a-zA-Z0-9][a-zA-Z0-9-]{0,63}$/;
+
+function validateWebhookId(id) {
+  return typeof id === "string" && WEBHOOK_ID_RE.test(id);
+}
+
+// Middleware: reject invalid webhook IDs early
+router.param("webhookId", (req, res, next, val) => {
+  if (!validateWebhookId(val)) {
+    return res.status(400).json({ error: "Invalid webhook ID format" });
+  }
+  next();
+});
+
 // ── Format payload for different services ───────────────────────────
 
 function formatPayload(format, alertData) {
