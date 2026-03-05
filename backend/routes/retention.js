@@ -133,9 +133,10 @@ function getEligibleSessions(config) {
         "SELECT session_id FROM sessions ORDER BY started_at ASC LIMIT ?"
       ).all(overflow);
 
+      // Use Set for O(1) deduplication instead of O(n) find()
+      const existingIds = new Set(eligible.map(e => e.session_id));
       for (const row of oldest) {
-        // Don't duplicate if already in the list
-        if (!eligible.find(e => e.session_id === row.session_id)) {
+        if (!existingIds.has(row.session_id)) {
           eligible.push({ session_id: row.session_id, reason: "count" });
         }
       }
@@ -188,6 +189,85 @@ function purgeSession(sessionId) {
   });
   doPurge();
   return eventCount;
+}
+
+/**
+ * Batch-purge multiple sessions in a single transaction.
+ * Returns array of { session_id, events_deleted } and total event count.
+ *
+ * Compared to calling purgeSession() in a loop, this runs one transaction
+ * instead of N, avoiding per-session WAL sync overhead.
+ */
+function purgeSessions(sessionIds) {
+  if (sessionIds.length === 0) return { details: [], totalEvents: 0 };
+
+  const stmts = getRetentionStatements();
+  const db = getDb();
+
+  // Check if annotations table exists (once, not per-session)
+  let hasAnnotations = false;
+  try {
+    db.prepare("SELECT 1 FROM annotations LIMIT 0").get();
+    hasAnnotations = true;
+  } catch {
+    // table doesn't exist
+  }
+  const deleteAnnotations = hasAnnotations
+    ? db.prepare("DELETE FROM annotations WHERE session_id = ?")
+    : null;
+
+  const details = [];
+  let totalEvents = 0;
+
+  const doPurge = db.transaction(() => {
+    for (const sid of sessionIds) {
+      const evCount = stmts.eventCountBySession.get(sid).count;
+      stmts.deleteEvents.run(sid);
+      stmts.deleteTags.run(sid);
+      if (deleteAnnotations) deleteAnnotations.run(sid);
+      stmts.deleteSession.run(sid);
+      details.push({ session_id: sid, events_deleted: evCount });
+      totalEvents += evCount;
+    }
+  });
+  doPurge();
+
+  return { details, totalEvents };
+}
+
+/**
+ * Batch-count events for multiple sessions using a single query.
+ * Returns a Map of session_id -> event count.
+ *
+ * Falls back to per-session queries if the batch is too large for
+ * a single IN clause (SQLite limit: ~999 params).
+ */
+function batchEventCounts(sessionIds) {
+  if (sessionIds.length === 0) return new Map();
+
+  const db = getDb();
+  const result = new Map();
+
+  // SQLite max variables per statement is ~999; batch in chunks
+  const CHUNK = 900;
+  for (let i = 0; i < sessionIds.length; i += CHUNK) {
+    const chunk = sessionIds.slice(i, i + CHUNK);
+    const placeholders = chunk.map(() => "?").join(",");
+    const rows = db.prepare(
+      `SELECT session_id, COUNT(*) AS count FROM events
+       WHERE session_id IN (${placeholders}) GROUP BY session_id`
+    ).all(...chunk);
+
+    for (const row of rows) {
+      result.set(row.session_id, row.count);
+    }
+    // Sessions with 0 events won't appear in GROUP BY
+    for (const sid of chunk) {
+      if (!result.has(sid)) result.set(sid, 0);
+    }
+  }
+
+  return result;
 }
 
 // ── Routes ──────────────────────────────────────────────────────────
@@ -340,11 +420,13 @@ router.post("/purge", (req, res) => {
     }
 
     if (dryRun) {
-      const stmts = getRetentionStatements();
+      // Batch-count events instead of N+1 per-session queries
+      const sessionIds = eligible.map(e => e.session_id);
+      const eventCounts = batchEventCounts(sessionIds);
       const details = eligible.map(e => ({
         session_id: e.session_id,
         reason: e.reason,
-        events: stmts.eventCountBySession.get(e.session_id).count,
+        events: eventCounts.get(e.session_id) || 0,
       }));
       const totalEvents = details.reduce((sum, d) => sum + d.events, 0);
 
@@ -357,18 +439,16 @@ router.post("/purge", (req, res) => {
       });
     }
 
-    // Actually purge
-    let totalEvents = 0;
-    const details = [];
-    for (const e of eligible) {
-      const evCount = purgeSession(e.session_id);
-      totalEvents += evCount;
-      details.push({
-        session_id: e.session_id,
-        reason: e.reason,
-        events_deleted: evCount,
-      });
-    }
+    // Actually purge — single transaction for all sessions
+    const sessionIds = eligible.map(e => e.session_id);
+    const { details: purgeDetails, totalEvents } = purgeSessions(sessionIds);
+
+    // Merge reasons into details
+    const reasonMap = new Map(eligible.map(e => [e.session_id, e.reason]));
+    const details = purgeDetails.map(d => ({
+      ...d,
+      reason: reasonMap.get(d.session_id) || "unknown",
+    }));
 
     res.json({
       dry_run: false,
