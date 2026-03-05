@@ -1,27 +1,32 @@
 /**
- * db.js — Unit tests for database initialization, schema, and pragmas.
+ * db.js - Unit tests for database initialization, schema, and pragmas.
  *
- * Uses node:test + in-memory SQLite (via DB_PATH=:memory: on each init)
- * to test schema creation, index presence, pragma settings, and
- * getDb() singleton behavior.
+ * Tests schema creation, index presence, pragma settings, and
+ * getDb() singleton behavior using in-memory SQLite.
  */
 
-const { describe, it, before, after, beforeEach, afterEach } = require("node:test");
+// Jest provides describe/it/before/after globals
 const assert = require("node:assert/strict");
 const path = require("path");
 const fs = require("fs");
 const os = require("os");
 
-describe("db.js — schema and initialization", () => {
+describe("db.js - schema and initialization", () => {
   let tmpDir;
   let dbPath;
 
-  before(() => {
+  beforeAll(() => {
     tmpDir = fs.mkdtempSync(path.join(os.tmpdir(), "agentlens-dbtest-"));
   });
 
-  after(() => {
-    fs.rmSync(tmpDir, { recursive: true, force: true });
+  afterAll(() => {
+    // Reset modules to release any open db handles
+    jest.resetModules();
+    try {
+      fs.rmSync(tmpDir, { recursive: true, force: true });
+    } catch (_) {
+      // Ignore EBUSY on Windows — temp files cleaned up by OS
+    }
   });
 
   /**
@@ -31,8 +36,8 @@ describe("db.js — schema and initialization", () => {
   function freshDb(suffix = "test") {
     dbPath = path.join(tmpDir, `db-${suffix}-${Date.now()}.sqlite`);
     process.env.DB_PATH = dbPath;
-    // Clear cached module so getDb() reinitializes
-    delete require.cache[require.resolve("../db")];
+    // Clear Jest's module cache so getDb() reinitializes
+    jest.resetModules();
     const { getDb } = require("../db");
     return getDb();
   }
@@ -147,7 +152,9 @@ describe("db.js — schema and initialization", () => {
     const db = freshDb("tag-pk");
     const info = db.prepare("PRAGMA table_info(session_tags)").all();
     const pk = info.filter(c => c.pk > 0).map(c => c.name).sort();
-    assert.deepEqual(pk, ["session_id", "tag"]);
+    assert.equal(pk.length, 2);
+    assert.equal(pk[0], "session_id");
+    assert.equal(pk[1], "tag");
     db.close();
   });
 
@@ -304,8 +311,8 @@ describe("db.js — schema and initialization", () => {
     ).run();
     db1.close();
 
-    // Re-require with same DB_PATH — should NOT destroy existing data
-    delete require.cache[require.resolve("../db")];
+    // Re-require with same DB_PATH - should NOT destroy existing data
+    jest.resetModules();
     const { getDb: getDb2 } = require("../db");
     const db2 = getDb2();
     const row = db2.prepare("SELECT session_id FROM sessions WHERE session_id = 'persist'").get();
@@ -319,7 +326,7 @@ describe("db.js — schema and initialization", () => {
     const suffix = "singleton-" + Date.now();
     dbPath = path.join(tmpDir, `db-${suffix}.sqlite`);
     process.env.DB_PATH = dbPath;
-    delete require.cache[require.resolve("../db")];
+    jest.resetModules();
     const { getDb } = require("../db");
 
     const a = getDb();

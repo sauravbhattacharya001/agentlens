@@ -1,6 +1,6 @@
 /* ── Webhook route tests ──────────────────────────────────────────── */
 
-const { describe, it, before, after } = require("node:test");
+// Jest provides describe/it/beforeAll/afterAll globals
 const assert = require("node:assert/strict");
 const http = require("node:http");
 
@@ -52,12 +52,12 @@ function request(method, path, body) {
   });
 }
 
-before(() => {
+beforeAll(() => {
   getDb(); // init schema
   server = app.listen(0);
 });
 
-after(() => {
+afterAll(() => {
   server.close();
 });
 
