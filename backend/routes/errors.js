@@ -1,6 +1,7 @@
 const express = require("express");
 const { getDb } = require("../db");
 const { safeJsonParse } = require("../lib/validation");
+const { wrapRoute } = require("../lib/request-helpers");
 
 const router = express.Router();
 
@@ -207,8 +208,7 @@ function computeMtbf(timestamps) {
 }
 
 // ── GET /errors — Full error analytics dashboard ────────────────────
-router.get("/", (req, res) => {
-  try {
+router.get("/", wrapRoute("compute error analytics", (req, res) => {
     const limit = Math.min(Math.max(parseInt(req.query.limit) || 10, 1), 100);
     const days = Math.min(Math.max(parseInt(req.query.days) || 30, 1), 365);
     const stmts = getStatements();
@@ -301,15 +301,11 @@ router.get("/", (req, res) => {
       error_sessions: errorSessions,
       hourly_distribution: hourlyDistribution,
     });
-  } catch (err) {
-    console.error("Error analytics failed:", err);
-    res.status(500).json({ error: "Failed to compute error analytics" });
-  }
-});
+  });
+}));
 
 // ── GET /errors/summary — Lightweight error summary ─────────────────
-router.get("/summary", (req, res) => {
-  try {
+router.get("/summary", wrapRoute("compute error summary", (req, res) => {
     const stmts = getStatements();
     const summary = stmts.errorSummary.get();
     const errorRate =
@@ -324,27 +320,17 @@ router.get("/summary", (req, res) => {
       first_error: summary.first_error,
       last_error: summary.last_error,
     });
-  } catch (err) {
-    console.error("Error summary failed:", err);
-    res.status(500).json({ error: "Failed to compute error summary" });
-  }
-});
+}));
 
 // ── GET /errors/by-type — Error breakdown by event type ─────────────
-router.get("/by-type", (req, res) => {
-  try {
+router.get("/by-type", wrapRoute("query errors by type", (req, res) => {
     const stmts = getStatements();
     const byType = stmts.errorsByType.all();
     res.json({ by_type: byType });
-  } catch (err) {
-    console.error("Error by-type query failed:", err);
-    res.status(500).json({ error: "Failed to query errors by type" });
-  }
-});
+}));
 
 // ── GET /errors/by-model — Error breakdown by model ─────────────────
-router.get("/by-model", (req, res) => {
-  try {
+router.get("/by-model", wrapRoute("query errors by model", (req, res) => {
     const limit = Math.min(Math.max(parseInt(req.query.limit) || 10, 1), 100);
     const stmts = getStatements();
     const byModel = stmts.errorsByModel.all(limit).map((row) => ({
@@ -355,15 +341,10 @@ router.get("/by-model", (req, res) => {
           : 0,
     }));
     res.json({ by_model: byModel });
-  } catch (err) {
-    console.error("Error by-model query failed:", err);
-    res.status(500).json({ error: "Failed to query errors by model" });
-  }
-});
+}));
 
 // ── GET /errors/by-agent — Error breakdown by agent ─────────────────
-router.get("/by-agent", (req, res) => {
-  try {
+router.get("/by-agent", wrapRoute("query errors by agent", (req, res) => {
     const limit = Math.min(Math.max(parseInt(req.query.limit) || 10, 1), 100);
     const stmts = getStatements();
     const byAgent = stmts.errorsByAgent.all(limit).map((row) => ({
@@ -376,10 +357,6 @@ router.get("/by-agent", (req, res) => {
           : 0,
     }));
     res.json({ by_agent: byAgent });
-  } catch (err) {
-    console.error("Error by-agent query failed:", err);
-    res.status(500).json({ error: "Failed to query errors by agent" });
-  }
-});
+}));
 
 module.exports = router;

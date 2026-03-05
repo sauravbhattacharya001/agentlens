@@ -1,6 +1,7 @@
 const express = require("express");
 const { getDb } = require("../db");
 const { latencyStats, round2 } = require("../lib/stats");
+const { wrapRoute } = require("../lib/request-helpers");
 
 const router = express.Router();
 
@@ -109,11 +110,9 @@ function getAnalyticsStatements() {
 }
 
 // GET /analytics — Aggregate statistics across all sessions
-router.get("/", (req, res) => {
+router.get("/", wrapRoute("fetch analytics", (req, res) => {
   const db = getDb();
-
-  try {
-    const stmts = getAnalyticsStatements();
+  const stmts = getAnalyticsStatements();
 
     // Run all queries inside a single deferred transaction for a
     // consistent snapshot and to avoid acquiring/releasing the WAL
@@ -181,11 +180,7 @@ router.get("/", (req, res) => {
       sessions_over_time: sessionsOverTime.reverse(),
       hourly_activity: hourlyActivity,
     });
-  } catch (err) {
-    console.error("Error fetching analytics:", err);
-    res.status(500).json({ error: "Failed to fetch analytics" });
-  }
-});
+}));
 
 // GET /analytics/performance — Percentile latencies, throughput & efficiency
 //
@@ -195,14 +190,12 @@ router.get("/", (req, res) => {
 // calculations that require the full distribution.  This reduces memory
 // from O(rows × 6 columns) to O(rows × 1 column) for the heavy path,
 // and eliminates JS-side reduce/map for totals and group stats entirely.
-router.get("/performance", (req, res) => {
+router.get("/performance", wrapRoute("fetch performance analytics", (req, res) => {
   const db = getDb();
-
-  try {
-    // Optional filters
-    const agentName = req.query.agent;
-    const model = req.query.model;
-    const days = Math.min(Math.max(1, parseInt(req.query.days) || 30), 365);
+  // Optional filters
+  const agentName = req.query.agent;
+  const model = req.query.model;
+  const days = Math.min(Math.max(1, parseInt(req.query.days) || 30), 365);
 
     const cutoff = new Date(Date.now() - days * 86400000).toISOString();
 
@@ -395,18 +388,12 @@ router.get("/performance", (req, res) => {
       by_model: byModel,
       by_event_type: byType,
     });
-  } catch (err) {
-    console.error("Error fetching performance analytics:", err);
-    res.status(500).json({ error: "Failed to fetch performance analytics" });
-  }
-});
+}));
 
 // GET /analytics/heatmap — Day-of-week × hour-of-day activity matrix
-router.get("/heatmap", (req, res) => {
+router.get("/heatmap", wrapRoute("fetch heatmap data", (req, res) => {
   const db = getDb();
-
-  try {
-    const days = Math.min(Math.max(1, parseInt(req.query.days) || 30), 365);
+  const days = Math.min(Math.max(1, parseInt(req.query.days) || 30), 365);
     const metric = ["events", "tokens", "sessions"].includes(req.query.metric)
       ? req.query.metric
       : "events";
@@ -514,10 +501,6 @@ router.get("/heatmap", (req, res) => {
       day_totals: dayTotals,
       hour_totals: hourTotals,
     });
-  } catch (err) {
-    console.error("Error fetching heatmap:", err);
-    res.status(500).json({ error: "Failed to fetch heatmap data" });
-  }
-});
+}));
 
 module.exports = router;

@@ -8,6 +8,7 @@
 const express = require("express");
 const { getDb } = require("../db");
 const { sanitizeString, isValidSessionId } = require("../lib/validation");
+const { requireSessionId, wrapRoute } = require("../lib/request-helpers");
 
 const router = express.Router();
 
@@ -172,12 +173,8 @@ router.delete("/:model", (req, res) => {
 });
 
 // GET /pricing/costs/:sessionId — Calculate costs for a session
-router.get("/costs/:sessionId", (req, res) => {
+router.get("/costs/:sessionId", requireSessionId, (req, res) => {
   const { sessionId } = req.params;
-
-  if (!isValidSessionId(sessionId)) {
-    return res.status(400).json({ error: "Invalid session ID format" });
-  }
 
   try {
     seedDefaults();

@@ -1,5 +1,6 @@
 const express = require("express");
 const { getDb } = require("../db");
+const { wrapRoute } = require("../lib/request-helpers");
 
 const router = express.Router();
 
@@ -11,7 +12,7 @@ const router = express.Router();
 //   days    — lookback window in days (1-365, default: 30)
 //   limit   — max agents to return (1-100, default: 20)
 //   min_sessions — minimum sessions to qualify (default: 2)
-router.get("/", (req, res) => {
+router.get("/", wrapRoute("build agent leaderboard", (req, res) => {
   const db = getDb();
 
   const sortBy = req.query.sort || "efficiency";
@@ -39,7 +40,6 @@ router.get("/", (req, res) => {
     return res.status(400).json({ error: "Invalid order. Use 'asc' or 'desc'." });
   }
 
-  try {
     // Per-agent session stats
     const agentStats = db
       .prepare(
@@ -213,10 +213,6 @@ router.get("/", (req, res) => {
       total_qualifying_agents: agents.length,
       agents: ranked,
     });
-  } catch (err) {
-    console.error("Error building leaderboard:", err);
-    res.status(500).json({ error: "Failed to build agent leaderboard" });
-  }
-});
+}));
 
 module.exports = router;
