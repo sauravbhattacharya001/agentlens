@@ -20,6 +20,7 @@ const leaderboardRouter = require("./routes/leaderboard");
 const errorsRouter = require("./routes/errors");
 const webhooksRouter = require("./routes/webhooks");
 const dependenciesRouter = require("./routes/dependencies");
+const correlationsRouter = require("./routes/correlations");
 
 const app = express();
 const PORT = process.env.PORT || 3000;
@@ -75,6 +76,7 @@ app.use("/leaderboard", leaderboardRouter);
 app.use("/errors", errorsRouter);
 app.use("/webhooks", webhooksRouter);
 app.use("/dependencies", dependenciesRouter);
+app.use("/correlations", correlationsRouter);
 // Mount session-scoped annotation routes on /sessions
 app.use("/sessions", annotationsRouter);
 
