@@ -4,6 +4,7 @@ const express = require("express");
 const crypto = require("crypto");
 const router = express.Router();
 const { getDb } = require("../db");
+const { parsePagination, wrapRoute } = require("../lib/request-helpers");
 
 // ── Schema initialisation ───────────────────────────────────────────
 
@@ -70,8 +71,7 @@ function validateAnnotation(body) {
 
 // ── POST /sessions/:id/annotations — add annotation ─────────────────
 
-router.post("/:id/annotations", (req, res) => {
-  try {
+router.post("/:id/annotations", wrapRoute("create annotation", (req, res) => {
   ensureAnnotationsTable();
   const db = getDb();
   const sessionId = req.params.id;
@@ -133,16 +133,11 @@ router.post("/:id/annotations", (req, res) => {
     created_at: annotation.created_at,
     updated_at: annotation.updated_at,
   });
-  } catch (err) {
-    console.error("Error creating annotation:", err);
-    res.status(500).json({ error: "Failed to create annotation" });
-  }
-});
+}));
 
 // ── GET /sessions/:id/annotations — list annotations ────────────────
 
-router.get("/:id/annotations", (req, res) => {
-  try {
+router.get("/:id/annotations", wrapRoute("fetch annotations", (req, res) => {
   ensureAnnotationsTable();
   const db = getDb();
   const sessionId = req.params.id;
@@ -179,8 +174,7 @@ router.get("/:id/annotations", (req, res) => {
   query += " ORDER BY created_at ASC";
 
   // Pagination
-  const limit = Math.min(Math.max(parseInt(req.query.limit) || 100, 1), 500);
-  const offset = Math.max(parseInt(req.query.offset) || 0, 0);
+  const { limit, offset } = parsePagination(req.query, { defaultLimit: 100, maxLimit: 500 });
   query += " LIMIT ? OFFSET ?";
   params.push(limit, offset);
 
@@ -231,16 +225,11 @@ router.get("/:id/annotations", (req, res) => {
       updated_at: a.updated_at,
     })),
   });
-  } catch (err) {
-    console.error("Error fetching annotations:", err);
-    res.status(500).json({ error: "Failed to fetch annotations" });
-  }
-});
+}));
 
 // ── PUT /sessions/:id/annotations/:annId — update annotation ────────
 
-router.put("/:id/annotations/:annId", (req, res) => {
-  try {
+router.put("/:id/annotations/:annId", wrapRoute("update annotation", (req, res) => {
   ensureAnnotationsTable();
   const db = getDb();
   const { id: sessionId, annId } = req.params;
@@ -313,16 +302,11 @@ router.put("/:id/annotations/:annId", (req, res) => {
     created_at: updated.created_at,
     updated_at: updated.updated_at,
   });
-  } catch (err) {
-    console.error("Error updating annotation:", err);
-    res.status(500).json({ error: "Failed to update annotation" });
-  }
-});
+}));
 
 // ── DELETE /sessions/:id/annotations/:annId — delete annotation ─────
 
-router.delete("/:id/annotations/:annId", (req, res) => {
-  try {
+router.delete("/:id/annotations/:annId", wrapRoute("delete annotation", (req, res) => {
   ensureAnnotationsTable();
   const db = getDb();
   const { id: sessionId, annId } = req.params;
@@ -341,20 +325,15 @@ router.delete("/:id/annotations/:annId", (req, res) => {
   ).run(annId, sessionId);
 
   res.json({ deleted: true, annotation_id: annId });
-  } catch (err) {
-    console.error("Error deleting annotation:", err);
-    res.status(500).json({ error: "Failed to delete annotation" });
-  }
-});
+}));
 
 // ── GET /annotations/recent — recent annotations across all sessions ──
 
-router.get("/", (req, res) => {
-  try {
+router.get("/", wrapRoute("fetch recent annotations", (req, res) => {
   ensureAnnotationsTable();
   const db = getDb();
 
-  const limit = Math.min(Math.max(parseInt(req.query.limit) || 50, 1), 200);
+  const { limit } = parsePagination(req.query);
 
   let query = `
     SELECT a.*, s.agent_name
@@ -391,11 +370,7 @@ router.get("/", (req, res) => {
       updated_at: a.updated_at,
     })),
   });
-  } catch (err) {
-    console.error("Error fetching recent annotations:", err);
-    res.status(500).json({ error: "Failed to fetch annotations" });
-  }
-});
+}));
 
 module.exports = router;
 module.exports.ensureAnnotationsTable = ensureAnnotationsTable;
