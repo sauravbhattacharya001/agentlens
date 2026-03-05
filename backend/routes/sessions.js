@@ -4,6 +4,7 @@ const { isValidSessionId, isValidStatus, safeJsonParse, validateTag } = require(
 const { generateExplanation } = require("../lib/explain");
 const { computeSessionMetrics, pctDelta } = require("../lib/session-metrics");
 const { getTagStatements } = require("../lib/tag-statements");
+const { parsePagination, requireSessionId, wrapRoute } = require("../lib/request-helpers");
 
 const router = express.Router();
 
@@ -85,19 +86,17 @@ function getSessionStatements() {
  * @query {string} [tag] - Filter sessions by tag.
  * @returns {{ sessions: Object[], total: number }} Paginated session list.
  */
-router.get("/", (req, res) => {
+router.get("/", wrapRoute("list sessions", (req, res) => {
   const db = getDb();
-  const limit = Math.min(Math.max(1, parseInt(req.query.limit) || 50), 200);
-  const offset = Math.max(0, parseInt(req.query.offset) || 0);
+  const { limit, offset } = parsePagination(req.query);
   const status = req.query.status;
 
   if (status && !isValidStatus(status)) {
     return res.status(400).json({ error: "Invalid status filter" });
   }
 
-  try {
-    const stmts = getSessionStatements();
-    const tagFilter = req.query.tag ? validateTag(req.query.tag) : null;
+  const stmts = getSessionStatements();
+  const tagFilter = req.query.tag ? validateTag(req.query.tag) : null;
 
     let sessions, total;
 
@@ -121,11 +120,7 @@ router.get("/", (req, res) => {
     }));
 
     res.json({ sessions: parsed, total: total.count });
-  } catch (err) {
-    console.error("Error listing sessions:", err);
-    res.status(500).json({ error: "Failed to list sessions" });
-  }
-});
+}));
 
 /**
  * GET /sessions/search — Search and filter sessions with multi-criteria matching.
@@ -146,12 +141,10 @@ router.get("/", (req, res) => {
  * @query {number} [offset=0] - Pagination offset.
  * @returns {{ sessions: Object[], total: number, filters: Object }} Filtered results with applied filter summary.
  */
-router.get("/search", (req, res) => {
+router.get("/search", wrapRoute("search sessions", (req, res) => {
   const db = getDb();
 
-  try {
-    const limit = Math.min(Math.max(1, parseInt(req.query.limit) || 50), 200);
-    const offset = Math.max(0, parseInt(req.query.offset) || 0);
+  const { limit, offset } = parsePagination(req.query);
     const sortBy = ["started_at", "total_tokens", "agent_name", "status"].includes(req.query.sort)
       ? req.query.sort
       : "started_at";
@@ -280,11 +273,7 @@ router.get("/search", (req, res) => {
         tags: tagFilter ? tagFilter.split(",").map(t => t.trim()).filter(Boolean) : null,
       },
     });
-  } catch (err) {
-    console.error("Error searching sessions:", err);
-    res.status(500).json({ error: "Failed to search sessions" });
-  }
-});
+}));
 
 // GET /sessions/tags — List all tags with session counts
 // Tag collection routes (GET /tags, GET /by-tag/:tag) and per-session tag routes
@@ -304,43 +293,36 @@ router.get("/search", (req, res) => {
  * @returns {Object} Session object with events array and metrics.
  * @returns {404} If session not found.
  */
-router.get("/:id", (req, res) => {
+router.get("/:id", requireSessionId, wrapRoute("fetch session", (req, res) => {
   const db = getDb();
   const { id } = req.params;
 
-  if (!isValidSessionId(id)) {
-    return res.status(400).json({ error: "Invalid session ID format" });
+  const stmts = getSessionStatements();
+  const session = stmts.getById.get(id);
+  if (!session) {
+    return res.status(404).json({ error: "Session not found" });
   }
 
-  try {
-    const stmts = getSessionStatements();
-    const session = stmts.getById.get(id);
-    if (!session) {
-      return res.status(404).json({ error: "Session not found" });
-    }
+  // Paginated event loading — defaults to 200, capped at 1000
+  const { limit: eventLimit, offset: eventOffset } = parsePagination(
+    { limit: req.query.event_limit, offset: req.query.event_offset },
+    { defaultLimit: 200, maxLimit: 1000 }
+  );
 
-    // Paginated event loading — defaults to 200, capped at 1000
-    const eventLimit = Math.min(Math.max(parseInt(req.query.event_limit) || 200, 1), 1000);
-    const eventOffset = Math.max(parseInt(req.query.event_offset) || 0, 0);
+  const { total: totalEvents } = stmts.countEventsBySession.get(id);
+  const events = stmts.eventsBySessionPaged.all(id, eventLimit, eventOffset);
 
-    const { total: totalEvents } = stmts.countEventsBySession.get(id);
-    const events = stmts.eventsBySessionPaged.all(id, eventLimit, eventOffset);
+  const parsedEvents = events.map(parseEventRow);
 
-    const parsedEvents = events.map(parseEventRow);
-
-    res.json({
-      ...session,
-      metadata: safeJsonParse(session.metadata),
-      total_events: totalEvents,
-      event_limit: eventLimit,
-      event_offset: eventOffset,
-      events: parsedEvents,
-    });
-  } catch (err) {
-    console.error("Error fetching session:", err);
-    res.status(500).json({ error: "Failed to fetch session" });
-  }
-});
+  res.json({
+    ...session,
+    metadata: safeJsonParse(session.metadata),
+    total_events: totalEvents,
+    event_limit: eventLimit,
+    event_offset: eventOffset,
+    events: parsedEvents,
+  });
+}));
 
 // GET /sessions/:id/export — Export session data as JSON or CSV
 /**
@@ -353,21 +335,16 @@ router.get("/:id", (req, res) => {
  * @returns {404} If session not found.
  * @returns {400} If format is invalid.
  */
-router.get("/:id/export", (req, res) => {
+router.get("/:id/export", requireSessionId, wrapRoute("export session", (req, res) => {
   const db = getDb();
   const { id } = req.params;
   const format = (req.query.format || "json").toLowerCase();
-
-  if (!isValidSessionId(id)) {
-    return res.status(400).json({ error: "Invalid session ID format" });
-  }
 
   if (format !== "json" && format !== "csv" && format !== "ndjson") {
     return res.status(400).json({ error: "Invalid format. Use 'json', 'csv', or 'ndjson'." });
   }
 
-  try {
-    const stmts = getSessionStatements();
+  const stmts = getSessionStatements();
     const session = stmts.getById.get(id);
     if (!session) {
       return res.status(404).json({ error: "Session not found" });
@@ -494,11 +471,7 @@ router.get("/:id/export", (req, res) => {
     res.setHeader("Content-Disposition", `attachment; filename="${filename}"`);
     res.setHeader("Content-Type", "text/csv");
     return res.send(csvRows.join("\n"));
-  } catch (err) {
-    console.error("Error exporting session:", err);
-    res.status(500).json({ error: "Failed to export session" });
-  }
-});
+}));
 
 // GET /sessions/:id/events — Paginated events sub-route
 /**
@@ -510,40 +483,30 @@ router.get("/:id/export", (req, res) => {
  * @query {number} [offset=0] - Offset for pagination.
  * @returns {{ session_id, total, returned, limit, offset, events }}
  */
-router.get("/:id/events", (req, res) => {
+router.get("/:id/events", requireSessionId, wrapRoute("fetch events", (req, res) => {
   const { id } = req.params;
 
-  if (!isValidSessionId(id)) {
-    return res.status(400).json({ error: "Invalid session ID format" });
+  const stmts = getSessionStatements();
+  const session = stmts.getById.get(id);
+  if (!session) {
+    return res.status(404).json({ error: "Session not found" });
   }
 
-  try {
-    const stmts = getSessionStatements();
-    const session = stmts.getById.get(id);
-    if (!session) {
-      return res.status(404).json({ error: "Session not found" });
-    }
+  const { limit, offset } = parsePagination(req.query, { defaultLimit: 100, maxLimit: 1000 });
 
-    const limit = Math.min(Math.max(parseInt(req.query.limit) || 100, 1), 1000);
-    const offset = Math.max(parseInt(req.query.offset) || 0, 0);
+  const { total } = stmts.countEventsBySession.get(id);
+  const events = stmts.eventsBySessionPaged.all(id, limit, offset);
+  const parsedEvents = events.map(parseEventRow);
 
-    const { total } = stmts.countEventsBySession.get(id);
-    const events = stmts.eventsBySessionPaged.all(id, limit, offset);
-    const parsedEvents = events.map(parseEventRow);
-
-    res.json({
-      session_id: id,
-      total,
-      returned: parsedEvents.length,
-      limit,
-      offset,
-      events: parsedEvents,
-    });
-  } catch (err) {
-    console.error("Error fetching events:", err);
-    res.status(500).json({ error: "Failed to fetch events" });
-  }
-});
+  res.json({
+    session_id: id,
+    total,
+    returned: parsedEvents.length,
+    limit,
+    offset,
+    events: parsedEvents,
+  });
+}));
 
 // POST /sessions/compare — Compare two sessions side-by-side
 /**
@@ -557,7 +520,7 @@ router.get("/:id/events", (req, res) => {
  * @returns {400} If either session ID is missing or invalid.
  * @returns {404} If either session is not found.
  */
-router.post("/compare", (req, res) => {
+router.post("/compare", wrapRoute("compare sessions", (req, res) => {
   const db = getDb();
   const { session_a, session_b } = req.body;
 
@@ -573,8 +536,7 @@ router.post("/compare", (req, res) => {
     return res.status(400).json({ error: "Cannot compare a session with itself" });
   }
 
-  try {
-    const stmts = getSessionStatements();
+  const stmts = getSessionStatements();
 
     // Cap events per session to prevent OOM — 5000 events max per side
     const DIFF_EVENT_CAP = 5000;
@@ -642,11 +604,7 @@ router.post("/compare", (req, res) => {
         models: allModels,
       },
     });
-  } catch (err) {
-    console.error("Error comparing sessions:", err);
-    res.status(500).json({ error: "Failed to compare sessions" });
-  }
-});
+}));
 
 // GET /sessions/:id/events/search — Search and filter events within a session
 //
@@ -676,20 +634,15 @@ router.post("/compare", (req, res) => {
  * @returns {{ events: Object[], total: number, filters: Object }}
  * @returns {404} If session not found.
  */
-router.get("/:id/events/search", (req, res) => {
+router.get("/:id/events/search", requireSessionId, wrapRoute("search events", (req, res) => {
   const db = getDb();
   const { id } = req.params;
 
-  if (!isValidSessionId(id)) {
-    return res.status(400).json({ error: "Invalid session ID format" });
+  const stmts = getSessionStatements();
+  const session = stmts.getById.get(id);
+  if (!session) {
+    return res.status(404).json({ error: "Session not found" });
   }
-
-  try {
-    const stmts = getSessionStatements();
-    const session = stmts.getById.get(id);
-    if (!session) {
-      return res.status(404).json({ error: "Session not found" });
-    }
 
     // ── Build dynamic SQL WHERE clause ──────────────────────────────
     const conditions = ["session_id = ?"];
@@ -816,8 +769,7 @@ router.get("/:id/events/search", (req, res) => {
     });
 
     // ── Pagination ──────────────────────────────────────────────────
-    const limit = Math.min(Math.max(1, parseInt(req.query.limit) || 100), 500);
-    const offset = Math.max(0, parseInt(req.query.offset) || 0);
+    const { limit, offset } = parsePagination(req.query, { defaultLimit: 100, maxLimit: 500 });
     const paginated = filtered.slice(offset, offset + limit);
 
     res.json({
@@ -837,11 +789,7 @@ router.get("/:id/events/search", (req, res) => {
       },
       events: paginated,
     });
-  } catch (err) {
-    console.error("Error searching events:", err);
-    res.status(500).json({ error: "Failed to search events" });
-  }
-});
+}));
 
 // GET /sessions/:id/explain — Human-readable explanation
 /**
@@ -853,31 +801,22 @@ router.get("/:id/events/search", (req, res) => {
  * @returns {{ explanation: string, session_id: string, event_count: number }}
  * @returns {404} If session not found.
  */
-router.get("/:id/explain", (req, res) => {
+router.get("/:id/explain", requireSessionId, wrapRoute("generate explanation", (req, res) => {
   const db = getDb();
   const { id } = req.params;
 
-  if (!isValidSessionId(id)) {
-    return res.status(400).json({ error: "Invalid session ID format" });
+  const stmts = getSessionStatements();
+  const session = stmts.getById.get(id);
+  if (!session) {
+    return res.status(404).json({ error: "Session not found" });
   }
 
-  try {
-    const stmts = getSessionStatements();
-    const session = stmts.getById.get(id);
-    if (!session) {
-      return res.status(404).json({ error: "Session not found" });
-    }
+  // Cap events for explanation to prevent OOM on huge sessions
+  const events = stmts.eventsBySessionCapped.all(id, 5000);
 
-    // Cap events for explanation to prevent OOM on huge sessions
-    const events = stmts.eventsBySessionCapped.all(id, 5000);
-
-    const explanation = generateExplanation(session, events);
-    res.json({ session_id: id, explanation });
-  } catch (err) {
-    console.error("Error generating explanation:", err);
-    res.status(500).json({ error: "Failed to generate explanation" });
-  }
-});
+  const explanation = generateExplanation(session, events);
+  res.json({ session_id: id, explanation });
+}));
 
 // Session tag routes are in routes/tags.js (mounted on the same /sessions
 // prefix via server.js).  Tag-filtered session listing above uses the
