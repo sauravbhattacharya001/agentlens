@@ -390,3 +390,378 @@ data = report.to_dict()
 | `MEDIUM` | 2.5-3.0σ |
 | `HIGH` | 3.0-4.0σ |
 | `CRITICAL` | > 4.0σ |
+
+## Token Budgets
+
+Enforce per-session or per-agent token and cost budgets with threshold callbacks.
+
+```python
+from agentlens import BudgetTracker, TokenBudget, BudgetStatus
+
+tracker = BudgetTracker()
+
+# Create a budget with token and/or cost caps
+budget = tracker.create_budget(
+    budget_id="agent-session-1",
+    max_tokens=50000,
+    max_cost=2.50,
+    warn_threshold=0.8,   # Callback fires at 80% utilization
+)
+
+# Receive threshold notifications
+def on_threshold(budget: TokenBudget, status: BudgetStatus):
+    print(f"Budget '{budget.budget_id}' → {status.value}")
+
+tracker.on_threshold(on_threshold)
+
+# Record token usage (auto-checks budget)
+tracker.record(
+    budget_id="agent-session-1",
+    tokens_in=1200,
+    tokens_out=800,
+    model="gpt-4",
+)
+
+# Check utilization
+print(f"Used: {budget.utilization:.0%}")
+print(f"Remaining tokens: {budget.remaining_tokens}")
+print(f"Status: {budget.status.value}")
+
+# Get a detailed report
+report = tracker.report("agent-session-1")
+print(report.summary())
+
+# Link budgets to sessions
+tracker.record_for_session(
+    session_id="sess-abc",
+    tokens_in=500,
+    tokens_out=200,
+    model="gpt-4",
+)
+session_report = tracker.report_for_session("sess-abc")
+```
+
+### Budget Statuses
+
+| Status | Meaning |
+|--------|---------|
+| `OK` | Under warning threshold |
+| `WARNING` | Approaching limit (≥ warn_threshold) |
+| `EXCEEDED` | Over budget (raises `BudgetExceededError` when `enforce=True`) |
+
+## Cost Forecasting
+
+Predict future AI spending from historical usage with linear regression and EMA models.
+
+```python
+from agentlens import CostForecaster, UsageRecord
+from datetime import datetime
+
+forecaster = CostForecaster()
+
+# Feed historical usage records
+forecaster.add_records([
+    UsageRecord(timestamp=datetime(2025, 1, d), tokens=1000 * d, cost=0.05 * d, model="gpt-4")
+    for d in range(1, 31)
+])
+
+# Forecast the next 7 days
+forecast = forecaster.forecast_daily(days=7, method="auto")
+print(f"Predicted total cost: ${forecast.total_predicted_cost:.2f}")
+
+for pred in forecast.predictions:
+    print(f"  {pred.date}: ${pred.predicted_cost:.2f} "
+          f"(±${pred.upper_bound - pred.predicted_cost:.2f})")
+
+# Get spending summary
+summary = forecaster.spending_summary()
+print(f"Daily avg: ${summary.daily_average:.2f}")
+print(f"Monthly projection: ${summary.monthly_projection:.2f}")
+print(f"Trend: {summary.trend_direction}")
+
+# Budget alerts
+alerts = forecaster.budget_alerts(monthly_budget=100.0)
+for alert in alerts:
+    print(f"  [{alert.severity}] {alert.message}")
+```
+
+### Forecast Methods
+
+| Method | Description |
+|--------|-------------|
+| `"linear"` | Linear regression on daily costs |
+| `"ema"` | Exponential moving average |
+| `"auto"` | Linear if ≥7 days of data, EMA otherwise |
+
+## Compliance Checking
+
+Validate agent behavior against configurable compliance policies.
+
+```python
+from agentlens import ComplianceChecker, CompliancePolicy, ComplianceRule, RuleKind
+
+# Define rules
+rules = [
+    ComplianceRule(
+        name="max-tokens-per-call",
+        kind=RuleKind.MAX_TOKENS,
+        threshold=4000,
+        description="No single LLM call should exceed 4000 tokens",
+    ),
+    ComplianceRule(
+        name="require-reasoning",
+        kind=RuleKind.REQUIRE_REASONING,
+        description="All decisions must include reasoning traces",
+    ),
+    ComplianceRule(
+        name="max-error-rate",
+        kind=RuleKind.MAX_ERROR_RATE,
+        threshold=0.05,
+        description="Error rate must stay below 5%",
+    ),
+]
+
+policy = CompliancePolicy(name="production-policy", rules=rules)
+
+# Or use built-in policies
+from agentlens import strict_policy, permissive_policy
+policy = strict_policy()
+
+# Check compliance
+checker = ComplianceChecker()
+report = checker.check(events, policy)
+
+print(f"Compliant: {report.compliant}")
+print(f"Passed: {report.passed}/{report.total_rules}")
+print(report.render())
+
+# Inspect failures
+for result in report.errors():
+    print(f"  FAIL: {result.rule.name} — {result.message}")
+```
+
+### Rule Kinds
+
+| Kind | What It Checks |
+|------|----------------|
+| `MAX_TOKENS` | Single-call token limit |
+| `MAX_TOTAL_TOKENS` | Session-wide token limit |
+| `MAX_ERROR_RATE` | Error rate threshold |
+| `MAX_LATENCY` | Per-call latency ceiling |
+| `REQUIRE_REASONING` | Decisions must have traces |
+| `MAX_TOOL_ERRORS` | Tool failure count limit |
+| `MIN_EVENTS` | Minimum event count |
+| `MAX_EVENTS` | Maximum event count |
+| `REQUIRE_SESSION_END` | Session must be properly closed |
+
+## Drift Detection
+
+Detect behavioral drift between baseline and current agent sessions.
+
+```python
+from agentlens import DriftDetector
+
+detector = DriftDetector(drift_threshold=2.0)
+
+# Add baseline sessions (known-good behavior)
+for session in baseline_sessions:
+    detector.add_baseline(session)
+
+# Add current sessions to compare
+for session in current_sessions:
+    detector.add_current(session)
+
+# Run detection
+report = detector.detect()
+print(report.format_report())
+
+# Or compare two lists directly
+report = DriftDetector.compare(
+    baseline=baseline_sessions,
+    current=current_sessions,
+    drift_threshold=2.0,
+)
+
+# Inspect metric drifts
+for drift in report.metric_drifts:
+    print(f"  {drift.metric}: {drift.baseline_mean:.2f} → {drift.current_mean:.2f} "
+          f"({drift.status.label}, {drift.direction.value})")
+
+# Inspect tool usage changes
+for tool_drift in report.tool_drifts:
+    print(f"  {tool_drift.tool}: baseline={tool_drift.baseline_count}, "
+          f"current={tool_drift.current_count}")
+```
+
+### Drift Statuses
+
+| Status | Meaning |
+|--------|---------|
+| `STABLE` | Within normal variation |
+| `DRIFT` | Statistically significant change |
+| `INSUFFICIENT_DATA` | Not enough data to determine |
+
+### Tracked Metrics
+
+Latency (mean), token usage (mean), error rate, and per-tool usage frequency.
+
+## SLA Evaluation
+
+Evaluate agent sessions against Service Level Objectives (SLOs).
+
+```python
+from agentlens import SLAEvaluator, SLObjective, SLAPolicy
+
+# Define objectives using factory methods
+policy = SLAPolicy(
+    name="production-sla",
+    objectives=[
+        SLObjective.latency_p95(target_ms=3000, slo_percent=99.0),
+        SLObjective.error_rate(target_rate=0.01, slo_percent=99.5),
+        SLObjective.token_budget(target_per_session=10000, slo_percent=95.0),
+        SLObjective.tool_success_rate(target_rate=0.95),
+        SLObjective.throughput(min_events=5, slo_percent=95.0),
+    ],
+)
+
+# Or use built-in policies
+from agentlens import production_policy, development_policy
+policy = production_policy()
+
+# Evaluate
+evaluator = SLAEvaluator()
+report = evaluator.evaluate(sessions, policy)
+
+print(report.render())
+
+# Inspect per-objective results
+for result in report.results:
+    print(f"  {result.objective.name}: {result.compliance_rate:.1%} "
+          f"(target: {result.objective.slo_percent}%) — {result.status.value}")
+    if result.violations:
+        print(f"    {result.violation_count} violations")
+```
+
+### Objective Kinds
+
+| Kind | Factory Method | What It Measures |
+|------|---------------|-----------------|
+| `LATENCY_P95` | `SLObjective.latency_p95()` | 95th percentile latency |
+| `LATENCY_AVG` | `SLObjective.latency_avg()` | Average latency |
+| `ERROR_RATE` | `SLObjective.error_rate()` | Fraction of error events |
+| `TOKEN_BUDGET` | `SLObjective.token_budget()` | Mean tokens per session |
+| `TOOL_SUCCESS` | `SLObjective.tool_success_rate()` | Tool call success ratio |
+| `THROUGHPUT` | `SLObjective.throughput()` | Minimum events per session |
+
+## Sampling Strategies
+
+Control which events get sent to the backend to reduce costs and noise.
+
+```python
+from agentlens import (
+    ProbabilisticSampler,
+    RateLimitSampler,
+    PrioritySampler,
+    TailSampler,
+    CompositeSampler,
+    AlwaysSampler,
+    NeverSampler,
+    TraceContext,
+)
+
+# Sample 20% of events randomly
+sampler = ProbabilisticSampler(sample_rate=0.2)
+
+# Rate-limit to 100 events per minute
+sampler = RateLimitSampler(max_per_second=100/60)
+
+# Always sample errors and high-latency events
+sampler = PrioritySampler(
+    priority_event_types={"agent_error", "tool_error"},
+    priority_rate=1.0,       # 100% of priority events
+    default_rate=0.1,        # 10% of everything else
+)
+
+# Retroactively sample when errors occur (tail-based)
+sampler = TailSampler(
+    default_rate=0.05,
+    error_rate=1.0,
+    latency_threshold_ms=5000,
+    high_latency_rate=1.0,
+)
+
+# Combine multiple strategies (all must agree)
+sampler = CompositeSampler(samplers=[
+    ProbabilisticSampler(sample_rate=0.5),
+    PrioritySampler(priority_event_types={"agent_error"}),
+])
+
+# Make a sampling decision
+ctx = TraceContext(trace_id="trace-1", event_type="llm_call")
+decision = sampler.should_sample(ctx)
+if decision.sampled:
+    send_event(event)
+
+# Check sampler statistics
+stats = sampler.stats()
+print(f"Sampled: {stats.sampled}/{stats.total} ({stats.sample_rate:.1%})")
+```
+
+## Timeline Visualization
+
+Render agent session timelines as text, Markdown, or HTML.
+
+```python
+from agentlens import TimelineRenderer
+
+renderer = TimelineRenderer(events=session_events, session=session_dict)
+
+# Text timeline (for terminals)
+print(renderer.render_text(width=80, show_tokens=True))
+
+# Markdown timeline (for docs/notebooks)
+md = renderer.render_markdown(show_reasoning=True)
+
+# HTML timeline (for dashboards)
+html = renderer.render_html(
+    title="Agent Session Timeline",
+    show_tokens=True,
+    show_reasoning=True,
+)
+renderer.save("timeline.html")
+
+# Analysis helpers
+summary = renderer.get_summary()
+print(f"Total events: {summary['total_events']}")
+print(f"Duration: {summary['total_duration_ms']}ms")
+print(f"Errors: {summary['error_count']}")
+
+critical_path = renderer.get_critical_path()
+slowest = renderer.get_slowest_events(n=3)
+errors = renderer.get_error_events()
+
+# Filter events
+filtered = renderer.filter(event_types=["llm_call"], min_duration_ms=100)
+```
+
+## Spans
+
+Structured tracing spans for fine-grained operation tracking.
+
+```python
+from agentlens import Span
+
+# Create a span for an operation
+span = Span(name="retrieve-context", kind="internal")
+span.set_attribute("query", "latest sales data")
+span.set_attribute("num_results", 5)
+
+# ... do work ...
+
+span.set_status("ok")
+span_dict = span.to_dict()
+# {"name": "retrieve-context", "kind": "internal", "status": "ok",
+#  "attributes": {"query": "latest sales data", "num_results": 5}, ...}
+```
+
+Spans can be nested and attached to events for distributed tracing context.
