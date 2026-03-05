@@ -126,12 +126,20 @@ function getStatements() {
         s.ended_at,
         s.total_tokens_in,
         s.total_tokens_out,
-        (SELECT COUNT(*) FROM events e
-         WHERE e.session_id = s.session_id
-           AND e.event_type IN ('error', 'tool_error', 'agent_error')) as error_count,
-        (SELECT COUNT(*) FROM events e
-         WHERE e.session_id = s.session_id) as total_events
+        COALESCE(err.error_count, 0) as error_count,
+        COALESCE(evt.total_events, 0) as total_events
       FROM sessions s
+      LEFT JOIN (
+        SELECT session_id, COUNT(*) as error_count
+        FROM events
+        WHERE event_type IN ('error', 'tool_error', 'agent_error')
+        GROUP BY session_id
+      ) err ON err.session_id = s.session_id
+      LEFT JOIN (
+        SELECT session_id, COUNT(*) as total_events
+        FROM events
+        GROUP BY session_id
+      ) evt ON evt.session_id = s.session_id
       WHERE s.status = 'error'
       ORDER BY s.started_at DESC
       LIMIT ?
