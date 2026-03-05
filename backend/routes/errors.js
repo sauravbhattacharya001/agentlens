@@ -25,17 +25,25 @@ function getStatements() {
       WHERE event_type IN ('error', 'tool_error', 'agent_error')
     `),
 
-    // Error rate over time (daily buckets)
+    // Error rate over time (daily buckets) — uses a JOIN instead of
+    // a correlated subquery to count total events per day.
     errorRateDaily: db.prepare(`
       SELECT
-        DATE(timestamp) as day,
-        COUNT(*) as error_count,
-        (SELECT COUNT(*) FROM events e2
-         WHERE DATE(e2.timestamp) = DATE(events.timestamp)) as total_events
-      FROM events
-      WHERE event_type IN ('error', 'tool_error', 'agent_error')
-      GROUP BY DATE(timestamp)
-      ORDER BY day DESC
+        err.day,
+        err.error_count,
+        COALESCE(dc.total_events, 0) as total_events
+      FROM (
+        SELECT DATE(timestamp) as day, COUNT(*) as error_count
+        FROM events
+        WHERE event_type IN ('error', 'tool_error', 'agent_error')
+        GROUP BY DATE(timestamp)
+      ) err
+      LEFT JOIN (
+        SELECT DATE(timestamp) as day, COUNT(*) as total_events
+        FROM events
+        GROUP BY DATE(timestamp)
+      ) dc ON err.day = dc.day
+      ORDER BY err.day DESC
       LIMIT ?
     `),
 
@@ -54,18 +62,24 @@ function getStatements() {
       ORDER BY count DESC
     `),
 
-    // Errors by model
+    // Errors by model — uses a JOIN to compute total calls per model
+    // instead of a correlated subquery (which counted all-time calls
+    // rather than being scoped to any window).
     errorsByModel: db.prepare(`
       SELECT
-        COALESCE(model, 'unknown') as model,
+        COALESCE(e.model, 'unknown') as model,
         COUNT(*) as error_count,
-        (SELECT COUNT(*) FROM events e2
-         WHERE e2.model = events.model
-           AND e2.model IS NOT NULL) as total_calls,
-        COUNT(DISTINCT session_id) as affected_sessions
-      FROM events
-      WHERE event_type IN ('error', 'tool_error', 'agent_error')
-      GROUP BY model
+        COALESCE(mc.total_calls, 0) as total_calls,
+        COUNT(DISTINCT e.session_id) as affected_sessions
+      FROM events e
+      LEFT JOIN (
+        SELECT model, COUNT(*) as total_calls
+        FROM events
+        WHERE model IS NOT NULL
+        GROUP BY model
+      ) mc ON e.model = mc.model
+      WHERE e.event_type IN ('error', 'tool_error', 'agent_error')
+      GROUP BY e.model
       ORDER BY error_count DESC
       LIMIT ?
     `),

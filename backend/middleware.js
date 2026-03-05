@@ -81,13 +81,14 @@ function createApiKeyAuth() {
     }
     const providedBuf = Buffer.from(String(providedKey));
     // Constant-time comparison to prevent timing attacks.
-    // timingSafeEqual requires equal-length buffers; if lengths differ
-    // we still perform a comparison against the expected key to avoid
-    // leaking length information through response time differences.
-    if (
-      providedBuf.length !== API_KEY_BUF.length ||
-      !crypto.timingSafeEqual(providedBuf, API_KEY_BUF)
-    ) {
+    // timingSafeEqual requires equal-length buffers. To avoid leaking
+    // the expected key length through response time, we hash both
+    // values with SHA-256 (producing fixed-length digests) before
+    // comparing. This ensures the comparison always operates on
+    // 32-byte buffers regardless of input lengths.
+    const expectedHash = crypto.createHash("sha256").update(API_KEY_BUF).digest();
+    const providedHash = crypto.createHash("sha256").update(providedBuf).digest();
+    if (!crypto.timingSafeEqual(providedHash, expectedHash)) {
       return res.status(401).json({ error: "Unauthorized: invalid or missing API key" });
     }
     next();
