@@ -15,6 +15,7 @@ from agentlens.compliance import ComplianceChecker, CompliancePolicy, Compliance
 from agentlens.drift import DriftDetector, DriftReport, DriftStatus, DriftDirection, MetricDrift, ToolUsageDrift
 from agentlens.sla import SLAEvaluator, SLObjective, SLAPolicy, SLAReport, ObjectiveResult, ObjectiveKind, ComplianceStatus, production_policy, development_policy
 from agentlens.sampling import ProbabilisticSampler, RateLimitSampler, PrioritySampler, TailSampler, CompositeSampler, AlwaysSampler, NeverSampler, Sampler, SamplingDecision, SamplingReason, TraceContext, SamplerStats
+from agentlens.evaluation import ResponseEvaluator, EvaluatorConfig, QualityReport, QualityTrend, QualityGrade, DimensionScore
 
 __version__ = "0.1.0"
 __all__ = [
@@ -103,6 +104,12 @@ __all__ = [
     "SamplingReason",
     "TraceContext",
     "SamplerStats",
+    "ResponseEvaluator",
+    "EvaluatorConfig",
+    "QualityReport",
+    "QualityTrend",
+    "QualityGrade",
+    "DimensionScore",
 ]
 
 _tracker: AgentTracker | None = None
