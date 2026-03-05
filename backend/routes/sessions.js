@@ -6,6 +6,16 @@ const { computeSessionMetrics, pctDelta } = require("../lib/session-metrics");
 
 const router = express.Router();
 
+// Sanitize a string for use in Content-Disposition filenames.
+// Strips characters that could cause header injection ("  \r  \n),
+// path traversal (/ \), or shell issues, and caps length.
+function sanitizeFilename(name) {
+  if (!name || typeof name !== "string") return "unknown";
+  return name
+    .replace(/[^\w.-]/g, "_")  // only alphanum, underscore, dot, hyphen
+    .slice(0, 64);
+}
+
 // ── Shared event-parsing helper ─────────────────────────────────────
 // Consolidates 4 identical inline `.map()` blocks that each parse
 // the JSON text columns of an event row. This also fixes an
@@ -445,7 +455,7 @@ router.get("/:id/export", (req, res) => {
 
     if (format === "ndjson") {
       // Streaming NDJSON export — uses .iterate() to avoid loading all events into memory
-      const filename = `agentlens-${session.agent_name}-${id.slice(0, 8)}.ndjson`;
+      const filename = `agentlens-${sanitizeFilename(session.agent_name)}-${id.slice(0, 8)}.ndjson`;
       res.setHeader("Content-Disposition", `attachment; filename="${filename}"`);
       res.setHeader("Content-Type", "application/x-ndjson");
 
@@ -492,7 +502,7 @@ router.get("/:id/export", (req, res) => {
         },
       };
 
-      const filename = `agentlens-${session.agent_name}-${id.slice(0, 8)}.json`;
+      const filename = `agentlens-${sanitizeFilename(session.agent_name)}-${id.slice(0, 8)}.json`;
       res.setHeader("Content-Disposition", `attachment; filename="${filename}"`);
       res.setHeader("Content-Type", "application/json");
       return res.json(exportData);
@@ -508,7 +518,17 @@ router.get("/:id/export", (req, res) => {
 
     const csvEscape = (val) => {
       if (val == null) return "";
-      const str = typeof val === "object" ? JSON.stringify(val) : String(val);
+      let str = typeof val === "object" ? JSON.stringify(val) : String(val);
+      // CSV formula injection defense (OWASP): prefix values that start
+      // with formula-trigger characters so spreadsheet applications
+      // (Excel, Google Sheets, LibreOffice) don't execute them as DDE
+      // commands, HYPERLINK injections, or arbitrary formulas.
+      const first = str.charAt(0);
+      if (first === "=" || first === "+" || first === "-" || first === "@") {
+        str = "'" + str;
+      } else if (first === "\t" || first === "\r") {
+        str = "'" + str;
+      }
       if (str.includes(",") || str.includes('"') || str.includes("\n")) {
         return `"${str.replace(/"/g, '""')}"`;
       }
@@ -534,7 +554,7 @@ router.get("/:id/export", (req, res) => {
       ].join(","));
     }
 
-    const filename = `agentlens-${session.agent_name}-${id.slice(0, 8)}.csv`;
+    const filename = `agentlens-${sanitizeFilename(session.agent_name)}-${id.slice(0, 8)}.csv`;
     res.setHeader("Content-Disposition", `attachment; filename="${filename}"`);
     res.setHeader("Content-Type", "text/csv");
     return res.send(csvRows.join("\n"));

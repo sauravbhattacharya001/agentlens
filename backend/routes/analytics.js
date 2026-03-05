@@ -1,6 +1,5 @@
 const express = require("express");
 const { getDb } = require("../db");
-const { safeJsonParse } = require("../lib/validation");
 const { latencyStats, round2 } = require("../lib/stats");
 
 const router = express.Router();

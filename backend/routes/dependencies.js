@@ -1,6 +1,5 @@
 const express = require("express");
 const { getDb } = require("../db");
-const { safeJsonParse } = require("../lib/validation");
 const {
   buildDependencyMap,
   computeServiceStats,
