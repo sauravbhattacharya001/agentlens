@@ -66,6 +66,7 @@ jest.mock("../middleware", () => ({
 const express = require("express");
 const request = require("supertest");
 const sessionsRouter = require("../routes/sessions");
+const tagsRouter = require("../routes/tags");
 
 let app;
 
@@ -88,6 +89,7 @@ function seedSessions() {
 beforeAll(() => {
   app = express();
   app.use(express.json());
+  app.use("/sessions", tagsRouter);
   app.use("/sessions", sessionsRouter);
 });
 

@@ -50,10 +50,13 @@ jest.mock("../db", () => ({
 const express = require("express");
 const request = require("supertest");
 const sessionsRouter = require("../routes/sessions");
+const tagsRouter = require("../routes/tags");
 
 function createApp() {
   const app = express();
   app.use(express.json());
+  // Tag routes must be before sessions (has /:id catch-all)
+  app.use("/sessions", tagsRouter);
   app.use("/sessions", sessionsRouter);
   return app;
 }

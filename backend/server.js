@@ -10,6 +10,7 @@ const {
 } = require("./middleware");
 const eventsRouter = require("./routes/events");
 const sessionsRouter = require("./routes/sessions");
+const tagsRouter = require("./routes/tags");
 const analyticsRouter = require("./routes/analytics");
 const pricingRouter = require("./routes/pricing");
 const alertsRouter = require("./routes/alerts");
@@ -62,6 +63,8 @@ app.use(express.static(path.join(__dirname, "..", "dashboard")));
 
 // API routes
 app.use("/events", eventsRouter);
+// Tag routes must be mounted before sessions to avoid /:id catching "tags" / "by-tag"
+app.use("/sessions", tagsRouter);
 app.use("/sessions", sessionsRouter);
 app.use("/analytics", analyticsRouter);
 app.use("/pricing", pricingRouter);
