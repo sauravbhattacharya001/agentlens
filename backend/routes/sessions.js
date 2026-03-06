@@ -724,58 +724,59 @@ router.get("/:id/events/search", requireSessionId, wrapRoute("search events", (r
       conditions.push("decision_trace IS NOT NULL AND decision_trace != 'null' AND decision_trace LIKE '%\"reasoning\"%'");
     }
 
-    // ── Execute SQL query ───────────────────────────────────────────
-    const whereClause = conditions.join(" AND ");
-    const sqlData = `SELECT * FROM events WHERE ${whereClause} ORDER BY timestamp ASC`;
-    const sqlCount = `SELECT COUNT(*) as total FROM events WHERE session_id = ?`;
-
-    const totalEvents = db.prepare(sqlCount).get(id).total;
-    const dbResults = db.prepare(sqlData).all(...params);
-
-    // Parse JSON columns
-    const parsed = dbResults.map(parseEventRow);
-
-    // ── Full-text search (must run in-process on parsed JSON) ───────
-    let filtered = parsed;
+    // ── Push full-text q into SQL WHERE clause ────────────────────
     const q = req.query.q;
+    let searchTerms = [];
     if (q) {
-      const searchTerms = q.toLowerCase().split(/\s+/).filter(Boolean);
-      filtered = filtered.filter((e) => {
-        const searchable = [
-          JSON.stringify(e.input_data || ""),
-          JSON.stringify(e.output_data || ""),
-          e.tool_call ? JSON.stringify(e.tool_call) : "",
-          e.decision_trace?.reasoning || "",
-          e.event_type || "",
-          e.model || "",
-        ]
-          .join(" ")
-          .toLowerCase();
-        return searchTerms.every((term) => searchable.includes(term));
-      });
+      searchTerms = q.toLowerCase().split(/\s+/).filter(Boolean);
+      // Each term must appear in at least one of the searchable JSON columns
+      for (const term of searchTerms) {
+        const likeTerm = `%${term}%`;
+        conditions.push(
+          `(LOWER(COALESCE(input_data,'')) LIKE ? OR LOWER(COALESCE(output_data,'')) LIKE ? OR LOWER(COALESCE(tool_call,'')) LIKE ? OR LOWER(COALESCE(decision_trace,'')) LIKE ? OR LOWER(COALESCE(event_type,'')) LIKE ? OR LOWER(COALESCE(model,'')) LIKE ?)`
+        );
+        params.push(likeTerm, likeTerm, likeTerm, likeTerm, likeTerm, likeTerm);
+      }
     }
 
-    // ── Compute summary stats for filtered results ──────────────────
-    const totalTokensIn = filtered.reduce((s, e) => s + (e.tokens_in || 0), 0);
-    const totalTokensOut = filtered.reduce((s, e) => s + (e.tokens_out || 0), 0);
-    const totalDuration = filtered.reduce((s, e) => s + (e.duration_ms || 0), 0);
+    // ── Sorting ─────────────────────────────────────────────────────
+    const allowedSort = { timestamp: "timestamp", duration_ms: "duration_ms", tokens: "(COALESCE(tokens_in,0)+COALESCE(tokens_out,0))" };
+    const sortField = allowedSort[req.query.sort] || "timestamp";
+    const sortOrder = req.query.order === "desc" ? "DESC" : "ASC";
+
+    // ── Execute SQL query with LIMIT/OFFSET ─────────────────────────
+    const whereClause = conditions.join(" AND ");
+    const sqlCount = `SELECT COUNT(*) as total FROM events WHERE session_id = ?`;
+    const sqlMatchCount = `SELECT COUNT(*) as total FROM events WHERE ${whereClause}`;
+
+    const { limit, offset } = parsePagination(req.query, { defaultLimit: 100, maxLimit: 500 });
+
+    const totalEvents = db.prepare(sqlCount).get(id).total;
+    const matchedCount = db.prepare(sqlMatchCount).get(...params).total;
+
+    const sqlData = `SELECT * FROM events WHERE ${whereClause} ORDER BY ${sortField} ${sortOrder} LIMIT ? OFFSET ?`;
+    const dbResults = db.prepare(sqlData).all(...params, limit, offset);
+
+    // Parse JSON columns
+    const paginated = dbResults.map(parseEventRow);
+
+    // ── Compute summary stats (from the page only to avoid full scan) ──
+    const totalTokensIn = paginated.reduce((s, e) => s + (e.tokens_in || 0), 0);
+    const totalTokensOut = paginated.reduce((s, e) => s + (e.tokens_out || 0), 0);
+    const totalDuration = paginated.reduce((s, e) => s + (e.duration_ms || 0), 0);
     const eventTypes = {};
     const models = {};
-    filtered.forEach((e) => {
+    paginated.forEach((e) => {
       eventTypes[e.event_type] = (eventTypes[e.event_type] || 0) + 1;
       if (e.model) {
         models[e.model] = (models[e.model] || 0) + 1;
       }
     });
 
-    // ── Pagination ──────────────────────────────────────────────────
-    const { limit, offset } = parsePagination(req.query, { defaultLimit: 100, maxLimit: 500 });
-    const paginated = filtered.slice(offset, offset + limit);
-
     res.json({
       session_id: id,
       total_events: totalEvents,
-      matched: filtered.length,
+      matched: matchedCount,
       returned: paginated.length,
       offset,
       limit,
