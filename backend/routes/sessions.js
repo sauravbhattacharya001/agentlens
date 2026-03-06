@@ -724,59 +724,52 @@ router.get("/:id/events/search", requireSessionId, wrapRoute("search events", (r
       conditions.push("decision_trace IS NOT NULL AND decision_trace != 'null' AND decision_trace LIKE '%\"reasoning\"%'");
     }
 
-    // ── Execute SQL query ───────────────────────────────────────────
-    const whereClause = conditions.join(" AND ");
-    const sqlData = `SELECT * FROM events WHERE ${whereClause} ORDER BY timestamp ASC`;
-    const sqlCount = `SELECT COUNT(*) as total FROM events WHERE session_id = ?`;
+    // ── Full-text search — push to SQL via LIKE when possible ─────
+    const q = req.query.q;
+    if (q) {
+      const searchTerms = q.split(/\s+/).filter(Boolean);
+      for (const term of searchTerms) {
+        const likeTerm = `%${term}%`;
+        conditions.push(
+          `(LOWER(COALESCE(input_data,'')) LIKE LOWER(?) OR LOWER(COALESCE(output_data,'')) LIKE LOWER(?) OR LOWER(COALESCE(tool_call,'')) LIKE LOWER(?) OR LOWER(COALESCE(event_type,'')) LIKE LOWER(?) OR LOWER(COALESCE(model,'')) LIKE LOWER(?) OR LOWER(COALESCE(decision_trace,'')) LIKE LOWER(?))`
+        );
+        params.push(likeTerm, likeTerm, likeTerm, likeTerm, likeTerm, likeTerm);
+      }
+    }
 
-    const totalEvents = db.prepare(sqlCount).get(id).total;
-    const dbResults = db.prepare(sqlData).all(...params);
+    // ── Pagination — always apply LIMIT/OFFSET in SQL ───────────────
+    const { limit, offset } = parsePagination(req.query, { defaultLimit: 100, maxLimit: 500 });
+
+    // ── Execute SQL query with LIMIT ────────────────────────────────
+    const whereClause = conditions.join(" AND ");
+    const sqlCount = `SELECT COUNT(*) as total FROM events WHERE ${whereClause}`;
+    const sqlData = `SELECT * FROM events WHERE ${whereClause} ORDER BY timestamp ASC LIMIT ? OFFSET ?`;
+
+    const totalEvents = db.prepare(`SELECT COUNT(*) as total FROM events WHERE session_id = ?`).get(id).total;
+    const matched = db.prepare(sqlCount).get(...params).total;
+    const dbResults = db.prepare(sqlData).all(...params, limit, offset);
 
     // Parse JSON columns
     const parsed = dbResults.map(parseEventRow);
 
-    // ── Full-text search (must run in-process on parsed JSON) ───────
-    let filtered = parsed;
-    const q = req.query.q;
-    if (q) {
-      const searchTerms = q.toLowerCase().split(/\s+/).filter(Boolean);
-      filtered = filtered.filter((e) => {
-        const searchable = [
-          JSON.stringify(e.input_data || ""),
-          JSON.stringify(e.output_data || ""),
-          e.tool_call ? JSON.stringify(e.tool_call) : "",
-          e.decision_trace?.reasoning || "",
-          e.event_type || "",
-          e.model || "",
-        ]
-          .join(" ")
-          .toLowerCase();
-        return searchTerms.every((term) => searchable.includes(term));
-      });
-    }
-
-    // ── Compute summary stats for filtered results ──────────────────
-    const totalTokensIn = filtered.reduce((s, e) => s + (e.tokens_in || 0), 0);
-    const totalTokensOut = filtered.reduce((s, e) => s + (e.tokens_out || 0), 0);
-    const totalDuration = filtered.reduce((s, e) => s + (e.duration_ms || 0), 0);
+    // ── Compute summary stats (only for this page — avoids loading all) ──
+    const totalTokensIn = parsed.reduce((s, e) => s + (e.tokens_in || 0), 0);
+    const totalTokensOut = parsed.reduce((s, e) => s + (e.tokens_out || 0), 0);
+    const totalDuration = parsed.reduce((s, e) => s + (e.duration_ms || 0), 0);
     const eventTypes = {};
     const models = {};
-    filtered.forEach((e) => {
+    parsed.forEach((e) => {
       eventTypes[e.event_type] = (eventTypes[e.event_type] || 0) + 1;
       if (e.model) {
         models[e.model] = (models[e.model] || 0) + 1;
       }
     });
 
-    // ── Pagination ──────────────────────────────────────────────────
-    const { limit, offset } = parsePagination(req.query, { defaultLimit: 100, maxLimit: 500 });
-    const paginated = filtered.slice(offset, offset + limit);
-
     res.json({
       session_id: id,
       total_events: totalEvents,
-      matched: filtered.length,
-      returned: paginated.length,
+      matched,
+      returned: parsed.length,
       offset,
       limit,
       summary: {
@@ -787,7 +780,7 @@ router.get("/:id/events/search", requireSessionId, wrapRoute("search events", (r
         event_types: eventTypes,
         models,
       },
-      events: paginated,
+      events: parsed,
     });
 }));
 
