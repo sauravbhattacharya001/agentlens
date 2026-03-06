@@ -303,6 +303,13 @@ class BudgetTracker:
         if max_cost_usd is not None and max_cost_usd <= 0:
             raise ValueError("max_cost_usd must be positive")
 
+        if session_id in self._session_index:
+            raise ValueError(
+                f"Session {session_id!r} already has a budget "
+                f"({self._session_index[session_id]}). "
+                f"Remove it first with remove_budget()."
+            )
+
         budget = TokenBudget(
             session_id=session_id,
             agent_name=agent_name,
@@ -460,5 +467,7 @@ class BudgetTracker:
         budget = self._budgets.pop(budget_id, None)
         if budget is None:
             return False
-        self._session_index.pop(budget.session_id, None)
+        # Only remove the session index entry if it still points to this budget
+        if self._session_index.get(budget.session_id) == budget_id:
+            del self._session_index[budget.session_id]
         return True
