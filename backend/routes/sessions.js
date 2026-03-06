@@ -724,70 +724,78 @@ router.get("/:id/events/search", requireSessionId, wrapRoute("search events", (r
       conditions.push("decision_trace IS NOT NULL AND decision_trace != 'null' AND decision_trace LIKE '%\"reasoning\"%'");
     }
 
-    // ── Execute SQL query ───────────────────────────────────────────
-    const whereClause = conditions.join(" AND ");
-    const sqlData = `SELECT * FROM events WHERE ${whereClause} ORDER BY timestamp ASC`;
-    const sqlCount = `SELECT COUNT(*) as total FROM events WHERE session_id = ?`;
+    // ── Full-text search: push q into SQL WHERE clause ─────────────
+    // Previously, q search loaded ALL matching events into memory and
+    // filtered in-process. Now we push LIKE conditions into SQL so the
+    // database handles filtering and LIMIT/OFFSET applies correctly.
+    // Fixes: https://github.com/sauravbhattacharya001/agentlens/issues/39
+    const q = req.query.q;
+    if (q) {
+      const searchTerms = q.trim().split(/\s+/).filter(Boolean);
+      for (const term of searchTerms) {
+        const likeTerm = `%${term}%`;
+        conditions.push(
+          "(COALESCE(input_data, '') LIKE ? COLLATE NOCASE OR " +
+          "COALESCE(output_data, '') LIKE ? COLLATE NOCASE OR " +
+          "COALESCE(tool_call, '') LIKE ? COLLATE NOCASE OR " +
+          "COALESCE(decision_trace, '') LIKE ? COLLATE NOCASE OR " +
+          "COALESCE(event_type, '') LIKE ? COLLATE NOCASE OR " +
+          "COALESCE(model, '') LIKE ? COLLATE NOCASE)"
+        );
+        params.push(likeTerm, likeTerm, likeTerm, likeTerm, likeTerm, likeTerm);
+      }
+    }
 
-    const totalEvents = db.prepare(sqlCount).get(id).total;
-    const dbResults = db.prepare(sqlData).all(...params);
+    // ── Pagination ──────────────────────────────────────────────────
+    const { limit, offset } = parsePagination(req.query, { defaultLimit: 100, maxLimit: 500 });
+
+    // ── Execute SQL query with LIMIT/OFFSET ─────────────────────────
+    const whereClause = conditions.join(" AND ");
+    const sqlCount = `SELECT COUNT(*) as total FROM events WHERE ${whereClause}`;
+    const sqlData = `SELECT * FROM events WHERE ${whereClause} ORDER BY timestamp ASC LIMIT ? OFFSET ?`;
+
+    const totalEvents = db.prepare("SELECT COUNT(*) as total FROM events WHERE session_id = ?").get(id).total;
+    const matched = db.prepare(sqlCount).get(...params).total;
+    const dbResults = db.prepare(sqlData).all(...params, limit, offset);
 
     // Parse JSON columns
     const parsed = dbResults.map(parseEventRow);
 
-    // ── Full-text search (must run in-process on parsed JSON) ───────
-    let filtered = parsed;
-    const q = req.query.q;
-    if (q) {
-      const searchTerms = q.toLowerCase().split(/\s+/).filter(Boolean);
-      filtered = filtered.filter((e) => {
-        const searchable = [
-          JSON.stringify(e.input_data || ""),
-          JSON.stringify(e.output_data || ""),
-          e.tool_call ? JSON.stringify(e.tool_call) : "",
-          e.decision_trace?.reasoning || "",
-          e.event_type || "",
-          e.model || "",
-        ]
-          .join(" ")
-          .toLowerCase();
-        return searchTerms.every((term) => searchable.includes(term));
-      });
-    }
+    // ── Compute summary stats via SQL aggregation ───────────────────
+    // Runs a single aggregate query over the full filtered set instead
+    // of loading all rows into memory just for stats.
+    const statsSql = `SELECT
+      COALESCE(SUM(tokens_in), 0) as total_tokens_in,
+      COALESCE(SUM(tokens_out), 0) as total_tokens_out,
+      COALESCE(SUM(duration_ms), 0) as total_duration_ms
+      FROM events WHERE ${whereClause}`;
+    const statsRow = db.prepare(statsSql).get(...params);
 
-    // ── Compute summary stats for filtered results ──────────────────
-    const totalTokensIn = filtered.reduce((s, e) => s + (e.tokens_in || 0), 0);
-    const totalTokensOut = filtered.reduce((s, e) => s + (e.tokens_out || 0), 0);
-    const totalDuration = filtered.reduce((s, e) => s + (e.duration_ms || 0), 0);
     const eventTypes = {};
     const models = {};
-    filtered.forEach((e) => {
+    parsed.forEach((e) => {
       eventTypes[e.event_type] = (eventTypes[e.event_type] || 0) + 1;
       if (e.model) {
         models[e.model] = (models[e.model] || 0) + 1;
       }
     });
 
-    // ── Pagination ──────────────────────────────────────────────────
-    const { limit, offset } = parsePagination(req.query, { defaultLimit: 100, maxLimit: 500 });
-    const paginated = filtered.slice(offset, offset + limit);
-
     res.json({
       session_id: id,
       total_events: totalEvents,
-      matched: filtered.length,
-      returned: paginated.length,
+      matched,
+      returned: parsed.length,
       offset,
       limit,
       summary: {
-        tokens_in: totalTokensIn,
-        tokens_out: totalTokensOut,
-        total_tokens: totalTokensIn + totalTokensOut,
-        total_duration_ms: Math.round(totalDuration * 100) / 100,
+        tokens_in: statsRow.total_tokens_in,
+        tokens_out: statsRow.total_tokens_out,
+        total_tokens: statsRow.total_tokens_in + statsRow.total_tokens_out,
+        total_duration_ms: Math.round(statsRow.total_duration_ms * 100) / 100,
         event_types: eventTypes,
         models,
       },
-      events: paginated,
+      events: parsed,
     });
 }));
 
