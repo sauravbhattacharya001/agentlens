@@ -386,3 +386,21 @@ class TestBudgetManagement:
     def test_remove_nonexistent(self):
         tracker = BudgetTracker()
         assert tracker.remove_budget("nope") is False
+
+    def test_duplicate_session_budget_raises(self):
+        """Creating two budgets for the same session_id should raise ValueError."""
+        tracker = BudgetTracker()
+        tracker.create_budget("session-dup", max_tokens=1000)
+        with pytest.raises(ValueError, match="already has a budget"):
+            tracker.create_budget("session-dup", max_tokens=5000)
+
+    def test_remove_budget_does_not_orphan_replacement(self):
+        """After removing a budget, a new one for the same session works correctly."""
+        tracker = BudgetTracker()
+        b1 = tracker.create_budget("session-reuse", max_tokens=1000)
+        tracker.remove_budget(b1.budget_id)
+        # Now creating a new budget for the same session should work
+        b2 = tracker.create_budget("session-reuse", max_tokens=5000)
+        report = tracker.report_for_session("session-reuse")
+        assert report is not None
+        assert report.budget_id == b2.budget_id
