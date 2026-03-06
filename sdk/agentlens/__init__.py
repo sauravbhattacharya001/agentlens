@@ -16,6 +16,7 @@ from agentlens.drift import DriftDetector, DriftReport, DriftStatus, DriftDirect
 from agentlens.sla import SLAEvaluator, SLObjective, SLAPolicy, SLAReport, ObjectiveResult, ObjectiveKind, ComplianceStatus, production_policy, development_policy
 from agentlens.sampling import ProbabilisticSampler, RateLimitSampler, PrioritySampler, TailSampler, CompositeSampler, AlwaysSampler, NeverSampler, Sampler, SamplingDecision, SamplingReason, TraceContext, SamplerStats
 from agentlens.evaluation import ResponseEvaluator, EvaluatorConfig, QualityReport, QualityTrend, QualityGrade, DimensionScore
+from agentlens.postmortem import PostmortemGenerator, PostmortemConfig, PostmortemReport, Severity as PostmortemSeverity, RootCause, ImpactAssessment, Remediation, RemediationCategory, LessonLearned, TimelineEntry, IncidentPhase
 
 __version__ = "0.1.0"
 __all__ = [
