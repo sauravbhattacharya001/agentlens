@@ -203,9 +203,7 @@ class AgentTracker:
         Raises:
             RuntimeError: If the session is not found.
         """
-        sid = session_id or self._current_session_id
-        if not sid or sid not in self.sessions:
-            raise RuntimeError("Session not found")
+        sid = self._resolve_session(session_id, "Session not found")
         session = self.sessions[sid]
         scorer = HealthScorer(thresholds)
         return scorer.score_session(session)
@@ -229,9 +227,7 @@ class AgentTracker:
         Raises:
             RuntimeError: If the session is not found.
         """
-        sid = session_id or self._current_session_id
-        if not sid or sid not in self.sessions:
-            raise RuntimeError("Session not found")
+        sid = self._resolve_session(session_id, "Session not found")
 
         session = self.sessions[sid]
 
@@ -406,8 +402,11 @@ class AgentTracker:
 
     def explain(self, session_id: str | None = None) -> str:
         """Generate a human-readable explanation of the agent's behavior."""
-        sid = session_id or self._current_session_id
-        if not sid:
+        try:
+            sid = self._resolve_session(session_id)
+        except RuntimeError:
+            if session_id:
+                return f"Session {session_id} not found."
             return "No active session."
 
         session = self.sessions.get(sid)
