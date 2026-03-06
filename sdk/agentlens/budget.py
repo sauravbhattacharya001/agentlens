@@ -255,7 +255,7 @@ class BudgetTracker:
 
     def __init__(self) -> None:
         self._budgets: dict[str, TokenBudget] = {}
-        self._session_index: dict[str, str] = {}  # session_id -> budget_id
+        self._session_index: dict[str, list[str]] = {}  # session_id -> [budget_id, ...]
         self._callbacks: list[Callable[[TokenBudget, BudgetStatus], None]] = []
 
     def on_threshold(self, callback: Callable[[TokenBudget, BudgetStatus], None]) -> None:
@@ -313,7 +313,7 @@ class BudgetTracker:
             model=model,
         )
         self._budgets[budget.budget_id] = budget
-        self._session_index[session_id] = budget.budget_id
+        self._session_index.setdefault(session_id, []).append(budget.budget_id)
         return budget
 
     def record(
@@ -396,10 +396,10 @@ class BudgetTracker:
 
         Returns None if no budget exists for this session.
         """
-        budget_id = self._session_index.get(session_id)
-        if budget_id is None:
+        budget_ids = self._session_index.get(session_id)
+        if not budget_ids:
             return None
-        return self.record(budget_id, tokens_in, tokens_out, model, event_id)
+        return self.record(budget_ids[-1], tokens_in, tokens_out, model, event_id)
 
     def report(self, budget_id: str) -> BudgetReport:
         """Generate a snapshot report for a budget.
@@ -441,11 +441,16 @@ class BudgetTracker:
         )
 
     def report_for_session(self, session_id: str) -> BudgetReport | None:
-        """Get report by session ID. Returns None if no budget exists."""
-        budget_id = self._session_index.get(session_id)
-        if budget_id is None:
+        """Get report for the most recent budget by session ID. Returns None if no budget exists."""
+        budget_ids = self._session_index.get(session_id)
+        if not budget_ids:
             return None
-        return self.report(budget_id)
+        return self.report(budget_ids[-1])
+
+    def reports_for_session(self, session_id: str) -> list[BudgetReport]:
+        """Get reports for ALL budgets associated with a session."""
+        budget_ids = self._session_index.get(session_id, [])
+        return [self.report(bid) for bid in budget_ids]
 
     def all_reports(self) -> list[BudgetReport]:
         """Get reports for all registered budgets."""
@@ -460,5 +465,12 @@ class BudgetTracker:
         budget = self._budgets.pop(budget_id, None)
         if budget is None:
             return False
-        self._session_index.pop(budget.session_id, None)
+        budget_ids = self._session_index.get(budget.session_id)
+        if budget_ids is not None:
+            try:
+                budget_ids.remove(budget_id)
+            except ValueError:
+                pass
+            if not budget_ids:
+                del self._session_index[budget.session_id]
         return True

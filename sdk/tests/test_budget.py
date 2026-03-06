@@ -386,3 +386,61 @@ class TestBudgetManagement:
     def test_remove_nonexistent(self):
         tracker = BudgetTracker()
         assert tracker.remove_budget("nope") is False
+
+
+# -- Multi-budget sessions -----------------------------------------
+
+
+class TestMultiBudgetSession:
+    """Regression tests for session_index collision (issue #35)."""
+
+    def test_two_budgets_same_session_both_reachable(self):
+        tracker = BudgetTracker()
+        b1 = tracker.create_budget("s1", max_tokens=1000)
+        b2 = tracker.create_budget("s1", max_tokens=5000)
+        # Both budgets exist and are independently accessible
+        assert tracker.get_budget(b1.budget_id) is b1
+        assert tracker.get_budget(b2.budget_id) is b2
+
+    def test_report_for_session_returns_latest(self):
+        tracker = BudgetTracker()
+        b1 = tracker.create_budget("s1", max_tokens=1000)
+        b2 = tracker.create_budget("s1", max_tokens=5000)
+        report = tracker.report_for_session("s1")
+        assert report is not None
+        assert report.budget_id == b2.budget_id
+
+    def test_reports_for_session_returns_all(self):
+        tracker = BudgetTracker()
+        b1 = tracker.create_budget("s1", max_tokens=1000)
+        b2 = tracker.create_budget("s1", max_tokens=5000)
+        reports = tracker.reports_for_session("s1")
+        assert len(reports) == 2
+        assert reports[0].budget_id == b1.budget_id
+        assert reports[1].budget_id == b2.budget_id
+
+    def test_remove_first_budget_does_not_break_second(self):
+        tracker = BudgetTracker()
+        b1 = tracker.create_budget("s1", max_tokens=1000)
+        b2 = tracker.create_budget("s1", max_tokens=5000)
+        tracker.remove_budget(b1.budget_id)
+        # b2 still reachable via session lookup
+        report = tracker.report_for_session("s1")
+        assert report is not None
+        assert report.budget_id == b2.budget_id
+
+    def test_remove_all_budgets_cleans_session_index(self):
+        tracker = BudgetTracker()
+        b1 = tracker.create_budget("s1", max_tokens=1000)
+        b2 = tracker.create_budget("s1", max_tokens=5000)
+        tracker.remove_budget(b1.budget_id)
+        tracker.remove_budget(b2.budget_id)
+        assert tracker.report_for_session("s1") is None
+
+    def test_record_for_session_targets_latest_budget(self):
+        tracker = BudgetTracker()
+        b1 = tracker.create_budget("s1", max_tokens=1000)
+        b2 = tracker.create_budget("s1", max_tokens=5000)
+        tracker.record_for_session("s1", tokens_in=100)
+        assert b1.total_tokens == 0
+        assert b2.total_tokens == 100
