@@ -305,7 +305,7 @@ class TestExportSession:
         mock_resp = MagicMock()
         mock_resp.json.return_value = {"session_id": "test", "events": []}
         mock_resp.raise_for_status = MagicMock()
-        initialized.transport._client.get.return_value = mock_resp
+        initialized.transport.get.return_value = mock_resp
         result = agentlens.export_session()
         assert result == {"session_id": "test", "events": []}
 
@@ -314,7 +314,7 @@ class TestExportSession:
         mock_resp = MagicMock()
         mock_resp.text = "session_id,event_type\ntest,llm_call"
         mock_resp.raise_for_status = MagicMock()
-        initialized.transport._client.get.return_value = mock_resp
+        initialized.transport.get.return_value = mock_resp
         result = agentlens.export_session(format="csv")
         assert "session_id" in result
 
@@ -323,7 +323,7 @@ class TestExportSession:
         mock_resp = MagicMock()
         mock_resp.json.return_value = {"session_id": s.session_id}
         mock_resp.raise_for_status = MagicMock()
-        initialized.transport._client.get.return_value = mock_resp
+        initialized.transport.get.return_value = mock_resp
         result = agentlens.export_session(session_id=s.session_id)
         assert result["session_id"] == s.session_id
 
@@ -333,10 +333,10 @@ class TestExportSession:
         mock_resp = MagicMock()
         mock_resp.json.return_value = {}
         mock_resp.raise_for_status = MagicMock()
-        initialized.transport._client.get.return_value = mock_resp
+        initialized.transport.get.return_value = mock_resp
         agentlens.export_session()
         # Verify the URL contained the current session id
-        call_args = initialized.transport._client.get.call_args
+        call_args = initialized.transport.get.call_args
         assert s.session_id in call_args[0][0]
 
 
@@ -349,7 +349,7 @@ class TestCompareSessionsAPI:
         mock_resp = MagicMock()
         mock_resp.json.return_value = {"deltas": {}}
         mock_resp.raise_for_status = MagicMock()
-        initialized.transport._client.post.return_value = mock_resp
+        initialized.transport.post.return_value = mock_resp
         result = agentlens.compare_sessions("sess-a", "sess-b")
         assert "deltas" in result
 
@@ -357,7 +357,7 @@ class TestCompareSessionsAPI:
         mock_resp = MagicMock()
         mock_resp.json.return_value = {"session_a": {}, "session_b": {}, "deltas": {}}
         mock_resp.raise_for_status = MagicMock()
-        initialized.transport._client.post.return_value = mock_resp
+        initialized.transport.post.return_value = mock_resp
         result = agentlens.compare_sessions("a", "b")
         assert isinstance(result, dict)
 
@@ -376,7 +376,7 @@ class TestGetSetCostsAPI:
         mock_resp = MagicMock()
         mock_resp.json.return_value = {"total_cost": 0.05, "currency": "USD"}
         mock_resp.raise_for_status = MagicMock()
-        initialized.transport._client.get.return_value = mock_resp
+        initialized.transport.get.return_value = mock_resp
         result = agentlens.get_costs()
         assert result["total_cost"] == 0.05
 
@@ -385,7 +385,7 @@ class TestGetSetCostsAPI:
         mock_resp = MagicMock()
         mock_resp.json.return_value = {"status": "ok", "updated": 1}
         mock_resp.raise_for_status = MagicMock()
-        initialized.transport._client.put.return_value = mock_resp
+        initialized.transport.put.return_value = mock_resp
         result = agentlens.set_pricing(pricing)
         assert result["updated"] == 1
 

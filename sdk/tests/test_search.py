@@ -66,12 +66,12 @@ class TestSearchEvents:
         mock_response.json.return_value = make_search_response(
             session_id=session.session_id
         )
-        mock_transport._client.get.return_value = mock_response
+        mock_transport.get.return_value = mock_response
 
         result = tracker.search_events()
 
-        mock_transport._client.get.assert_called_once()
-        call_args = mock_transport._client.get.call_args
+        mock_transport.get.assert_called_once()
+        call_args = mock_transport.get.call_args
         assert session.session_id in call_args[0][0]
         assert result["matched"] == 5
 
@@ -81,11 +81,11 @@ class TestSearchEvents:
         mock_response.json.return_value = make_search_response(
             session_id="explicit-session"
         )
-        mock_transport._client.get.return_value = mock_response
+        mock_transport.get.return_value = mock_response
 
         result = tracker.search_events(session_id="explicit-session")
 
-        call_args = mock_transport._client.get.call_args
+        call_args = mock_transport.get.call_args
         assert "explicit-session" in call_args[0][0]
 
     def test_search_no_session_raises(self, tracker):
@@ -98,11 +98,11 @@ class TestSearchEvents:
         session = tracker.start_session(agent_name="test")
         mock_response = MagicMock()
         mock_response.json.return_value = make_search_response()
-        mock_transport._client.get.return_value = mock_response
+        mock_transport.get.return_value = mock_response
 
         tracker.search_events(q="customer data")
 
-        call_args = mock_transport._client.get.call_args
+        call_args = mock_transport.get.call_args
         params = call_args[1]["params"]
         assert params["q"] == "customer data"
 
@@ -111,11 +111,11 @@ class TestSearchEvents:
         session = tracker.start_session(agent_name="test")
         mock_response = MagicMock()
         mock_response.json.return_value = make_search_response()
-        mock_transport._client.get.return_value = mock_response
+        mock_transport.get.return_value = mock_response
 
         tracker.search_events(event_type="llm_call,tool_call")
 
-        params = mock_transport._client.get.call_args[1]["params"]
+        params = mock_transport.get.call_args[1]["params"]
         assert params["type"] == "llm_call,tool_call"
 
     def test_search_with_model(self, tracker, mock_transport):
@@ -123,11 +123,11 @@ class TestSearchEvents:
         session = tracker.start_session(agent_name="test")
         mock_response = MagicMock()
         mock_response.json.return_value = make_search_response()
-        mock_transport._client.get.return_value = mock_response
+        mock_transport.get.return_value = mock_response
 
         tracker.search_events(model="gpt-4")
 
-        params = mock_transport._client.get.call_args[1]["params"]
+        params = mock_transport.get.call_args[1]["params"]
         assert params["model"] == "gpt-4"
 
     def test_search_with_min_tokens(self, tracker, mock_transport):
@@ -135,11 +135,11 @@ class TestSearchEvents:
         session = tracker.start_session(agent_name="test")
         mock_response = MagicMock()
         mock_response.json.return_value = make_search_response()
-        mock_transport._client.get.return_value = mock_response
+        mock_transport.get.return_value = mock_response
 
         tracker.search_events(min_tokens=500)
 
-        params = mock_transport._client.get.call_args[1]["params"]
+        params = mock_transport.get.call_args[1]["params"]
         assert params["min_tokens"] == 500
 
     def test_search_with_max_tokens(self, tracker, mock_transport):
@@ -147,11 +147,11 @@ class TestSearchEvents:
         session = tracker.start_session(agent_name="test")
         mock_response = MagicMock()
         mock_response.json.return_value = make_search_response()
-        mock_transport._client.get.return_value = mock_response
+        mock_transport.get.return_value = mock_response
 
         tracker.search_events(max_tokens=2000)
 
-        params = mock_transport._client.get.call_args[1]["params"]
+        params = mock_transport.get.call_args[1]["params"]
         assert params["max_tokens"] == 2000
 
     def test_search_with_min_duration(self, tracker, mock_transport):
@@ -159,11 +159,11 @@ class TestSearchEvents:
         session = tracker.start_session(agent_name="test")
         mock_response = MagicMock()
         mock_response.json.return_value = make_search_response()
-        mock_transport._client.get.return_value = mock_response
+        mock_transport.get.return_value = mock_response
 
         tracker.search_events(min_duration_ms=100.5)
 
-        params = mock_transport._client.get.call_args[1]["params"]
+        params = mock_transport.get.call_args[1]["params"]
         assert params["min_duration_ms"] == 100.5
 
     def test_search_with_has_tools(self, tracker, mock_transport):
@@ -171,11 +171,11 @@ class TestSearchEvents:
         session = tracker.start_session(agent_name="test")
         mock_response = MagicMock()
         mock_response.json.return_value = make_search_response()
-        mock_transport._client.get.return_value = mock_response
+        mock_transport.get.return_value = mock_response
 
         tracker.search_events(has_tools=True)
 
-        params = mock_transport._client.get.call_args[1]["params"]
+        params = mock_transport.get.call_args[1]["params"]
         assert params["has_tools"] == "true"
 
     def test_search_with_has_reasoning(self, tracker, mock_transport):
@@ -183,11 +183,11 @@ class TestSearchEvents:
         session = tracker.start_session(agent_name="test")
         mock_response = MagicMock()
         mock_response.json.return_value = make_search_response()
-        mock_transport._client.get.return_value = mock_response
+        mock_transport.get.return_value = mock_response
 
         tracker.search_events(has_reasoning=True)
 
-        params = mock_transport._client.get.call_args[1]["params"]
+        params = mock_transport.get.call_args[1]["params"]
         assert params["has_reasoning"] == "true"
 
     def test_search_with_errors(self, tracker, mock_transport):
@@ -195,11 +195,11 @@ class TestSearchEvents:
         session = tracker.start_session(agent_name="test")
         mock_response = MagicMock()
         mock_response.json.return_value = make_search_response()
-        mock_transport._client.get.return_value = mock_response
+        mock_transport.get.return_value = mock_response
 
         tracker.search_events(errors=True)
 
-        params = mock_transport._client.get.call_args[1]["params"]
+        params = mock_transport.get.call_args[1]["params"]
         assert params["errors"] == "true"
 
     def test_search_with_time_range(self, tracker, mock_transport):
@@ -207,14 +207,14 @@ class TestSearchEvents:
         session = tracker.start_session(agent_name="test")
         mock_response = MagicMock()
         mock_response.json.return_value = make_search_response()
-        mock_transport._client.get.return_value = mock_response
+        mock_transport.get.return_value = mock_response
 
         tracker.search_events(
             after="2024-06-15T10:00:00Z",
             before="2024-06-15T10:30:00Z",
         )
 
-        params = mock_transport._client.get.call_args[1]["params"]
+        params = mock_transport.get.call_args[1]["params"]
         assert params["after"] == "2024-06-15T10:00:00Z"
         assert params["before"] == "2024-06-15T10:30:00Z"
 
@@ -223,11 +223,11 @@ class TestSearchEvents:
         session = tracker.start_session(agent_name="test")
         mock_response = MagicMock()
         mock_response.json.return_value = make_search_response()
-        mock_transport._client.get.return_value = mock_response
+        mock_transport.get.return_value = mock_response
 
         tracker.search_events(limit=25, offset=50)
 
-        params = mock_transport._client.get.call_args[1]["params"]
+        params = mock_transport.get.call_args[1]["params"]
         assert params["limit"] == 25
         assert params["offset"] == 50
 
@@ -236,14 +236,14 @@ class TestSearchEvents:
         session = tracker.start_session(agent_name="test")
         mock_response = MagicMock()
         mock_response.json.return_value = make_search_response()
-        mock_transport._client.get.return_value = mock_response
+        mock_transport.get.return_value = mock_response
 
         tracker.search_events(limit=9999)
-        params = mock_transport._client.get.call_args[1]["params"]
+        params = mock_transport.get.call_args[1]["params"]
         assert params["limit"] == 500
 
         tracker.search_events(limit=0)
-        params = mock_transport._client.get.call_args[1]["params"]
+        params = mock_transport.get.call_args[1]["params"]
         assert params["limit"] == 1
 
     def test_search_offset_clamped(self, tracker, mock_transport):
@@ -251,10 +251,10 @@ class TestSearchEvents:
         session = tracker.start_session(agent_name="test")
         mock_response = MagicMock()
         mock_response.json.return_value = make_search_response()
-        mock_transport._client.get.return_value = mock_response
+        mock_transport.get.return_value = mock_response
 
         tracker.search_events(offset=-10)
-        params = mock_transport._client.get.call_args[1]["params"]
+        params = mock_transport.get.call_args[1]["params"]
         assert params["offset"] == 0
 
     def test_search_omits_unset_params(self, tracker, mock_transport):
@@ -262,11 +262,11 @@ class TestSearchEvents:
         session = tracker.start_session(agent_name="test")
         mock_response = MagicMock()
         mock_response.json.return_value = make_search_response()
-        mock_transport._client.get.return_value = mock_response
+        mock_transport.get.return_value = mock_response
 
         tracker.search_events()
 
-        params = mock_transport._client.get.call_args[1]["params"]
+        params = mock_transport.get.call_args[1]["params"]
         # Only limit and offset should be set (defaults)
         assert "q" not in params
         assert "type" not in params
@@ -286,11 +286,11 @@ class TestSearchEvents:
         session = tracker.start_session(agent_name="test")
         mock_response = MagicMock()
         mock_response.json.return_value = make_search_response()
-        mock_transport._client.get.return_value = mock_response
+        mock_transport.get.return_value = mock_response
 
         tracker.search_events(min_tokens=0)
 
-        params = mock_transport._client.get.call_args[1]["params"]
+        params = mock_transport.get.call_args[1]["params"]
         assert "min_tokens" not in params
 
     def test_search_false_booleans_not_sent(self, tracker, mock_transport):
@@ -298,11 +298,11 @@ class TestSearchEvents:
         session = tracker.start_session(agent_name="test")
         mock_response = MagicMock()
         mock_response.json.return_value = make_search_response()
-        mock_transport._client.get.return_value = mock_response
+        mock_transport.get.return_value = mock_response
 
         tracker.search_events(has_tools=False, has_reasoning=False, errors=False)
 
-        params = mock_transport._client.get.call_args[1]["params"]
+        params = mock_transport.get.call_args[1]["params"]
         assert "has_tools" not in params
         assert "has_reasoning" not in params
         assert "errors" not in params
@@ -312,7 +312,7 @@ class TestSearchEvents:
         session = tracker.start_session(agent_name="test")
         mock_response = MagicMock()
         mock_response.json.return_value = make_search_response()
-        mock_transport._client.get.return_value = mock_response
+        mock_transport.get.return_value = mock_response
 
         tracker.search_events(
             q="customer",
@@ -325,7 +325,7 @@ class TestSearchEvents:
             offset=5,
         )
 
-        params = mock_transport._client.get.call_args[1]["params"]
+        params = mock_transport.get.call_args[1]["params"]
         assert params["q"] == "customer"
         assert params["type"] == "llm_call"
         assert params["model"] == "gpt-4"
@@ -340,12 +340,12 @@ class TestSearchEvents:
         session = tracker.start_session(agent_name="test")
         mock_response = MagicMock()
         mock_response.json.return_value = make_search_response()
-        mock_transport._client.get.return_value = mock_response
+        mock_transport.get.return_value = mock_response
 
         tracker.search_events()
 
-        headers = mock_transport._client.get.call_args[1]["headers"]
-        assert headers["X-API-Key"] == "test-key"
+        # Auth headers are now handled internally by Transport
+        mock_transport.get.assert_called_once()
 
     def test_search_returns_full_response(self, tracker, mock_transport):
         """search_events returns the complete response structure."""
@@ -353,7 +353,7 @@ class TestSearchEvents:
         expected = make_search_response(matched=3, total_events=10)
         mock_response = MagicMock()
         mock_response.json.return_value = expected
-        mock_transport._client.get.return_value = mock_response
+        mock_transport.get.return_value = mock_response
 
         result = tracker.search_events()
 

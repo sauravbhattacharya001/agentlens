@@ -163,6 +163,52 @@ class Transport:
                 )
                 self._consecutive_failures = 0
 
+    # ── Convenience HTTP methods ───────────────────────────────────
+
+    def _auth_headers(self) -> dict[str, str]:
+        """Return headers with API key authentication."""
+        return {"X-API-Key": self.api_key}
+
+    def get(self, path: str, **kwargs: Any) -> httpx.Response:
+        """Authenticated GET request to *endpoint/path*.
+
+        All keyword arguments are forwarded to ``httpx.Client.get``.
+        The ``X-API-Key`` header is injected automatically.
+        """
+        headers = {**self._auth_headers(), **kwargs.pop("headers", {})}
+        response = self._client.get(
+            f"{self.endpoint}{path}", headers=headers, **kwargs,
+        )
+        response.raise_for_status()
+        return response
+
+    def post(self, path: str, **kwargs: Any) -> httpx.Response:
+        """Authenticated POST request to *endpoint/path*."""
+        headers = {**self._auth_headers(), **kwargs.pop("headers", {})}
+        response = self._client.post(
+            f"{self.endpoint}{path}", headers=headers, **kwargs,
+        )
+        response.raise_for_status()
+        return response
+
+    def put(self, path: str, **kwargs: Any) -> httpx.Response:
+        """Authenticated PUT request to *endpoint/path*."""
+        headers = {**self._auth_headers(), **kwargs.pop("headers", {})}
+        response = self._client.put(
+            f"{self.endpoint}{path}", headers=headers, **kwargs,
+        )
+        response.raise_for_status()
+        return response
+
+    def delete(self, path: str, **kwargs: Any) -> httpx.Response:
+        """Authenticated DELETE request to *endpoint/path*."""
+        headers = {**self._auth_headers(), **kwargs.pop("headers", {})}
+        response = self._client.request(
+            "DELETE", f"{self.endpoint}{path}", headers=headers, **kwargs,
+        )
+        response.raise_for_status()
+        return response
+
     def _flush_loop(self) -> None:
         """Background thread that periodically flushes the buffer."""
         while self._running:

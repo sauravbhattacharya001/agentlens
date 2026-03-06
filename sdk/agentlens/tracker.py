@@ -40,6 +40,28 @@ class AgentTracker:
         """Return the innermost active span, or None."""
         return self._active_spans[-1] if self._active_spans else None
 
+    def _resolve_session(
+        self,
+        session_id: str | None,
+        error_msg: str = "No session specified. Specify session_id or start a session first.",
+    ) -> str:
+        """Resolve a session ID, falling back to the current session.
+
+        Args:
+            session_id: Explicit session ID, or None to use current.
+            error_msg: Error message if no session can be resolved.
+
+        Returns:
+            The resolved session ID.
+
+        Raises:
+            RuntimeError: If no session can be resolved.
+        """
+        sid = session_id or self._current_session_id
+        if not sid:
+            raise RuntimeError(error_msg)
+        return sid
+
     @contextmanager
     def span(
         self,
@@ -335,13 +357,10 @@ class AgentTracker:
         if session_a == session_b:
             raise ValueError("Cannot compare a session with itself.")
 
-        response = self.transport._client.post(
-            f"{self.transport.endpoint}/sessions/compare",
+        return self.transport.post(
+            "/sessions/compare",
             json={"session_a": session_a, "session_b": session_b},
-            headers={"X-API-Key": self.transport.api_key},
-        )
-        response.raise_for_status()
-        return response.json()
+        ).json()
 
     def export_session(
         self,
@@ -368,19 +387,18 @@ class AgentTracker:
             ValueError: If the format is not ``"json"`` or ``"csv"``.
             httpx.HTTPStatusError: If the backend returns an error.
         """
-        sid = session_id or self._current_session_id
-        if not sid:
-            raise RuntimeError("No session to export. Specify session_id or start a session first.")
+        sid = self._resolve_session(
+            session_id,
+            "No session to export. Specify session_id or start a session first.",
+        )
 
         if format not in ("json", "csv"):
             raise ValueError(f"Invalid format '{format}'. Use 'json' or 'csv'.")
 
-        response = self.transport._client.get(
-            f"{self.transport.endpoint}/sessions/{sid}/export",
+        response = self.transport.get(
+            f"/sessions/{sid}/export",
             params={"format": format},
-            headers={"X-API-Key": self.transport.api_key},
         )
-        response.raise_for_status()
 
         if format == "json":
             return response.json()
@@ -444,16 +462,12 @@ class AgentTracker:
                 session.
             httpx.HTTPStatusError: If the backend returns an error.
         """
-        sid = session_id or self._current_session_id
-        if not sid:
-            raise RuntimeError("No session to get costs for. Specify session_id or start a session first.")
-
-        response = self.transport._client.get(
-            f"{self.transport.endpoint}/pricing/costs/{sid}",
-            headers={"X-API-Key": self.transport.api_key},
+        sid = self._resolve_session(
+            session_id,
+            "No session to get costs for. Specify session_id or start a session first.",
         )
-        response.raise_for_status()
-        return response.json()
+
+        return self.transport.get(f"/pricing/costs/{sid}").json()
 
     def get_pricing(self) -> dict[str, Any]:
         """Get the current model pricing configuration.
@@ -462,12 +476,7 @@ class AgentTracker:
             A dict with ``pricing`` (current model prices) and ``defaults``
             (built-in default prices).
         """
-        response = self.transport._client.get(
-            f"{self.transport.endpoint}/pricing",
-            headers={"X-API-Key": self.transport.api_key},
-        )
-        response.raise_for_status()
-        return response.json()
+        return self.transport.get("/pricing").json()
 
     def set_pricing(self, pricing: dict[str, dict[str, float]]) -> dict[str, Any]:
         """Update model pricing configuration.
@@ -479,13 +488,9 @@ class AgentTracker:
         Returns:
             A dict with ``status`` and ``updated`` count.
         """
-        response = self.transport._client.put(
-            f"{self.transport.endpoint}/pricing",
-            json={"pricing": pricing},
-            headers={"X-API-Key": self.transport.api_key},
-        )
-        response.raise_for_status()
-        return response.json()
+        return self.transport.put(
+            "/pricing", json={"pricing": pricing},
+        ).json()
 
     def search_events(
         self,
@@ -547,11 +552,10 @@ class AgentTracker:
                 session.
             httpx.HTTPStatusError: If the backend returns an error.
         """
-        sid = session_id or self._current_session_id
-        if not sid:
-            raise RuntimeError(
-                "No session to search. Specify session_id or start a session first."
-            )
+        sid = self._resolve_session(
+            session_id,
+            "No session to search. Specify session_id or start a session first.",
+        )
 
         params: dict[str, str | int | float] = {
             "limit": min(max(1, limit), 500),
@@ -581,13 +585,9 @@ class AgentTracker:
         if before:
             params["before"] = before
 
-        response = self.transport._client.get(
-            f"{self.transport.endpoint}/sessions/{sid}/events/search",
-            params=params,
-            headers={"X-API-Key": self.transport.api_key},
-        )
-        response.raise_for_status()
-        return response.json()
+        return self.transport.get(
+            f"/sessions/{sid}/events/search", params=params,
+        ).json()
 
     # ── Alert Rules ──────────────────────────────────────────────────
 
@@ -596,13 +596,7 @@ class AgentTracker:
         params = {}
         if enabled is not None:
             params["enabled"] = "true" if enabled else "false"
-        response = self.transport._client.get(
-            f"{self.transport.endpoint}/alerts/rules",
-            params=params,
-            headers={"X-API-Key": self.transport.api_key},
-        )
-        response.raise_for_status()
-        return response.json()
+        return self.transport.get("/alerts/rules", params=params).json()
 
     def create_alert_rule(
         self,
@@ -635,41 +629,21 @@ class AgentTracker:
         }
         if agent_filter:
             payload["agent_filter"] = agent_filter
-        response = self.transport._client.post(
-            f"{self.transport.endpoint}/alerts/rules",
-            json=payload,
-            headers={"X-API-Key": self.transport.api_key},
-        )
-        response.raise_for_status()
-        return response.json()
+        return self.transport.post("/alerts/rules", json=payload).json()
 
     def update_alert_rule(self, rule_id: str, **kwargs) -> dict:
         """Update an existing alert rule. Pass any field to update."""
-        response = self.transport._client.put(
-            f"{self.transport.endpoint}/alerts/rules/{rule_id}",
-            json=kwargs,
-            headers={"X-API-Key": self.transport.api_key},
-        )
-        response.raise_for_status()
-        return response.json()
+        return self.transport.put(
+            f"/alerts/rules/{rule_id}", json=kwargs,
+        ).json()
 
     def delete_alert_rule(self, rule_id: str) -> dict:
         """Delete an alert rule."""
-        response = self.transport._client.delete(
-            f"{self.transport.endpoint}/alerts/rules/{rule_id}",
-            headers={"X-API-Key": self.transport.api_key},
-        )
-        response.raise_for_status()
-        return response.json()
+        return self.transport.delete(f"/alerts/rules/{rule_id}").json()
 
     def evaluate_alerts(self) -> dict:
         """Evaluate all enabled alert rules against current data."""
-        response = self.transport._client.post(
-            f"{self.transport.endpoint}/alerts/evaluate",
-            headers={"X-API-Key": self.transport.api_key},
-        )
-        response.raise_for_status()
-        return response.json()
+        return self.transport.post("/alerts/evaluate").json()
 
     def get_alert_events(
         self,
@@ -683,31 +657,17 @@ class AgentTracker:
             params["rule_id"] = rule_id
         if acknowledged is not None:
             params["acknowledged"] = "true" if acknowledged else "false"
-        response = self.transport._client.get(
-            f"{self.transport.endpoint}/alerts/events",
-            params=params,
-            headers={"X-API-Key": self.transport.api_key},
-        )
-        response.raise_for_status()
-        return response.json()
+        return self.transport.get("/alerts/events", params=params).json()
 
     def acknowledge_alert(self, alert_id: str) -> dict:
         """Acknowledge a triggered alert event."""
-        response = self.transport._client.put(
-            f"{self.transport.endpoint}/alerts/events/{alert_id}/acknowledge",
-            headers={"X-API-Key": self.transport.api_key},
-        )
-        response.raise_for_status()
-        return response.json()
+        return self.transport.put(
+            f"/alerts/events/{alert_id}/acknowledge",
+        ).json()
 
     def get_alert_metrics(self) -> dict:
         """Get list of available metrics for alert rules."""
-        response = self.transport._client.get(
-            f"{self.transport.endpoint}/alerts/metrics",
-            headers={"X-API-Key": self.transport.api_key},
-        )
-        response.raise_for_status()
-        return response.json()
+        return self.transport.get("/alerts/metrics").json()
 
     # -- Session Tags ---------------------------------------------------------
 
@@ -734,21 +694,16 @@ class AgentTracker:
 
             tracker.add_tags(["production", "v2.1", "regression-test"])
         """
-        sid = session_id or self._current_session_id
-        if not sid:
-            raise RuntimeError(
-                "No session to tag. Specify session_id or start a session first."
-            )
+        sid = self._resolve_session(
+            session_id,
+            "No session to tag. Specify session_id or start a session first.",
+        )
         if not tags or not isinstance(tags, list):
             raise ValueError("tags must be a non-empty list of strings.")
 
-        response = self.transport._client.post(
-            f"{self.transport.endpoint}/sessions/{sid}/tags",
-            json={"tags": tags},
-            headers={"X-API-Key": self.transport.api_key},
-        )
-        response.raise_for_status()
-        return response.json()
+        return self.transport.post(
+            f"/sessions/{sid}/tags", json={"tags": tags},
+        ).json()
 
     def remove_tags(
         self,
@@ -773,21 +728,15 @@ class AgentTracker:
             tracker.remove_tags(["debug"])
             tracker.remove_tags()  # removes all tags
         """
-        sid = session_id or self._current_session_id
-        if not sid:
-            raise RuntimeError(
-                "No session to untag. Specify session_id or start a session first."
-            )
+        sid = self._resolve_session(
+            session_id,
+            "No session to untag. Specify session_id or start a session first.",
+        )
 
         body = {"tags": tags} if tags else {}
-        response = self.transport._client.request(
-            "DELETE",
-            f"{self.transport.endpoint}/sessions/{sid}/tags",
-            json=body,
-            headers={"X-API-Key": self.transport.api_key},
-        )
-        response.raise_for_status()
-        return response.json()
+        return self.transport.delete(
+            f"/sessions/{sid}/tags", json=body,
+        ).json()
 
     def get_tags(
         self,
@@ -801,18 +750,12 @@ class AgentTracker:
         Returns:
             A list of tag strings.
         """
-        sid = session_id or self._current_session_id
-        if not sid:
-            raise RuntimeError(
-                "No session to query. Specify session_id or start a session first."
-            )
-
-        response = self.transport._client.get(
-            f"{self.transport.endpoint}/sessions/{sid}/tags",
-            headers={"X-API-Key": self.transport.api_key},
+        sid = self._resolve_session(
+            session_id,
+            "No session to query. Specify session_id or start a session first.",
         )
-        response.raise_for_status()
-        return response.json().get("tags", [])
+
+        return self.transport.get(f"/sessions/{sid}/tags").json().get("tags", [])
 
     def list_all_tags(self) -> list[dict[str, Any]]:
         """List all tags across all sessions with session counts.
@@ -826,12 +769,7 @@ class AgentTracker:
             tags = tracker.list_all_tags()
             # [{"tag": "production", "session_count": 42}, ...]
         """
-        response = self.transport._client.get(
-            f"{self.transport.endpoint}/sessions/tags",
-            headers={"X-API-Key": self.transport.api_key},
-        )
-        response.raise_for_status()
-        return response.json().get("tags", [])
+        return self.transport.get("/sessions/tags").json().get("tags", [])
 
     def list_sessions_by_tag(
         self,
@@ -859,13 +797,10 @@ class AgentTracker:
         if not tag or not isinstance(tag, str):
             raise ValueError("tag must be a non-empty string.")
 
-        response = self.transport._client.get(
-            f"{self.transport.endpoint}/sessions/by-tag/{tag}",
+        return self.transport.get(
+            f"/sessions/by-tag/{tag}",
             params={"limit": limit, "offset": offset},
-            headers={"X-API-Key": self.transport.api_key},
-        )
-        response.raise_for_status()
-        return response.json()
+        ).json()
 
     # -- Session Search ---------------------------------------------------------
 
@@ -937,13 +872,7 @@ class AgentTracker:
         if tags:
             params["tags"] = ",".join(tags)
 
-        response = self.transport._client.get(
-            f"{self.transport.endpoint}/sessions/search",
-            params=params,
-            headers={"X-API-Key": self.transport.api_key},
-        )
-        response.raise_for_status()
-        return response.json()
+        return self.transport.get("/sessions/search", params=params).json()
 
     # -- Session Annotations --------------------------------------------------
 
@@ -981,11 +910,10 @@ class AgentTracker:
             tracker.annotate("Latency spike at step 5", annotation_type="warning")
             tracker.annotate("Reached goal state", annotation_type="milestone")
         """
-        sid = session_id or self._current_session_id
-        if not sid:
-            raise RuntimeError(
-                "No session to annotate. Specify session_id or start a session first."
-            )
+        sid = self._resolve_session(
+            session_id,
+            "No session to annotate. Specify session_id or start a session first.",
+        )
         if not text or not isinstance(text, str) or not text.strip():
             raise ValueError("text must be a non-empty string.")
 
@@ -997,13 +925,9 @@ class AgentTracker:
         if event_id:
             payload["event_id"] = event_id
 
-        response = self.transport._client.post(
-            f"{self.transport.endpoint}/sessions/{sid}/annotations",
-            json=payload,
-            headers={"X-API-Key": self.transport.api_key},
-        )
-        response.raise_for_status()
-        return response.json()
+        return self.transport.post(
+            f"/sessions/{sid}/annotations", json=payload,
+        ).json()
 
     def get_annotations(
         self,
@@ -1033,11 +957,10 @@ class AgentTracker:
             for ann in result["annotations"]:
                 print(f"[{ann['type']}] {ann['text']}")
         """
-        sid = session_id or self._current_session_id
-        if not sid:
-            raise RuntimeError(
-                "No session to query. Specify session_id or start a session first."
-            )
+        sid = self._resolve_session(
+            session_id,
+            "No session to query. Specify session_id or start a session first.",
+        )
 
         params: dict[str, str | int] = {
             "limit": min(max(1, limit), 500),
@@ -1048,13 +971,9 @@ class AgentTracker:
         if author:
             params["author"] = author
 
-        response = self.transport._client.get(
-            f"{self.transport.endpoint}/sessions/{sid}/annotations",
-            params=params,
-            headers={"X-API-Key": self.transport.api_key},
-        )
-        response.raise_for_status()
-        return response.json()
+        return self.transport.get(
+            f"/sessions/{sid}/annotations", params=params,
+        ).json()
 
     def update_annotation(
         self,
@@ -1077,11 +996,7 @@ class AgentTracker:
         Returns:
             Updated annotation dict.
         """
-        sid = session_id or self._current_session_id
-        if not sid:
-            raise RuntimeError(
-                "No session specified. Specify session_id or start a session first."
-            )
+        sid = self._resolve_session(session_id)
         if not annotation_id:
             raise ValueError("annotation_id is required.")
 
@@ -1096,13 +1011,9 @@ class AgentTracker:
         if not payload:
             raise ValueError("At least one field (text, annotation_type, author) must be provided.")
 
-        response = self.transport._client.put(
-            f"{self.transport.endpoint}/sessions/{sid}/annotations/{annotation_id}",
-            json=payload,
-            headers={"X-API-Key": self.transport.api_key},
-        )
-        response.raise_for_status()
-        return response.json()
+        return self.transport.put(
+            f"/sessions/{sid}/annotations/{annotation_id}", json=payload,
+        ).json()
 
     def delete_annotation(
         self,
@@ -1119,20 +1030,13 @@ class AgentTracker:
         Returns:
             A dict with ``deleted`` (bool) and ``annotation_id``.
         """
-        sid = session_id or self._current_session_id
-        if not sid:
-            raise RuntimeError(
-                "No session specified. Specify session_id or start a session first."
-            )
+        sid = self._resolve_session(session_id)
         if not annotation_id:
             raise ValueError("annotation_id is required.")
 
-        response = self.transport._client.delete(
-            f"{self.transport.endpoint}/sessions/{sid}/annotations/{annotation_id}",
-            headers={"X-API-Key": self.transport.api_key},
-        )
-        response.raise_for_status()
-        return response.json()
+        return self.transport.delete(
+            f"/sessions/{sid}/annotations/{annotation_id}",
+        ).json()
 
     def list_recent_annotations(
         self,
@@ -1160,13 +1064,7 @@ class AgentTracker:
         if annotation_type:
             params["type"] = annotation_type
 
-        response = self.transport._client.get(
-            f"{self.transport.endpoint}/annotations",
-            params=params,
-            headers={"X-API-Key": self.transport.api_key},
-        )
-        response.raise_for_status()
-        return response.json()
+        return self.transport.get("/annotations", params=params).json()
 
     # -- Activity Heatmap -----------------------------------------------------
 
@@ -1203,13 +1101,10 @@ class AgentTracker:
         if metric not in ("events", "tokens", "sessions"):
             raise ValueError(f"Invalid metric '{metric}'. Use 'events', 'tokens', or 'sessions'.")
 
-        response = self.transport._client.get(
-            f"{self.transport.endpoint}/analytics/heatmap",
+        return self.transport.get(
+            "/analytics/heatmap",
             params={"metric": metric, "days": min(max(1, days), 365)},
-            headers={"X-API-Key": self.transport.api_key},
-        )
-        response.raise_for_status()
-        return response.json()
+        ).json()
 
     # -- Data Retention & Cleanup ---------------------------------------------
 
@@ -1229,12 +1124,7 @@ class AgentTracker:
             config = tracker.get_retention_config()
             print(f"Max age: {config['config']['max_age_days']} days")
         """
-        response = self.transport._client.get(
-            f"{self.transport.endpoint}/retention/config",
-            headers={"X-API-Key": self.transport.api_key},
-        )
-        response.raise_for_status()
-        return response.json()
+        return self.transport.get("/retention/config").json()
 
     def set_retention_config(
         self,
@@ -1279,13 +1169,7 @@ class AgentTracker:
         if not payload:
             raise ValueError("At least one config field must be specified.")
 
-        response = self.transport._client.put(
-            f"{self.transport.endpoint}/retention/config",
-            json=payload,
-            headers={"X-API-Key": self.transport.api_key},
-        )
-        response.raise_for_status()
-        return response.json()
+        return self.transport.put("/retention/config", json=payload).json()
 
     def get_retention_stats(self) -> dict[str, Any]:
         """Get database statistics and retention status.
@@ -1314,12 +1198,7 @@ class AgentTracker:
             print(f"{stats['sessions']} sessions, {stats['events']} events")
             print(f"{stats['eligible_for_purge']} eligible for purge")
         """
-        response = self.transport._client.get(
-            f"{self.transport.endpoint}/retention/stats",
-            headers={"X-API-Key": self.transport.api_key},
-        )
-        response.raise_for_status()
-        return response.json()
+        return self.transport.get("/retention/stats").json()
 
     def purge(self, *, dry_run: bool = False) -> dict[str, Any]:
         """Manually purge sessions matching the retention policy.
@@ -1356,11 +1235,6 @@ class AgentTracker:
         if dry_run:
             params["dry_run"] = "true"
 
-        response = self.transport._client.post(
-            f"{self.transport.endpoint}/retention/purge",
-            params=params,
-            json={},
-            headers={"X-API-Key": self.transport.api_key},
-        )
-        response.raise_for_status()
-        return response.json()
+        return self.transport.post(
+            "/retention/purge", params=params, json={},
+        ).json()

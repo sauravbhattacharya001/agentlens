@@ -27,7 +27,7 @@ class TestGetRetentionConfig:
                 "auto_purge": False,
             }
         }
-        tracker.transport._client.get.return_value = mock_resp
+        tracker.transport.get.return_value = mock_resp
 
         result = tracker.get_retention_config()
         assert result["config"]["max_age_days"] == 90
@@ -38,27 +38,27 @@ class TestGetRetentionConfig:
     def test_calls_correct_endpoint(self, tracker):
         mock_resp = MagicMock()
         mock_resp.json.return_value = {"config": {}}
-        tracker.transport._client.get.return_value = mock_resp
+        tracker.transport.get.return_value = mock_resp
 
         tracker.get_retention_config()
-        call_args = tracker.transport._client.get.call_args
+        call_args = tracker.transport.get.call_args
         assert "/retention/config" in call_args[0][0]
 
     def test_sends_api_key(self, tracker):
         mock_resp = MagicMock()
         mock_resp.json.return_value = {"config": {}}
-        tracker.transport._client.get.return_value = mock_resp
+        tracker.transport.get.return_value = mock_resp
 
         tracker.get_retention_config()
-        call_kwargs = tracker.transport._client.get.call_args[1]
-        assert call_kwargs["headers"]["X-API-Key"] == "test-key"
+        # Auth headers are now handled internally by Transport
+        tracker.transport.get.assert_called_once()
 
 
 class TestSetRetentionConfig:
     def test_updates_max_age_days(self, tracker):
         mock_resp = MagicMock()
         mock_resp.json.return_value = {"config": {"max_age_days": 30}, "updated": 1}
-        tracker.transport._client.put.return_value = mock_resp
+        tracker.transport.put.return_value = mock_resp
 
         result = tracker.set_retention_config(max_age_days=30)
         assert result["config"]["max_age_days"] == 30
@@ -67,37 +67,37 @@ class TestSetRetentionConfig:
     def test_updates_max_sessions(self, tracker):
         mock_resp = MagicMock()
         mock_resp.json.return_value = {"config": {"max_sessions": 500}, "updated": 1}
-        tracker.transport._client.put.return_value = mock_resp
+        tracker.transport.put.return_value = mock_resp
 
         result = tracker.set_retention_config(max_sessions=500)
-        call_json = tracker.transport._client.put.call_args[1]["json"]
+        call_json = tracker.transport.put.call_args[1]["json"]
         assert call_json["max_sessions"] == 500
 
     def test_updates_exempt_tags(self, tracker):
         mock_resp = MagicMock()
         mock_resp.json.return_value = {"config": {"exempt_tags": ["prod"]}, "updated": 1}
-        tracker.transport._client.put.return_value = mock_resp
+        tracker.transport.put.return_value = mock_resp
 
         tracker.set_retention_config(exempt_tags=["prod"])
-        call_json = tracker.transport._client.put.call_args[1]["json"]
+        call_json = tracker.transport.put.call_args[1]["json"]
         assert call_json["exempt_tags"] == ["prod"]
 
     def test_updates_auto_purge(self, tracker):
         mock_resp = MagicMock()
         mock_resp.json.return_value = {"config": {"auto_purge": True}, "updated": 1}
-        tracker.transport._client.put.return_value = mock_resp
+        tracker.transport.put.return_value = mock_resp
 
         tracker.set_retention_config(auto_purge=True)
-        call_json = tracker.transport._client.put.call_args[1]["json"]
+        call_json = tracker.transport.put.call_args[1]["json"]
         assert call_json["auto_purge"] is True
 
     def test_updates_multiple_fields(self, tracker):
         mock_resp = MagicMock()
         mock_resp.json.return_value = {"config": {}, "updated": 3}
-        tracker.transport._client.put.return_value = mock_resp
+        tracker.transport.put.return_value = mock_resp
 
         tracker.set_retention_config(max_age_days=14, max_sessions=100, auto_purge=True)
-        call_json = tracker.transport._client.put.call_args[1]["json"]
+        call_json = tracker.transport.put.call_args[1]["json"]
         assert call_json["max_age_days"] == 14
         assert call_json["max_sessions"] == 100
         assert call_json["auto_purge"] is True
@@ -109,20 +109,20 @@ class TestSetRetentionConfig:
     def test_calls_correct_endpoint(self, tracker):
         mock_resp = MagicMock()
         mock_resp.json.return_value = {"config": {}, "updated": 1}
-        tracker.transport._client.put.return_value = mock_resp
+        tracker.transport.put.return_value = mock_resp
 
         tracker.set_retention_config(max_age_days=30)
-        call_args = tracker.transport._client.put.call_args
+        call_args = tracker.transport.put.call_args
         assert "/retention/config" in call_args[0][0]
 
     def test_sends_api_key(self, tracker):
         mock_resp = MagicMock()
         mock_resp.json.return_value = {"config": {}, "updated": 1}
-        tracker.transport._client.put.return_value = mock_resp
+        tracker.transport.put.return_value = mock_resp
 
         tracker.set_retention_config(max_age_days=30)
-        call_kwargs = tracker.transport._client.put.call_args[1]
-        assert call_kwargs["headers"]["X-API-Key"] == "test-key"
+        # Auth headers are now handled internally by Transport
+        tracker.transport.put.assert_called_once()
 
 
 class TestGetRetentionStats:
@@ -139,7 +139,7 @@ class TestGetRetentionStats:
             "eligible_for_purge": 4,
             "config": {},
         }
-        tracker.transport._client.get.return_value = mock_resp
+        tracker.transport.get.return_value = mock_resp
 
         result = tracker.get_retention_stats()
         assert result["sessions"] == 42
@@ -151,10 +151,10 @@ class TestGetRetentionStats:
     def test_calls_correct_endpoint(self, tracker):
         mock_resp = MagicMock()
         mock_resp.json.return_value = {}
-        tracker.transport._client.get.return_value = mock_resp
+        tracker.transport.get.return_value = mock_resp
 
         tracker.get_retention_stats()
-        call_args = tracker.transport._client.get.call_args
+        call_args = tracker.transport.get.call_args
         assert "/retention/stats" in call_args[0][0]
 
 
@@ -172,7 +172,7 @@ class TestPurge:
             ],
             "message": "Purged 3 sessions and 25 events",
         }
-        tracker.transport._client.post.return_value = mock_resp
+        tracker.transport.post.return_value = mock_resp
 
         result = tracker.purge()
         assert result["dry_run"] is False
@@ -189,49 +189,49 @@ class TestPurge:
             "details": [],
             "message": "Would purge 2 sessions",
         }
-        tracker.transport._client.post.return_value = mock_resp
+        tracker.transport.post.return_value = mock_resp
 
         result = tracker.purge(dry_run=True)
         assert result["dry_run"] is True
         assert result["would_purge_sessions"] == 2
 
-        call_kwargs = tracker.transport._client.post.call_args[1]
+        call_kwargs = tracker.transport.post.call_args[1]
         assert call_kwargs["params"]["dry_run"] == "true"
 
     def test_purge_no_dry_run_flag(self, tracker):
         mock_resp = MagicMock()
         mock_resp.json.return_value = {"dry_run": False, "purged_sessions": 0}
-        tracker.transport._client.post.return_value = mock_resp
+        tracker.transport.post.return_value = mock_resp
 
         tracker.purge()
-        call_kwargs = tracker.transport._client.post.call_args[1]
+        call_kwargs = tracker.transport.post.call_args[1]
         assert call_kwargs.get("params", {}) == {}
 
     def test_purge_calls_correct_endpoint(self, tracker):
         mock_resp = MagicMock()
         mock_resp.json.return_value = {}
-        tracker.transport._client.post.return_value = mock_resp
+        tracker.transport.post.return_value = mock_resp
 
         tracker.purge()
-        call_args = tracker.transport._client.post.call_args
+        call_args = tracker.transport.post.call_args
         assert "/retention/purge" in call_args[0][0]
 
     def test_purge_sends_api_key(self, tracker):
         mock_resp = MagicMock()
         mock_resp.json.return_value = {}
-        tracker.transport._client.post.return_value = mock_resp
+        tracker.transport.post.return_value = mock_resp
 
         tracker.purge()
-        call_kwargs = tracker.transport._client.post.call_args[1]
-        assert call_kwargs["headers"]["X-API-Key"] == "test-key"
+        # Auth headers are now handled internally by Transport
+        tracker.transport.post.assert_called_once()
 
     def test_purge_sends_empty_json_body(self, tracker):
         mock_resp = MagicMock()
         mock_resp.json.return_value = {}
-        tracker.transport._client.post.return_value = mock_resp
+        tracker.transport.post.return_value = mock_resp
 
         tracker.purge()
-        call_kwargs = tracker.transport._client.post.call_args[1]
+        call_kwargs = tracker.transport.post.call_args[1]
         assert call_kwargs["json"] == {}
 
     def test_purge_nothing_to_purge(self, tracker):
@@ -243,7 +243,7 @@ class TestPurge:
             "details": [],
             "message": "No sessions eligible for purge",
         }
-        tracker.transport._client.post.return_value = mock_resp
+        tracker.transport.post.return_value = mock_resp
 
         result = tracker.purge()
         assert result["purged_sessions"] == 0

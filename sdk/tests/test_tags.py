@@ -35,23 +35,23 @@ class TestAddTags:
             "added": 2,
             "tags": ["production", "v2.1"],
         }
-        tracker.transport._client.post.return_value = mock_resp
+        tracker.transport.post.return_value = mock_resp
 
         result = tracker.add_tags(["production", "v2.1"])
         assert result["added"] == 2
         assert result["tags"] == ["production", "v2.1"]
-        tracker.transport._client.post.assert_called_once()
-        call_args = tracker.transport._client.post.call_args
+        tracker.transport.post.assert_called_once()
+        call_args = tracker.transport.post.call_args
         assert "/sessions/test-session-123/tags" in call_args[0][0]
         assert call_args[1]["json"] == {"tags": ["production", "v2.1"]}
 
     def test_add_tags_to_specific_session(self, tracker):
         mock_resp = MagicMock()
         mock_resp.json.return_value = {"session_id": "other", "added": 1, "tags": ["test"]}
-        tracker.transport._client.post.return_value = mock_resp
+        tracker.transport.post.return_value = mock_resp
 
         result = tracker.add_tags(["test"], session_id="other")
-        call_args = tracker.transport._client.post.call_args
+        call_args = tracker.transport.post.call_args
         assert "/sessions/other/tags" in call_args[0][0]
 
     def test_add_tags_no_session_raises(self, tracker_no_session):
@@ -79,13 +79,12 @@ class TestRemoveTags:
             "removed": 1,
             "tags": ["remaining"],
         }
-        tracker.transport._client.request.return_value = mock_resp
+        tracker.transport.delete.return_value = mock_resp
 
         result = tracker.remove_tags(["old-tag"])
         assert result["removed"] == 1
-        call_args = tracker.transport._client.request.call_args
-        assert call_args[0][0] == "DELETE"
-        assert "/sessions/test-session-123/tags" in call_args[0][1]
+        call_args = tracker.transport.delete.call_args
+        assert "/sessions/test-session-123/tags" in call_args[0][0]
         assert call_args[1]["json"] == {"tags": ["old-tag"]}
 
     def test_remove_all_tags(self, tracker):
@@ -95,12 +94,12 @@ class TestRemoveTags:
             "removed": 3,
             "tags": [],
         }
-        tracker.transport._client.request.return_value = mock_resp
+        tracker.transport.delete.return_value = mock_resp
 
         result = tracker.remove_tags()
         assert result["removed"] == 3
         assert result["tags"] == []
-        call_args = tracker.transport._client.request.call_args
+        call_args = tracker.transport.delete.call_args
         assert call_args[1]["json"] == {}
 
     def test_remove_tags_no_session_raises(self, tracker_no_session):
@@ -110,11 +109,11 @@ class TestRemoveTags:
     def test_remove_tags_from_specific_session(self, tracker):
         mock_resp = MagicMock()
         mock_resp.json.return_value = {"session_id": "other", "removed": 1, "tags": []}
-        tracker.transport._client.request.return_value = mock_resp
+        tracker.transport.delete.return_value = mock_resp
 
         tracker.remove_tags(["tag"], session_id="other")
-        call_args = tracker.transport._client.request.call_args
-        assert "/sessions/other/tags" in call_args[0][1]
+        call_args = tracker.transport.delete.call_args
+        assert "/sessions/other/tags" in call_args[0][0]
 
 
 class TestGetTags:
@@ -124,17 +123,17 @@ class TestGetTags:
             "session_id": "test-session-123",
             "tags": ["alpha", "beta"],
         }
-        tracker.transport._client.get.return_value = mock_resp
+        tracker.transport.get.return_value = mock_resp
 
         result = tracker.get_tags()
         assert result == ["alpha", "beta"]
-        call_args = tracker.transport._client.get.call_args
+        call_args = tracker.transport.get.call_args
         assert "/sessions/test-session-123/tags" in call_args[0][0]
 
     def test_get_tags_specific_session(self, tracker):
         mock_resp = MagicMock()
         mock_resp.json.return_value = {"session_id": "other", "tags": ["x"]}
-        tracker.transport._client.get.return_value = mock_resp
+        tracker.transport.get.return_value = mock_resp
 
         result = tracker.get_tags(session_id="other")
         assert result == ["x"]
@@ -146,7 +145,7 @@ class TestGetTags:
     def test_get_tags_empty(self, tracker):
         mock_resp = MagicMock()
         mock_resp.json.return_value = {"session_id": "test-session-123", "tags": []}
-        tracker.transport._client.get.return_value = mock_resp
+        tracker.transport.get.return_value = mock_resp
 
         result = tracker.get_tags()
         assert result == []
@@ -161,7 +160,7 @@ class TestListAllTags:
                 {"tag": "staging", "session_count": 10},
             ]
         }
-        tracker.transport._client.get.return_value = mock_resp
+        tracker.transport.get.return_value = mock_resp
 
         result = tracker.list_all_tags()
         assert len(result) == 2
@@ -171,7 +170,7 @@ class TestListAllTags:
     def test_list_all_tags_empty(self, tracker):
         mock_resp = MagicMock()
         mock_resp.json.return_value = {"tags": []}
-        tracker.transport._client.get.return_value = mock_resp
+        tracker.transport.get.return_value = mock_resp
 
         result = tracker.list_all_tags()
         assert result == []
@@ -187,12 +186,12 @@ class TestListSessionsByTag:
             "offset": 0,
             "tag": "prod",
         }
-        tracker.transport._client.get.return_value = mock_resp
+        tracker.transport.get.return_value = mock_resp
 
         result = tracker.list_sessions_by_tag("prod")
         assert result["total"] == 1
         assert result["tag"] == "prod"
-        call_args = tracker.transport._client.get.call_args
+        call_args = tracker.transport.get.call_args
         assert "/sessions/by-tag/prod" in call_args[0][0]
 
     def test_list_sessions_by_tag_with_pagination(self, tracker):
@@ -204,10 +203,10 @@ class TestListSessionsByTag:
             "offset": 20,
             "tag": "test",
         }
-        tracker.transport._client.get.return_value = mock_resp
+        tracker.transport.get.return_value = mock_resp
 
         tracker.list_sessions_by_tag("test", limit=10, offset=20)
-        call_args = tracker.transport._client.get.call_args
+        call_args = tracker.transport.get.call_args
         assert call_args[1]["params"]["limit"] == 10
         assert call_args[1]["params"]["offset"] == 20
 

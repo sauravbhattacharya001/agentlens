@@ -214,12 +214,12 @@ def _mock_response(json_data=None, text_data=""):
 class TestCompareSessions:
     def test_compare_sessions_calls_backend(self, tracker, mock_transport):
         resp = _mock_response({"deltas": {}})
-        mock_transport._client.post.return_value = resp
+        mock_transport.post.return_value = resp
 
         tracker.compare_sessions("sid-a", "sid-b")
 
-        mock_transport._client.post.assert_called_once()
-        call_args = mock_transport._client.post.call_args
+        mock_transport.post.assert_called_once()
+        call_args = mock_transport.post.call_args
         assert "/sessions/compare" in call_args[0][0]
         assert call_args[1]["json"] == {"session_a": "sid-a", "session_b": "sid-b"}
 
@@ -235,7 +235,7 @@ class TestCompareSessions:
 
     def test_compare_sessions_returns_response_json(self, tracker, mock_transport):
         expected = {"session_a": {}, "session_b": {}, "deltas": {}, "shared": {}}
-        mock_transport._client.post.return_value = _mock_response(expected)
+        mock_transport.post.return_value = _mock_response(expected)
 
         result = tracker.compare_sessions("a", "b")
         assert result == expected
@@ -247,22 +247,22 @@ class TestExportSession:
     def test_export_json_format(self, tracker, mock_transport):
         tracker.start_session()
         expected = {"events": [], "summary": {}}
-        mock_transport._client.get.return_value = _mock_response(expected)
+        mock_transport.get.return_value = _mock_response(expected)
 
         result = tracker.export_session(format="json")
 
         assert result == expected
-        call_args = mock_transport._client.get.call_args
+        call_args = mock_transport.get.call_args
         assert call_args[1]["params"]["format"] == "json"
 
     def test_export_csv_format(self, tracker, mock_transport):
         tracker.start_session()
-        mock_transport._client.get.return_value = _mock_response(text_data="col1,col2\na,b")
+        mock_transport.get.return_value = _mock_response(text_data="col1,col2\na,b")
 
         result = tracker.export_session(format="csv")
 
         assert result == "col1,col2\na,b"
-        call_args = mock_transport._client.get.call_args
+        call_args = mock_transport.get.call_args
         assert call_args[1]["params"]["format"] == "csv"
 
     def test_export_invalid_format_raises_ValueError(self, tracker, mock_transport):
@@ -275,11 +275,11 @@ class TestExportSession:
             tracker.export_session()
 
     def test_export_specific_session_id(self, tracker, mock_transport):
-        mock_transport._client.get.return_value = _mock_response({"ok": True})
+        mock_transport.get.return_value = _mock_response({"ok": True})
 
         result = tracker.export_session(session_id="custom-sid")
 
-        call_args = mock_transport._client.get.call_args
+        call_args = mock_transport.get.call_args
         assert "custom-sid" in call_args[0][0]
 
 
@@ -288,12 +288,12 @@ class TestExportSession:
 class TestCosts:
     def test_get_costs_calls_backend(self, tracker, mock_transport):
         tracker.start_session()
-        mock_transport._client.get.return_value = _mock_response({"total_cost": 0.42})
+        mock_transport.get.return_value = _mock_response({"total_cost": 0.42})
 
         result = tracker.get_costs()
 
         assert result["total_cost"] == 0.42
-        call_args = mock_transport._client.get.call_args
+        call_args = mock_transport.get.call_args
         assert "/pricing/costs/" in call_args[0][0]
 
     def test_get_costs_no_session_raises_RuntimeError(self, tracker):
@@ -302,31 +302,31 @@ class TestCosts:
 
     def test_get_pricing_calls_backend(self, tracker, mock_transport):
         expected = {"pricing": {"gpt-4": {"input_cost_per_1m": 30}}, "defaults": {}}
-        mock_transport._client.get.return_value = _mock_response(expected)
+        mock_transport.get.return_value = _mock_response(expected)
 
         result = tracker.get_pricing()
 
         assert result == expected
-        call_args = mock_transport._client.get.call_args
+        call_args = mock_transport.get.call_args
         assert "/pricing" in call_args[0][0]
 
     def test_set_pricing_calls_backend(self, tracker, mock_transport):
         pricing = {"gpt-4": {"input_cost_per_1m": 30, "output_cost_per_1m": 60}}
-        mock_transport._client.put.return_value = _mock_response({"status": "ok", "updated": 1})
+        mock_transport.put.return_value = _mock_response({"status": "ok", "updated": 1})
 
         result = tracker.set_pricing(pricing)
 
         assert result["status"] == "ok"
-        call_args = mock_transport._client.put.call_args
+        call_args = mock_transport.put.call_args
         assert "/pricing" in call_args[0][0]
 
     def test_set_pricing_payload_structure(self, tracker, mock_transport):
         pricing = {"claude-3": {"input_cost_per_1m": 15, "output_cost_per_1m": 75}}
-        mock_transport._client.put.return_value = _mock_response({"status": "ok", "updated": 1})
+        mock_transport.put.return_value = _mock_response({"status": "ok", "updated": 1})
 
         tracker.set_pricing(pricing)
 
-        call_args = mock_transport._client.put.call_args
+        call_args = mock_transport.put.call_args
         assert call_args[1]["json"] == {"pricing": pricing}
 
 
@@ -335,11 +335,11 @@ class TestCosts:
 class TestSearchEvents:
     def test_search_basic_query(self, tracker, mock_transport):
         tracker.start_session()
-        mock_transport._client.get.return_value = _mock_response({"events": [], "matched": 0})
+        mock_transport.get.return_value = _mock_response({"events": [], "matched": 0})
 
         tracker.search_events(q="hello")
 
-        call_args = mock_transport._client.get.call_args
+        call_args = mock_transport.get.call_args
         assert call_args[1]["params"]["q"] == "hello"
 
     def test_search_no_session_raises_RuntimeError(self, tracker):
@@ -348,7 +348,7 @@ class TestSearchEvents:
 
     def test_search_all_filters(self, tracker, mock_transport):
         tracker.start_session()
-        mock_transport._client.get.return_value = _mock_response({"events": []})
+        mock_transport.get.return_value = _mock_response({"events": []})
 
         tracker.search_events(
             q="test",
@@ -364,7 +364,7 @@ class TestSearchEvents:
             before="2025-12-31T23:59:59Z",
         )
 
-        params = mock_transport._client.get.call_args[1]["params"]
+        params = mock_transport.get.call_args[1]["params"]
         assert params["q"] == "test"
         assert params["type"] == "llm_call"
         assert params["model"] == "gpt-4"
@@ -379,47 +379,47 @@ class TestSearchEvents:
 
     def test_search_limit_capped_at_500(self, tracker, mock_transport):
         tracker.start_session()
-        mock_transport._client.get.return_value = _mock_response({"events": []})
+        mock_transport.get.return_value = _mock_response({"events": []})
 
         tracker.search_events(limit=9999)
 
-        params = mock_transport._client.get.call_args[1]["params"]
+        params = mock_transport.get.call_args[1]["params"]
         assert params["limit"] == 500
 
     def test_search_offset_floored_at_0(self, tracker, mock_transport):
         tracker.start_session()
-        mock_transport._client.get.return_value = _mock_response({"events": []})
+        mock_transport.get.return_value = _mock_response({"events": []})
 
         tracker.search_events(offset=-50)
 
-        params = mock_transport._client.get.call_args[1]["params"]
+        params = mock_transport.get.call_args[1]["params"]
         assert params["offset"] == 0
 
     def test_search_empty_query_omitted(self, tracker, mock_transport):
         tracker.start_session()
-        mock_transport._client.get.return_value = _mock_response({"events": []})
+        mock_transport.get.return_value = _mock_response({"events": []})
 
         tracker.search_events(q=None)
 
-        params = mock_transport._client.get.call_args[1]["params"]
+        params = mock_transport.get.call_args[1]["params"]
         assert "q" not in params
 
     def test_search_default_limit_100(self, tracker, mock_transport):
         tracker.start_session()
-        mock_transport._client.get.return_value = _mock_response({"events": []})
+        mock_transport.get.return_value = _mock_response({"events": []})
 
         tracker.search_events()
 
-        params = mock_transport._client.get.call_args[1]["params"]
+        params = mock_transport.get.call_args[1]["params"]
         assert params["limit"] == 100
 
     def test_search_boolean_filters_as_strings(self, tracker, mock_transport):
         tracker.start_session()
-        mock_transport._client.get.return_value = _mock_response({"events": []})
+        mock_transport.get.return_value = _mock_response({"events": []})
 
         tracker.search_events(has_tools=True, has_reasoning=True, errors=True)
 
-        params = mock_transport._client.get.call_args[1]["params"]
+        params = mock_transport.get.call_args[1]["params"]
         assert params["has_tools"] == "true"
         assert params["has_reasoning"] == "true"
         assert params["errors"] == "true"
@@ -429,24 +429,24 @@ class TestSearchEvents:
 
 class TestAlertRules:
     def test_list_alert_rules_no_filter(self, tracker, mock_transport):
-        mock_transport._client.get.return_value = _mock_response({"rules": []})
+        mock_transport.get.return_value = _mock_response({"rules": []})
 
         tracker.list_alert_rules()
 
-        call_args = mock_transport._client.get.call_args
+        call_args = mock_transport.get.call_args
         assert "/alerts/rules" in call_args[0][0]
         assert call_args[1]["params"] == {}
 
     def test_list_alert_rules_enabled_filter(self, tracker, mock_transport):
-        mock_transport._client.get.return_value = _mock_response({"rules": []})
+        mock_transport.get.return_value = _mock_response({"rules": []})
 
         tracker.list_alert_rules(enabled=True)
 
-        params = mock_transport._client.get.call_args[1]["params"]
+        params = mock_transport.get.call_args[1]["params"]
         assert params["enabled"] == "true"
 
     def test_create_alert_rule_payload(self, tracker, mock_transport):
-        mock_transport._client.post.return_value = _mock_response({"rule_id": "r1"})
+        mock_transport.post.return_value = _mock_response({"rule_id": "r1"})
 
         tracker.create_alert_rule(
             name="High tokens",
@@ -456,7 +456,7 @@ class TestAlertRules:
             window_minutes=30,
         )
 
-        call_args = mock_transport._client.post.call_args
+        call_args = mock_transport.post.call_args
         payload = call_args[1]["json"]
         assert payload["name"] == "High tokens"
         assert payload["metric"] == "total_tokens"
@@ -465,7 +465,7 @@ class TestAlertRules:
         assert payload["window_minutes"] == 30
 
     def test_create_alert_rule_with_agent_filter(self, tracker, mock_transport):
-        mock_transport._client.post.return_value = _mock_response({"rule_id": "r2"})
+        mock_transport.post.return_value = _mock_response({"rule_id": "r2"})
 
         tracker.create_alert_rule(
             name="Test",
@@ -475,41 +475,41 @@ class TestAlertRules:
             agent_filter="my-agent",
         )
 
-        payload = mock_transport._client.post.call_args[1]["json"]
+        payload = mock_transport.post.call_args[1]["json"]
         assert payload["agent_filter"] == "my-agent"
 
     def test_update_alert_rule_calls_put(self, tracker, mock_transport):
-        mock_transport._client.put.return_value = _mock_response({"updated": True})
+        mock_transport.put.return_value = _mock_response({"updated": True})
 
         tracker.update_alert_rule("rule-123", threshold=5000, name="Updated")
 
-        call_args = mock_transport._client.put.call_args
+        call_args = mock_transport.put.call_args
         assert "rule-123" in call_args[0][0]
         assert call_args[1]["json"] == {"threshold": 5000, "name": "Updated"}
 
     def test_delete_alert_rule_calls_delete(self, tracker, mock_transport):
-        mock_transport._client.delete.return_value = _mock_response({"deleted": True})
+        mock_transport.delete.return_value = _mock_response({"deleted": True})
 
         tracker.delete_alert_rule("rule-456")
 
-        call_args = mock_transport._client.delete.call_args
+        call_args = mock_transport.delete.call_args
         assert "rule-456" in call_args[0][0]
 
     def test_evaluate_alerts_calls_post(self, tracker, mock_transport):
-        mock_transport._client.post.return_value = _mock_response({"triggered": 2})
+        mock_transport.post.return_value = _mock_response({"triggered": 2})
 
         result = tracker.evaluate_alerts()
 
         assert result["triggered"] == 2
-        call_args = mock_transport._client.post.call_args
+        call_args = mock_transport.post.call_args
         assert "/alerts/evaluate" in call_args[0][0]
 
     def test_get_alert_events_params(self, tracker, mock_transport):
-        mock_transport._client.get.return_value = _mock_response({"events": []})
+        mock_transport.get.return_value = _mock_response({"events": []})
 
         tracker.get_alert_events(rule_id="r1", acknowledged=False, limit=25)
 
-        params = mock_transport._client.get.call_args[1]["params"]
+        params = mock_transport.get.call_args[1]["params"]
         assert params["rule_id"] == "r1"
         assert params["acknowledged"] == "false"
         assert params["limit"] == 25
@@ -529,43 +529,43 @@ class TestTags:
 
     def test_add_tags_calls_post(self, tracker, mock_transport):
         session = tracker.start_session()
-        mock_transport._client.post.return_value = _mock_response(
+        mock_transport.post.return_value = _mock_response(
             {"session_id": session.session_id, "added": 2, "tags": ["a", "b"]}
         )
 
         result = tracker.add_tags(["a", "b"])
 
         assert result["added"] == 2
-        call_args = mock_transport._client.post.call_args
+        call_args = mock_transport.post.call_args
         assert "/tags" in call_args[0][0]
         assert call_args[1]["json"] == {"tags": ["a", "b"]}
 
     def test_remove_tags_with_list(self, tracker, mock_transport):
         session = tracker.start_session()
-        mock_transport._client.request.return_value = _mock_response(
+        mock_transport.delete.return_value = _mock_response(
             {"session_id": session.session_id, "removed": 1, "tags": []}
         )
 
         result = tracker.remove_tags(["old-tag"])
 
-        call_args = mock_transport._client.request.call_args
-        assert call_args[0][0] == "DELETE"
+        call_args = mock_transport.delete.call_args
+        assert f"/sessions/{session.session_id}/tags" in call_args[0][0]
         assert call_args[1]["json"] == {"tags": ["old-tag"]}
 
     def test_remove_tags_all(self, tracker, mock_transport):
         session = tracker.start_session()
-        mock_transport._client.request.return_value = _mock_response(
+        mock_transport.delete.return_value = _mock_response(
             {"session_id": session.session_id, "removed": 3, "tags": []}
         )
 
         result = tracker.remove_tags()
 
-        call_args = mock_transport._client.request.call_args
+        call_args = mock_transport.delete.call_args
         assert call_args[1]["json"] == {}
 
     def test_get_tags_returns_list(self, tracker, mock_transport):
         session = tracker.start_session()
-        mock_transport._client.get.return_value = _mock_response(
+        mock_transport.get.return_value = _mock_response(
             {"tags": ["prod", "v2"]}
         )
 
@@ -574,7 +574,7 @@ class TestTags:
         assert result == ["prod", "v2"]
 
     def test_list_all_tags_calls_get(self, tracker, mock_transport):
-        mock_transport._client.get.return_value = _mock_response(
+        mock_transport.get.return_value = _mock_response(
             {"tags": [{"tag": "prod", "session_count": 5}]}
         )
 
@@ -582,7 +582,7 @@ class TestTags:
 
         assert len(result) == 1
         assert result[0]["tag"] == "prod"
-        call_args = mock_transport._client.get.call_args
+        call_args = mock_transport.get.call_args
         assert "/sessions/tags" in call_args[0][0]
 
     def test_list_sessions_by_tag_empty_tag_raises(self, tracker):
@@ -604,11 +604,11 @@ class TestAnnotations:
 
     def test_annotate_sends_payload(self, tracker, mock_transport):
         tracker.start_session()
-        mock_transport._client.post.return_value = _mock_response({"annotation_id": "ann-1"})
+        mock_transport.post.return_value = _mock_response({"annotation_id": "ann-1"})
 
         result = tracker.annotate("Bug found", annotation_type="bug", author="tester")
 
-        payload = mock_transport._client.post.call_args[1]["json"]
+        payload = mock_transport.post.call_args[1]["json"]
         assert payload["text"] == "Bug found"
         assert payload["type"] == "bug"
         assert payload["author"] == "tester"
@@ -616,20 +616,20 @@ class TestAnnotations:
 
     def test_annotate_with_event_id(self, tracker, mock_transport):
         tracker.start_session()
-        mock_transport._client.post.return_value = _mock_response({"annotation_id": "ann-2"})
+        mock_transport.post.return_value = _mock_response({"annotation_id": "ann-2"})
 
         tracker.annotate("Note", event_id="evt-42")
 
-        payload = mock_transport._client.post.call_args[1]["json"]
+        payload = mock_transport.post.call_args[1]["json"]
         assert payload["event_id"] == "evt-42"
 
     def test_get_annotations_params(self, tracker, mock_transport):
         tracker.start_session()
-        mock_transport._client.get.return_value = _mock_response({"annotations": []})
+        mock_transport.get.return_value = _mock_response({"annotations": []})
 
         tracker.get_annotations(annotation_type="bug", author="sdk", limit=50, offset=10)
 
-        params = mock_transport._client.get.call_args[1]["params"]
+        params = mock_transport.get.call_args[1]["params"]
         assert params["type"] == "bug"
         assert params["author"] == "sdk"
         assert params["limit"] == 50
@@ -646,13 +646,13 @@ class TestAnnotations:
             tracker.delete_annotation("")
 
     def test_list_recent_annotations_params(self, tracker, mock_transport):
-        mock_transport._client.get.return_value = _mock_response(
+        mock_transport.get.return_value = _mock_response(
             {"total": 5, "annotations": []}
         )
 
         tracker.list_recent_annotations(annotation_type="warning", limit=20)
 
-        params = mock_transport._client.get.call_args[1]["params"]
+        params = mock_transport.get.call_args[1]["params"]
         assert params["type"] == "warning"
         assert params["limit"] == 20
 
@@ -662,22 +662,22 @@ class TestAnnotations:
 class TestRetention:
     def test_get_retention_config(self, tracker, mock_transport):
         expected = {"config": {"max_age_days": 90, "auto_purge": True}}
-        mock_transport._client.get.return_value = _mock_response(expected)
+        mock_transport.get.return_value = _mock_response(expected)
 
         result = tracker.get_retention_config()
 
         assert result == expected
-        call_args = mock_transport._client.get.call_args
+        call_args = mock_transport.get.call_args
         assert "/retention/config" in call_args[0][0]
 
     def test_set_retention_config_payload(self, tracker, mock_transport):
-        mock_transport._client.put.return_value = _mock_response(
+        mock_transport.put.return_value = _mock_response(
             {"config": {"max_age_days": 30}, "updated": 1}
         )
 
         tracker.set_retention_config(max_age_days=30, exempt_tags=["prod"])
 
-        payload = mock_transport._client.put.call_args[1]["json"]
+        payload = mock_transport.put.call_args[1]["json"]
         assert payload["max_age_days"] == 30
         assert payload["exempt_tags"] == ["prod"]
 
@@ -687,22 +687,22 @@ class TestRetention:
 
     def test_get_retention_stats(self, tracker, mock_transport):
         expected = {"sessions": 100, "events": 5000, "eligible_for_purge": 10}
-        mock_transport._client.get.return_value = _mock_response(expected)
+        mock_transport.get.return_value = _mock_response(expected)
 
         result = tracker.get_retention_stats()
 
         assert result == expected
-        assert "/retention/stats" in mock_transport._client.get.call_args[0][0]
+        assert "/retention/stats" in mock_transport.get.call_args[0][0]
 
     def test_purge_dry_run_param(self, tracker, mock_transport):
-        mock_transport._client.post.return_value = _mock_response(
+        mock_transport.post.return_value = _mock_response(
             {"dry_run": True, "would_purge_sessions": 5}
         )
 
         result = tracker.purge(dry_run=True)
 
         assert result["dry_run"] is True
-        params = mock_transport._client.post.call_args[1]["params"]
+        params = mock_transport.post.call_args[1]["params"]
         assert params["dry_run"] == "true"
 
 

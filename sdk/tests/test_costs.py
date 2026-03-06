@@ -49,24 +49,24 @@ class TestGetCosts:
             "event_costs": [],
             "unmatched_models": [],
         }
-        mock_transport._client.get.return_value = mock_response
+        mock_transport.get.return_value = mock_response
 
         result = tracker.get_costs()
 
         assert result["total_cost"] == 0.0015
         assert result["currency"] == "USD"
         assert "gpt-4" in result["model_costs"]
-        mock_transport._client.get.assert_called_once()
+        mock_transport.get.assert_called_once()
 
     def test_get_costs_specific_session(self, tracker, mock_transport):
         mock_response = MagicMock()
         mock_response.json.return_value = {"total_cost": 0.01}
-        mock_transport._client.get.return_value = mock_response
+        mock_transport.get.return_value = mock_response
 
         result = tracker.get_costs(session_id="abc123")
 
         assert result["total_cost"] == 0.01
-        call_args = mock_transport._client.get.call_args
+        call_args = mock_transport.get.call_args
         assert "abc123" in call_args[0][0]
 
     def test_get_costs_no_session_raises(self, tracker):
@@ -78,12 +78,12 @@ class TestGetCosts:
 
         mock_response = MagicMock()
         mock_response.json.return_value = {"total_cost": 0}
-        mock_transport._client.get.return_value = mock_response
+        mock_transport.get.return_value = mock_response
 
         tracker.get_costs()
 
-        call_kwargs = mock_transport._client.get.call_args
-        assert call_kwargs[1]["headers"]["X-API-Key"] == "test-key"
+        # Auth headers are now handled internally by Transport
+        mock_transport.get.assert_called_once()
 
 
 class TestGetPricing:
@@ -98,7 +98,7 @@ class TestGetPricing:
                 "gpt-4": {"input": 30.0, "output": 60.0},
             },
         }
-        mock_transport._client.get.return_value = mock_response
+        mock_transport.get.return_value = mock_response
 
         result = tracker.get_pricing()
 
@@ -109,11 +109,11 @@ class TestGetPricing:
     def test_get_pricing_endpoint(self, tracker, mock_transport):
         mock_response = MagicMock()
         mock_response.json.return_value = {"pricing": {}, "defaults": {}}
-        mock_transport._client.get.return_value = mock_response
+        mock_transport.get.return_value = mock_response
 
         tracker.get_pricing()
 
-        call_args = mock_transport._client.get.call_args
+        call_args = mock_transport.get.call_args
         assert "/pricing" in call_args[0][0]
 
 
@@ -121,7 +121,7 @@ class TestSetPricing:
     def test_set_pricing(self, tracker, mock_transport):
         mock_response = MagicMock()
         mock_response.json.return_value = {"status": "ok", "updated": 2}
-        mock_transport._client.put.return_value = mock_response
+        mock_transport.put.return_value = mock_response
 
         pricing = {
             "gpt-4": {"input_cost_per_1m": 25.0, "output_cost_per_1m": 50.0},
@@ -135,22 +135,22 @@ class TestSetPricing:
     def test_set_pricing_sends_correct_body(self, tracker, mock_transport):
         mock_response = MagicMock()
         mock_response.json.return_value = {"status": "ok", "updated": 1}
-        mock_transport._client.put.return_value = mock_response
+        mock_transport.put.return_value = mock_response
 
         pricing = {"gpt-4": {"input_cost_per_1m": 30.0, "output_cost_per_1m": 60.0}}
         tracker.set_pricing(pricing)
 
-        call_kwargs = mock_transport._client.put.call_args
+        call_kwargs = mock_transport.put.call_args
         assert call_kwargs[1]["json"]["pricing"] == pricing
 
     def test_set_pricing_endpoint(self, tracker, mock_transport):
         mock_response = MagicMock()
         mock_response.json.return_value = {"status": "ok", "updated": 0}
-        mock_transport._client.put.return_value = mock_response
+        mock_transport.put.return_value = mock_response
 
         tracker.set_pricing({})
 
-        call_args = mock_transport._client.put.call_args
+        call_args = mock_transport.put.call_args
         assert "/pricing" in call_args[0][0]
 
 

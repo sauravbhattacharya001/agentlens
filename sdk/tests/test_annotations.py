@@ -42,12 +42,12 @@ class TestAnnotate:
             "created_at": "2025-01-01T00:00:00Z",
             "updated_at": "2025-01-01T00:00:00Z",
         }
-        tracker.transport._client.post.return_value = mock_resp
+        tracker.transport.post.return_value = mock_resp
 
         result = tracker.annotate("Bug found here")
         assert result["annotation_id"] == "ann-123"
         assert result["text"] == "Bug found here"
-        call_args = tracker.transport._client.post.call_args
+        call_args = tracker.transport.post.call_args
         assert "/sessions/test-session-123/annotations" in call_args[0][0]
         payload = call_args[1]["json"]
         assert payload["text"] == "Bug found here"
@@ -63,7 +63,7 @@ class TestAnnotate:
             "type": "warning",
             "event_id": "evt-001",
         }
-        tracker.transport._client.post.return_value = mock_resp
+        tracker.transport.post.return_value = mock_resp
 
         result = tracker.annotate(
             "Performance degraded",
@@ -71,7 +71,7 @@ class TestAnnotate:
             annotation_type="warning",
             event_id="evt-001",
         )
-        payload = tracker.transport._client.post.call_args[1]["json"]
+        payload = tracker.transport.post.call_args[1]["json"]
         assert payload["author"] == "alice"
         assert payload["type"] == "warning"
         assert payload["event_id"] == "evt-001"
@@ -79,10 +79,10 @@ class TestAnnotate:
     def test_with_specific_session(self, tracker):
         mock_resp = MagicMock()
         mock_resp.json.return_value = {"annotation_id": "ann-789", "session_id": "other"}
-        tracker.transport._client.post.return_value = mock_resp
+        tracker.transport.post.return_value = mock_resp
 
         tracker.annotate("Note", session_id="other")
-        call_url = tracker.transport._client.post.call_args[0][0]
+        call_url = tracker.transport.post.call_args[0][0]
         assert "/sessions/other/annotations" in call_url
 
     def test_no_session_raises(self, tracker_no_session):
@@ -104,11 +104,11 @@ class TestAnnotate:
     def test_each_annotation_type(self, tracker):
         mock_resp = MagicMock()
         mock_resp.json.return_value = {"annotation_id": "ann-x"}
-        tracker.transport._client.post.return_value = mock_resp
+        tracker.transport.post.return_value = mock_resp
 
         for t in ["note", "bug", "insight", "warning", "milestone"]:
             tracker.annotate("Test", annotation_type=t)
-            payload = tracker.transport._client.post.call_args[1]["json"]
+            payload = tracker.transport.post.call_args[1]["json"]
             assert payload["type"] == t
 
 
@@ -127,7 +127,7 @@ class TestGetAnnotations:
                 {"annotation_id": "a3", "text": "Note 3", "type": "insight"},
             ],
         }
-        tracker.transport._client.get.return_value = mock_resp
+        tracker.transport.get.return_value = mock_resp
 
         result = tracker.get_annotations()
         assert result["total"] == 3
@@ -136,10 +136,10 @@ class TestGetAnnotations:
     def test_with_filters(self, tracker):
         mock_resp = MagicMock()
         mock_resp.json.return_value = {"session_id": "test-session-123", "total": 1, "annotations": []}
-        tracker.transport._client.get.return_value = mock_resp
+        tracker.transport.get.return_value = mock_resp
 
         tracker.get_annotations(annotation_type="bug", author="alice", limit=10, offset=5)
-        call_args = tracker.transport._client.get.call_args
+        call_args = tracker.transport.get.call_args
         params = call_args[1]["params"]
         assert params["type"] == "bug"
         assert params["author"] == "alice"
@@ -149,10 +149,10 @@ class TestGetAnnotations:
     def test_specific_session(self, tracker):
         mock_resp = MagicMock()
         mock_resp.json.return_value = {"session_id": "other", "total": 0, "annotations": []}
-        tracker.transport._client.get.return_value = mock_resp
+        tracker.transport.get.return_value = mock_resp
 
         tracker.get_annotations(session_id="other")
-        call_url = tracker.transport._client.get.call_args[0][0]
+        call_url = tracker.transport.get.call_args[0][0]
         assert "/sessions/other/annotations" in call_url
 
     def test_no_session_raises(self, tracker_no_session):
@@ -162,10 +162,10 @@ class TestGetAnnotations:
     def test_limit_clamped(self, tracker):
         mock_resp = MagicMock()
         mock_resp.json.return_value = {"total": 0, "annotations": []}
-        tracker.transport._client.get.return_value = mock_resp
+        tracker.transport.get.return_value = mock_resp
 
         tracker.get_annotations(limit=9999)
-        params = tracker.transport._client.get.call_args[1]["params"]
+        params = tracker.transport.get.call_args[1]["params"]
         assert params["limit"] == 500
 
 
@@ -179,30 +179,30 @@ class TestUpdateAnnotation:
             "text": "Updated",
             "type": "note",
         }
-        tracker.transport._client.put.return_value = mock_resp
+        tracker.transport.put.return_value = mock_resp
 
         result = tracker.update_annotation("ann-123", text="Updated")
         assert result["text"] == "Updated"
-        call_args = tracker.transport._client.put.call_args
+        call_args = tracker.transport.put.call_args
         assert "/sessions/test-session-123/annotations/ann-123" in call_args[0][0]
         assert call_args[1]["json"] == {"text": "Updated"}
 
     def test_update_type(self, tracker):
         mock_resp = MagicMock()
         mock_resp.json.return_value = {"annotation_id": "ann-123", "type": "bug"}
-        tracker.transport._client.put.return_value = mock_resp
+        tracker.transport.put.return_value = mock_resp
 
         tracker.update_annotation("ann-123", annotation_type="bug")
-        payload = tracker.transport._client.put.call_args[1]["json"]
+        payload = tracker.transport.put.call_args[1]["json"]
         assert payload["type"] == "bug"
 
     def test_update_author(self, tracker):
         mock_resp = MagicMock()
         mock_resp.json.return_value = {"annotation_id": "ann-123"}
-        tracker.transport._client.put.return_value = mock_resp
+        tracker.transport.put.return_value = mock_resp
 
         tracker.update_annotation("ann-123", author="charlie")
-        payload = tracker.transport._client.put.call_args[1]["json"]
+        payload = tracker.transport.put.call_args[1]["json"]
         assert payload["author"] == "charlie"
 
     def test_no_session_raises(self, tracker_no_session):
@@ -220,10 +220,10 @@ class TestUpdateAnnotation:
     def test_specific_session(self, tracker):
         mock_resp = MagicMock()
         mock_resp.json.return_value = {"annotation_id": "ann-123"}
-        tracker.transport._client.put.return_value = mock_resp
+        tracker.transport.put.return_value = mock_resp
 
         tracker.update_annotation("ann-123", session_id="other", text="test")
-        call_url = tracker.transport._client.put.call_args[0][0]
+        call_url = tracker.transport.put.call_args[0][0]
         assert "/sessions/other/annotations/ann-123" in call_url
 
 
@@ -233,11 +233,11 @@ class TestDeleteAnnotation:
     def test_delete_annotation(self, tracker):
         mock_resp = MagicMock()
         mock_resp.json.return_value = {"deleted": True, "annotation_id": "ann-123"}
-        tracker.transport._client.delete.return_value = mock_resp
+        tracker.transport.delete.return_value = mock_resp
 
         result = tracker.delete_annotation("ann-123")
         assert result["deleted"] is True
-        call_url = tracker.transport._client.delete.call_args[0][0]
+        call_url = tracker.transport.delete.call_args[0][0]
         assert "/sessions/test-session-123/annotations/ann-123" in call_url
 
     def test_no_session_raises(self, tracker_no_session):
@@ -251,10 +251,10 @@ class TestDeleteAnnotation:
     def test_specific_session(self, tracker):
         mock_resp = MagicMock()
         mock_resp.json.return_value = {"deleted": True}
-        tracker.transport._client.delete.return_value = mock_resp
+        tracker.transport.delete.return_value = mock_resp
 
         tracker.delete_annotation("ann-123", session_id="other")
-        call_url = tracker.transport._client.delete.call_args[0][0]
+        call_url = tracker.transport.delete.call_args[0][0]
         assert "/sessions/other/annotations/ann-123" in call_url
 
 
@@ -270,27 +270,27 @@ class TestListRecentAnnotations:
                 {"annotation_id": "a2", "agent_name": "agent-2", "text": "Recent 2"},
             ],
         }
-        tracker.transport._client.get.return_value = mock_resp
+        tracker.transport.get.return_value = mock_resp
 
         result = tracker.list_recent_annotations()
         assert result["total"] == 2
-        call_url = tracker.transport._client.get.call_args[0][0]
+        call_url = tracker.transport.get.call_args[0][0]
         assert "/annotations" in call_url
 
     def test_with_type_filter(self, tracker):
         mock_resp = MagicMock()
         mock_resp.json.return_value = {"total": 0, "annotations": []}
-        tracker.transport._client.get.return_value = mock_resp
+        tracker.transport.get.return_value = mock_resp
 
         tracker.list_recent_annotations(annotation_type="bug")
-        params = tracker.transport._client.get.call_args[1]["params"]
+        params = tracker.transport.get.call_args[1]["params"]
         assert params["type"] == "bug"
 
     def test_limit_clamped(self, tracker):
         mock_resp = MagicMock()
         mock_resp.json.return_value = {"total": 0, "annotations": []}
-        tracker.transport._client.get.return_value = mock_resp
+        tracker.transport.get.return_value = mock_resp
 
         tracker.list_recent_annotations(limit=999)
-        params = tracker.transport._client.get.call_args[1]["params"]
+        params = tracker.transport.get.call_args[1]["params"]
         assert params["limit"] == 200
