@@ -11,7 +11,8 @@ let pricingData = null;    // Cached pricing configuration
 
 // ── Initialization ──────────────────────────────────────────────────
 
-document.addEventListener("DOMContentLoaded", () => {
+document.addEventListener("DOMContentLoaded", async () => {
+  await loadBookmarks();
   loadSessions();
 
   document.getElementById("statusFilter").addEventListener("change", () => {
@@ -38,9 +39,24 @@ async function loadSessions() {
       return;
     }
 
-    listEl.innerHTML = data.sessions.map((s) => `
+    let sessions = data.sessions || [];
+
+    // Filter to bookmarked only if active
+    if (showOnlyBookmarks) {
+      sessions = sessions.filter(s => bookmarkedIds.has(s.session_id));
+      if (sessions.length === 0) {
+        listEl.innerHTML = '<div class="loading">No bookmarked sessions. Star a session to bookmark it.</div>';
+        return;
+      }
+    }
+
+    listEl.innerHTML = sessions.map((s) => `
       <div class="session-card ${compareSelection.some(c => c.id === s.session_id) ? 'selected' : ''}" data-session-id="${s.session_id}">
         <div style="display:flex;align-items:center;gap:12px;flex:1;min-width:0">
+          <span class="bookmark-star" data-bookmark-id="${s.session_id}"
+            onclick="toggleBookmark('${s.session_id}', event)"
+            title="${bookmarkedIds.has(s.session_id) ? 'Remove bookmark' : 'Bookmark session'}"
+            style="cursor:pointer;font-size:1.2em;user-select:none">${bookmarkedIds.has(s.session_id) ? '⭐' : '☆'}</span>
           <input type="checkbox" class="compare-checkbox"
             ${compareSelection.some(c => c.id === s.session_id) ? 'checked' : ''}
             onclick="event.stopPropagation(); toggleCompare('${s.session_id}', '${escHtml(s.agent_name)}')"
@@ -2635,5 +2651,57 @@ function clearSessionSearch() {
   document.getElementById("sessionSortBy").value = "started_at";
   document.getElementById("sessionSortOrder").value = "desc";
   document.getElementById("sessionSearchResultsBar").style.display = "none";
+  loadSessions();
+}
+
+// ── Bookmarks ───────────────────────────────────────────────────────
+
+let bookmarkedIds = new Set();
+let showOnlyBookmarks = false;
+
+async function loadBookmarks() {
+  try {
+    const res = await fetch(`${API_BASE}/bookmarks`);
+    const data = await res.json();
+    bookmarkedIds = new Set((data.bookmarks || []).map(b => b.session_id));
+  } catch (e) {
+    console.error("Failed to load bookmarks:", e);
+  }
+}
+
+async function toggleBookmark(sessionId, event) {
+  if (event) event.stopPropagation();
+  const isBookmarked = bookmarkedIds.has(sessionId);
+  try {
+    if (isBookmarked) {
+      await fetch(`${API_BASE}/bookmarks/${sessionId}`, { method: "DELETE" });
+      bookmarkedIds.delete(sessionId);
+    } else {
+      await fetch(`${API_BASE}/bookmarks/${sessionId}`, {
+        method: "PUT",
+        headers: { "Content-Type": "application/json" },
+        body: JSON.stringify({ note: "" }),
+      });
+      bookmarkedIds.add(sessionId);
+    }
+    // Re-render the star icon
+    const starEl = document.querySelector(`[data-bookmark-id="${sessionId}"]`);
+    if (starEl) {
+      starEl.textContent = bookmarkedIds.has(sessionId) ? "⭐" : "☆";
+      starEl.title = bookmarkedIds.has(sessionId) ? "Remove bookmark" : "Bookmark session";
+    }
+    showToast(isBookmarked ? "Bookmark removed" : "⭐ Session bookmarked");
+  } catch (e) {
+    showToast("Failed to update bookmark");
+  }
+}
+
+function toggleBookmarkFilter() {
+  showOnlyBookmarks = !showOnlyBookmarks;
+  const btn = document.getElementById("bookmarkFilterBtn");
+  if (btn) {
+    btn.classList.toggle("active", showOnlyBookmarks);
+    btn.title = showOnlyBookmarks ? "Show all sessions" : "Show bookmarked only";
+  }
   loadSessions();
 }

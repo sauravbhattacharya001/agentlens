@@ -149,6 +149,19 @@ body {
   background: transparent;
 }
 
+#bookmarkFilterBtn.active {
+  background: var(--accent);
+  color: #000;
+  border-color: var(--accent);
+}
+
+.bookmark-star {
+  transition: transform 0.15s ease;
+}
+.bookmark-star:hover {
+  transform: scale(1.3);
+}
+
 .btn-ghost {
   background: transparent;
   border: none;

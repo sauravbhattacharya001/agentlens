@@ -23,6 +23,7 @@ const dependenciesRouter = require("./routes/dependencies");
 const correlationsRouter = require("./routes/correlations");
 const correlationSchedulerRouter = require("./routes/correlation-scheduler");
 const postmortemRouter = require("./routes/postmortem");
+const bookmarksRouter = require("./routes/bookmarks");
 
 const app = express();
 const PORT = process.env.PORT || 3000;
@@ -44,6 +45,7 @@ app.use("/errors", createApiLimiter());
 app.use("/webhooks", createApiLimiter());
 app.use("/dependencies", createApiLimiter());
 app.use("/postmortem", createApiLimiter());
+app.use("/bookmarks", createApiLimiter());
 
 // ── API key authentication ──────────────────────────────────────────
 const { authenticateApiKey, hasApiKey } = createApiKeyAuth();
@@ -58,6 +60,7 @@ app.use("/leaderboard", authenticateApiKey);
 app.use("/errors", authenticateApiKey);
 app.use("/webhooks", authenticateApiKey);
 app.use("/dependencies", authenticateApiKey);
+app.use("/bookmarks", authenticateApiKey);
 app.use("/postmortem", authenticateApiKey);
 
 // Body parser with size limit
@@ -83,6 +86,7 @@ app.use("/dependencies", dependenciesRouter);
 app.use("/correlations", correlationsRouter);
 app.use("/correlations", correlationSchedulerRouter);
 app.use("/postmortem", postmortemRouter);
+app.use("/bookmarks", bookmarksRouter);
 // Mount session-scoped annotation routes on /sessions
 app.use("/sessions", annotationsRouter);
 

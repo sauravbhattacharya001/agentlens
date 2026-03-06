@@ -76,6 +76,14 @@ function initSchema() {
     );
     CREATE INDEX IF NOT EXISTS idx_session_tags_tag ON session_tags(tag);
     CREATE INDEX IF NOT EXISTS idx_session_tags_session ON session_tags(session_id);
+
+    -- Session bookmarks for starring important sessions
+    CREATE TABLE IF NOT EXISTS session_bookmarks (
+      session_id TEXT PRIMARY KEY,
+      note TEXT DEFAULT '',
+      created_at TEXT NOT NULL DEFAULT (datetime('now')),
+      FOREIGN KEY (session_id) REFERENCES sessions(session_id) ON DELETE CASCADE
+    );
   `);
 
   // Performance: optimize for read-heavy analytics workload
