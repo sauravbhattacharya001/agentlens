@@ -1,6 +1,6 @@
 const express = require("express");
 const { getDb } = require("../db");
-const { isValidSessionId, isValidStatus, safeJsonParse, validateTag } = require("../lib/validation");
+const { isValidSessionId, isValidStatus, safeJsonParse, validateTag, escapeLikeWildcards } = require("../lib/validation");
 const { generateExplanation } = require("../lib/explain");
 const { computeSessionMetrics, pctDelta } = require("../lib/session-metrics");
 const { getTagStatements } = require("../lib/tag-statements");
@@ -159,16 +159,17 @@ router.get("/search", wrapRoute("search sessions", (req, res) => {
     if (q) {
       const terms = q.trim().split(/\s+/).filter(Boolean);
       for (const term of terms) {
-        conditions.push("(s.agent_name LIKE ? OR s.metadata LIKE ?)");
-        params.push(`%${term}%`, `%${term}%`);
+        const escaped = escapeLikeWildcards(term);
+        conditions.push("(s.agent_name LIKE ? ESCAPE '\\' OR s.metadata LIKE ? ESCAPE '\\')");
+        params.push(`%${escaped}%`, `%${escaped}%`);
       }
     }
 
     // Agent name filter (exact or substring)
     const agent = req.query.agent;
     if (agent) {
-      conditions.push("s.agent_name LIKE ?");
-      params.push(`%${agent}%`);
+      conditions.push("s.agent_name LIKE ? ESCAPE '\\'");
+      params.push(`%${escapeLikeWildcards(agent)}%`);
     }
 
     // Status filter
@@ -663,9 +664,9 @@ router.get("/:id/events/search", requireSessionId, wrapRoute("search events", (r
     if (modelFilter) {
       const models = modelFilter.split(",").map((m) => m.trim()).filter(Boolean);
       if (models.length > 0) {
-        const modelClauses = models.map(() => "LOWER(model) LIKE ?");
+        const modelClauses = models.map(() => "LOWER(model) LIKE ? ESCAPE '\\'");
         conditions.push(`model IS NOT NULL AND (${modelClauses.join(" OR ")})`);
-        params.push(...models.map((m) => `%${m.toLowerCase()}%`));
+        params.push(...models.map((m) => `%${escapeLikeWildcards(m).toLowerCase()}%`));
       }
     }
 
@@ -729,9 +730,9 @@ router.get("/:id/events/search", requireSessionId, wrapRoute("search events", (r
     if (q) {
       const searchTerms = q.split(/\s+/).filter(Boolean);
       for (const term of searchTerms) {
-        const likeTerm = `%${term}%`;
+        const likeTerm = `%${escapeLikeWildcards(term)}%`;
         conditions.push(
-          `(LOWER(COALESCE(input_data,'')) LIKE LOWER(?) OR LOWER(COALESCE(output_data,'')) LIKE LOWER(?) OR LOWER(COALESCE(tool_call,'')) LIKE LOWER(?) OR LOWER(COALESCE(event_type,'')) LIKE LOWER(?) OR LOWER(COALESCE(model,'')) LIKE LOWER(?) OR LOWER(COALESCE(decision_trace,'')) LIKE LOWER(?))`
+          `(LOWER(COALESCE(input_data,'')) LIKE LOWER(?) ESCAPE '\\' OR LOWER(COALESCE(output_data,'')) LIKE LOWER(?) ESCAPE '\\' OR LOWER(COALESCE(tool_call,'')) LIKE LOWER(?) ESCAPE '\\' OR LOWER(COALESCE(event_type,'')) LIKE LOWER(?) ESCAPE '\\' OR LOWER(COALESCE(model,'')) LIKE LOWER(?) ESCAPE '\\' OR LOWER(COALESCE(decision_trace,'')) LIKE LOWER(?) ESCAPE '\\')`
         );
         params.push(likeTerm, likeTerm, likeTerm, likeTerm, likeTerm, likeTerm);
       }

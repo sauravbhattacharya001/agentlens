@@ -77,23 +77,28 @@ function runCorrelation(rule, lookbackMinutes) {
   var db = dbMod.getDb();
   var config = parseConfig(rule.config);
   var lookback = lookbackMinutes || config.lookback_minutes || 60;
+  // Cap lookback to prevent full-table scans (max 7 days = 10080 min)
+  var MAX_LOOKBACK_MINUTES = 10080;
+  if (lookback > MAX_LOOKBACK_MINUTES) lookback = MAX_LOOKBACK_MINUTES;
   var cutoff = new Date(Date.now() - lookback * 60000).toISOString();
 
+  // Cap loaded events to prevent OOM on large datasets
+  var EVENT_CAP = 50000;
   var events;
   if (rule.agent_filter) {
     events = db.prepare(
       "SELECT e.*, s.agent_name FROM events e " +
       "JOIN sessions s ON e.session_id = s.session_id " +
       "WHERE e.timestamp >= ? AND s.agent_name = ? " +
-      "ORDER BY e.timestamp ASC"
-    ).all(cutoff, rule.agent_filter);
+      "ORDER BY e.timestamp ASC LIMIT ?"
+    ).all(cutoff, rule.agent_filter, EVENT_CAP);
   } else {
     events = db.prepare(
       "SELECT e.*, s.agent_name FROM events e " +
       "JOIN sessions s ON e.session_id = s.session_id " +
       "WHERE e.timestamp >= ? " +
-      "ORDER BY e.timestamp ASC"
-    ).all(cutoff);
+      "ORDER BY e.timestamp ASC LIMIT ?"
+    ).all(cutoff, EVENT_CAP);
   }
 
   if (events.length === 0) return [];

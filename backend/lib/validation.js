@@ -199,6 +199,10 @@ function validateWebhookUrl(url) {
     return { valid: false, error: "url is required" };
   }
 
+  // Reject URLs with embedded credentials (user:pass@host)
+  if (url.match(/:\/\/[^/]*@/)) {
+    return { valid: false, error: "url must not contain embedded credentials" };
+  }
   let parsed;
   try {
     parsed = new URL(url);
@@ -222,6 +226,26 @@ function validateWebhookUrl(url) {
     hostname === "0.0.0.0"
   ) {
     return { valid: false, error: "url must not point to a loopback address" };
+  }
+
+  // Block IPv6-mapped IPv4 addresses (::ffff:127.0.0.1, ::ffff:10.x.x.x, etc.)
+  // These bypass IPv4-only checks while resolving to the same destinations.
+  const bare = hostname.replace(/^\[|\]$/g, "");
+  if (bare.startsWith("::ffff:")) {
+    return { valid: false, error: "url must not use IPv6-mapped IPv4 addresses" };
+  }
+
+  // Block non-standard IP representations that bypass regex checks:
+  // decimal (2130706433 = 127.0.0.1), octal (0177.0.0.1), hex (0x7f.0.0.1)
+  if (/^(0x[0-9a-f]+|0[0-7]+|\d{5,})$/i.test(hostname)) {
+    return { valid: false, error: "url must use standard dotted-decimal IP notation" };
+  }
+  // Octal octets (e.g., 0177.0.0.01)
+  const octets = hostname.split(".");
+  if (octets.length === 4 && octets.every(o => /^\d+$/.test(o) || /^0[0-7]+$/.test(o) || /^0x[0-9a-f]+$/i.test(o))) {
+    if (octets.some(o => /^0\d/.test(o) || /^0x/i.test(o))) {
+      return { valid: false, error: "url must use standard dotted-decimal IP notation" };
+    }
   }
 
   // Block link-local / metadata (169.254.x.x — AWS/GCP/Azure metadata)
@@ -256,6 +280,19 @@ function validateWebhookUrl(url) {
   return { valid: true };
 }
 
+/**
+ * Escape SQL LIKE wildcard characters in a user-provided search term.
+ * Prevents `%` and `_` in user input from acting as wildcards, which
+ * can cause unexpected full-table matches and information disclosure.
+ *
+ * @param {string} term – raw search term
+ * @returns {string} escaped term safe for LIKE patterns
+ */
+function escapeLikeWildcards(term) {
+  if (typeof term !== "string") return "";
+  return term.replace(/[%_\\]/g, "\\$&");
+}
+
 module.exports = {
   // Constants
   MAX_BATCH_SIZE,
@@ -278,4 +315,5 @@ module.exports = {
   validateTag,
   validateTags,
   validateWebhookUrl,
+  escapeLikeWildcards,
 };
