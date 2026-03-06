@@ -386,3 +386,91 @@ class TestBudgetManagement:
     def test_remove_nonexistent(self):
         tracker = BudgetTracker()
         assert tracker.remove_budget("nope") is False
+
+    # -- Session index collision fix (issue #35) ----------------------
+
+    def test_multiple_budgets_same_session(self):
+        """Creating two budgets for the same session doesn't lose the first."""
+        tracker = BudgetTracker()
+        b1 = tracker.create_budget("s1", max_tokens=1000)
+        b2 = tracker.create_budget("s1", max_tokens=5000)
+
+        # Both budgets are accessible by ID
+        assert tracker.get_budget(b1.budget_id) is not None
+        assert tracker.get_budget(b2.budget_id) is not None
+
+        # report_for_session returns the most recent (b2)
+        report = tracker.report_for_session("s1")
+        assert report is not None
+        assert report.budget_id == b2.budget_id
+
+    def test_reports_for_session_returns_all(self):
+        """reports_for_session returns all budgets for a session."""
+        tracker = BudgetTracker()
+        b1 = tracker.create_budget("s1", max_tokens=1000)
+        b2 = tracker.create_budget("s1", max_tokens=5000)
+        b3 = tracker.create_budget("s1", max_tokens=9000)
+
+        reports = tracker.reports_for_session("s1")
+        assert len(reports) == 3
+        assert reports[0].budget_id == b1.budget_id
+        assert reports[1].budget_id == b2.budget_id
+        assert reports[2].budget_id == b3.budget_id
+
+    def test_reports_for_session_empty(self):
+        """reports_for_session returns empty list for unknown session."""
+        tracker = BudgetTracker()
+        assert tracker.reports_for_session("unknown") == []
+
+    def test_remove_first_budget_preserves_second(self):
+        """Removing the first budget doesn't break the second's session lookup."""
+        tracker = BudgetTracker()
+        b1 = tracker.create_budget("s1", max_tokens=1000)
+        b2 = tracker.create_budget("s1", max_tokens=5000)
+
+        tracker.remove_budget(b1.budget_id)
+
+        # b2 is still reachable via session lookup
+        report = tracker.report_for_session("s1")
+        assert report is not None
+        assert report.budget_id == b2.budget_id
+
+    def test_remove_second_budget_preserves_first(self):
+        """Removing the later budget still keeps the earlier one accessible."""
+        tracker = BudgetTracker()
+        b1 = tracker.create_budget("s1", max_tokens=1000)
+        b2 = tracker.create_budget("s1", max_tokens=5000)
+
+        tracker.remove_budget(b2.budget_id)
+
+        report = tracker.report_for_session("s1")
+        assert report is not None
+        assert report.budget_id == b1.budget_id
+
+    def test_remove_all_budgets_cleans_session_index(self):
+        """Removing all budgets for a session cleans up the session index."""
+        tracker = BudgetTracker()
+        b1 = tracker.create_budget("s1", max_tokens=1000)
+        b2 = tracker.create_budget("s1", max_tokens=5000)
+
+        tracker.remove_budget(b1.budget_id)
+        tracker.remove_budget(b2.budget_id)
+
+        assert tracker.report_for_session("s1") is None
+        assert tracker.reports_for_session("s1") == []
+
+    def test_record_for_session_uses_latest_budget(self):
+        """record_for_session charges against the most recent budget."""
+        tracker = BudgetTracker()
+        b1 = tracker.create_budget("s1", max_tokens=1000)
+        b2 = tracker.create_budget("s1", max_tokens=5000)
+
+        tracker.record_for_session("s1", tokens_in=100, tokens_out=50)
+
+        # b1 should be untouched
+        r1 = tracker.report(b1.budget_id)
+        assert r1.total_tokens == 0
+
+        # b2 should have the usage
+        r2 = tracker.report(b2.budget_id)
+        assert r2.total_tokens == 150
