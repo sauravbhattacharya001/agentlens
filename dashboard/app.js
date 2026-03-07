@@ -52,32 +52,32 @@ async function loadSessions() {
     }
 
     listEl.innerHTML = sessions.map((s) => `
-      <div class="session-card ${compareSelection.some(c => c.id === s.session_id) ? 'selected' : ''}" data-session-id="${s.session_id}">
+      <div class="session-card ${compareSelection.some(c => c.id === s.session_id) ? 'selected' : ''}" data-session-id="${escHtml(s.session_id)}">
         <div style="display:flex;align-items:center;gap:12px;flex:1;min-width:0">
-          <span class="bookmark-star" data-bookmark-id="${s.session_id}"
-            onclick="toggleBookmark('${s.session_id}', event)"
+          <span class="bookmark-star" data-bookmark-id="${escHtml(s.session_id)}"
+            onclick="toggleBookmark('${escHtml(s.session_id)}', event)"
             title="${bookmarkedIds.has(s.session_id) ? 'Remove bookmark' : 'Bookmark session'}"
             style="cursor:pointer;font-size:1.2em;user-select:none">${bookmarkedIds.has(s.session_id) ? '⭐' : '☆'}</span>
           <input type="checkbox" class="compare-checkbox"
             ${compareSelection.some(c => c.id === s.session_id) ? 'checked' : ''}
-            onclick="event.stopPropagation(); toggleCompare('${s.session_id}', '${escHtml(s.agent_name)}')"
+            onclick="event.stopPropagation(); toggleCompare('${escHtml(s.session_id)}', '${escHtml(s.agent_name)}')"
             title="Select for comparison">
-          <div class="session-card-left" onclick="loadSessionDetail('${s.session_id}')">
+          <div class="session-card-left" onclick="loadSessionDetail('${escHtml(s.session_id)}')">
             <div class="session-agent">${escHtml(s.agent_name)}</div>
             <div class="session-meta">
-              <span>🆔 ${s.session_id.slice(0, 8)}…</span>
+              <span>🆔 ${escHtml(s.session_id.slice(0, 8))}…</span>
               <span>🕐 ${formatTime(s.started_at)}</span>
               ${s.metadata?.version ? `<span>📦 v${escHtml(s.metadata.version)}</span>` : ""}
               ${s.metadata?.environment ? `<span>🌍 ${escHtml(s.metadata.environment)}</span>` : ""}
             </div>
           </div>
         </div>
-        <div class="session-card-right" onclick="loadSessionDetail('${s.session_id}')">
+        <div class="session-card-right" onclick="loadSessionDetail('${escHtml(s.session_id)}')">
           <div class="session-tokens">
             <div class="count">${(s.total_tokens_in + s.total_tokens_out).toLocaleString()}</div>
             <div>tokens</div>
           </div>
-          <span class="status-badge ${s.status}">${s.status}</span>
+          <span class="status-badge ${escHtml(s.status)}">${escHtml(s.status)}</span>
         </div>
       </div>
     `).join("");
@@ -134,7 +134,7 @@ function renderSessionInfo(session) {
   document.getElementById("sessionInfo").innerHTML = `
     <div class="info-card">
       <div class="label">Status</div>
-      <div class="value"><span class="status-badge ${session.status}">${session.status}</span></div>
+      <div class="value"><span class="status-badge ${escHtml(session.status)}">${escHtml(session.status)}</span></div>
     </div>
     <div class="info-card">
       <div class="label">Duration</div>
@@ -2330,11 +2330,11 @@ async function loadAlertRules() {
           </div>
         </div>
         <div class="rule-actions">
-          <button onclick="toggleAlertRule('${r.rule_id}', ${!r.enabled})" title="${r.enabled ? 'Disable' : 'Enable'}">
+          <button onclick="toggleAlertRule('${escHtml(r.rule_id)}', ${!r.enabled})" title="${r.enabled ? 'Disable' : 'Enable'}">
             ${r.enabled ? '⏸' : '▶'}
           </button>
-          <button onclick="editAlertRule('${r.rule_id}')" title="Edit">✏️</button>
-          <button class="btn-danger" onclick="deleteAlertRule('${r.rule_id}')" title="Delete">🗑</button>
+          <button onclick="editAlertRule('${escHtml(r.rule_id)}')" title="Edit">✏️</button>
+          <button class="btn-danger" onclick="deleteAlertRule('${escHtml(r.rule_id)}')" title="Delete">🗑</button>
         </div>
       </div>
     `).join("");
@@ -2535,7 +2535,7 @@ async function loadAlertHistory() {
           </div>
         </div>
         <div class="alert-event-time">${formatTime(e.triggered_at)}</div>
-        ${!e.acknowledged ? `<button class="btn btn-secondary" style="font-size:0.75rem;padding:4px 8px" onclick="acknowledgeAlert('${e.alert_id}')">Ack</button>` : ''}
+        ${!e.acknowledged ? `<button class="btn btn-secondary" style="font-size:0.75rem;padding:4px 8px" onclick="acknowledgeAlert('${escHtml(e.alert_id)}')">Ack</button>` : ''}
       </div>
     `).join("");
   } catch (e) {
@@ -2618,28 +2618,28 @@ async function searchSessions() {
         ? `<span style="margin-left:8px">${s.tags.map(t => `<span class="status-badge" style="background:var(--accent);font-size:0.65rem;padding:1px 6px">${escHtml(t)}</span>`).join(' ')}</span>`
         : '';
       return `
-        <div class="session-card ${compareSelection.some(c => c.id === s.session_id) ? 'selected' : ''}" data-session-id="${s.session_id}">
+        <div class="session-card ${compareSelection.some(c => c.id === s.session_id) ? 'selected' : ''}" data-session-id="${escHtml(s.session_id)}">
           <div style="display:flex;align-items:center;gap:12px;flex:1;min-width:0">
             <input type="checkbox" class="compare-checkbox"
               ${compareSelection.some(c => c.id === s.session_id) ? 'checked' : ''}
-              onclick="event.stopPropagation(); toggleCompare('${s.session_id}', '${escHtml(s.agent_name)}')"
+              onclick="event.stopPropagation(); toggleCompare('${escHtml(s.session_id)}', '${escHtml(s.agent_name)}')"
               title="Select for comparison">
-            <div class="session-card-left" onclick="loadSessionDetail('${s.session_id}')">
+            <div class="session-card-left" onclick="loadSessionDetail('${escHtml(s.session_id)}')">
               <div class="session-agent">${escHtml(s.agent_name)}${tagsHtml}</div>
               <div class="session-meta">
-                <span>🆔 ${s.session_id.slice(0, 8)}…</span>
+                <span>🆔 ${escHtml(s.session_id.slice(0, 8))}…</span>
                 <span>🕐 ${formatTime(s.started_at)}</span>
                 ${s.metadata?.version ? `<span>📦 v${escHtml(s.metadata.version)}</span>` : ""}
                 ${s.metadata?.environment ? `<span>🌍 ${escHtml(s.metadata.environment)}</span>` : ""}
               </div>
             </div>
           </div>
-          <div class="session-card-right" onclick="loadSessionDetail('${s.session_id}')">
+          <div class="session-card-right" onclick="loadSessionDetail('${escHtml(s.session_id)}')">
             <div class="session-tokens">
               <div class="count">${(s.total_tokens_in + s.total_tokens_out).toLocaleString()}</div>
               <div>tokens</div>
             </div>
-            <span class="status-badge ${s.status}">${s.status}</span>
+            <span class="status-badge ${escHtml(s.status)}">${escHtml(s.status)}</span>
           </div>
         </div>
       `;
@@ -2695,7 +2695,7 @@ async function toggleBookmark(sessionId, event) {
       bookmarkedIds.add(sessionId);
     }
     // Re-render the star icon
-    const starEl = document.querySelector(`[data-bookmark-id="${sessionId}"]`);
+    const starEl = document.querySelector(`[data-bookmark-id="${CSS.escape(sessionId)}"]`);
     if (starEl) {
       starEl.textContent = bookmarkedIds.has(sessionId) ? "⭐" : "☆";
       starEl.title = bookmarkedIds.has(sessionId) ? "Remove bookmark" : "Bookmark session";
@@ -2757,7 +2757,7 @@ async function loadAnnotations() {
           <span class="annotation-type-badge">${ANNOTATION_ICONS[a.type] || '📝'} ${escHtml(a.type)}</span>
           <span class="annotation-author">${escHtml(a.author)}</span>
           <span class="annotation-time">${formatTime(a.created_at)}</span>
-          <button class="btn btn-ghost annotation-delete" onclick="deleteAnnotation('${a.annotation_id}')" title="Delete">🗑</button>
+          <button class="btn btn-ghost annotation-delete" onclick="deleteAnnotation('${escHtml(a.annotation_id)}')" title="Delete">🗑</button>
         </div>
         <div class="annotation-body">${escHtml(a.text)}</div>
       </div>
