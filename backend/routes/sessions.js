@@ -42,6 +42,24 @@ function parseEventRow(e) {
   };
 }
 
+/**
+ * Look up a session by ID using cached statements.
+ * Returns the session row or null (and sends 404 on the response).
+ *
+ * @param {string} id - Session ID.
+ * @param {Object} res - Express response object.
+ * @returns {Object|null} Session row, or null if not found (404 already sent).
+ */
+function fetchSessionOrFail(id, res) {
+  const stmts = getSessionStatements();
+  const session = stmts.getById.get(id);
+  if (!session) {
+    res.status(404).json({ error: "Session not found" });
+    return null;
+  }
+  return session;
+}
+
 // ── Cached prepared statements ──────────────────────────────────────
 // Lazily initialized once, reused across all requests to avoid
 // re-compiling SQL on every call.
@@ -298,11 +316,8 @@ router.get("/:id", requireSessionId, wrapRoute("fetch session", (req, res) => {
   const db = getDb();
   const { id } = req.params;
 
-  const stmts = getSessionStatements();
-  const session = stmts.getById.get(id);
-  if (!session) {
-    return res.status(404).json({ error: "Session not found" });
-  }
+  const session = fetchSessionOrFail(id, res);
+  if (!session) return;
 
   // Paginated event loading — defaults to 200, capped at 1000
   const { limit: eventLimit, offset: eventOffset } = parsePagination(
@@ -310,6 +325,7 @@ router.get("/:id", requireSessionId, wrapRoute("fetch session", (req, res) => {
     { defaultLimit: 200, maxLimit: 1000 }
   );
 
+  const stmts = getSessionStatements();
   const { total: totalEvents } = stmts.countEventsBySession.get(id);
   const events = stmts.eventsBySessionPaged.all(id, eventLimit, eventOffset);
 
@@ -345,27 +361,29 @@ router.get("/:id/export", requireSessionId, wrapRoute("export session", (req, re
     return res.status(400).json({ error: "Invalid format. Use 'json', 'csv', or 'ndjson'." });
   }
 
-  const stmts = getSessionStatements();
-    const session = stmts.getById.get(id);
-    if (!session) {
-      return res.status(404).json({ error: "Session not found" });
-    }
+  const session = fetchSessionOrFail(id, res);
+  if (!session) return;
 
+    const stmts = getSessionStatements();
     const events = stmts.eventsBySession.all(id);
 
-    const parseExportEvent = (e) => ({
-      event_id: e.event_id,
-      event_type: e.event_type,
-      timestamp: e.timestamp,
-      model: e.model || "",
-      tokens_in: e.tokens_in || 0,
-      tokens_out: e.tokens_out || 0,
-      duration_ms: e.duration_ms || 0,
-      input_data: safeJsonParse(e.input_data),
-      output_data: safeJsonParse(e.output_data),
-      tool_call: safeJsonParse(e.tool_call, null),
-      decision_trace: safeJsonParse(e.decision_trace, null),
-    });
+    // Builds on parseEventRow but selects explicit fields for export
+    const parseExportEvent = (e) => {
+      const parsed = parseEventRow(e);
+      return {
+        event_id: parsed.event_id,
+        event_type: parsed.event_type,
+        timestamp: parsed.timestamp,
+        model: parsed.model || "",
+        tokens_in: parsed.tokens_in || 0,
+        tokens_out: parsed.tokens_out || 0,
+        duration_ms: parsed.duration_ms || 0,
+        input_data: parsed.input_data,
+        output_data: parsed.output_data,
+        tool_call: parsed.tool_call,
+        decision_trace: parsed.decision_trace,
+      };
+    };
 
     if (format === "ndjson") {
       // Streaming NDJSON export — uses .iterate() to avoid loading all events into memory
@@ -487,14 +505,12 @@ router.get("/:id/export", requireSessionId, wrapRoute("export session", (req, re
 router.get("/:id/events", requireSessionId, wrapRoute("fetch events", (req, res) => {
   const { id } = req.params;
 
-  const stmts = getSessionStatements();
-  const session = stmts.getById.get(id);
-  if (!session) {
-    return res.status(404).json({ error: "Session not found" });
-  }
+  const session = fetchSessionOrFail(id, res);
+  if (!session) return;
 
   const { limit, offset } = parsePagination(req.query, { defaultLimit: 100, maxLimit: 1000 });
 
+  const stmts = getSessionStatements();
   const { total } = stmts.countEventsBySession.get(id);
   const events = stmts.eventsBySessionPaged.all(id, limit, offset);
   const parsedEvents = events.map(parseEventRow);
@@ -639,11 +655,8 @@ router.get("/:id/events/search", requireSessionId, wrapRoute("search events", (r
   const db = getDb();
   const { id } = req.params;
 
-  const stmts = getSessionStatements();
-  const session = stmts.getById.get(id);
-  if (!session) {
-    return res.status(404).json({ error: "Session not found" });
-  }
+  const session = fetchSessionOrFail(id, res);
+  if (!session) return;
 
     // ── Build dynamic SQL WHERE clause ──────────────────────────────
     const conditions = ["session_id = ?"];
@@ -799,13 +812,11 @@ router.get("/:id/explain", requireSessionId, wrapRoute("generate explanation", (
   const db = getDb();
   const { id } = req.params;
 
-  const stmts = getSessionStatements();
-  const session = stmts.getById.get(id);
-  if (!session) {
-    return res.status(404).json({ error: "Session not found" });
-  }
+  const session = fetchSessionOrFail(id, res);
+  if (!session) return;
 
   // Cap events for explanation to prevent OOM on huge sessions
+  const stmts = getSessionStatements();
   const events = stmts.eventsBySessionCapped.all(id, 5000);
 
   const explanation = generateExplanation(session, events);
