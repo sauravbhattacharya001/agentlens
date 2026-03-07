@@ -409,7 +409,15 @@ router.post("/purge", (req, res) => {
     const config = getConfig();
     const eligible = getEligibleSessions(config);
 
-    if (eligible.length === 0) {
+    // Safety: cap destructive purges at 500 sessions per call.
+    // This prevents a misconfigured retention policy from wiping the
+    // entire database in a single request.  Callers can issue
+    // repeated purge calls to process larger backlogs.
+    const MAX_PURGE_BATCH = 500;
+    const cappedEligible = eligible.slice(0, MAX_PURGE_BATCH);
+    const wasCapped = eligible.length > MAX_PURGE_BATCH;
+
+    if (cappedEligible.length === 0) {
       return res.json({
         dry_run: dryRun,
         purged_sessions: 0,
@@ -421,9 +429,9 @@ router.post("/purge", (req, res) => {
 
     if (dryRun) {
       // Batch-count events instead of N+1 per-session queries
-      const sessionIds = eligible.map(e => e.session_id);
+      const sessionIds = cappedEligible.map(e => e.session_id);
       const eventCounts = batchEventCounts(sessionIds);
-      const details = eligible.map(e => ({
+      const details = cappedEligible.map(e => ({
         session_id: e.session_id,
         reason: e.reason,
         events: eventCounts.get(e.session_id) || 0,
@@ -432,19 +440,23 @@ router.post("/purge", (req, res) => {
 
       return res.json({
         dry_run: true,
-        would_purge_sessions: eligible.length,
+        would_purge_sessions: cappedEligible.length,
+        total_eligible: eligible.length,
+        capped: wasCapped,
         would_purge_events: totalEvents,
         details,
-        message: `Would purge ${eligible.length} sessions and ${totalEvents} events`,
+        message: wasCapped
+          ? `Would purge ${cappedEligible.length} of ${eligible.length} eligible sessions (batch limit ${MAX_PURGE_BATCH})`
+          : `Would purge ${cappedEligible.length} sessions and ${totalEvents} events`,
       });
     }
 
     // Actually purge — single transaction for all sessions
-    const sessionIds = eligible.map(e => e.session_id);
+    const sessionIds = cappedEligible.map(e => e.session_id);
     const { details: purgeDetails, totalEvents } = purgeSessions(sessionIds);
 
     // Merge reasons into details
-    const reasonMap = new Map(eligible.map(e => [e.session_id, e.reason]));
+    const reasonMap = new Map(cappedEligible.map(e => [e.session_id, e.reason]));
     const details = purgeDetails.map(d => ({
       ...d,
       reason: reasonMap.get(d.session_id) || "unknown",
@@ -452,10 +464,14 @@ router.post("/purge", (req, res) => {
 
     res.json({
       dry_run: false,
-      purged_sessions: eligible.length,
+      purged_sessions: cappedEligible.length,
+      total_eligible: eligible.length,
+      remaining: eligible.length - cappedEligible.length,
       purged_events: totalEvents,
       details,
-      message: `Purged ${eligible.length} sessions and ${totalEvents} events`,
+      message: wasCapped
+        ? `Purged ${cappedEligible.length} of ${eligible.length} eligible sessions (${eligible.length - cappedEligible.length} remaining)`
+        : `Purged ${cappedEligible.length} sessions and ${totalEvents} events`,
     });
   } catch (err) {
     console.error("Retention purge error:", err);

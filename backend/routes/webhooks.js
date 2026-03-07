@@ -200,7 +200,12 @@ async function deliverWebhook(webhook, alertData) {
       clearTimeout(timer);
 
       statusCode = resp.status;
-      try { responseBody = await resp.text(); } catch { responseBody = null; }
+      // Limit response body to 16 KB to prevent memory exhaustion from
+      // malicious webhook endpoints returning huge payloads.
+      try {
+        const rawBody = await resp.text();
+        responseBody = rawBody.length > 16384 ? rawBody.slice(0, 16384) + "...[truncated]" : rawBody;
+      } catch { responseBody = null; }
 
       if (resp.ok) {
         db.prepare(`
