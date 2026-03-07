@@ -5,6 +5,7 @@ const crypto = require("crypto");
 const router = express.Router();
 const { getDb } = require("../db");
 const { validateWebhookUrl } = require("../lib/validation");
+const { parseLimit, wrapRoute } = require("../lib/request-helpers");
 
 // ── Security limits ─────────────────────────────────────────────────
 // Prevent resource exhaustion via unbounded user-controlled values.
@@ -16,7 +17,10 @@ const MAX_RULE_IDS = 50;          // max alert rule bindings per webhook
 
 // ── Schema initialisation ───────────────────────────────────────────
 
+let _tableReady = false;
+
 function ensureWebhooksTable() {
+  if (_tableReady) return;
   const db = getDb();
   db.exec(`
     CREATE TABLE IF NOT EXISTS webhooks (
@@ -51,6 +55,7 @@ function ensureWebhooksTable() {
     CREATE INDEX IF NOT EXISTS idx_webhook_deliveries_status ON webhook_deliveries(status);
     CREATE INDEX IF NOT EXISTS idx_webhook_deliveries_delivered ON webhook_deliveries(delivered_at);
   `);
+  _tableReady = true;
 }
 
 function generateId() {
@@ -64,11 +69,30 @@ function validateWebhookId(id) {
   return typeof id === "string" && WEBHOOK_ID_RE.test(id);
 }
 
+// ── Shared response formatter ───────────────────────────────────────
+// Consolidates 3 identical inline mapping blocks that mask secrets
+// and parse rule_ids JSON for the API response.
+
+function formatWebhookResponse(w) {
+  return {
+    ...w,
+    enabled: !!w.enabled,
+    rule_ids: w.rule_ids ? JSON.parse(w.rule_ids) : null,
+    secret: w.secret ? "••••••" : null,
+  };
+}
+
 // Middleware: reject invalid webhook IDs early
 router.param("webhookId", (req, res, next, val) => {
   if (!validateWebhookId(val)) {
     return res.status(400).json({ error: "Invalid webhook ID format" });
   }
+  next();
+});
+
+// Middleware: ensure table exists (once per process, not per request)
+router.use((req, res, next) => {
+  ensureWebhooksTable();
   next();
 });
 
@@ -233,235 +257,178 @@ async function fireWebhooks(alertData) {
 
 // ── GET /webhooks — list all webhooks ───────────────────────────────
 
-router.get("/", (req, res) => {
-  try {
-    ensureWebhooksTable();
-    const db = getDb();
-    const webhooks = db.prepare("SELECT * FROM webhooks ORDER BY created_at DESC").all();
-    res.json({
-      webhooks: webhooks.map((w) => ({
-        ...w,
-        enabled: !!w.enabled,
-        rule_ids: w.rule_ids ? JSON.parse(w.rule_ids) : null,
-        secret: w.secret ? "••••••" : null, // Don't expose secrets
-      })),
-    });
-  } catch (err) {
-    console.error("Error listing webhooks:", err);
-    res.status(500).json({ error: "Failed to list webhooks" });
-  }
-});
+router.get("/", wrapRoute("list webhooks", (req, res) => {
+  const db = getDb();
+  const webhooks = db.prepare("SELECT * FROM webhooks ORDER BY created_at DESC").all();
+  res.json({ webhooks: webhooks.map(formatWebhookResponse) });
+}));
 
 // ── POST /webhooks — create a webhook ───────────────────────────────
 
-router.post("/", (req, res) => {
-  try {
-    ensureWebhooksTable();
-    const db = getDb();
-    const { name, url, secret, format, rule_ids, retry_count, timeout_ms } = req.body;
+router.post("/", wrapRoute("create webhook", (req, res) => {
+  const db = getDb();
+  const { name, url, secret, format, rule_ids, retry_count, timeout_ms } = req.body;
 
-    if (!name || typeof name !== "string" || name.trim().length === 0) {
-      return res.status(400).json({ error: "name is required" });
-    }
-    if (!url || typeof url !== "string") {
-      return res.status(400).json({ error: "url is required" });
-    }
+  if (!name || typeof name !== "string" || name.trim().length === 0) {
+    return res.status(400).json({ error: "name is required" });
+  }
+  if (!url || typeof url !== "string") {
+    return res.status(400).json({ error: "url is required" });
+  }
+  const urlCheck = validateWebhookUrl(url);
+  if (!urlCheck.valid) {
+    return res.status(400).json({ error: urlCheck.error });
+  }
+
+  const validFormats = ["json", "slack", "discord"];
+  if (format && !validFormats.includes(format)) {
+    return res.status(400).json({ error: `format must be one of: ${validFormats.join(", ")}` });
+  }
+  if (rule_ids && !Array.isArray(rule_ids)) {
+    return res.status(400).json({ error: "rule_ids must be an array of rule IDs" });
+  }
+
+  // Bound retry_count and timeout_ms to prevent resource exhaustion
+  const safeRetryCount = Math.min(Math.max(0, Number(retry_count) || 3), MAX_RETRY_COUNT);
+  const safeTimeoutMs = Math.min(Math.max(500, Number(timeout_ms) || 5000), MAX_TIMEOUT_MS);
+
+  // Limit rule_ids array size
+  if (rule_ids && rule_ids.length > MAX_RULE_IDS) {
+    return res.status(400).json({ error: `rule_ids cannot exceed ${MAX_RULE_IDS} entries` });
+  }
+
+  // Limit secret length
+  if (secret && typeof secret === "string" && secret.length > MAX_SECRET_LENGTH) {
+    return res.status(400).json({ error: `secret cannot exceed ${MAX_SECRET_LENGTH} characters` });
+  }
+
+  const webhookId = generateId();
+  const now = new Date().toISOString();
+
+  db.prepare(`
+    INSERT INTO webhooks (webhook_id, name, url, secret, format, rule_ids, enabled, retry_count, timeout_ms, created_at, updated_at)
+    VALUES (?, ?, ?, ?, ?, ?, 1, ?, ?, ?, ?)
+  `).run(
+    webhookId, name.trim().slice(0, MAX_NAME_LENGTH), url, secret || null, format || "json",
+    rule_ids ? JSON.stringify(rule_ids) : null,
+    safeRetryCount, safeTimeoutMs, now, now
+  );
+
+  const webhook = db.prepare("SELECT * FROM webhooks WHERE webhook_id = ?").get(webhookId);
+  res.status(201).json({ webhook: formatWebhookResponse(webhook) });
+}));
+
+// ── PUT /webhooks/:webhookId — update a webhook ─────────────────────
+
+router.put("/:webhookId", wrapRoute("update webhook", (req, res) => {
+  const db = getDb();
+  const { webhookId } = req.params;
+
+  const existing = db.prepare("SELECT * FROM webhooks WHERE webhook_id = ?").get(webhookId);
+  if (!existing) return res.status(404).json({ error: "Webhook not found" });
+
+  const { name, url, secret, format, rule_ids, enabled, retry_count, timeout_ms } = req.body;
+  const updates = {};
+
+  if (name !== undefined) updates.name = name.trim().slice(0, MAX_NAME_LENGTH);
+  if (url !== undefined) {
     const urlCheck = validateWebhookUrl(url);
     if (!urlCheck.valid) {
       return res.status(400).json({ error: urlCheck.error });
     }
-
-    const validFormats = ["json", "slack", "discord"];
-    if (format && !validFormats.includes(format)) {
-      return res.status(400).json({ error: `format must be one of: ${validFormats.join(", ")}` });
-    }
-    if (rule_ids && !Array.isArray(rule_ids)) {
-      return res.status(400).json({ error: "rule_ids must be an array of rule IDs" });
-    }
-
-    // Bound retry_count and timeout_ms to prevent resource exhaustion
-    const safeRetryCount = Math.min(Math.max(0, Number(retry_count) || 3), MAX_RETRY_COUNT);
-    const safeTimeoutMs = Math.min(Math.max(500, Number(timeout_ms) || 5000), MAX_TIMEOUT_MS);
-
-    // Limit rule_ids array size
-    if (rule_ids && rule_ids.length > MAX_RULE_IDS) {
-      return res.status(400).json({ error: `rule_ids cannot exceed ${MAX_RULE_IDS} entries` });
-    }
-
-    // Limit secret length
+    updates.url = url;
+  }
+  if (secret !== undefined) {
     if (secret && typeof secret === "string" && secret.length > MAX_SECRET_LENGTH) {
       return res.status(400).json({ error: `secret cannot exceed ${MAX_SECRET_LENGTH} characters` });
     }
-
-    const webhookId = generateId();
-    const now = new Date().toISOString();
-
-    db.prepare(`
-      INSERT INTO webhooks (webhook_id, name, url, secret, format, rule_ids, enabled, retry_count, timeout_ms, created_at, updated_at)
-      VALUES (?, ?, ?, ?, ?, ?, 1, ?, ?, ?, ?)
-    `).run(
-      webhookId, name.trim().slice(0, MAX_NAME_LENGTH), url, secret || null, format || "json",
-      rule_ids ? JSON.stringify(rule_ids) : null,
-      safeRetryCount, safeTimeoutMs, now, now
-    );
-
-    const webhook = db.prepare("SELECT * FROM webhooks WHERE webhook_id = ?").get(webhookId);
-    res.status(201).json({
-      webhook: {
-        ...webhook,
-        enabled: !!webhook.enabled,
-        rule_ids: webhook.rule_ids ? JSON.parse(webhook.rule_ids) : null,
-        secret: webhook.secret ? "••••••" : null,
-      },
-    });
-  } catch (err) {
-    console.error("Error creating webhook:", err);
-    res.status(500).json({ error: "Failed to create webhook" });
+    updates.secret = secret || null;
   }
-});
-
-// ── PUT /webhooks/:webhookId — update a webhook ─────────────────────
-
-router.put("/:webhookId", (req, res) => {
-  try {
-    ensureWebhooksTable();
-    const db = getDb();
-    const { webhookId } = req.params;
-
-    const existing = db.prepare("SELECT * FROM webhooks WHERE webhook_id = ?").get(webhookId);
-    if (!existing) return res.status(404).json({ error: "Webhook not found" });
-
-    const { name, url, secret, format, rule_ids, enabled, retry_count, timeout_ms } = req.body;
-    const updates = {};
-
-    if (name !== undefined) updates.name = name.trim().slice(0, MAX_NAME_LENGTH);
-    if (url !== undefined) {
-      const urlCheck = validateWebhookUrl(url);
-      if (!urlCheck.valid) {
-        return res.status(400).json({ error: urlCheck.error });
-      }
-      updates.url = url;
+  if (format !== undefined) {
+    const validFormats = ["json", "slack", "discord"];
+    if (!validFormats.includes(format)) {
+      return res.status(400).json({ error: `format must be one of: ${validFormats.join(", ")}` });
     }
-    if (secret !== undefined) {
-      if (secret && typeof secret === "string" && secret.length > MAX_SECRET_LENGTH) {
-        return res.status(400).json({ error: `secret cannot exceed ${MAX_SECRET_LENGTH} characters` });
-      }
-      updates.secret = secret || null;
-    }
-    if (format !== undefined) {
-      const validFormats = ["json", "slack", "discord"];
-      if (!validFormats.includes(format)) {
-        return res.status(400).json({ error: `format must be one of: ${validFormats.join(", ")}` });
-      }
-      updates.format = format;
-    }
-    if (rule_ids !== undefined) {
-      if (rule_ids && Array.isArray(rule_ids) && rule_ids.length > MAX_RULE_IDS) {
-        return res.status(400).json({ error: `rule_ids cannot exceed ${MAX_RULE_IDS} entries` });
-      }
-      updates.rule_ids = rule_ids ? JSON.stringify(rule_ids) : null;
-    }
-    if (enabled !== undefined) updates.enabled = enabled ? 1 : 0;
-    if (retry_count !== undefined) updates.retry_count = Math.min(Math.max(0, Number(retry_count)), MAX_RETRY_COUNT);
-    if (timeout_ms !== undefined) updates.timeout_ms = Math.min(Math.max(500, Number(timeout_ms)), MAX_TIMEOUT_MS);
-
-    const setClauses = Object.keys(updates).map((k) => `${k} = ?`);
-    setClauses.push("updated_at = ?");
-    const values = [...Object.values(updates), new Date().toISOString(), webhookId];
-
-    db.prepare(`UPDATE webhooks SET ${setClauses.join(", ")} WHERE webhook_id = ?`).run(...values);
-
-    const webhook = db.prepare("SELECT * FROM webhooks WHERE webhook_id = ?").get(webhookId);
-    res.json({
-      webhook: {
-        ...webhook,
-        enabled: !!webhook.enabled,
-        rule_ids: webhook.rule_ids ? JSON.parse(webhook.rule_ids) : null,
-        secret: webhook.secret ? "••••••" : null,
-      },
-    });
-  } catch (err) {
-    console.error("Error updating webhook:", err);
-    res.status(500).json({ error: "Failed to update webhook" });
+    updates.format = format;
   }
-});
+  if (rule_ids !== undefined) {
+    if (rule_ids && Array.isArray(rule_ids) && rule_ids.length > MAX_RULE_IDS) {
+      return res.status(400).json({ error: `rule_ids cannot exceed ${MAX_RULE_IDS} entries` });
+    }
+    updates.rule_ids = rule_ids ? JSON.stringify(rule_ids) : null;
+  }
+  if (enabled !== undefined) updates.enabled = enabled ? 1 : 0;
+  if (retry_count !== undefined) updates.retry_count = Math.min(Math.max(0, Number(retry_count)), MAX_RETRY_COUNT);
+  if (timeout_ms !== undefined) updates.timeout_ms = Math.min(Math.max(500, Number(timeout_ms)), MAX_TIMEOUT_MS);
+
+  const setClauses = Object.keys(updates).map((k) => `${k} = ?`);
+  setClauses.push("updated_at = ?");
+  const values = [...Object.values(updates), new Date().toISOString(), webhookId];
+
+  db.prepare(`UPDATE webhooks SET ${setClauses.join(", ")} WHERE webhook_id = ?`).run(...values);
+
+  const webhook = db.prepare("SELECT * FROM webhooks WHERE webhook_id = ?").get(webhookId);
+  res.json({ webhook: formatWebhookResponse(webhook) });
+}));
 
 // ── DELETE /webhooks/:webhookId — delete a webhook ──────────────────
 
-router.delete("/:webhookId", (req, res) => {
-  try {
-    ensureWebhooksTable();
-    const db = getDb();
-    const { webhookId } = req.params;
+router.delete("/:webhookId", wrapRoute("delete webhook", (req, res) => {
+  const db = getDb();
+  const { webhookId } = req.params;
 
-    const result = db.prepare("DELETE FROM webhooks WHERE webhook_id = ?").run(webhookId);
-    if (result.changes === 0) return res.status(404).json({ error: "Webhook not found" });
+  const result = db.prepare("DELETE FROM webhooks WHERE webhook_id = ?").run(webhookId);
+  if (result.changes === 0) return res.status(404).json({ error: "Webhook not found" });
 
-    res.json({ deleted: true, webhook_id: webhookId });
-  } catch (err) {
-    console.error("Error deleting webhook:", err);
-    res.status(500).json({ error: "Failed to delete webhook" });
-  }
-});
+  res.json({ deleted: true, webhook_id: webhookId });
+}));
 
 // ── POST /webhooks/:webhookId/test — send a test payload ────────────
 
-router.post("/:webhookId/test", async (req, res) => {
-  try {
-    ensureWebhooksTable();
-    const db = getDb();
-    const { webhookId } = req.params;
+router.post("/:webhookId/test", wrapRoute("test webhook", async (req, res) => {
+  const db = getDb();
+  const { webhookId } = req.params;
 
-    const webhook = db.prepare("SELECT * FROM webhooks WHERE webhook_id = ?").get(webhookId);
-    if (!webhook) return res.status(404).json({ error: "Webhook not found" });
+  const webhook = db.prepare("SELECT * FROM webhooks WHERE webhook_id = ?").get(webhookId);
+  if (!webhook) return res.status(404).json({ error: "Webhook not found" });
 
-    const testData = {
-      rule_name: "Test Alert",
-      metric: "error_rate",
-      operator: ">",
-      threshold: 10,
-      current_value: 15.5,
-      window_minutes: 60,
-      agent_filter: null,
-      alert_id: "test-" + generateId(),
-      rule_id: "test-rule",
-    };
+  const testData = {
+    rule_name: "Test Alert",
+    metric: "error_rate",
+    operator: ">",
+    threshold: 10,
+    current_value: 15.5,
+    window_minutes: 60,
+    agent_filter: null,
+    alert_id: "test-" + generateId(),
+    rule_id: "test-rule",
+  };
 
-    const result = await deliverWebhook(webhook, testData);
-    res.json({ test: true, ...result });
-  } catch (err) {
-    console.error("Error testing webhook:", err);
-    res.status(500).json({ error: "Failed to test webhook" });
-  }
-});
+  const result = await deliverWebhook(webhook, testData);
+  res.json({ test: true, ...result });
+}));
 
 // ── GET /webhooks/:webhookId/deliveries — delivery history ──────────
 
-router.get("/:webhookId/deliveries", (req, res) => {
-  try {
-    ensureWebhooksTable();
-    const db = getDb();
-    const { webhookId } = req.params;
+router.get("/:webhookId/deliveries", wrapRoute("list deliveries", (req, res) => {
+  const db = getDb();
+  const { webhookId } = req.params;
 
-    const webhook = db.prepare("SELECT webhook_id FROM webhooks WHERE webhook_id = ?").get(webhookId);
-    if (!webhook) return res.status(404).json({ error: "Webhook not found" });
+  const webhook = db.prepare("SELECT webhook_id FROM webhooks WHERE webhook_id = ?").get(webhookId);
+  if (!webhook) return res.status(404).json({ error: "Webhook not found" });
 
-    const { status, limit: limitStr } = req.query;
-    const limit = Math.min(Number(limitStr) || 50, 200);
+  const { status } = req.query;
+  const limit = parseLimit(req.query.limit, 50, 200);
 
-    let sql = "SELECT * FROM webhook_deliveries WHERE webhook_id = ?";
-    const params = [webhookId];
-    if (status) { sql += " AND status = ?"; params.push(status); }
-    sql += " ORDER BY delivered_at DESC LIMIT ?";
-    params.push(limit);
+  let sql = "SELECT * FROM webhook_deliveries WHERE webhook_id = ?";
+  const params = [webhookId];
+  if (status) { sql += " AND status = ?"; params.push(status); }
+  sql += " ORDER BY delivered_at DESC LIMIT ?";
+  params.push(limit);
 
-    const deliveries = db.prepare(sql).all(...params);
-    res.json({ deliveries, count: deliveries.length });
-  } catch (err) {
-    console.error("Error listing deliveries:", err);
-    res.status(500).json({ error: "Failed to list deliveries" });
-  }
-});
+  const deliveries = db.prepare(sql).all(...params);
+  res.json({ deliveries, count: deliveries.length });
+}));
 
 module.exports = router;
 module.exports.fireWebhooks = fireWebhooks;
