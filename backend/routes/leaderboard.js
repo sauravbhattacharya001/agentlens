@@ -1,8 +1,16 @@
 const express = require("express");
 const { getDb } = require("../db");
 const { wrapRoute } = require("../lib/request-helpers");
+const { createCache, cacheMiddleware } = require("../lib/response-cache");
 
 const router = express.Router();
+
+// Response cache for leaderboard — 30s TTL, aggregation queries are expensive
+// Disabled in test environment to avoid stale data between test cases.
+const leaderboardCache = createCache({ ttlMs: 30000, maxEntries: 50 });
+const leaderboardCacheMw = process.env.NODE_ENV === "test"
+  ? function (_req, _res, next) { next(); }
+  : cacheMiddleware(leaderboardCache);
 
 // GET /leaderboard — Rank agents by performance metrics
 //
@@ -12,7 +20,7 @@ const router = express.Router();
 //   days    — lookback window in days (1-365, default: 30)
 //   limit   — max agents to return (1-100, default: 20)
 //   min_sessions — minimum sessions to qualify (default: 2)
-router.get("/", wrapRoute("build agent leaderboard", (req, res) => {
+router.get("/", leaderboardCacheMw, wrapRoute("build agent leaderboard", (req, res) => {
   const db = getDb();
 
   const sortBy = req.query.sort || "efficiency";

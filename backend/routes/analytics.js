@@ -2,8 +2,20 @@ const express = require("express");
 const { getDb } = require("../db");
 const { latencyStats, round2 } = require("../lib/stats");
 const { wrapRoute } = require("../lib/request-helpers");
+const { createCache, cacheMiddleware } = require("../lib/response-cache");
 
 const router = express.Router();
+
+// ── Response cache for analytics ────────────────────────────────────
+// Analytics queries aggregate across all sessions/events — expensive
+// on large datasets but results change infrequently. A 30-second TTL
+// prevents redundant re-computation while keeping data reasonably fresh.
+// Disabled in test environment to avoid stale data between test cases.
+const analyticsCache = createCache({ ttlMs: 30000, maxEntries: 100 });
+const isTest = process.env.NODE_ENV === "test";
+const analyticsCacheMw = isTest
+  ? function (_req, _res, next) { next(); }
+  : cacheMiddleware(analyticsCache);
 
 // ── Cached prepared statements for analytics ────────────────────────
 // These are read-only aggregation queries — safe to prepare once and
@@ -110,7 +122,7 @@ function getAnalyticsStatements() {
 }
 
 // GET /analytics — Aggregate statistics across all sessions
-router.get("/", wrapRoute("fetch analytics", (req, res) => {
+router.get("/", analyticsCacheMw, wrapRoute("fetch analytics", (req, res) => {
   const db = getDb();
   const stmts = getAnalyticsStatements();
 
@@ -190,7 +202,7 @@ router.get("/", wrapRoute("fetch analytics", (req, res) => {
 // calculations that require the full distribution.  This reduces memory
 // from O(rows × 6 columns) to O(rows × 1 column) for the heavy path,
 // and eliminates JS-side reduce/map for totals and group stats entirely.
-router.get("/performance", wrapRoute("fetch performance analytics", (req, res) => {
+router.get("/performance", isTest ? analyticsCacheMw : cacheMiddleware(analyticsCache, { ttlMs: 15000 }), wrapRoute("fetch performance analytics", (req, res) => {
   const db = getDb();
   // Optional filters
   const agentName = req.query.agent;
@@ -391,7 +403,7 @@ router.get("/performance", wrapRoute("fetch performance analytics", (req, res) =
 }));
 
 // GET /analytics/heatmap — Day-of-week × hour-of-day activity matrix
-router.get("/heatmap", wrapRoute("fetch heatmap data", (req, res) => {
+router.get("/heatmap", isTest ? analyticsCacheMw : cacheMiddleware(analyticsCache, { ttlMs: 60000 }), wrapRoute("fetch heatmap data", (req, res) => {
   const db = getDb();
   const days = Math.min(Math.max(1, parseInt(req.query.days) || 30), 365);
     const metric = ["events", "tokens", "sessions"].includes(req.query.metric)
@@ -503,4 +515,10 @@ router.get("/heatmap", wrapRoute("fetch heatmap data", (req, res) => {
     });
 }));
 
+// GET /analytics/cache — Cache statistics (for monitoring)
+router.get("/cache", wrapRoute("fetch cache stats", (req, res) => {
+  res.json(analyticsCache.stats());
+}));
+
 module.exports = router;
+module.exports.analyticsCache = analyticsCache;
