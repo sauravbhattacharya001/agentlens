@@ -5,6 +5,7 @@ const crypto = require("crypto");
 const router = express.Router();
 const { getDb } = require("../db");
 const { fireWebhooks } = require("./webhooks");
+const { wrapRoute, parseLimit } = require("../lib/request-helpers");
 
 // ── Schema initialisation ───────────────────────────────────────────
 
@@ -174,8 +175,7 @@ function compareValue(value, operator, threshold) {
 
 // ── GET /alerts/rules — list all alert rules ────────────────────────
 
-router.get("/rules", (req, res) => {
-  try {
+router.get("/rules", wrapRoute("list alert rules", (req, res) => {
     ensureAlertsTable();
     const db = getDb();
     const { enabled } = req.query;
@@ -190,16 +190,11 @@ router.get("/rules", (req, res) => {
 
     const rules = db.prepare(sql).all(...params);
     res.json({ rules: rules.map(r => ({ ...r, enabled: !!r.enabled })) });
-  } catch (err) {
-    console.error("Error listing alert rules:", err);
-    res.status(500).json({ error: "Failed to list alert rules" });
-  }
-});
+}));
 
 // ── POST /alerts/rules — create a new alert rule ────────────────────
 
-router.post("/rules", (req, res) => {
-  try {
+router.post("/rules", wrapRoute("create alert rule", (req, res) => {
     ensureAlertsTable();
     const db = getDb();
     const { name, metric, operator, threshold, window_minutes, agent_filter, cooldown_minutes } = req.body;
@@ -230,16 +225,11 @@ router.post("/rules", (req, res) => {
 
     const rule = db.prepare("SELECT * FROM alert_rules WHERE rule_id = ?").get(ruleId);
     res.status(201).json({ rule: { ...rule, enabled: !!rule.enabled } });
-  } catch (err) {
-    console.error("Error creating alert rule:", err);
-    res.status(500).json({ error: "Failed to create alert rule" });
-  }
-});
+}));
 
 // ── PUT /alerts/rules/:ruleId — update an alert rule ────────────────
 
-router.put("/rules/:ruleId", (req, res) => {
-  try {
+router.put("/rules/:ruleId", wrapRoute("update alert rule", (req, res) => {
     ensureAlertsTable();
     const db = getDb();
     const { ruleId } = req.params;
@@ -279,16 +269,11 @@ router.put("/rules/:ruleId", (req, res) => {
 
     const rule = db.prepare("SELECT * FROM alert_rules WHERE rule_id = ?").get(ruleId);
     res.json({ rule: { ...rule, enabled: !!rule.enabled } });
-  } catch (err) {
-    console.error("Error updating alert rule:", err);
-    res.status(500).json({ error: "Failed to update alert rule" });
-  }
-});
+}));
 
 // ── DELETE /alerts/rules/:ruleId — delete a rule ────────────────────
 
-router.delete("/rules/:ruleId", (req, res) => {
-  try {
+router.delete("/rules/:ruleId", wrapRoute("delete alert rule", (req, res) => {
     ensureAlertsTable();
     const db = getDb();
     const { ruleId } = req.params;
@@ -298,16 +283,11 @@ router.delete("/rules/:ruleId", (req, res) => {
       return res.status(404).json({ error: "Rule not found" });
     }
     res.json({ deleted: true, rule_id: ruleId });
-  } catch (err) {
-    console.error("Error deleting alert rule:", err);
-    res.status(500).json({ error: "Failed to delete alert rule" });
-  }
-});
+}));
 
 // ── POST /alerts/evaluate — evaluate all enabled rules now ──────────
 
-router.post("/evaluate", async (req, res) => {
-  try {
+router.post("/evaluate", wrapRoute("evaluate alerts", async (req, res) => {
     ensureAlertsTable();
     const db = getDb();
 
@@ -381,20 +361,15 @@ router.post("/evaluate", async (req, res) => {
     const ok = results.filter(r => r.status === "ok").length;
 
     res.json({ evaluated: results.length, fired, cooldown, ok, results });
-  } catch (err) {
-    console.error("Error evaluating alerts:", err);
-    res.status(500).json({ error: "Failed to evaluate alerts" });
-  }
-});
+}));
 
 // ── GET /alerts/events — list alert events (triggered alerts) ───────
 
-router.get("/events", (req, res) => {
-  try {
+router.get("/events", wrapRoute("list alert events", (req, res) => {
     ensureAlertsTable();
     const db = getDb();
     const { rule_id, acknowledged, limit: limitStr, after, before } = req.query;
-    const limit = Math.min(Number(limitStr) || 50, 200);
+    const limit = parseLimit(limitStr, 50, 200);
 
     let sql = `
       SELECT ae.*, ar.name AS rule_name, ar.metric, ar.operator, ar.threshold
@@ -417,16 +392,11 @@ router.get("/events", (req, res) => {
       events: events.map(e => ({ ...e, acknowledged: !!e.acknowledged })),
       count: events.length,
     });
-  } catch (err) {
-    console.error("Error listing alert events:", err);
-    res.status(500).json({ error: "Failed to list alert events" });
-  }
-});
+}));
 
 // ── PUT /alerts/events/:alertId/acknowledge — ack an alert ──────────
 
-router.put("/events/:alertId/acknowledge", (req, res) => {
-  try {
+router.put("/events/:alertId/acknowledge", wrapRoute("acknowledge alert", (req, res) => {
     ensureAlertsTable();
     const db = getDb();
     const { alertId } = req.params;
@@ -439,11 +409,7 @@ router.put("/events/:alertId/acknowledge", (req, res) => {
       return res.status(404).json({ error: "Alert event not found" });
     }
     res.json({ acknowledged: true, alert_id: alertId });
-  } catch (err) {
-    console.error("Error acknowledging alert:", err);
-    res.status(500).json({ error: "Failed to acknowledge alert" });
-  }
-});
+}));
 
 // ── GET /alerts/metrics — list available metrics ────────────────────
 
