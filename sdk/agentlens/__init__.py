@@ -18,6 +18,7 @@ from agentlens.sampling import ProbabilisticSampler, RateLimitSampler, PriorityS
 from agentlens.evaluation import ResponseEvaluator, EvaluatorConfig, QualityReport, QualityTrend, QualityGrade, DimensionScore
 from agentlens.postmortem import PostmortemGenerator, PostmortemConfig, PostmortemReport, Severity as PostmortemSeverity, RootCause, ImpactAssessment, Remediation, RemediationCategory, LessonLearned, TimelineEntry, IncidentPhase
 from agentlens.rate_limiter import RateLimiter, RateLimit, RateLimitAction, RateLimitPolicy, CheckResult, RateLimitReport, WindowStats, openai_tier1_policy, anthropic_tier1_policy, conservative_policy
+from agentlens.exporter import SessionExporter
 
 __version__ = "0.1.0"
 __all__ = [
@@ -122,6 +123,7 @@ __all__ = [
     "openai_tier1_policy",
     "anthropic_tier1_policy",
     "conservative_policy",
+    "SessionExporter",
 ]
 
 _tracker: AgentTracker | None = None
