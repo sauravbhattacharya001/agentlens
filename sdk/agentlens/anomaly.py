@@ -508,9 +508,11 @@ class AnomalyDetector:
         """Compute statistical baseline from a list of values."""
         n = len(values)
         mean = sum(values) / n
-        # Population variance — these are the complete observed measurements,
-        # not a sample estimating an unknown parameter.
-        variance = sum((v - mean) ** 2 for v in values) / n if n > 0 else 0.0
+        # Sample variance (Bessel's correction) — the observations are a sample
+        # from the ongoing stream of sessions, not the complete population.
+        # Using n instead of n-1 underestimates the true std dev, inflating
+        # z-scores and causing false-positive anomaly detections.
+        variance = sum((v - mean) ** 2 for v in values) / (n - 1) if n > 1 else 0.0
         std_dev = math.sqrt(variance)
         return MetricBaseline(
             name=name,

@@ -352,13 +352,13 @@ class TestAnomalyDetectorGetBaseline:
         b = d.get_baseline("x")
         assert b.mean == pytest.approx(20.0)
 
-    def test_std_dev_is_correct_population(self):
+    def test_std_dev_is_correct_sample(self):
         d = AnomalyDetector()
         for v in [10.0, 20.0, 30.0]:
             d.add_sample({"x": v})
         b = d.get_baseline("x")
-        # population std dev of [10, 20, 30] = sqrt(200/3) ≈ 8.1650
-        expected_std = math.sqrt(200.0 / 3.0)
+        # sample std dev of [10, 20, 30] = sqrt(200/2) = 10.0
+        expected_std = math.sqrt(200.0 / 2.0)
         assert b.std_dev == pytest.approx(expected_std)
 
     def test_min_max_are_correct(self):
