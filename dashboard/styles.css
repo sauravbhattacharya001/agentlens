@@ -1811,3 +1811,91 @@ body {
   letter-spacing: 0.5px;
   font-weight: 600;
 }
+
+/* ── Error Analytics ────────────────────────────────────────────────── */
+
+.error-high { color: #ef4444; }
+.error-medium { color: #f97316; }
+.error-low { color: #22c55e; }
+
+.error-item {
+  border: 1px solid var(--border);
+  border-radius: 8px;
+  padding: 12px 16px;
+  margin-bottom: 10px;
+  background: var(--bg-secondary);
+}
+
+.error-item:hover {
+  border-color: rgba(239, 68, 68, 0.3);
+}
+
+.error-item-header {
+  display: flex;
+  align-items: center;
+  gap: 8px;
+  margin-bottom: 6px;
+}
+
+.error-type-badge {
+  display: inline-block;
+  padding: 2px 8px;
+  border-radius: 4px;
+  font-size: 0.75rem;
+  font-weight: 600;
+  text-transform: uppercase;
+  letter-spacing: 0.3px;
+}
+
+.error-badge-error { background: rgba(239, 68, 68, 0.2); color: #ef4444; }
+.error-badge-tool_error { background: rgba(249, 115, 22, 0.2); color: #f97316; }
+.error-badge-agent_error { background: rgba(234, 179, 8, 0.2); color: #eab308; }
+
+.error-count {
+  font-weight: 700;
+  color: var(--text-muted);
+  font-size: 0.85rem;
+}
+
+.error-model {
+  font-size: 0.75rem;
+  color: var(--text-muted);
+  background: var(--bg-tertiary, rgba(255,255,255,0.05));
+  padding: 2px 6px;
+  border-radius: 3px;
+}
+
+.error-message {
+  font-family: "SF Mono", "Cascadia Code", "Fira Code", monospace;
+  font-size: 0.82rem;
+  color: var(--text-secondary);
+  padding: 6px 10px;
+  background: rgba(0, 0, 0, 0.2);
+  border-radius: 4px;
+  word-break: break-word;
+  margin-bottom: 6px;
+}
+
+.error-meta {
+  font-size: 0.75rem;
+  color: var(--text-muted);
+}
+
+.empty-state {
+  text-align: center;
+  padding: 60px 20px;
+  color: var(--text-muted);
+}
+
+.empty-state h3 {
+  color: var(--text-primary);
+  margin-bottom: 8px;
+}
+
+.clickable-row {
+  cursor: pointer;
+}
+
+.clickable-row:hover {
+  background: rgba(255, 255, 255, 0.04);
+}

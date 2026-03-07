@@ -201,6 +201,7 @@
           <button class="tab" data-tab="costs" onclick="switchTab('costs')">💲 Costs</button>
           <button class="tab" data-tab="explain" onclick="switchTab('explain')">💡 Explain</button>
           <button class="tab" data-tab="annotations" onclick="switchTab('annotations')">📝 Notes</button>
+          <button class="tab" data-tab="errors" onclick="switchTab('errors')">🚨 Errors</button>
         </div>
 
         <!-- Timeline Tab -->
@@ -362,6 +363,64 @@
           </div>
           <div id="annotationsList" class="annotations-list">
             <div class="loading">Select the Notes tab to load annotations.</div>
+          </div>
+        </div>
+
+        <!-- Errors Tab -->
+        <div id="errorsTab" class="tab-content">
+          <div id="errorsLoading" class="loading" style="display:none">Analyzing errors...</div>
+          <div id="errorsEmpty" style="display:none">
+            <div class="empty-state">
+              <div style="font-size:2.5rem;margin-bottom:12px">✅</div>
+              <h3>No Errors Found</h3>
+              <p style="color:var(--text-muted)">This session has no error events. Everything ran cleanly.</p>
+            </div>
+          </div>
+          <div id="errorsContent" style="display:none">
+            <!-- Error Summary Cards -->
+            <div id="errorSummaryCards" class="session-info-bar"></div>
+
+            <!-- Error Charts Row -->
+            <div class="charts-grid">
+              <div class="chart-card">
+                <h3>Error Rate Over Time</h3>
+                <canvas id="errorRateChart" width="600" height="300"></canvas>
+              </div>
+              <div class="chart-card">
+                <h3>Hourly Distribution</h3>
+                <canvas id="errorHourlyChart" width="600" height="300"></canvas>
+              </div>
+            </div>
+
+            <!-- Errors by Type & Model -->
+            <div class="charts-grid">
+              <div class="chart-card">
+                <h3>Errors by Type</h3>
+                <canvas id="errorTypeChart" width="400" height="300"></canvas>
+              </div>
+              <div class="chart-card">
+                <h3>Errors by Model</h3>
+                <div id="errorModelTable" class="token-summary"></div>
+              </div>
+            </div>
+
+            <!-- Errors by Agent -->
+            <div id="errorAgentSection" class="token-summary" style="display:none">
+              <h3>🤖 Errors by Agent</h3>
+              <div id="errorAgentTable"></div>
+            </div>
+
+            <!-- Top Error Messages -->
+            <div class="token-summary">
+              <h3>🔝 Top Error Messages</h3>
+              <div id="topErrorsList"></div>
+            </div>
+
+            <!-- Error Sessions -->
+            <div id="errorSessionsSection" class="token-summary" style="display:none">
+              <h3>💥 Sessions Ending in Error</h3>
+              <div id="errorSessionsList"></div>
+            </div>
           </div>
         </div>
       </div>

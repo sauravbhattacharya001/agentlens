@@ -8,6 +8,7 @@ let analyticsData = null;  // Cached analytics data
 let analyticsVisible = false;
 let costData = null;       // Cached cost data for current session
 let pricingData = null;    // Cached pricing configuration
+let errorData = null;      // Cached error analytics data
 
 // ── Initialization ──────────────────────────────────────────────────
 
@@ -91,6 +92,7 @@ async function loadSessionDetail(sessionId) {
   document.getElementById("sessionListView").classList.remove("active");
   document.getElementById("sessionDetailView").classList.add("active");
   costData = null; // Reset cost data for new session
+  errorData = null; // Reset error data for new session
 
   try {
     const res = await fetch(`${API_BASE}/sessions/${sessionId}`);
@@ -601,6 +603,10 @@ function switchTab(tabName) {
   // Lazy-load annotations
   if (tabName === "annotations" && currentSession) {
     loadAnnotations();
+  }
+  // Lazy-load error analytics
+  if (tabName === "errors" && !errorData) {
+    loadErrors();
   }
 }
 
@@ -2833,6 +2839,7 @@ function getCommandRegistry() {
       { group: "Current Session", icon: "📄", name: "Export as CSV", desc: `Export ${currentSession.session_id.slice(0, 8)}… as CSV`, action: () => { exportSession("csv"); }, keywords: "export csv download" },
       { group: "Current Session", icon: "💡", name: "Load Explanation", desc: "Get AI explanation for this session", action: () => { loadExplanation(currentSession.session_id); }, keywords: "explain ai insight" },
       { group: "Current Session", icon: "💰", name: "View Costs", desc: "Show cost breakdown", action: () => { switchTab("costs"); }, keywords: "cost pricing tokens money" },
+      { group: "Current Session", icon: "🚨", name: "View Errors", desc: "Error analytics dashboard", action: () => { switchTab("errors"); }, keywords: "error failure crash bug debug" },
       { group: "Current Session", icon: "📝", name: "Add Annotation", desc: "Add a note to this session", action: () => { showAnnotationForm(); }, keywords: "annotate note comment" },
       { group: "Current Session", icon: "⭐", name: "Toggle Bookmark", desc: "Star/unstar this session", action: () => { toggleBookmark(currentSession.session_id); }, keywords: "bookmark star favorite" },
       { group: "Current Session", icon: "⬅️", name: "Back to Sessions", desc: "Return to session list", action: () => { showSessionList(); }, keywords: "back list return" }
@@ -2954,3 +2961,448 @@ document.addEventListener("keydown", (e) => {
     closeCommandPaletteForce();
   }
 });
+
+// ── Error Analytics ─────────────────────────────────────────────────
+
+async function loadErrors() {
+  const loadingEl = document.getElementById("errorsLoading");
+  const contentEl = document.getElementById("errorsContent");
+  const emptyEl = document.getElementById("errorsEmpty");
+
+  loadingEl.style.display = "block";
+  contentEl.style.display = "none";
+  emptyEl.style.display = "none";
+
+  try {
+    const res = await fetch(`${API_BASE}/errors?days=30&limit=20`);
+    if (!res.ok) throw new Error("Failed to load error analytics");
+    errorData = await res.json();
+
+    loadingEl.style.display = "none";
+
+    if (errorData.summary.total_errors === 0) {
+      emptyEl.style.display = "block";
+      return;
+    }
+
+    contentEl.style.display = "block";
+
+    renderErrorSummaryCards(errorData);
+    renderErrorRateChart(errorData);
+    renderErrorHourlyChart(errorData);
+    renderErrorTypeChart(errorData);
+    renderErrorModelTable(errorData);
+    renderErrorAgentTable(errorData);
+    renderTopErrors(errorData);
+    renderErrorSessions(errorData);
+  } catch (err) {
+    loadingEl.textContent = `Error: ${escHtml(err.message)}`;
+  }
+}
+
+function renderErrorSummaryCards(data) {
+  const s = data.summary;
+  const mtbfText = s.mtbf
+    ? (s.mtbf.mean_minutes >= 60
+        ? `${(s.mtbf.mean_minutes / 60).toFixed(1)}h`
+        : `${s.mtbf.mean_minutes}m`)
+    : "N/A";
+
+  const severityClass = s.error_rate_percent > 10 ? "error-high"
+    : s.error_rate_percent > 3 ? "error-medium" : "error-low";
+
+  document.getElementById("errorSummaryCards").innerHTML = `
+    <div class="info-card">
+      <div class="label">Total Errors</div>
+      <div class="value" style="color:var(--red)">${s.total_errors.toLocaleString()}</div>
+    </div>
+    <div class="info-card">
+      <div class="label">Error Rate</div>
+      <div class="value ${severityClass}">${s.error_rate_percent.toFixed(2)}%</div>
+    </div>
+    <div class="info-card">
+      <div class="label">Affected Sessions</div>
+      <div class="value">${s.affected_sessions}</div>
+    </div>
+    <div class="info-card">
+      <div class="label">Session Error Rate</div>
+      <div class="value">${s.session_error_rate_percent.toFixed(1)}%</div>
+    </div>
+    <div class="info-card">
+      <div class="label">MTBF</div>
+      <div class="value" title="Mean Time Between Failures">${mtbfText}</div>
+    </div>
+  `;
+}
+
+function renderErrorRateChart(data) {
+  const canvas = document.getElementById("errorRateChart");
+  const ctx = canvas.getContext("2d");
+  const rates = data.rate_over_time.slice().reverse(); // oldest first
+
+  if (rates.length === 0) {
+    ctx.fillStyle = "#888";
+    ctx.font = "14px sans-serif";
+    ctx.textAlign = "center";
+    ctx.fillText("No error rate data", canvas.width / 2, canvas.height / 2);
+    return;
+  }
+
+  const W = canvas.width;
+  const H = canvas.height;
+  const pad = { top: 30, right: 20, bottom: 60, left: 60 };
+  const plotW = W - pad.left - pad.right;
+  const plotH = H - pad.top - pad.bottom;
+
+  ctx.clearRect(0, 0, W, H);
+
+  const maxRate = Math.max(...rates.map(r => r.error_rate), 1);
+  const maxCount = Math.max(...rates.map(r => r.error_count), 1);
+
+  // Draw gridlines
+  ctx.strokeStyle = "rgba(255,255,255,0.06)";
+  ctx.lineWidth = 1;
+  for (let i = 0; i <= 4; i++) {
+    const y = pad.top + (plotH / 4) * i;
+    ctx.beginPath();
+    ctx.moveTo(pad.left, y);
+    ctx.lineTo(W - pad.right, y);
+    ctx.stroke();
+  }
+
+  // Bar chart for error count
+  const barW = Math.max(2, (plotW / rates.length) * 0.6);
+  ctx.fillStyle = "rgba(239,68,68,0.3)";
+  rates.forEach((r, i) => {
+    const x = pad.left + (i + 0.5) * (plotW / rates.length) - barW / 2;
+    const barH = (r.error_count / maxCount) * plotH;
+    ctx.fillRect(x, pad.top + plotH - barH, barW, barH);
+  });
+
+  // Line chart for error rate %
+  ctx.strokeStyle = "#ef4444";
+  ctx.lineWidth = 2;
+  ctx.beginPath();
+  rates.forEach((r, i) => {
+    const x = pad.left + (i + 0.5) * (plotW / rates.length);
+    const y = pad.top + plotH - (r.error_rate / maxRate) * plotH;
+    if (i === 0) ctx.moveTo(x, y);
+    else ctx.lineTo(x, y);
+  });
+  ctx.stroke();
+
+  // Dots on line
+  ctx.fillStyle = "#ef4444";
+  rates.forEach((r, i) => {
+    const x = pad.left + (i + 0.5) * (plotW / rates.length);
+    const y = pad.top + plotH - (r.error_rate / maxRate) * plotH;
+    ctx.beginPath();
+    ctx.arc(x, y, 3, 0, Math.PI * 2);
+    ctx.fill();
+  });
+
+  // X-axis labels (show every Nth)
+  ctx.fillStyle = "#888";
+  ctx.font = "11px sans-serif";
+  ctx.textAlign = "center";
+  const step = Math.max(1, Math.floor(rates.length / 8));
+  rates.forEach((r, i) => {
+    if (i % step === 0 || i === rates.length - 1) {
+      const x = pad.left + (i + 0.5) * (plotW / rates.length);
+      const label = r.day.slice(5); // MM-DD
+      ctx.save();
+      ctx.translate(x, pad.top + plotH + 12);
+      ctx.rotate(-0.5);
+      ctx.fillText(label, 0, 0);
+      ctx.restore();
+    }
+  });
+
+  // Y-axis labels (error rate %)
+  ctx.textAlign = "right";
+  for (let i = 0; i <= 4; i++) {
+    const y = pad.top + (plotH / 4) * (4 - i);
+    const val = ((maxRate / 4) * i).toFixed(1);
+    ctx.fillText(`${val}%`, pad.left - 8, y + 4);
+  }
+
+  // Legend
+  ctx.fillStyle = "rgba(239,68,68,0.3)";
+  ctx.fillRect(pad.left + 10, 8, 14, 10);
+  ctx.fillStyle = "#888";
+  ctx.font = "11px sans-serif";
+  ctx.textAlign = "left";
+  ctx.fillText("Count", pad.left + 28, 17);
+
+  ctx.strokeStyle = "#ef4444";
+  ctx.lineWidth = 2;
+  ctx.beginPath();
+  ctx.moveTo(pad.left + 90, 13);
+  ctx.lineTo(pad.left + 104, 13);
+  ctx.stroke();
+  ctx.fillText("Rate %", pad.left + 108, 17);
+}
+
+function renderErrorHourlyChart(data) {
+  const canvas = document.getElementById("errorHourlyChart");
+  const ctx = canvas.getContext("2d");
+  const hours = data.hourly_distribution;
+
+  // Build full 24-hour array
+  const counts = new Array(24).fill(0);
+  hours.forEach(h => { counts[h.hour] = h.error_count; });
+
+  const W = canvas.width;
+  const H = canvas.height;
+  const pad = { top: 20, right: 20, bottom: 40, left: 50 };
+  const plotW = W - pad.left - pad.right;
+  const plotH = H - pad.top - pad.bottom;
+
+  ctx.clearRect(0, 0, W, H);
+
+  const maxCount = Math.max(...counts, 1);
+  const barW = (plotW / 24) * 0.7;
+
+  // Bars
+  counts.forEach((count, hour) => {
+    const x = pad.left + (hour + 0.5) * (plotW / 24) - barW / 2;
+    const barH = (count / maxCount) * plotH;
+    const intensity = count / maxCount;
+    ctx.fillStyle = `rgba(239, 68, 68, ${0.2 + intensity * 0.6})`;
+    ctx.fillRect(x, pad.top + plotH - barH, barW, barH);
+  });
+
+  // X-axis labels
+  ctx.fillStyle = "#888";
+  ctx.font = "10px sans-serif";
+  ctx.textAlign = "center";
+  for (let h = 0; h < 24; h += 3) {
+    const x = pad.left + (h + 0.5) * (plotW / 24);
+    ctx.fillText(`${h}:00`, x, pad.top + plotH + 18);
+  }
+
+  // Y-axis labels
+  ctx.textAlign = "right";
+  for (let i = 0; i <= 4; i++) {
+    const y = pad.top + (plotH / 4) * (4 - i);
+    const val = Math.round((maxCount / 4) * i);
+    ctx.fillText(val, pad.left - 8, y + 4);
+  }
+}
+
+function renderErrorTypeChart(data) {
+  const canvas = document.getElementById("errorTypeChart");
+  const ctx = canvas.getContext("2d");
+  const types = data.by_type;
+
+  if (types.length === 0) {
+    ctx.fillStyle = "#888";
+    ctx.font = "14px sans-serif";
+    ctx.textAlign = "center";
+    ctx.fillText("No data", canvas.width / 2, canvas.height / 2);
+    return;
+  }
+
+  const W = canvas.width;
+  const H = canvas.height;
+  const centerX = W / 2;
+  const centerY = H / 2;
+  const radius = Math.min(W, H) * 0.35;
+
+  const colors = ["#ef4444", "#f97316", "#eab308", "#3b82f6", "#8b5cf6", "#06b6d4"];
+  const total = types.reduce((sum, t) => sum + t.count, 0);
+
+  ctx.clearRect(0, 0, W, H);
+
+  let startAngle = -Math.PI / 2;
+  types.forEach((t, i) => {
+    const sliceAngle = (t.count / total) * Math.PI * 2;
+    ctx.fillStyle = colors[i % colors.length];
+    ctx.beginPath();
+    ctx.moveTo(centerX, centerY);
+    ctx.arc(centerX, centerY, radius, startAngle, startAngle + sliceAngle);
+    ctx.closePath();
+    ctx.fill();
+
+    // Label
+    const midAngle = startAngle + sliceAngle / 2;
+    const labelR = radius + 20;
+    const lx = centerX + Math.cos(midAngle) * labelR;
+    const ly = centerY + Math.sin(midAngle) * labelR;
+    ctx.fillStyle = "#ccc";
+    ctx.font = "11px sans-serif";
+    ctx.textAlign = midAngle > Math.PI / 2 && midAngle < Math.PI * 1.5 ? "right" : "left";
+    const pct = ((t.count / total) * 100).toFixed(0);
+    ctx.fillText(`${t.event_type} (${pct}%)`, lx, ly);
+
+    startAngle += sliceAngle;
+  });
+
+  // Center hole for donut effect
+  ctx.fillStyle = getComputedStyle(document.documentElement).getPropertyValue("--bg-primary").trim() || "#1a1a2e";
+  ctx.beginPath();
+  ctx.arc(centerX, centerY, radius * 0.55, 0, Math.PI * 2);
+  ctx.fill();
+
+  // Center text
+  ctx.fillStyle = "#fff";
+  ctx.font = "bold 18px sans-serif";
+  ctx.textAlign = "center";
+  ctx.textBaseline = "middle";
+  ctx.fillText(total.toLocaleString(), centerX, centerY - 8);
+  ctx.font = "11px sans-serif";
+  ctx.fillStyle = "#888";
+  ctx.fillText("total errors", centerX, centerY + 10);
+}
+
+function renderErrorModelTable(data) {
+  const models = data.by_model;
+  if (!models || models.length === 0) {
+    document.getElementById("errorModelTable").innerHTML =
+      '<p style="color:var(--text-muted);padding:8px">No model-specific error data.</p>';
+    return;
+  }
+
+  const rows = models.map(m => {
+    const errRate = m.total_calls > 0
+      ? ((m.error_count / m.total_calls) * 100).toFixed(2) + "%"
+      : "—";
+    return `<tr>
+      <td>${escHtml(m.model)}</td>
+      <td style="text-align:right">${m.error_count.toLocaleString()}</td>
+      <td style="text-align:right">${m.total_calls.toLocaleString()}</td>
+      <td style="text-align:right">${errRate}</td>
+      <td style="text-align:right">${m.affected_sessions}</td>
+    </tr>`;
+  }).join("");
+
+  document.getElementById("errorModelTable").innerHTML = `
+    <table class="token-table">
+      <thead>
+        <tr>
+          <th>Model</th>
+          <th style="text-align:right">Errors</th>
+          <th style="text-align:right">Total Calls</th>
+          <th style="text-align:right">Error Rate</th>
+          <th style="text-align:right">Sessions</th>
+        </tr>
+      </thead>
+      <tbody>${rows}</tbody>
+    </table>
+  `;
+}
+
+function renderErrorAgentTable(data) {
+  const agents = data.by_agent;
+  const section = document.getElementById("errorAgentSection");
+
+  if (!agents || agents.length === 0) {
+    section.style.display = "none";
+    return;
+  }
+  section.style.display = "block";
+
+  const rows = agents.map(a => {
+    const sessionRate = a.total_sessions > 0
+      ? ((a.error_sessions / a.total_sessions) * 100).toFixed(1) + "%"
+      : "—";
+    return `<tr>
+      <td>${escHtml(a.agent_name || "unknown")}</td>
+      <td style="text-align:right">${a.error_count.toLocaleString()}</td>
+      <td style="text-align:right">${a.error_sessions}</td>
+      <td style="text-align:right">${a.total_sessions}</td>
+      <td style="text-align:right">${sessionRate}</td>
+    </tr>`;
+  }).join("");
+
+  document.getElementById("errorAgentTable").innerHTML = `
+    <table class="token-table">
+      <thead>
+        <tr>
+          <th>Agent</th>
+          <th style="text-align:right">Errors</th>
+          <th style="text-align:right">Error Sessions</th>
+          <th style="text-align:right">Total Sessions</th>
+          <th style="text-align:right">Session Error Rate</th>
+        </tr>
+      </thead>
+      <tbody>${rows}</tbody>
+    </table>
+  `;
+}
+
+function renderTopErrors(data) {
+  const errors = data.top_errors;
+  if (!errors || errors.length === 0) {
+    document.getElementById("topErrorsList").innerHTML =
+      '<p style="color:var(--text-muted);padding:8px">No error details available.</p>';
+    return;
+  }
+
+  const items = errors.map(err => {
+    const msg = err.error_message || err.output_data || "Unknown error";
+    const truncated = msg.length > 150 ? msg.slice(0, 150) + "…" : msg;
+    const firstSeen = err.first_seen ? new Date(err.first_seen).toLocaleDateString() : "—";
+    const lastSeen = err.last_seen ? new Date(err.last_seen).toLocaleDateString() : "—";
+
+    return `
+      <div class="error-item">
+        <div class="error-item-header">
+          <span class="error-type-badge error-badge-${err.event_type}">${escHtml(err.event_type)}</span>
+          <span class="error-count">${err.occurrences}×</span>
+          ${err.model ? `<span class="error-model">${escHtml(err.model)}</span>` : ""}
+        </div>
+        <div class="error-message">${escHtml(truncated)}</div>
+        <div class="error-meta">
+          ${err.affected_sessions} session${err.affected_sessions !== 1 ? "s" : ""} ·
+          First: ${firstSeen} · Last: ${lastSeen}
+        </div>
+      </div>
+    `;
+  }).join("");
+
+  document.getElementById("topErrorsList").innerHTML = items;
+}
+
+function renderErrorSessions(data) {
+  const sessions = data.error_sessions;
+  const section = document.getElementById("errorSessionsSection");
+
+  if (!sessions || sessions.length === 0) {
+    section.style.display = "none";
+    return;
+  }
+  section.style.display = "block";
+
+  const rows = sessions.map(s => {
+    const started = new Date(s.started_at).toLocaleString();
+    const errPct = s.total_events > 0
+      ? ((s.error_count / s.total_events) * 100).toFixed(1) + "%"
+      : "—";
+    return `<tr class="clickable-row" onclick="loadSessionDetail('${escHtml(s.session_id)}')">
+      <td title="${escHtml(s.session_id)}">${escHtml(s.session_id.slice(0, 12))}…</td>
+      <td>${escHtml(s.agent_name || "—")}</td>
+      <td>${started}</td>
+      <td style="text-align:right;color:var(--red)">${s.error_count}</td>
+      <td style="text-align:right">${s.total_events}</td>
+      <td style="text-align:right">${errPct}</td>
+    </tr>`;
+  }).join("");
+
+  document.getElementById("errorSessionsList").innerHTML = `
+    <table class="token-table">
+      <thead>
+        <tr>
+          <th>Session ID</th>
+          <th>Agent</th>
+          <th>Started</th>
+          <th style="text-align:right">Errors</th>
+          <th style="text-align:right">Events</th>
+          <th style="text-align:right">Error Rate</th>
+        </tr>
+      </thead>
+      <tbody>${rows}</tbody>
+    </table>
+  `;
+}
+
