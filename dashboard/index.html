@@ -200,6 +200,7 @@
           <button class="tab" data-tab="tokens" onclick="switchTab('tokens')">💰 Tokens</button>
           <button class="tab" data-tab="costs" onclick="switchTab('costs')">💲 Costs</button>
           <button class="tab" data-tab="explain" onclick="switchTab('explain')">💡 Explain</button>
+          <button class="tab" data-tab="annotations" onclick="switchTab('annotations')">📝 Notes</button>
         </div>
 
         <!-- Timeline Tab -->
@@ -327,6 +328,40 @@
                 <button class="btn btn-secondary" onclick="resetPricing()">↻ Reset to Defaults</button>
               </div>
             </div>
+          </div>
+        </div>
+      </div>
+
+        <!-- Annotations Tab -->
+        <div id="annotationsTab" class="tab-content">
+          <div class="annotations-toolbar">
+            <button class="btn btn-export" onclick="showAnnotationForm()">+ Add Note</button>
+            <select id="annotationTypeFilter" class="select-input" onchange="loadAnnotations()">
+              <option value="">All Types</option>
+              <option value="note">📝 Note</option>
+              <option value="bug">🐛 Bug</option>
+              <option value="insight">💡 Insight</option>
+              <option value="warning">⚠️ Warning</option>
+              <option value="milestone">🏁 Milestone</option>
+            </select>
+          </div>
+          <div id="annotationForm" class="annotation-form" style="display:none">
+            <textarea id="annotationText" class="annotation-textarea" placeholder="Write your note..." rows="3"></textarea>
+            <div class="annotation-form-row">
+              <input type="text" id="annotationAuthor" class="form-input" placeholder="Author (optional)" style="max-width:200px">
+              <select id="annotationType" class="select-input">
+                <option value="note">📝 Note</option>
+                <option value="bug">🐛 Bug</option>
+                <option value="insight">💡 Insight</option>
+                <option value="warning">⚠️ Warning</option>
+                <option value="milestone">🏁 Milestone</option>
+              </select>
+              <button class="btn btn-export" onclick="saveAnnotation()">Save</button>
+              <button class="btn btn-secondary" onclick="hideAnnotationForm()">Cancel</button>
+            </div>
+          </div>
+          <div id="annotationsList" class="annotations-list">
+            <div class="loading">Select the Notes tab to load annotations.</div>
           </div>
         </div>
       </div>

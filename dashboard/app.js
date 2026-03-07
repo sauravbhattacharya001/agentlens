@@ -598,6 +598,10 @@ function switchTab(tabName) {
   if (tabName === "costs" && currentSession && !costData) {
     loadCosts(currentSession.session_id);
   }
+  // Lazy-load annotations
+  if (tabName === "annotations" && currentSession) {
+    loadAnnotations();
+  }
 }
 
 // ── Compare Selection ───────────────────────────────────────────────
@@ -2704,4 +2708,94 @@ function toggleBookmarkFilter() {
     btn.title = showOnlyBookmarks ? "Show all sessions" : "Show bookmarked only";
   }
   loadSessions();
+}
+
+// ── Annotations ─────────────────────────────────────────────────────
+
+const ANNOTATION_ICONS = { note: '📝', bug: '🐛', insight: '💡', warning: '⚠️', milestone: '🏁' };
+
+function showAnnotationForm() {
+  document.getElementById("annotationForm").style.display = "block";
+  document.getElementById("annotationText").focus();
+}
+
+function hideAnnotationForm() {
+  document.getElementById("annotationForm").style.display = "none";
+  document.getElementById("annotationText").value = "";
+  document.getElementById("annotationAuthor").value = "";
+  document.getElementById("annotationType").value = "note";
+}
+
+async function loadAnnotations() {
+  if (!currentSession) return;
+  const list = document.getElementById("annotationsList");
+  list.innerHTML = '<div class="loading">Loading annotations...</div>';
+
+  const typeFilter = document.getElementById("annotationTypeFilter").value;
+  const params = new URLSearchParams();
+  if (typeFilter) params.set("type", typeFilter);
+  params.set("limit", "200");
+
+  try {
+    const res = await fetch(`${API_BASE}/sessions/${currentSession.session_id}/annotations?${params}`);
+    const data = await res.json();
+
+    if (!data.annotations || data.annotations.length === 0) {
+      list.innerHTML = '<div class="loading">No annotations yet. Click "+ Add Note" to create one.</div>';
+      return;
+    }
+
+    list.innerHTML = data.annotations.map(a => `
+      <div class="annotation-card annotation-${escHtml(a.type)}">
+        <div class="annotation-header">
+          <span class="annotation-type-badge">${ANNOTATION_ICONS[a.type] || '📝'} ${escHtml(a.type)}</span>
+          <span class="annotation-author">${escHtml(a.author)}</span>
+          <span class="annotation-time">${formatTime(a.created_at)}</span>
+          <button class="btn btn-ghost annotation-delete" onclick="deleteAnnotation('${a.annotation_id}')" title="Delete">🗑</button>
+        </div>
+        <div class="annotation-body">${escHtml(a.text)}</div>
+      </div>
+    `).join("");
+  } catch (e) {
+    list.innerHTML = `<div class="loading">Failed to load annotations: ${escHtml(e.message)}</div>`;
+  }
+}
+
+async function saveAnnotation() {
+  if (!currentSession) return;
+  const text = document.getElementById("annotationText").value.trim();
+  if (!text) { alert("Note text is required"); return; }
+
+  const author = document.getElementById("annotationAuthor").value.trim() || "user";
+  const type = document.getElementById("annotationType").value;
+
+  try {
+    const res = await fetch(`${API_BASE}/sessions/${currentSession.session_id}/annotations`, {
+      method: "POST",
+      headers: { "Content-Type": "application/json" },
+      body: JSON.stringify({ text, author, type }),
+    });
+    if (!res.ok) {
+      const err = await res.json();
+      alert("Failed: " + (err.error || res.statusText));
+      return;
+    }
+    hideAnnotationForm();
+    showToast("📝 Annotation saved");
+    loadAnnotations();
+  } catch (e) {
+    alert("Failed to save annotation: " + e.message);
+  }
+}
+
+async function deleteAnnotation(annotationId) {
+  if (!currentSession) return;
+  if (!confirm("Delete this annotation?")) return;
+  try {
+    await fetch(`${API_BASE}/sessions/${currentSession.session_id}/annotations/${annotationId}`, { method: "DELETE" });
+    showToast("Annotation deleted");
+    loadAnnotations();
+  } catch (e) {
+    alert("Failed to delete: " + e.message);
+  }
 }

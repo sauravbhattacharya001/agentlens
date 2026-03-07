@@ -1579,3 +1579,101 @@ body {
 .alert-eval-result .fired { color: #f85149; font-weight: 600; }
 .alert-eval-result .ok { color: #3fb950; }
 .alert-eval-result .cooldown { color: #d29922; }
+
+/* ── Annotations ─────────────────────────────────────────────────── */
+
+.annotations-toolbar {
+  display: flex;
+  gap: 12px;
+  align-items: center;
+  margin-bottom: 16px;
+}
+
+.annotation-form {
+  background: var(--bg-tertiary);
+  border: 1px solid var(--border);
+  border-radius: var(--radius);
+  padding: 16px;
+  margin-bottom: 16px;
+}
+
+.annotation-textarea {
+  width: 100%;
+  background: var(--bg-secondary);
+  color: var(--text-primary);
+  border: 1px solid var(--border);
+  border-radius: var(--radius-sm);
+  padding: 10px;
+  font-family: inherit;
+  font-size: 0.9rem;
+  resize: vertical;
+  margin-bottom: 10px;
+}
+.annotation-textarea:focus {
+  outline: none;
+  border-color: var(--accent);
+}
+
+.annotation-form-row {
+  display: flex;
+  gap: 8px;
+  align-items: center;
+  flex-wrap: wrap;
+}
+
+.annotations-list {
+  display: flex;
+  flex-direction: column;
+  gap: 10px;
+}
+
+.annotation-card {
+  background: var(--bg-secondary);
+  border: 1px solid var(--border);
+  border-radius: var(--radius);
+  padding: 14px 16px;
+  border-left: 3px solid var(--accent);
+}
+.annotation-bug { border-left-color: var(--red); }
+.annotation-insight { border-left-color: var(--yellow); }
+.annotation-warning { border-left-color: var(--orange); }
+.annotation-milestone { border-left-color: var(--green); }
+.annotation-note { border-left-color: var(--accent); }
+
+.annotation-header {
+  display: flex;
+  align-items: center;
+  gap: 10px;
+  margin-bottom: 8px;
+  font-size: 0.8rem;
+  color: var(--text-secondary);
+}
+
+.annotation-type-badge {
+  font-weight: 600;
+  text-transform: capitalize;
+}
+
+.annotation-author {
+  color: var(--accent);
+}
+
+.annotation-time {
+  margin-left: auto;
+}
+
+.annotation-delete {
+  font-size: 0.8rem;
+  padding: 2px 6px;
+  opacity: 0.5;
+}
+.annotation-delete:hover {
+  opacity: 1;
+}
+
+.annotation-body {
+  font-size: 0.9rem;
+  line-height: 1.5;
+  white-space: pre-wrap;
+  word-break: break-word;
+}
