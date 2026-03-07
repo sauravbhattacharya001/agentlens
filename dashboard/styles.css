@@ -1677,3 +1677,137 @@ body {
   white-space: pre-wrap;
   word-break: break-word;
 }
+
+/* ── Command Palette ─────────────────────────────────────────────── */
+
+.command-palette-overlay {
+  position: fixed;
+  inset: 0;
+  background: rgba(0, 0, 0, 0.6);
+  z-index: 10000;
+  display: flex;
+  justify-content: center;
+  padding-top: 15vh;
+  backdrop-filter: blur(2px);
+}
+
+.command-palette {
+  background: #1e1e2e;
+  border: 1px solid #45475a;
+  border-radius: 12px;
+  width: 560px;
+  max-height: 420px;
+  display: flex;
+  flex-direction: column;
+  box-shadow: 0 16px 48px rgba(0, 0, 0, 0.5);
+  overflow: hidden;
+}
+
+.command-palette-input-row {
+  display: flex;
+  align-items: center;
+  gap: 10px;
+  padding: 14px 16px;
+  border-bottom: 1px solid #313244;
+}
+
+.command-palette-icon {
+  font-size: 1.1em;
+  opacity: 0.6;
+}
+
+.command-palette-input {
+  flex: 1;
+  background: transparent;
+  border: none;
+  outline: none;
+  color: #cdd6f4;
+  font-size: 15px;
+  font-family: inherit;
+}
+
+.command-palette-input::placeholder {
+  color: #6c7086;
+}
+
+.command-palette-hint {
+  background: #313244;
+  color: #a6adc8;
+  padding: 2px 8px;
+  border-radius: 4px;
+  font-size: 11px;
+  font-family: inherit;
+}
+
+.command-palette-results {
+  overflow-y: auto;
+  padding: 6px 0;
+}
+
+.command-palette-item {
+  display: flex;
+  align-items: center;
+  gap: 12px;
+  padding: 10px 16px;
+  cursor: pointer;
+  color: #cdd6f4;
+  font-size: 14px;
+  transition: background 0.1s;
+}
+
+.command-palette-item:hover,
+.command-palette-item.active {
+  background: #313244;
+}
+
+.command-palette-item-icon {
+  font-size: 1.1em;
+  width: 24px;
+  text-align: center;
+  flex-shrink: 0;
+}
+
+.command-palette-item-label {
+  flex: 1;
+  min-width: 0;
+}
+
+.command-palette-item-name {
+  font-weight: 500;
+}
+
+.command-palette-item-desc {
+  font-size: 12px;
+  color: #6c7086;
+  margin-top: 1px;
+}
+
+.command-palette-item-shortcut {
+  color: #6c7086;
+  font-size: 11px;
+  flex-shrink: 0;
+}
+
+.command-palette-item-shortcut kbd {
+  background: #313244;
+  padding: 1px 6px;
+  border-radius: 3px;
+  font-family: inherit;
+  font-size: 11px;
+}
+
+.command-palette-empty {
+  padding: 24px 16px;
+  text-align: center;
+  color: #6c7086;
+  font-size: 13px;
+}
+
+.command-palette-group {
+  padding: 6px 16px 4px;
+  font-size: 11px;
+  color: #6c7086;
+  text-transform: uppercase;
+  letter-spacing: 0.5px;
+  font-weight: 600;
+}

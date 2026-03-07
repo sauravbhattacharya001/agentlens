@@ -2799,3 +2799,158 @@ async function deleteAnnotation(annotationId) {
     alert("Failed to delete: " + e.message);
   }
 }
+
+// ── Command Palette (Ctrl+K) ───────────────────────────────────────
+
+let commandPaletteActive = false;
+let commandActiveIndex = 0;
+let filteredCommands = [];
+
+function getCommandRegistry() {
+  const cmds = [
+    // Navigation
+    { group: "Navigation", icon: "📋", name: "Go to Sessions", desc: "View all sessions", action: () => { showSessionList(); }, keywords: "sessions list home" },
+    { group: "Navigation", icon: "📈", name: "Toggle Analytics", desc: "Show/hide analytics panel", action: () => { toggleAnalytics(); }, keywords: "analytics stats charts" },
+    { group: "Navigation", icon: "🔔", name: "Open Alerts", desc: "View alerts and rules", action: () => { openAlertsModal(); }, keywords: "alerts notifications rules" },
+
+    // Actions
+    { group: "Actions", icon: "↻", name: "Refresh Sessions", desc: "Reload the session list", action: () => { loadSessions(); }, keywords: "refresh reload update" },
+    { group: "Actions", icon: "☆", name: "Toggle Bookmark Filter", desc: "Show only bookmarked sessions", action: () => { toggleBookmarkFilter(); }, keywords: "bookmark star filter" },
+    { group: "Actions", icon: "🔎", name: "Search Sessions", desc: "Search sessions by name or ID", action: () => { document.getElementById("sessionSearchInput")?.focus(); }, keywords: "search find query" },
+    { group: "Actions", icon: "✕", name: "Clear Compare Selection", desc: "Reset comparison picks", action: () => { clearCompareSelection(); }, keywords: "compare clear reset" },
+
+    // Filters
+    { group: "Filters", icon: "🟢", name: "Filter: Active", desc: "Show only active sessions", action: () => { document.getElementById("statusFilter").value = "active"; loadSessions(); }, keywords: "filter active status" },
+    { group: "Filters", icon: "✅", name: "Filter: Completed", desc: "Show only completed sessions", action: () => { document.getElementById("statusFilter").value = "completed"; loadSessions(); }, keywords: "filter completed done" },
+    { group: "Filters", icon: "🔴", name: "Filter: Error", desc: "Show only errored sessions", action: () => { document.getElementById("statusFilter").value = "error"; loadSessions(); }, keywords: "filter error failed" },
+    { group: "Filters", icon: "📊", name: "Filter: All Statuses", desc: "Remove status filter", action: () => { document.getElementById("statusFilter").value = ""; loadSessions(); }, keywords: "filter all clear" },
+  ];
+
+  // Session-specific commands when viewing a session
+  if (currentSession) {
+    cmds.push(
+      { group: "Current Session", icon: "📄", name: "Export as JSON", desc: `Export ${currentSession.session_id.slice(0, 8)}… as JSON`, action: () => { exportSession("json"); }, keywords: "export json download" },
+      { group: "Current Session", icon: "📄", name: "Export as CSV", desc: `Export ${currentSession.session_id.slice(0, 8)}… as CSV`, action: () => { exportSession("csv"); }, keywords: "export csv download" },
+      { group: "Current Session", icon: "💡", name: "Load Explanation", desc: "Get AI explanation for this session", action: () => { loadExplanation(currentSession.session_id); }, keywords: "explain ai insight" },
+      { group: "Current Session", icon: "💰", name: "View Costs", desc: "Show cost breakdown", action: () => { switchTab("costs"); }, keywords: "cost pricing tokens money" },
+      { group: "Current Session", icon: "📝", name: "Add Annotation", desc: "Add a note to this session", action: () => { showAnnotationForm(); }, keywords: "annotate note comment" },
+      { group: "Current Session", icon: "⭐", name: "Toggle Bookmark", desc: "Star/unstar this session", action: () => { toggleBookmark(currentSession.session_id); }, keywords: "bookmark star favorite" },
+      { group: "Current Session", icon: "⬅️", name: "Back to Sessions", desc: "Return to session list", action: () => { showSessionList(); }, keywords: "back list return" }
+    );
+  }
+
+  return cmds;
+}
+
+function openCommandPalette() {
+  const overlay = document.getElementById("commandPalette");
+  overlay.style.display = "flex";
+  commandPaletteActive = true;
+  commandActiveIndex = 0;
+  const input = document.getElementById("commandPaletteInput");
+  input.value = "";
+  filterCommands();
+  setTimeout(() => input.focus(), 50);
+}
+
+function closeCommandPalette(e) {
+  if (e && e.target && e.target.id !== "commandPalette" && e.target.className !== "command-palette-overlay") return;
+  const overlay = document.getElementById("commandPalette");
+  overlay.style.display = "none";
+  commandPaletteActive = false;
+}
+
+function closeCommandPaletteForce() {
+  document.getElementById("commandPalette").style.display = "none";
+  commandPaletteActive = false;
+}
+
+function filterCommands() {
+  const query = document.getElementById("commandPaletteInput").value.toLowerCase().trim();
+  const all = getCommandRegistry();
+
+  if (!query) {
+    filteredCommands = all;
+  } else {
+    filteredCommands = all.filter(cmd => {
+      const text = `${cmd.name} ${cmd.desc} ${cmd.keywords}`.toLowerCase();
+      return query.split(/\s+/).every(word => text.includes(word));
+    });
+  }
+
+  commandActiveIndex = 0;
+  renderCommandResults();
+}
+
+function renderCommandResults() {
+  const container = document.getElementById("commandPaletteResults");
+
+  if (filteredCommands.length === 0) {
+    container.innerHTML = '<div class="command-palette-empty">No matching commands</div>';
+    return;
+  }
+
+  let html = "";
+  let lastGroup = "";
+  filteredCommands.forEach((cmd, i) => {
+    if (cmd.group !== lastGroup) {
+      html += `<div class="command-palette-group">${escHtml(cmd.group)}</div>`;
+      lastGroup = cmd.group;
+    }
+    html += `<div class="command-palette-item ${i === commandActiveIndex ? 'active' : ''}"
+      onmouseenter="commandActiveIndex=${i};renderCommandResults()"
+      onclick="executeCommand(${i})">
+      <span class="command-palette-item-icon">${cmd.icon}</span>
+      <div class="command-palette-item-label">
+        <div class="command-palette-item-name">${escHtml(cmd.name)}</div>
+        <div class="command-palette-item-desc">${escHtml(cmd.desc)}</div>
+      </div>
+    </div>`;
+  });
+
+  container.innerHTML = html;
+
+  // Scroll active item into view
+  const active = container.querySelector(".command-palette-item.active");
+  if (active) active.scrollIntoView({ block: "nearest" });
+}
+
+function handleCommandKey(e) {
+  if (e.key === "Escape") {
+    e.preventDefault();
+    closeCommandPaletteForce();
+  } else if (e.key === "ArrowDown") {
+    e.preventDefault();
+    commandActiveIndex = Math.min(commandActiveIndex + 1, filteredCommands.length - 1);
+    renderCommandResults();
+  } else if (e.key === "ArrowUp") {
+    e.preventDefault();
+    commandActiveIndex = Math.max(commandActiveIndex - 1, 0);
+    renderCommandResults();
+  } else if (e.key === "Enter") {
+    e.preventDefault();
+    executeCommand(commandActiveIndex);
+  }
+}
+
+function executeCommand(index) {
+  const cmd = filteredCommands[index];
+  if (!cmd) return;
+  closeCommandPaletteForce();
+  cmd.action();
+}
+
+// Global keyboard shortcut: Ctrl+K / Cmd+K
+document.addEventListener("keydown", (e) => {
+  if ((e.ctrlKey || e.metaKey) && e.key === "k") {
+    e.preventDefault();
+    if (commandPaletteActive) {
+      closeCommandPaletteForce();
+    } else {
+      openCommandPalette();
+    }
+  }
+  if (e.key === "Escape" && commandPaletteActive) {
+    closeCommandPaletteForce();
+  }
+});

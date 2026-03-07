@@ -520,6 +520,20 @@
     </div>
   </div>
 
+  <!-- Command Palette (Ctrl+K) -->
+  <div id="commandPalette" class="command-palette-overlay" style="display:none" onclick="closeCommandPalette(event)">
+    <div class="command-palette" onclick="event.stopPropagation()">
+      <div class="command-palette-input-row">
+        <span class="command-palette-icon">🔍</span>
+        <input type="text" id="commandPaletteInput" class="command-palette-input"
+          placeholder="Type a command or search…" autocomplete="off"
+          oninput="filterCommands()" onkeydown="handleCommandKey(event)">
+        <kbd class="command-palette-hint">esc</kbd>
+      </div>
+      <div id="commandPaletteResults" class="command-palette-results"></div>
+    </div>
+  </div>
+
   <script src="app.js"></script>
 </body>
 </html>
