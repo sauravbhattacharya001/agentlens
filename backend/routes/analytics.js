@@ -284,27 +284,31 @@ router.get("/performance", isTest ? analyticsCacheMw : cacheMiddleware(analytics
 
     const modelRows = db.prepare(modelSql).all(...params);
 
-    // For per-model percentiles we still need sorted durations per group.
-    // Use a single pass over the (already sorted) global durations? No —
-    // global sort is by duration_ms, not grouped.  Instead, fetch per-model
-    // durations in one query with the model column, then split in JS.
-    // This is still cheaper than the original (2 cols vs 6, and group
-    // stats are precomputed above).
-    const modelDurSql = `
-      SELECT COALESCE(e.model, '(unknown)') AS grp, e.duration_ms
+    // Fetch model + event_type + duration in a single query instead of
+    // two separate full-table scans. Split into per-model and per-type
+    // duration maps in one JS pass. This halves the I/O for percentile
+    // computation on large datasets.
+    const groupedDurSql = `
+      SELECT COALESCE(e.model, '(unknown)') AS model_grp, e.event_type AS type_grp, e.duration_ms
       FROM events e
       INNER JOIN sessions s ON e.session_id = s.session_id
       WHERE ${baseWhere}
-      ORDER BY grp, e.duration_ms ASC`;
+      ORDER BY e.duration_ms ASC`;
 
-    const modelDurRows = db.prepare(modelDurSql).all(...params);
+    const groupedDurRows = db.prepare(groupedDurSql).all(...params);
 
-    // Split durations by model (already sorted within each group)
+    // Split durations by model and by event_type in one pass
     const modelDurMap = Object.create(null);
-    for (const r of modelDurRows) {
-      if (!modelDurMap[r.grp]) modelDurMap[r.grp] = [];
-      modelDurMap[r.grp].push(r.duration_ms);
+    const typeDurMap = Object.create(null);
+    for (const r of groupedDurRows) {
+      if (!modelDurMap[r.model_grp]) modelDurMap[r.model_grp] = [];
+      modelDurMap[r.model_grp].push(r.duration_ms);
+      if (!typeDurMap[r.type_grp]) typeDurMap[r.type_grp] = [];
+      typeDurMap[r.type_grp].push(r.duration_ms);
     }
+    // Sort per-group durations (global ORDER BY doesn't guarantee per-group order)
+    for (const durs of Object.values(modelDurMap)) durs.sort((a, b) => a - b);
+    for (const durs of Object.values(typeDurMap)) durs.sort((a, b) => a - b);
 
     const byModel = Object.create(null);
     for (const row of modelRows) {
@@ -342,21 +346,7 @@ router.get("/performance", isTest ? analyticsCacheMw : cacheMiddleware(analytics
 
     const typeRows = db.prepare(typeSql).all(...params);
 
-    // Per-type percentiles: fetch durations grouped by event_type
-    const typeDurSql = `
-      SELECT e.event_type AS grp, e.duration_ms
-      FROM events e
-      INNER JOIN sessions s ON e.session_id = s.session_id
-      WHERE ${baseWhere}
-      ORDER BY grp, e.duration_ms ASC`;
-
-    const typeDurRows = db.prepare(typeDurSql).all(...params);
-
-    const typeDurMap = Object.create(null);
-    for (const r of typeDurRows) {
-      if (!typeDurMap[r.grp]) typeDurMap[r.grp] = [];
-      typeDurMap[r.grp].push(r.duration_ms);
-    }
+    // typeDurMap already populated from the combined query above
 
     const byType = Object.create(null);
     for (const row of typeRows) {
