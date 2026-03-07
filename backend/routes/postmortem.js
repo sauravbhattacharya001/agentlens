@@ -196,7 +196,7 @@ function identifyRootCauses(errors) {
 // POST /api/postmortem/:sessionId — generate postmortem for a session
 router.post(
   "/:sessionId",
-  wrapRoute(async (req, res) => {
+  wrapRoute("generate postmortem", async (req, res) => {
     const { sessionId } = req.params;
     const stmts = getStatements();
     const rows = stmts.sessionEvents.all(sessionId);
@@ -275,7 +275,7 @@ router.post(
 // GET /api/postmortem/candidates — list sessions with enough errors for postmortem
 router.get(
   "/candidates",
-  wrapRoute(async (req, res) => {
+  wrapRoute("list postmortem candidates", async (req, res) => {
     const minErrors = parseInt(req.query.min_errors) || 2;
     const limit = Math.min(parseInt(req.query.limit) || 20, 100);
     const stmts = getStatements();

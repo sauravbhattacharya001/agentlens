@@ -9,6 +9,7 @@ let analyticsVisible = false;
 let costData = null;       // Cached cost data for current session
 let pricingData = null;    // Cached pricing configuration
 let errorData = null;      // Cached error analytics data
+let postmortemData = null;  // Cached postmortem data for current session
 
 // ── Initialization ──────────────────────────────────────────────────
 
@@ -93,6 +94,7 @@ async function loadSessionDetail(sessionId) {
   document.getElementById("sessionDetailView").classList.add("active");
   costData = null; // Reset cost data for new session
   errorData = null; // Reset error data for new session
+  postmortemData = null; // Reset postmortem data for new session
 
   try {
     const res = await fetch(`${API_BASE}/sessions/${sessionId}`);
@@ -607,6 +609,10 @@ function switchTab(tabName) {
   // Lazy-load error analytics
   if (tabName === "errors" && !errorData) {
     loadErrors();
+  }
+  // Lazy-load postmortem
+  if (tabName === "postmortem" && currentSession && !postmortemData) {
+    loadPostmortem();
   }
 }
 
@@ -2840,6 +2846,7 @@ function getCommandRegistry() {
       { group: "Current Session", icon: "💡", name: "Load Explanation", desc: "Get AI explanation for this session", action: () => { loadExplanation(currentSession.session_id); }, keywords: "explain ai insight" },
       { group: "Current Session", icon: "💰", name: "View Costs", desc: "Show cost breakdown", action: () => { switchTab("costs"); }, keywords: "cost pricing tokens money" },
       { group: "Current Session", icon: "🚨", name: "View Errors", desc: "Error analytics dashboard", action: () => { switchTab("errors"); }, keywords: "error failure crash bug debug" },
+      { group: "Current Session", icon: "🔥", name: "View Postmortem", desc: "Generate incident report", action: () => { switchTab("postmortem"); }, keywords: "postmortem incident report root cause severity" },
       { group: "Current Session", icon: "📝", name: "Add Annotation", desc: "Add a note to this session", action: () => { showAnnotationForm(); }, keywords: "annotate note comment" },
       { group: "Current Session", icon: "⭐", name: "Toggle Bookmark", desc: "Star/unstar this session", action: () => { toggleBookmark(currentSession.session_id); }, keywords: "bookmark star favorite" },
       { group: "Current Session", icon: "⬅️", name: "Back to Sessions", desc: "Return to session list", action: () => { showSessionList(); }, keywords: "back list return" }
@@ -3404,5 +3411,220 @@ function renderErrorSessions(data) {
       <tbody>${rows}</tbody>
     </table>
   `;
+}
+
+// ── Postmortem Dashboard ────────────────────────────────────────────
+
+async function loadPostmortem() {
+  if (!currentSession) return;
+
+  var loadingEl = document.getElementById("postmortemLoading");
+  var contentEl = document.getElementById("postmortemContent");
+  var emptyEl = document.getElementById("postmortemEmpty");
+
+  loadingEl.style.display = "block";
+  contentEl.style.display = "none";
+  emptyEl.style.display = "none";
+
+  try {
+    var res = await fetch(API_BASE + "/postmortem/" + encodeURIComponent(currentSession.session_id), {
+      method: "POST",
+      headers: { "Content-Type": "application/json" },
+    });
+    if (!res.ok) throw new Error("Failed to generate postmortem (status " + res.status + ")");
+    postmortemData = await res.json();
+
+    loadingEl.style.display = "none";
+
+    if (postmortemData.incident_id === "INC-NONE") {
+      emptyEl.style.display = "block";
+      return;
+    }
+
+    contentEl.style.display = "block";
+
+    renderPostmortemHeader(postmortemData);
+    renderPostmortemImpact(postmortemData);
+    renderPostmortemCauses(postmortemData);
+    renderPostmortemTimeline(postmortemData);
+  } catch (err) {
+    loadingEl.textContent = "Error: " + escHtml(err.message);
+  }
+}
+
+function severityColor(severity) {
+  if (severity === "SEV-1") return "#ef4444";
+  if (severity === "SEV-2") return "#f97316";
+  if (severity === "SEV-3") return "#eab308";
+  return "#6b7280";
+}
+
+function severityBg(severity) {
+  if (severity === "SEV-1") return "rgba(239,68,68,0.15)";
+  if (severity === "SEV-2") return "rgba(249,115,22,0.15)";
+  if (severity === "SEV-3") return "rgba(234,179,8,0.15)";
+  return "rgba(107,114,128,0.10)";
+}
+
+function renderPostmortemHeader(data) {
+  var sevColor = severityColor(data.severity);
+  var sevBgColor = severityBg(data.severity);
+  var durationText = data.duration_ms ? formatDurationShort(data.duration_ms) : "\u2014";
+  var generatedAt = data.generated_at ? formatTime(data.generated_at) : "\u2014";
+
+  document.getElementById("postmortemHeader").innerHTML =
+    '<div style="display:flex;flex-wrap:wrap;gap:16px;align-items:center">' +
+      '<div style="background:' + sevBgColor + ';color:' + sevColor + ';font-weight:700;font-size:1.5rem;padding:8px 18px;border-radius:8px;border:2px solid ' + sevColor + '">' +
+        escHtml(data.severity) +
+      '</div>' +
+      '<div style="flex:1;min-width:200px">' +
+        '<div style="font-size:0.85rem;color:var(--text-muted)">Incident ' + escHtml(data.incident_id) + '</div>' +
+        '<div style="font-size:1.1rem;font-weight:600">' + escHtml(data.title) + '</div>' +
+      '</div>' +
+      '<div class="info-card"><div class="info-label">Duration</div><div class="info-value">' + durationText + '</div></div>' +
+      '<div class="info-card"><div class="info-label">Events</div><div class="info-value">' + data.event_count + '</div></div>' +
+      '<div class="info-card"><div class="info-label">Generated</div><div class="info-value" style="font-size:0.8rem">' + generatedAt + '</div></div>' +
+    '</div>' +
+    '<div style="margin-top:12px;padding:10px 14px;background:var(--bg-card);border-radius:6px;color:var(--text-muted);font-size:0.9rem">' +
+      escHtml(data.summary) +
+    '</div>';
+}
+
+function renderPostmortemImpact(data) {
+  var impact = data.impact;
+  if (!impact) {
+    document.getElementById("postmortemImpact").innerHTML = "";
+    return;
+  }
+
+  var costText = impact.estimated_cost_impact != null
+    ? "$" + impact.estimated_cost_impact.toFixed(4)
+    : "\u2014";
+  var errorPct = impact.error_rate != null
+    ? (impact.error_rate * 100).toFixed(1) + "%"
+    : "\u2014";
+  var downtimeText = impact.downtime_ms ? formatDurationShort(impact.downtime_ms) : "\u2014";
+
+  var toolsHtml = "";
+  if (impact.affected_tools && impact.affected_tools.length > 0) {
+    toolsHtml = '<div style="margin-top:8px"><strong>Affected Tools:</strong> ' +
+      impact.affected_tools.map(function(t) {
+        return '<span style="background:rgba(59,130,246,0.15);color:#60a5fa;padding:2px 8px;border-radius:4px;font-size:0.8rem;margin-right:4px">' + escHtml(t) + '</span>';
+      }).join("") +
+    '</div>';
+  }
+
+  var modelsHtml = "";
+  if (impact.affected_models && impact.affected_models.length > 0) {
+    modelsHtml = '<div style="margin-top:6px"><strong>Affected Models:</strong> ' +
+      impact.affected_models.map(function(m) {
+        return '<span style="background:rgba(168,85,247,0.15);color:#c084fc;padding:2px 8px;border-radius:4px;font-size:0.8rem;margin-right:4px">' + escHtml(m) + '</span>';
+      }).join("") +
+    '</div>';
+  }
+
+  document.getElementById("postmortemImpact").innerHTML =
+    '<h3>\uD83D\uDCA5 Impact Assessment</h3>' +
+    '<div style="display:grid;grid-template-columns:repeat(auto-fit,minmax(140px,1fr));gap:12px;margin-top:8px">' +
+      '<div class="info-card"><div class="info-label">Errors</div><div class="info-value">' + impact.error_count + ' / ' + impact.total_events + '</div></div>' +
+      '<div class="info-card"><div class="info-label">Error Rate</div><div class="info-value" style="color:' + (impact.error_rate > 0.25 ? '#ef4444' : impact.error_rate > 0.1 ? '#f97316' : '#eab308') + '">' + errorPct + '</div></div>' +
+      '<div class="info-card"><div class="info-label">Downtime</div><div class="info-value">' + downtimeText + '</div></div>' +
+      '<div class="info-card"><div class="info-label">Tokens Wasted</div><div class="info-value">' + (impact.tokens_wasted || 0).toLocaleString() + '</div></div>' +
+      '<div class="info-card"><div class="info-label">Est. Cost</div><div class="info-value">' + costText + '</div></div>' +
+      '<div class="info-card"><div class="info-label">User-Facing</div><div class="info-value">' + (impact.user_facing ? "\u26A0\uFE0F Yes" : "No") + '</div></div>' +
+    '</div>' +
+    toolsHtml +
+    modelsHtml;
+}
+
+function renderPostmortemCauses(data) {
+  var causes = data.root_causes;
+  if (!causes || causes.length === 0) {
+    document.getElementById("postmortemCauses").innerHTML =
+      '<h3>\uD83D\uDD0D Root Cause Analysis</h3>' +
+      '<div style="color:var(--text-muted);padding:12px">No root causes identified.</div>';
+    return;
+  }
+
+  var html = '<h3>\uD83D\uDD0D Root Cause Analysis</h3>';
+  html += '<div style="display:flex;flex-direction:column;gap:10px;margin-top:8px">';
+
+  for (var i = 0; i < causes.length; i++) {
+    var cause = causes[i];
+    var confidence = Math.round(cause.confidence * 100);
+    var barColor = confidence >= 70 ? "#ef4444" : confidence >= 40 ? "#f97316" : "#eab308";
+    var categoryLabel = (cause.category || "unknown").replace(/_/g, " ");
+
+    html += '<div style="background:var(--bg-card);border-radius:8px;padding:14px;border-left:4px solid ' + barColor + '">';
+    html += '<div style="display:flex;justify-content:space-between;align-items:center">';
+    html += '<div style="font-weight:600">' + escHtml(cause.description) + '</div>';
+    html += '<div style="display:flex;align-items:center;gap:8px">';
+    html += '<span style="background:rgba(107,114,128,0.15);color:var(--text-muted);padding:2px 8px;border-radius:4px;font-size:0.75rem">' + escHtml(categoryLabel) + '</span>';
+    html += '<span style="font-weight:600;color:' + barColor + '">' + confidence + '%</span>';
+    html += '</div></div>';
+
+    // Confidence bar
+    html += '<div style="margin-top:8px;height:6px;background:rgba(255,255,255,0.08);border-radius:3px;overflow:hidden">';
+    html += '<div style="height:100%;width:' + confidence + '%;background:' + barColor + ';border-radius:3px"></div>';
+    html += '</div>';
+
+    // Evidence
+    if (cause.evidence && cause.evidence.length > 0) {
+      html += '<div style="margin-top:8px;font-size:0.85rem;color:var(--text-muted)">';
+      for (var j = 0; j < cause.evidence.length; j++) {
+        html += '<div style="margin-top:2px">\u2022 ' + escHtml(cause.evidence[j]) + '</div>';
+      }
+      html += '</div>';
+    }
+
+    if (cause.affected_events) {
+      html += '<div style="margin-top:4px;font-size:0.8rem;color:var(--text-muted)">' + cause.affected_events + ' event(s) affected</div>';
+    }
+
+    html += '</div>';
+  }
+
+  html += '</div>';
+  document.getElementById("postmortemCauses").innerHTML = html;
+}
+
+function renderPostmortemTimeline(data) {
+  var timeline = data.timeline;
+  if (!timeline || timeline.length === 0) {
+    document.getElementById("postmortemTimeline").innerHTML =
+      '<h3>\uD83D\uDCCB Incident Timeline</h3>' +
+      '<div style="color:var(--text-muted);padding:12px">No timeline events.</div>';
+    return;
+  }
+
+  var html = '<h3>\uD83D\uDCCB Incident Timeline</h3>';
+  html += '<div style="position:relative;margin-top:12px;padding-left:24px">';
+
+  // Vertical line
+  html += '<div style="position:absolute;left:8px;top:0;bottom:0;width:2px;background:rgba(255,255,255,0.1)"></div>';
+
+  for (var i = 0; i < timeline.length; i++) {
+    var evt = timeline[i];
+    var dotColor = evt.severity === "error" ? "#ef4444" : evt.severity === "warning" ? "#f97316" : "#22c55e";
+    var elapsedText = formatDurationShort(evt.elapsed_ms);
+    var timeText = formatTime(evt.timestamp);
+
+    html += '<div style="position:relative;margin-bottom:16px;padding-left:16px">';
+
+    // Dot
+    html += '<div style="position:absolute;left:-20px;top:6px;width:12px;height:12px;border-radius:50%;background:' + dotColor + ';border:2px solid var(--bg-surface)"></div>';
+
+    // Content
+    html += '<div style="background:var(--bg-card);border-radius:6px;padding:10px 14px">';
+    html += '<div style="display:flex;justify-content:space-between;align-items:center;flex-wrap:wrap;gap:4px">';
+    html += '<span style="font-weight:600;color:' + dotColor + '">' + escHtml(evt.event_type) + '</span>';
+    html += '<span style="font-size:0.8rem;color:var(--text-muted)">' + elapsedText + ' elapsed \u00B7 ' + timeText + '</span>';
+    html += '</div>';
+    html += '<div style="margin-top:4px;font-size:0.9rem;color:var(--text-secondary)">' + escHtml(evt.description) + '</div>';
+    html += '</div></div>';
+  }
+
+  html += '</div>';
+  document.getElementById("postmortemTimeline").innerHTML = html;
 }
 

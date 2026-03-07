@@ -202,6 +202,7 @@
           <button class="tab" data-tab="explain" onclick="switchTab('explain')">💡 Explain</button>
           <button class="tab" data-tab="annotations" onclick="switchTab('annotations')">📝 Notes</button>
           <button class="tab" data-tab="errors" onclick="switchTab('errors')">🚨 Errors</button>
+          <button class="tab" data-tab="postmortem" onclick="switchTab('postmortem')">🔥 Postmortem</button>
         </div>
 
         <!-- Timeline Tab -->
@@ -421,6 +422,31 @@
               <h3>💥 Sessions Ending in Error</h3>
               <div id="errorSessionsList"></div>
             </div>
+          </div>
+        </div>
+
+        <!-- Postmortem Tab -->
+        <div id="postmortemTab" class="tab-content">
+          <div id="postmortemLoading" class="loading" style="display:none">Generating incident report...</div>
+          <div id="postmortemEmpty" style="display:none">
+            <div class="empty-state">
+              <div style="font-size:2.5rem;margin-bottom:12px">✅</div>
+              <h3>No Incident Detected</h3>
+              <p style="color:var(--text-muted)">This session has no error events. No postmortem needed.</p>
+            </div>
+          </div>
+          <div id="postmortemContent" style="display:none">
+            <!-- Incident Header -->
+            <div id="postmortemHeader" class="session-info-bar"></div>
+
+            <!-- Impact Summary -->
+            <div id="postmortemImpact" class="token-summary"></div>
+
+            <!-- Root Causes -->
+            <div id="postmortemCauses" class="token-summary"></div>
+
+            <!-- Incident Timeline -->
+            <div id="postmortemTimeline" class="token-summary"></div>
           </div>
         </div>
       </div>
