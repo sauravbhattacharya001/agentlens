@@ -17,6 +17,7 @@ from agentlens.sla import SLAEvaluator, SLObjective, SLAPolicy, SLAReport, Objec
 from agentlens.sampling import ProbabilisticSampler, RateLimitSampler, PrioritySampler, TailSampler, CompositeSampler, AlwaysSampler, NeverSampler, Sampler, SamplingDecision, SamplingReason, TraceContext, SamplerStats
 from agentlens.evaluation import ResponseEvaluator, EvaluatorConfig, QualityReport, QualityTrend, QualityGrade, DimensionScore
 from agentlens.postmortem import PostmortemGenerator, PostmortemConfig, PostmortemReport, Severity as PostmortemSeverity, RootCause, ImpactAssessment, Remediation, RemediationCategory, LessonLearned, TimelineEntry, IncidentPhase
+from agentlens.rate_limiter import RateLimiter, RateLimit, RateLimitAction, RateLimitPolicy, CheckResult, RateLimitReport, WindowStats, openai_tier1_policy, anthropic_tier1_policy, conservative_policy
 
 __version__ = "0.1.0"
 __all__ = [
@@ -111,6 +112,16 @@ __all__ = [
     "QualityTrend",
     "QualityGrade",
     "DimensionScore",
+    "RateLimiter",
+    "RateLimit",
+    "RateLimitAction",
+    "RateLimitPolicy",
+    "CheckResult",
+    "RateLimitReport",
+    "WindowStats",
+    "openai_tier1_policy",
+    "anthropic_tier1_policy",
+    "conservative_policy",
 ]
 
 _tracker: AgentTracker | None = None
