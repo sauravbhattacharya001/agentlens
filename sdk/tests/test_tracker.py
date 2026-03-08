@@ -735,3 +735,282 @@ class TestHealthScore:
 
         assert report.session_id is not None
         assert isinstance(report.overall_score, float)
+
+
+# ── Span context manager ────────────────────────────────────────────────
+
+class TestSpan:
+    def test_span_creates_span(self, tracker, mock_transport):
+        tracker.start_session()
+        with tracker.span("test-span") as s:
+            assert s.name == "test-span"
+            assert s.status == "active"
+        assert s.status == "completed"
+
+    def test_span_sets_duration(self, tracker, mock_transport):
+        tracker.start_session()
+        with tracker.span("timed") as s:
+            pass
+        assert s.duration_ms is not None
+        assert s.duration_ms >= 0
+
+    def test_span_sends_start_and_end_events(self, tracker, mock_transport):
+        tracker.start_session()
+        with tracker.span("test-span"):
+            pass
+        all_events = []
+        for call in mock_transport.send_events.call_args_list:
+            for ev in call[0][0]:
+                all_events.append(ev)
+        span_starts = [e for e in all_events if e.get("event_type") == "span_start"]
+        span_ends = [e for e in all_events if e.get("event_type") == "span_end"]
+        assert len(span_starts) == 1
+        assert len(span_ends) == 1
+        assert span_starts[0]["span_name"] == "test-span"
+        assert span_ends[0]["span_name"] == "test-span"
+
+    def test_span_nested(self, tracker, mock_transport):
+        tracker.start_session()
+        with tracker.span("outer") as outer:
+            with tracker.span("inner") as inner:
+                assert inner.parent_id == outer.span_id
+
+    def test_span_error_sets_error_status(self, tracker, mock_transport):
+        tracker.start_session()
+        with pytest.raises(ValueError):
+            with tracker.span("failing") as s:
+                raise ValueError("test error")
+        assert s.status == "error"
+        assert s.error == "test error"
+
+    def test_span_increments_event_count(self, tracker, mock_transport):
+        tracker.start_session()
+        with tracker.span("counting") as s:
+            tracker.track(event_type="llm_call")
+            tracker.track(event_type="llm_call")
+        assert s.event_count == 2
+
+    def test_span_with_attributes(self, tracker, mock_transport):
+        tracker.start_session()
+        with tracker.span("attributed", attributes={"key": "value"}) as s:
+            pass
+        assert s.attributes.get("key") == "value"
+
+    def test_span_set_attribute_during(self, tracker, mock_transport):
+        tracker.start_session()
+        with tracker.span("dynamic") as s:
+            s.set_attribute("result", 42)
+        assert s.attributes.get("result") == 42
+
+    def test_span_children_tracked(self, tracker, mock_transport):
+        tracker.start_session()
+        with tracker.span("parent") as parent:
+            with tracker.span("child1"):
+                pass
+            with tracker.span("child2"):
+                pass
+        assert len(parent.children) == 2
+
+
+# ── Timeline ────────────────────────────────────────────────────────────
+
+class TestTimeline:
+    def test_timeline_no_session_raises(self, tracker):
+        with pytest.raises(RuntimeError):
+            tracker.timeline()
+
+    def test_timeline_returns_renderer(self, tracker, mock_transport):
+        from agentlens.timeline import TimelineRenderer
+        tracker.start_session()
+        tracker.track(event_type="llm_call", tokens_in=50, tokens_out=25, duration_ms=100.0)
+        renderer = tracker.timeline()
+        assert isinstance(renderer, TimelineRenderer)
+
+    def test_timeline_specific_session(self, tracker, mock_transport):
+        from agentlens.timeline import TimelineRenderer
+        session = tracker.start_session()
+        tracker.track(event_type="llm_call", tokens_in=50)
+        renderer = tracker.timeline(session_id=session.session_id)
+        assert isinstance(renderer, TimelineRenderer)
+
+    def test_timeline_with_filter_kwargs(self, tracker, mock_transport):
+        from agentlens.timeline import TimelineRenderer
+        tracker.start_session()
+        tracker.track(event_type="llm_call", tokens_in=50, duration_ms=100.0)
+        tracker.track(event_type="tool_call", tool_name="search", duration_ms=200.0)
+        renderer = tracker.timeline(event_types=["llm_call"])
+        assert isinstance(renderer, TimelineRenderer)
+
+
+# ── Heatmap ─────────────────────────────────────────────────────────────
+
+class TestHeatmap:
+    def test_heatmap_calls_backend(self, tracker, mock_transport):
+        mock_transport.get.return_value = MagicMock(
+            json=MagicMock(return_value={"matrix": [], "peak": None})
+        )
+        result = tracker.heatmap()
+        mock_transport.get.assert_called_with(
+            "/analytics/heatmap",
+            params={"metric": "events", "days": 30},
+        )
+
+    def test_heatmap_custom_metric(self, tracker, mock_transport):
+        mock_transport.get.return_value = MagicMock(
+            json=MagicMock(return_value={"matrix": []})
+        )
+        tracker.heatmap(metric="tokens", days=7)
+        call_params = mock_transport.get.call_args[1]["params"]
+        assert call_params["metric"] == "tokens"
+        assert call_params["days"] == 7
+
+    def test_heatmap_invalid_metric_raises(self, tracker):
+        with pytest.raises(ValueError, match="Invalid metric"):
+            tracker.heatmap(metric="invalid")
+
+    def test_heatmap_days_clamped(self, tracker, mock_transport):
+        mock_transport.get.return_value = MagicMock(
+            json=MagicMock(return_value={"matrix": []})
+        )
+        tracker.heatmap(days=999)
+        call_params = mock_transport.get.call_args[1]["params"]
+        assert call_params["days"] == 365
+
+    def test_heatmap_days_min_clamped(self, tracker, mock_transport):
+        mock_transport.get.return_value = MagicMock(
+            json=MagicMock(return_value={"matrix": []})
+        )
+        tracker.heatmap(days=0)
+        call_params = mock_transport.get.call_args[1]["params"]
+        assert call_params["days"] == 1
+
+
+# ── Search Sessions ─────────────────────────────────────────────────────
+
+class TestSearchSessions:
+    def test_search_sessions_basic(self, tracker, mock_transport):
+        mock_transport.get.return_value = MagicMock(
+            json=MagicMock(return_value={"sessions": [], "total": 0})
+        )
+        tracker.search_sessions()
+        call_args = mock_transport.get.call_args
+        assert call_args[0][0] == "/sessions/search"
+
+    def test_search_sessions_all_filters(self, tracker, mock_transport):
+        mock_transport.get.return_value = MagicMock(
+            json=MagicMock(return_value={"sessions": [], "total": 0})
+        )
+        tracker.search_sessions(
+            q="test",
+            agent="planner",
+            status="completed",
+            after="2026-01-01T00:00:00Z",
+            before="2026-12-31T23:59:59Z",
+            min_tokens=100,
+            max_tokens=5000,
+            tags=["production", "v2"],
+            sort="total_tokens",
+            order="asc",
+            limit=20,
+            offset=10,
+        )
+        call_params = mock_transport.get.call_args[1]["params"]
+        assert call_params["q"] == "test"
+        assert call_params["agent"] == "planner"
+        assert call_params["status"] == "completed"
+        assert call_params["tags"] == "production,v2"
+        assert call_params["sort"] == "total_tokens"
+        assert call_params["order"] == "asc"
+        assert call_params["limit"] == 20
+        assert call_params["offset"] == 10
+
+    def test_search_sessions_limit_capped(self, tracker, mock_transport):
+        mock_transport.get.return_value = MagicMock(
+            json=MagicMock(return_value={"sessions": []})
+        )
+        tracker.search_sessions(limit=999)
+        call_params = mock_transport.get.call_args[1]["params"]
+        assert call_params["limit"] == 200
+
+    def test_search_sessions_zero_tokens_omitted(self, tracker, mock_transport):
+        mock_transport.get.return_value = MagicMock(
+            json=MagicMock(return_value={"sessions": []})
+        )
+        tracker.search_sessions(min_tokens=0, max_tokens=0)
+        call_params = mock_transport.get.call_args[1]["params"]
+        assert "min_tokens" not in call_params
+        assert "max_tokens" not in call_params
+
+
+# ── Alert edge cases ────────────────────────────────────────────────────
+
+class TestAlertEdgeCases:
+    def test_acknowledge_alert_calls_put(self, tracker, mock_transport):
+        mock_transport.put.return_value = MagicMock(
+            json=MagicMock(return_value={"acknowledged": True})
+        )
+        tracker.acknowledge_alert("alert-123")
+        mock_transport.put.assert_called_once_with(
+            "/alerts/events/alert-123/acknowledge",
+        )
+
+    def test_get_alert_metrics_calls_get(self, tracker, mock_transport):
+        mock_transport.get.return_value = MagicMock(
+            json=MagicMock(return_value={"metrics": []})
+        )
+        tracker.get_alert_metrics()
+        mock_transport.get.assert_called_once_with("/alerts/metrics")
+
+    def test_get_alert_events_with_filters(self, tracker, mock_transport):
+        mock_transport.get.return_value = MagicMock(
+            json=MagicMock(return_value={"events": []})
+        )
+        tracker.get_alert_events(rule_id="r1", acknowledged=False, limit=10)
+        call_params = mock_transport.get.call_args[1]["params"]
+        assert call_params["rule_id"] == "r1"
+        assert call_params["acknowledged"] == "false"
+        assert call_params["limit"] == 10
+
+
+# ── Tag happy paths ─────────────────────────────────────────────────────
+
+class TestTagHappyPaths:
+    def test_list_sessions_by_tag_calls_backend(self, tracker, mock_transport):
+        mock_transport.get.return_value = MagicMock(
+            json=MagicMock(return_value={"sessions": [], "total": 0})
+        )
+        tracker.list_sessions_by_tag("production", limit=25, offset=5)
+        call_args = mock_transport.get.call_args
+        assert "/sessions/by-tag/production" in call_args[0][0]
+        assert call_args[1]["params"]["limit"] == 25
+        assert call_args[1]["params"]["offset"] == 5
+
+
+# ── Annotation happy paths ──────────────────────────────────────────────
+
+class TestAnnotationHappyPaths:
+    def test_update_annotation_sends_payload(self, tracker, mock_transport):
+        tracker.start_session()
+        mock_transport.put.return_value = MagicMock(
+            json=MagicMock(return_value={"annotation_id": "a1", "text": "updated"})
+        )
+        tracker.update_annotation("a1", text="updated", annotation_type="bug")
+        call_args = mock_transport.put.call_args
+        assert "a1" in call_args[0][0]
+        payload = call_args[1]["json"]
+        assert payload["text"] == "updated"
+        assert payload["type"] == "bug"
+
+    def test_delete_annotation_calls_delete(self, tracker, mock_transport):
+        tracker.start_session()
+        mock_transport.delete.return_value = MagicMock(
+            json=MagicMock(return_value={"deleted": True, "annotation_id": "a1"})
+        )
+        tracker.delete_annotation("a1")
+        call_args = mock_transport.delete.call_args
+        assert "a1" in call_args[0][0]
+
+    def test_update_annotation_empty_id_raises(self, tracker, mock_transport):
+        tracker.start_session()
+        with pytest.raises(ValueError, match="annotation_id"):
+            tracker.update_annotation("", text="test")

@@ -131,19 +131,76 @@ class HealthScorer:
 
     # -- public API ----------------------------------------------------------
 
+    @staticmethod
+    def _aggregate(events: list[dict]) -> dict:
+        """Single-pass pre-aggregation of all per-event stats.
+
+        Eliminates redundant iterations (previously 9+ passes over the
+        events list) by collecting every metric in one loop.
+        """
+        total = len(events)
+        error_count = 0
+        total_tokens = 0
+        total_duration = 0.0
+        durations: list[float] = []
+        tool_count = 0
+        tool_failures = 0
+
+        for e in events:
+            # Error counting
+            if e.get("event_type") == "error":
+                error_count += 1
+            else:
+                tc = e.get("tool_call")
+                if isinstance(tc, dict):
+                    out = tc.get("tool_output")
+                    if isinstance(out, dict) and out.get("error"):
+                        error_count += 1
+
+            # Duration
+            dur = e.get("duration_ms")
+            if dur is not None:
+                durations.append(dur)
+                total_duration += dur
+
+            # Tokens
+            total_tokens += (e.get("tokens_in") or 0) + (e.get("tokens_out") or 0)
+
+            # Tool calls
+            tc = e.get("tool_call")
+            if isinstance(tc, dict):
+                tool_count += 1
+                out = tc.get("tool_output")
+                if isinstance(out, dict) and out.get("error"):
+                    tool_failures += 1
+
+        return {
+            "total": total,
+            "error_count": error_count,
+            "total_tokens": total_tokens,
+            "total_duration": total_duration,
+            "durations": durations,
+            "tool_count": tool_count,
+            "tool_failures": tool_failures,
+        }
+
     def score(self, events: list[dict], session_id: str = "unknown") -> HealthReport:
         """Score a list of raw event dicts.
 
         Each dict is expected to have keys like *event_type*, *duration_ms*,
         *tokens_in*, *tokens_out*, *tool_call* (dict or ``None``).
+
+        Uses single-pass aggregation to avoid redundant iterations.
         """
+        agg = self._aggregate(events)
+
         metrics = [
-            self._score_error_rate(events),
-            self._score_latency(events),
-            self._score_p95_latency(events),
-            self._score_tool_success(events),
-            self._score_token_efficiency(events),
-            self._score_event_volume(events),
+            self._score_error_rate(agg),
+            self._score_latency(agg),
+            self._score_p95_latency(agg),
+            self._score_tool_success(agg),
+            self._score_token_efficiency(agg),
+            self._score_event_volume(agg),
         ]
 
         total_weight = sum(m.weight for m in metrics)
@@ -154,22 +211,16 @@ class HealthScorer:
 
         overall = max(0.0, min(100.0, overall))
 
-        error_count = self._count_errors(events)
-        total_tokens = sum(
-            (e.get("tokens_in") or 0) + (e.get("tokens_out") or 0) for e in events
-        )
-        total_duration = sum(e.get("duration_ms") or 0.0 for e in events)
-
         return HealthReport(
             session_id=session_id,
             overall_score=overall,
             grade=self._calculate_grade(overall),
             metrics=metrics,
             recommendations=self._generate_recommendations(metrics),
-            event_count=len(events),
-            error_count=error_count,
-            total_tokens=total_tokens,
-            total_duration_ms=total_duration,
+            event_count=agg["total"],
+            error_count=agg["error_count"],
+            total_tokens=agg["total_tokens"],
+            total_duration_ms=agg["total_duration"],
         )
 
     def score_session(self, session: Any) -> HealthReport:
@@ -205,9 +256,20 @@ class HealthScorer:
 
     # -- individual metric scorers -------------------------------------------
 
-    def _score_error_rate(self, events: list[dict]) -> MetricScore:
-        total = len(events)
-        errors = self._count_errors(events)
+    def _ensure_agg(self, data: dict | list) -> dict:
+        """Accept either a pre-aggregated dict or a raw event list.
+
+        Allows scorer methods to be called directly with event lists
+        (backward-compatible) or with pre-aggregated data from ``score()``.
+        """
+        if isinstance(data, list):
+            return self._aggregate(data)
+        return data
+
+    def _score_error_rate(self, data: dict | list) -> MetricScore:
+        agg = self._ensure_agg(data)
+        total = agg["total"]
+        errors = agg["error_count"]
         rate = errors / total if total > 0 else 0.0
         threshold = self.thresholds.max_error_rate
 
@@ -227,8 +289,9 @@ class HealthScorer:
             detail=f"{errors}/{total} events errored ({rate:.1%})",
         )
 
-    def _score_latency(self, events: list[dict]) -> MetricScore:
-        durations = [e["duration_ms"] for e in events if e.get("duration_ms") is not None]
+    def _score_latency(self, data: dict | list) -> MetricScore:
+        agg = self._ensure_agg(data)
+        durations = agg["durations"]
         threshold = self.thresholds.max_avg_latency_ms
 
         if not durations:
@@ -260,10 +323,9 @@ class HealthScorer:
             detail=f"Average latency {avg:.0f}ms",
         )
 
-    def _score_p95_latency(self, events: list[dict]) -> MetricScore:
-        durations = sorted(
-            e["duration_ms"] for e in events if e.get("duration_ms") is not None
-        )
+    def _score_p95_latency(self, data: dict | list) -> MetricScore:
+        agg = self._ensure_agg(data)
+        durations = sorted(agg["durations"])
         threshold = self.thresholds.max_p95_latency_ms
 
         if not durations:
@@ -277,9 +339,7 @@ class HealthScorer:
             )
 
         # Percentile using linear interpolation (consistent with the
-        # backend's analytics.js).  Previous formula used
-        # floor(0.95 * len) which computed P100 (max) for small arrays
-        # instead of P95.
+        # backend's analytics.js).
         idx = 0.95 * (len(durations) - 1)
         lo = int(math.floor(idx))
         hi = min(lo + 1, len(durations) - 1)
@@ -302,11 +362,13 @@ class HealthScorer:
             detail=f"P95 latency {p95:.0f}ms",
         )
 
-    def _score_tool_success(self, events: list[dict]) -> MetricScore:
-        tool_events = [e for e in events if e.get("tool_call") is not None]
+    def _score_tool_success(self, data: dict | list) -> MetricScore:
+        agg = self._ensure_agg(data)
+        tool_count = agg["tool_count"]
+        tool_failures = agg["tool_failures"]
         threshold = self.thresholds.min_tool_success_rate
 
-        if not tool_events:
+        if tool_count == 0:
             return MetricScore(
                 name="tool_success",
                 score=100.0,
@@ -316,8 +378,7 @@ class HealthScorer:
                 detail="No tool calls to evaluate",
             )
 
-        failures = sum(1 for e in tool_events if self._is_tool_error(e))
-        success_rate = 1.0 - (failures / len(tool_events))
+        success_rate = 1.0 - (tool_failures / tool_count)
 
         if success_rate >= threshold:
             score = 100.0
@@ -332,11 +393,12 @@ class HealthScorer:
             weight=_DEFAULT_WEIGHTS["tool_success"],
             value=success_rate,
             threshold=threshold,
-            detail=f"Tool success rate {success_rate:.1%} ({len(tool_events)} calls)",
+            detail=f"Tool success rate {success_rate:.1%} ({tool_count} calls)",
         )
 
-    def _score_token_efficiency(self, events: list[dict]) -> MetricScore:
-        total = len(events)
+    def _score_token_efficiency(self, data: dict | list) -> MetricScore:
+        agg = self._ensure_agg(data)
+        total = agg["total"]
         threshold = self.thresholds.max_tokens_per_event
 
         if total == 0:
@@ -349,10 +411,7 @@ class HealthScorer:
                 detail="No events to evaluate",
             )
 
-        total_tokens = sum(
-            (e.get("tokens_in") or 0) + (e.get("tokens_out") or 0) for e in events
-        )
-        avg_tokens = total_tokens / total
+        avg_tokens = agg["total_tokens"] / total
         half_threshold = threshold / 2.0
 
         if avg_tokens <= half_threshold:
@@ -371,8 +430,9 @@ class HealthScorer:
             detail=f"Average {avg_tokens:.0f} tokens/event",
         )
 
-    def _score_event_volume(self, events: list[dict]) -> MetricScore:
-        count = len(events)
+    def _score_event_volume(self, data: dict | list) -> MetricScore:
+        agg = self._ensure_agg(data)
+        count = agg["total"]
         lo, hi = self.thresholds.ideal_events_range
 
         if lo <= count <= hi:
