@@ -25,6 +25,7 @@ const correlationSchedulerRouter = require("./routes/correlation-scheduler");
 const postmortemRouter = require("./routes/postmortem");
 const bookmarksRouter = require("./routes/bookmarks");
 const baselinesRouter = require("./routes/baselines");
+const slaRouter = require("./routes/sla");
 
 const app = express();
 const PORT = process.env.PORT || 3000;
@@ -48,6 +49,7 @@ app.use("/dependencies", createApiLimiter());
 app.use("/postmortem", createApiLimiter());
 app.use("/bookmarks", createApiLimiter());
 app.use("/baselines", createApiLimiter());
+app.use("/sla", createApiLimiter());
 app.use("/correlations", createApiLimiter());
 
 // ── API key authentication ──────────────────────────────────────────
@@ -66,6 +68,7 @@ app.use("/dependencies", authenticateApiKey);
 app.use("/bookmarks", authenticateApiKey);
 app.use("/postmortem", authenticateApiKey);
 app.use("/baselines", authenticateApiKey);
+app.use("/sla", authenticateApiKey);
 app.use("/correlations", authenticateApiKey);
 
 // Body parser with size limit
@@ -93,6 +96,7 @@ app.use("/correlations", correlationSchedulerRouter);
 app.use("/postmortem", postmortemRouter);
 app.use("/bookmarks", bookmarksRouter);
 app.use("/baselines", baselinesRouter);
+app.use("/sla", slaRouter);
 // Mount session-scoped annotation routes on /sessions
 app.use("/sessions", annotationsRouter);
 
