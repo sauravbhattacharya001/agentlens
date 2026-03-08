@@ -21,6 +21,7 @@ from agentlens.rate_limiter import RateLimiter, RateLimit, RateLimitAction, Rate
 from agentlens.exporter import SessionExporter
 from agentlens.prompt_tracker import PromptVersionTracker, PromptVersion, PromptDiff, PromptReport, VersionStats, Outcome, DiffKind
 from agentlens.latency import LatencyProfiler, ProfilingSession, StepRecord, StepStatus, PercentileStats, SlowStepAlert, SessionReport, compute_percentiles
+from agentlens.cost_optimizer import CostOptimizer, ComplexityAnalyzer, ComplexityLevel, ComplexityAssessment, ModelTier, ModelInfo, Confidence, Recommendation, MigrationStep, OptimizationReport, MODEL_REGISTRY as OPTIMIZER_MODEL_REGISTRY
 
 __version__ = "0.1.0"
 __all__ = [
@@ -133,6 +134,16 @@ __all__ = [
     "VersionStats",
     "Outcome",
     "DiffKind",
+    "CostOptimizer",
+    "ComplexityAnalyzer",
+    "ComplexityLevel",
+    "ComplexityAssessment",
+    "ModelTier",
+    "ModelInfo",
+    "Confidence",
+    "Recommendation",
+    "MigrationStep",
+    "OptimizationReport",
 ]
 
 _tracker: AgentTracker | None = None
