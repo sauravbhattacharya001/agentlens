@@ -20,6 +20,7 @@ from agentlens.postmortem import PostmortemGenerator, PostmortemConfig, Postmort
 from agentlens.rate_limiter import RateLimiter, RateLimit, RateLimitAction, RateLimitPolicy, CheckResult, RateLimitReport, WindowStats, openai_tier1_policy, anthropic_tier1_policy, conservative_policy
 from agentlens.exporter import SessionExporter
 from agentlens.prompt_tracker import PromptVersionTracker, PromptVersion, PromptDiff, PromptReport, VersionStats, Outcome, DiffKind
+from agentlens.latency import LatencyProfiler, ProfilingSession, StepRecord, StepStatus, PercentileStats, SlowStepAlert, SessionReport, compute_percentiles
 
 __version__ = "0.1.0"
 __all__ = [
