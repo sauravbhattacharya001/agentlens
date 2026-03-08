@@ -19,6 +19,7 @@ from agentlens.evaluation import ResponseEvaluator, EvaluatorConfig, QualityRepo
 from agentlens.postmortem import PostmortemGenerator, PostmortemConfig, PostmortemReport, Severity as PostmortemSeverity, RootCause, ImpactAssessment, Remediation, RemediationCategory, LessonLearned, TimelineEntry, IncidentPhase
 from agentlens.rate_limiter import RateLimiter, RateLimit, RateLimitAction, RateLimitPolicy, CheckResult, RateLimitReport, WindowStats, openai_tier1_policy, anthropic_tier1_policy, conservative_policy
 from agentlens.exporter import SessionExporter
+from agentlens.prompt_tracker import PromptVersionTracker, PromptVersion, PromptDiff, PromptReport, VersionStats, Outcome, DiffKind
 
 __version__ = "0.1.0"
 __all__ = [
@@ -124,6 +125,13 @@ __all__ = [
     "anthropic_tier1_policy",
     "conservative_policy",
     "SessionExporter",
+    "PromptVersionTracker",
+    "PromptVersion",
+    "PromptDiff",
+    "PromptReport",
+    "VersionStats",
+    "Outcome",
+    "DiffKind",
 ]
 
 _tracker: AgentTracker | None = None
