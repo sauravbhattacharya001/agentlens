@@ -15,6 +15,14 @@ var express = require("express");
 var crypto = require("crypto");
 var router = express.Router();
 var dbMod = require("../db");
+var { wrapRoute, parseLimit, parseOffset } = require("../lib/request-helpers");
+var { sanitizeString } = require("../lib/validation");
+
+// ── Input limits ────────────────────────────────────────────────────
+var MAX_NAME_LENGTH = 128;
+var MAX_DESCRIPTION_LENGTH = 1024;
+var MAX_CONFIG_SIZE = 8192; // 8 KB serialized config
+var MAX_AGENT_FILTER_LENGTH = 128;
 
 // ── Schema ──────────────────────────────────────────────────────────
 
@@ -378,16 +386,39 @@ function persistGroups(rule, groups) {
 var VALID_TYPES = ["metadata_key", "time_window", "error_cascade", "causal_chain", "custom"];
 
 /** POST /rules — Create a correlation rule */
-router.post("/rules", function(req, res) {
+router.post("/rules", wrapRoute("create correlation rule", function(req, res) {
   ensureCorrelationTables();
   var db = dbMod.getDb();
   var body = req.body;
 
-  if (!body.name || !body.match_type) {
-    return res.status(400).json({ error: "name and match_type are required" });
+  if (!body.name || typeof body.name !== "string" || !body.name.trim()) {
+    return res.status(400).json({ error: "name is required and must be a non-empty string" });
+  }
+  if (!body.match_type) {
+    return res.status(400).json({ error: "match_type is required" });
   }
   if (VALID_TYPES.indexOf(body.match_type) < 0) {
     return res.status(400).json({ error: "match_type must be one of: " + VALID_TYPES.join(", ") });
+  }
+
+  var safeName = sanitizeString(body.name, MAX_NAME_LENGTH) || "unnamed";
+  var safeDesc = sanitizeString(body.description || "", MAX_DESCRIPTION_LENGTH) || "";
+  var safeAgentFilter = body.agent_filter
+    ? sanitizeString(body.agent_filter, MAX_AGENT_FILTER_LENGTH)
+    : null;
+
+  // Validate config size to prevent resource exhaustion
+  var configStr = safeJSON(body.config);
+  if (configStr.length > MAX_CONFIG_SIZE) {
+    return res.status(400).json({ error: "config is too large (max " + MAX_CONFIG_SIZE + " bytes)" });
+  }
+
+  // Validate priority is a bounded integer
+  var priority = 0;
+  if (body.priority !== undefined) {
+    priority = parseInt(body.priority);
+    if (!Number.isFinite(priority)) priority = 0;
+    priority = Math.max(-100, Math.min(100, priority));
   }
 
   var ruleId = uid();
@@ -395,13 +426,13 @@ router.post("/rules", function(req, res) {
   db.prepare(
     "INSERT INTO correlation_rules (rule_id, name, description, match_type, config, agent_filter, priority, created_at, updated_at) " +
     "VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?)"
-  ).run(ruleId, body.name, body.description || "", body.match_type, safeJSON(body.config), body.agent_filter || null, body.priority || 0, timestamp, timestamp);
+  ).run(ruleId, safeName, safeDesc, body.match_type, configStr, safeAgentFilter, priority, timestamp, timestamp);
 
-  res.status(201).json({ rule_id: ruleId, name: body.name, match_type: body.match_type, created_at: timestamp });
-});
+  res.status(201).json({ rule_id: ruleId, name: safeName, match_type: body.match_type, created_at: timestamp });
+}));
 
 /** GET /rules — List all correlation rules */
-router.get("/rules", function(req, res) {
+router.get("/rules", wrapRoute("list correlation rules", function(req, res) {
   ensureCorrelationTables();
   var db = dbMod.getDb();
   var query = "SELECT * FROM correlation_rules";
@@ -416,10 +447,10 @@ router.get("/rules", function(req, res) {
   var rules = params.length > 0 ? stmt.all(params[0]) : stmt.all();
   for (var i = 0; i < rules.length; i++) { rules[i].config = parseConfig(rules[i].config); }
   res.json({ rules: rules, total: rules.length });
-});
+}));
 
 /** GET /rules/:ruleId — Get a specific rule */
-router.get("/rules/:ruleId", function(req, res) {
+router.get("/rules/:ruleId", wrapRoute("get correlation rule", function(req, res) {
   ensureCorrelationTables();
   var db = dbMod.getDb();
   var rule = db.prepare("SELECT * FROM correlation_rules WHERE rule_id = ?").get(req.params.ruleId);
@@ -428,10 +459,10 @@ router.get("/rules/:ruleId", function(req, res) {
   var stats = db.prepare("SELECT COUNT(*) as group_count FROM correlation_groups WHERE rule_id = ?").get(rule.rule_id);
   rule.group_count = stats.group_count;
   res.json(rule);
-});
+}));
 
 /** PATCH /rules/:ruleId — Update a rule */
-router.patch("/rules/:ruleId", function(req, res) {
+router.patch("/rules/:ruleId", wrapRoute("update correlation rule", function(req, res) {
   ensureCorrelationTables();
   var db = dbMod.getDb();
   var rule = db.prepare("SELECT * FROM correlation_rules WHERE rule_id = ?").get(req.params.ruleId);
@@ -439,14 +470,53 @@ router.patch("/rules/:ruleId", function(req, res) {
 
   var fields = [];
   var values = [];
-  var allowed = ["name", "description", "match_type", "config", "agent_filter", "enabled", "priority"];
-  for (var a = 0; a < allowed.length; a++) {
-    var key = allowed[a];
-    if (req.body[key] !== undefined) {
-      fields.push(key + " = ?");
-      values.push(key === "config" ? safeJSON(req.body[key]) : req.body[key]);
+
+  // Validate and sanitize each allowed field
+  if (req.body.name !== undefined) {
+    if (typeof req.body.name !== "string" || !req.body.name.trim()) {
+      return res.status(400).json({ error: "name must be a non-empty string" });
     }
+    fields.push("name = ?");
+    values.push(sanitizeString(req.body.name, MAX_NAME_LENGTH));
   }
+  if (req.body.description !== undefined) {
+    fields.push("description = ?");
+    values.push(sanitizeString(req.body.description || "", MAX_DESCRIPTION_LENGTH) || "");
+  }
+  if (req.body.match_type !== undefined) {
+    if (VALID_TYPES.indexOf(req.body.match_type) < 0) {
+      return res.status(400).json({ error: "match_type must be one of: " + VALID_TYPES.join(", ") });
+    }
+    fields.push("match_type = ?");
+    values.push(req.body.match_type);
+  }
+  if (req.body.config !== undefined) {
+    var configStr = safeJSON(req.body.config);
+    if (configStr.length > MAX_CONFIG_SIZE) {
+      return res.status(400).json({ error: "config is too large (max " + MAX_CONFIG_SIZE + " bytes)" });
+    }
+    fields.push("config = ?");
+    values.push(configStr);
+  }
+  if (req.body.agent_filter !== undefined) {
+    fields.push("agent_filter = ?");
+    values.push(req.body.agent_filter
+      ? sanitizeString(req.body.agent_filter, MAX_AGENT_FILTER_LENGTH)
+      : null);
+  }
+  if (req.body.enabled !== undefined) {
+    fields.push("enabled = ?");
+    values.push(req.body.enabled ? 1 : 0);
+  }
+  if (req.body.priority !== undefined) {
+    var priority = parseInt(req.body.priority);
+    if (!Number.isFinite(priority)) {
+      return res.status(400).json({ error: "priority must be an integer" });
+    }
+    fields.push("priority = ?");
+    values.push(Math.max(-100, Math.min(100, priority)));
+  }
+
   if (fields.length === 0) return res.status(400).json({ error: "No fields to update" });
 
   fields.push("updated_at = ?");
@@ -455,25 +525,34 @@ router.patch("/rules/:ruleId", function(req, res) {
   var updateStmt = db.prepare("UPDATE correlation_rules SET " + fields.join(", ") + " WHERE rule_id = ?");
   updateStmt.run.apply(updateStmt, values);
   res.json({ updated: true, rule_id: req.params.ruleId });
-});
+}));
 
 /** DELETE /rules/:ruleId — Delete a rule (cascades groups) */
-router.delete("/rules/:ruleId", function(req, res) {
+router.delete("/rules/:ruleId", wrapRoute("delete correlation rule", function(req, res) {
   ensureCorrelationTables();
   var db = dbMod.getDb();
   var result = db.prepare("DELETE FROM correlation_rules WHERE rule_id = ?").run(req.params.ruleId);
   if (result.changes === 0) return res.status(404).json({ error: "Rule not found" });
   res.json({ deleted: true, rule_id: req.params.ruleId });
-});
+}));
 
 /** POST /rules/:ruleId/run — Execute a correlation rule */
-router.post("/rules/:ruleId/run", function(req, res) {
+router.post("/rules/:ruleId/run", wrapRoute("run correlation rule", function(req, res) {
   ensureCorrelationTables();
   var db = dbMod.getDb();
   var rule = db.prepare("SELECT * FROM correlation_rules WHERE rule_id = ?").get(req.params.ruleId);
   if (!rule) return res.status(404).json({ error: "Rule not found" });
 
-  var groups = runCorrelation(rule, req.body.lookback_minutes || null);
+  // Validate lookback_minutes if provided
+  var lookback = null;
+  if (req.body.lookback_minutes !== undefined) {
+    lookback = parseInt(req.body.lookback_minutes);
+    if (!Number.isFinite(lookback) || lookback < 1 || lookback > 10080) {
+      return res.status(400).json({ error: "lookback_minutes must be 1-10080 (max 7 days)" });
+    }
+  }
+
+  var groups = runCorrelation(rule, lookback);
   var persisted = [];
   if (req.body.persist !== false) persisted = persistGroups(rule, groups);
 
@@ -495,18 +574,18 @@ router.post("/rules/:ruleId/run", function(req, res) {
     groups_found: groups.length, total_events_correlated: totalEvts,
     groups: outGroups,
   });
-});
+}));
 
 /** GET /groups — List correlation groups */
-router.get("/groups", function(req, res) {
+router.get("/groups", wrapRoute("list correlation groups", function(req, res) {
   ensureCorrelationTables();
   var db = dbMod.getDb();
   var query = "SELECT g.*, r.name as rule_name, r.match_type FROM correlation_groups g JOIN correlation_rules r ON g.rule_id = r.rule_id";
   var params = [];
   if (req.query.rule_id) { query += " WHERE g.rule_id = ?"; params.push(req.query.rule_id); }
   query += " ORDER BY g.created_at DESC";
-  var limit = Math.min(parseInt(req.query.limit) || 50, 200);
-  var offset = parseInt(req.query.offset) || 0;
+  var limit = parseLimit(req.query.limit, 50, 200);
+  var offset = parseOffset(req.query.offset);
   query += " LIMIT ? OFFSET ?";
   params.push(limit, offset);
 
@@ -523,10 +602,10 @@ router.get("/groups", function(req, res) {
   else { total = db.prepare(totalQuery).get().cnt; }
 
   res.json({ groups: groups, total: total, limit: limit, offset: offset });
-});
+}));
 
 /** GET /groups/:groupId — Get group details with members */
-router.get("/groups/:groupId", function(req, res) {
+router.get("/groups/:groupId", wrapRoute("get correlation group", function(req, res) {
   ensureCorrelationTables();
   var db = dbMod.getDb();
   var group = db.prepare(
@@ -547,19 +626,19 @@ router.get("/groups/:groupId", function(req, res) {
   group.members = members;
   group.member_count = members.length;
   res.json(group);
-});
+}));
 
 /** DELETE /groups/:groupId — Delete a correlation group */
-router.delete("/groups/:groupId", function(req, res) {
+router.delete("/groups/:groupId", wrapRoute("delete correlation group", function(req, res) {
   ensureCorrelationTables();
   var db = dbMod.getDb();
   var result = db.prepare("DELETE FROM correlation_groups WHERE group_id = ?").run(req.params.groupId);
   if (result.changes === 0) return res.status(404).json({ error: "Group not found" });
   res.json({ deleted: true, group_id: req.params.groupId });
-});
+}));
 
 /** GET /stats — Correlation statistics */
-router.get("/stats", function(req, res) {
+router.get("/stats", wrapRoute("correlation stats", function(req, res) {
   ensureCorrelationTables();
   var db = dbMod.getDb();
   var ruleCount = db.prepare("SELECT COUNT(*) as cnt FROM correlation_rules").get().cnt;
@@ -577,10 +656,10 @@ router.get("/stats", function(req, res) {
     total_groups: groupCount, total_correlated_events: memberCount,
     by_match_type: byType,
   });
-});
+}));
 
 /** GET /event/:eventId — Find all correlations for an event */
-router.get("/event/:eventId", function(req, res) {
+router.get("/event/:eventId", wrapRoute("find event correlations", function(req, res) {
   ensureCorrelationTables();
   var db = dbMod.getDb();
   var memberships = db.prepare(
@@ -590,7 +669,7 @@ router.get("/event/:eventId", function(req, res) {
   ).all(req.params.eventId);
   for (var i = 0; i < memberships.length; i++) { memberships[i].metadata = parseConfig(memberships[i].metadata); }
   res.json({ event_id: req.params.eventId, correlations: memberships, total: memberships.length });
-});
+}));
 
 // ── Export for testing ──────────────────────────────────────────────
 router._engine = {
