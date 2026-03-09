@@ -1126,3 +1126,383 @@ data = report.to_dict()
 ### Incident Phases
 
 Postmortem timelines are broken into phases: `DETECTION`, `INVESTIGATION`, `MITIGATION`, `RESOLUTION`, `POST_INCIDENT`.
+
+---
+
+## Session Correlator
+
+Discover relationships, resource contention, and error propagation across concurrent agent sessions.
+
+```python
+from agentlens import SessionCorrelator
+
+correlator = SessionCorrelator()
+correlator.add_sessions([session_a, session_b, session_c])
+
+# Full correlation analysis
+report = correlator.correlate()
+
+# Temporal overlaps between sessions
+overlaps = correlator.find_overlaps()
+for o in overlaps:
+    print(f"{o.session_a} <-> {o.session_b}: {o.overlap_pct:.0%} overlap")
+
+# Shared resources (models, tools, APIs)
+shared = correlator.find_shared_resources()
+
+# Resource contention detection
+contentions = correlator.detect_contention()
+for c in contentions:
+    print(f"⚠️ {c.resource}: {c.severity.value} ({c.concurrent_users} concurrent)")
+
+# Error propagation tracing
+errors = correlator.trace_error_propagation()
+for e in errors:
+    print(f"Error in {e.source_session} → {e.target_session} via {e.shared_resource}")
+
+# Model usage hotspots
+hotspots = correlator.find_model_hotspots()
+
+# Synchronization points
+sync_points = correlator.find_sync_points()
+
+# Compare two sessions
+diff = correlator.compare(session_a, session_b)
+
+# Render report as text
+print(report.render())
+# Export as dict
+data = report.to_dict()
+```
+
+### Correlation Kinds
+
+| Kind | Description |
+|------|-------------|
+| `TEMPORAL` | Time-based overlap between sessions |
+| `RESOURCE` | Shared model/tool/API usage |
+| `CAUSAL` | Error propagation between sessions |
+
+### Contention Severity
+
+| Severity | Concurrent Users |
+|----------|-----------------|
+| `LOW` | 2 |
+| `MEDIUM` | 3–4 |
+| `HIGH` | 5+ |
+
+## Retry Tracker
+
+Track retry chains, measure retry effectiveness, detect retry storms, and get optimization recommendations.
+
+```python
+from agentlens import RetryTracker
+
+tracker = RetryTracker(
+    storm_window_ms=60_000,  # 60s window for storm detection
+    storm_threshold=5,        # 5+ retries = storm
+)
+
+tracker.add_sessions([session_1, session_2])
+report = tracker.report()
+
+# Retry chains (linked by event.retry_of field)
+for chain in report.chains:
+    print(f"Chain: {chain.length} attempts, "
+          f"outcome={chain.outcome.value}, "
+          f"retry_tax_ms={chain.retry_tax_ms:.0f}")
+
+# Storm detection
+for storm in report.storms:
+    print(f"🌪️ Storm: {storm.count} retries in {storm.window_ms}ms "
+          f"({storm.session_id})")
+
+# Recommendations
+for rec in report.recommendations:
+    print(f"💡 [{rec.category}] {rec.message}")
+
+# Summary stats
+print(f"Total retries: {report.total_retries}")
+print(f"Success rate: {report.success_rate:.0%}")
+print(f"Retry tax: {report.total_retry_tax_ms:.0f}ms")
+print(f"Storms detected: {len(report.storms)}")
+
+# Render as text or export
+print(report.render())
+data = report.to_dict()
+```
+
+### Retry Outcomes
+
+| Outcome | Description |
+|---------|-------------|
+| `SUCCESS` | Final retry succeeded |
+| `FAILURE` | All retries exhausted |
+| `PARTIAL` | Some events succeeded, some failed |
+
+### How Retry Chains Work
+
+Events are linked via the `retry_of` field. If event B has `retry_of = A.event_id`, then B is a retry of A. Chains can be arbitrarily long (A → B → C → …). The **retry tax** is the cumulative time and tokens spent on failed attempts within a chain.
+
+## Prompt Version Tracker
+
+Track prompt template versions, record outcomes, diff versions, and generate performance reports.
+
+```python
+from agentlens import PromptVersionTracker
+
+tracker = PromptVersionTracker(dedup=True)
+
+# Register prompt versions
+v1 = tracker.register(
+    prompt_name="summarize",
+    template="Summarize: {text}",
+    version=1,
+    tags=["baseline"],
+    metadata={"author": "alice"},
+)
+
+v2 = tracker.register(
+    prompt_name="summarize",
+    template="Write a concise summary of: {text}",
+    version=2,
+    tags=["improved"],
+)
+
+# Record outcomes
+tracker.record_outcome(
+    version_id=v1.version_id,
+    latency_ms=120.5,
+    tokens_in=50,
+    tokens_out=30,
+    success=True,
+    metadata={"quality_score": 0.85},
+)
+
+# Diff two versions
+diff = tracker.diff("summarize", from_version=1, to_version=2)
+print(f"Change type: {diff.kind.value}")
+print(f"Similarity: {diff.similarity:.0%}")
+
+# Performance report
+report = tracker.report("summarize")
+for entry in report.entries:
+    stats = entry.stats
+    print(f"v{entry.version.version}: "
+          f"p50={stats.p50_latency_ms:.0f}ms, "
+          f"success={stats.success_rate:.0%}")
+
+# Search by tag
+versions = tracker.search_by_tag("baseline")
+
+# Rollback to previous version
+tracker.rollback("summarize", to_version=1)
+
+# Export / import
+data = tracker.export_json()
+tracker.import_json(data)
+```
+
+### Diff Kinds
+
+| Kind | Description |
+|------|-------------|
+| `MAJOR` | Structural template change |
+| `MINOR` | Wording or parameter change |
+| `PATCH` | Whitespace or formatting only |
+| `IDENTICAL` | No change |
+
+## Tracker Alert Rules
+
+Mixin methods on `AgentTracker` for managing server-side alert rules.
+
+```python
+from agentlens import AgentTracker
+
+tracker = AgentTracker(api_key="...", endpoint="...")
+
+# Create an alert rule
+rule = tracker.create_alert_rule(
+    name="High error rate",
+    metric="error_rate",
+    operator="gt",
+    threshold=0.1,
+    window_minutes=15,
+    severity="critical",
+    description="Fires when error rate exceeds 10%",
+)
+
+# List all rules
+rules = tracker.list_alert_rules(enabled=True)
+
+# Update a rule
+tracker.update_alert_rule(rule["id"], threshold=0.15)
+
+# Evaluate current alerts
+alerts = tracker.evaluate_alerts()
+
+# Get alert events
+events = tracker.get_alert_events(
+    severity="critical",
+    acknowledged=False,
+    limit=20,
+)
+
+# Acknowledge an alert
+tracker.acknowledge_alert(alert_id="alert-123")
+
+# Get alert metrics
+metrics = tracker.get_alert_metrics()
+
+# Delete a rule
+tracker.delete_alert_rule(rule["id"])
+```
+
+## Tracker Annotations
+
+Mixin methods on `AgentTracker` for annotating sessions and events.
+
+```python
+from agentlens import AgentTracker
+
+tracker = AgentTracker(api_key="...", endpoint="...")
+
+# Annotate a session
+ann = tracker.annotate(
+    text="Performance regression after model switch",
+    scope="session",
+    session_id="sess-123",
+    tags=["regression", "model-switch"],
+    severity="warning",
+)
+
+# Annotate a specific event
+tracker.annotate(
+    text="Unexpected tool failure",
+    scope="event",
+    session_id="sess-123",
+    event_id="evt-456",
+    severity="error",
+)
+
+# List annotations (filterable)
+anns = tracker.get_annotations(
+    session_id="sess-123",
+    scope="session",
+    severity="warning",
+    limit=10,
+)
+
+# Update annotation
+tracker.update_annotation(
+    annotation_id=ann["id"],
+    text="Confirmed: model regression",
+    severity="error",
+)
+
+# List recent across all sessions
+recent = tracker.list_recent_annotations(limit=20)
+
+# Delete
+tracker.delete_annotation(ann["id"])
+```
+
+### Annotation Scopes
+
+| Scope | Description |
+|-------|-------------|
+| `session` | Annotates an entire session |
+| `event` | Annotates a specific event within a session |
+
+### Severity Levels
+
+`info`, `warning`, `error`, `critical`
+
+## Tracker Data Retention
+
+Mixin methods on `AgentTracker` for managing data retention policies and purging old data.
+
+```python
+from agentlens import AgentTracker
+
+tracker = AgentTracker(api_key="...", endpoint="...")
+
+# Get current retention config
+config = tracker.get_retention_config()
+print(f"Events: {config['event_ttl_days']} days")
+print(f"Sessions: {config['session_ttl_days']} days")
+
+# Update retention policy
+tracker.set_retention_config(
+    event_ttl_days=90,
+    session_ttl_days=180,
+    archive_before_delete=True,
+)
+
+# Get retention statistics
+stats = tracker.get_retention_stats()
+print(f"Total events: {stats['total_events']}")
+print(f"Eligible for purge: {stats['purgeable_events']}")
+
+# Dry run purge (shows what would be deleted)
+preview = tracker.purge(dry_run=True)
+print(f"Would purge: {preview['events_purged']} events")
+
+# Execute purge
+result = tracker.purge(dry_run=False)
+print(f"Purged: {result['events_purged']} events, "
+      f"{result['sessions_purged']} sessions")
+```
+
+## Tracker Session Tags
+
+Mixin methods on `AgentTracker` for tagging sessions and searching by tags.
+
+```python
+from agentlens import AgentTracker
+
+tracker = AgentTracker(api_key="...", endpoint="...")
+
+# Tag a session
+tracker.add_tags(
+    tags=["production", "v2.1", "regression-test"],
+    session_id="sess-123",
+)
+
+# Remove specific tags
+tracker.remove_tags(
+    tags=["regression-test"],
+    session_id="sess-123",
+)
+
+# Remove all tags
+tracker.remove_tags(session_id="sess-123")
+
+# Get tags for a session
+tags = tracker.get_tags(session_id="sess-123")
+
+# List all tags across all sessions
+all_tags = tracker.list_all_tags()
+for tag in all_tags:
+    print(f"{tag['tag']}: {tag['count']} sessions")
+
+# Find sessions by tag
+sessions = tracker.list_sessions_by_tag(
+    tag="production",
+    limit=20,
+    offset=0,
+)
+
+# Full-text search across sessions
+results = tracker.search_sessions(
+    query="error timeout",
+    tags=["production"],
+    limit=10,
+)
+```
+
+### Tag Constraints
+
+- Max 64 characters per tag
+- Allowed characters: alphanumeric, `_`, `-`, `.`, `:`, `/`, space
+- Max 20 tags per session
