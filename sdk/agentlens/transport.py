@@ -47,7 +47,7 @@ class Transport:
         self._client = httpx.Client(timeout=10.0)
 
         # Start background flush thread
-        self._running = True
+        self._stop_event = threading.Event()
         self._flush_thread = threading.Thread(target=self._flush_loop, daemon=True)
         self._flush_thread.start()
 
@@ -210,15 +210,29 @@ class Transport:
         return response
 
     def _flush_loop(self) -> None:
-        """Background thread that periodically flushes the buffer."""
-        while self._running:
-            time.sleep(self.flush_interval)
+        """Background thread that periodically flushes the buffer.
+
+        Uses ``threading.Event.wait`` instead of ``time.sleep`` so that
+        ``close()`` can wake the thread immediately rather than waiting
+        for the full sleep interval to elapse.
+        """
+        while not self._stop_event.wait(timeout=self.flush_interval):
             self.flush()
 
     def close(self) -> None:
-        """Flush remaining events and stop the background thread."""
-        self._running = False
+        """Flush remaining events and stop the background thread.
+
+        Signals the flush thread via ``_stop_event`` so it wakes up
+        immediately (instead of sleeping through the remaining interval),
+        then performs a final flush and waits for the thread to exit
+        before closing the HTTP client.
+        """
+        self._stop_event.set()
         self.flush()
+        self._flush_thread.join(timeout=10.0)
         if self._flush_thread.is_alive():
-            self._flush_thread.join(timeout=5.0)
+            logger.warning(
+                "Flush thread did not exit within timeout; "
+                "closing transport anyway"
+            )
         self._client.close()
