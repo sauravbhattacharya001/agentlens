@@ -413,7 +413,7 @@ router.put("/events/:alertId/acknowledge", wrapRoute("acknowledge alert", (req, 
 
 // ── GET /alerts/metrics — list available metrics ────────────────────
 
-router.get("/metrics", (req, res) => {
+router.get("/metrics", wrapRoute("list alert metrics", (req, res) => {
   res.json({
     metrics: VALID_METRICS.map(m => ({
       name: m,
@@ -430,6 +430,6 @@ router.get("/metrics", (req, res) => {
     })),
     operators: VALID_OPERATORS,
   });
-});
+}));
 
 module.exports = router;

@@ -7,6 +7,7 @@
 const express = require("express");
 const router = express.Router();
 const { getDb } = require("../db");
+const { wrapRoute } = require("../lib/request-helpers");
 
 // ── Schema initialisation ───────────────────────────────────────────
 
@@ -273,19 +274,13 @@ function batchEventCounts(sessionIds) {
 // ── Routes ──────────────────────────────────────────────────────────
 
 // GET /retention/config — current retention settings
-router.get("/config", (req, res) => {
-  try {
+router.get("/config", wrapRoute("get retention config", (req, res) => {
     const config = getConfig();
     res.json({ config });
-  } catch (err) {
-    console.error("Retention config error:", err);
-    res.status(500).json({ error: "Failed to get retention config" });
-  }
-});
+}));
 
 // PUT /retention/config — update retention settings
-router.put("/config", (req, res) => {
-  try {
+router.put("/config", wrapRoute("update retention config", (req, res) => {
     const updates = req.body;
     if (!updates || typeof updates !== "object") {
       return res.status(400).json({ error: "Request body must be a JSON object" });
@@ -340,15 +335,10 @@ router.put("/config", (req, res) => {
 
     saveConfig(config);
     res.json({ config, updated: changed });
-  } catch (err) {
-    console.error("Retention config update error:", err);
-    res.status(500).json({ error: "Failed to update retention config" });
-  }
-});
+}));
 
 // GET /retention/stats — database size & age statistics
-router.get("/stats", (req, res) => {
-  try {
+router.get("/stats", wrapRoute("get retention stats", (req, res) => {
     const db = getDb();
     const stmts = getRetentionStatements();
 
@@ -396,15 +386,10 @@ router.get("/stats", (req, res) => {
       eligible_for_purge: eligibleForPurge.length,
       config,
     });
-  } catch (err) {
-    console.error("Retention stats error:", err);
-    res.status(500).json({ error: "Failed to get retention stats" });
-  }
-});
+}));
 
 // POST /retention/purge — manually purge old data
-router.post("/purge", (req, res) => {
-  try {
+router.post("/purge", wrapRoute("purge retention data", (req, res) => {
     const dryRun = req.query.dry_run === "true" || req.body?.dry_run === true;
     const config = getConfig();
     const eligible = getEligibleSessions(config);
@@ -473,11 +458,7 @@ router.post("/purge", (req, res) => {
         ? `Purged ${cappedEligible.length} of ${eligible.length} eligible sessions (${eligible.length - cappedEligible.length} remaining)`
         : `Purged ${cappedEligible.length} sessions and ${totalEvents} events`,
     });
-  } catch (err) {
-    console.error("Retention purge error:", err);
-    res.status(500).json({ error: "Failed to purge data" });
-  }
-});
+}));
 
 module.exports = router;
 module.exports._resetStmts = function () { _retentionStmts = null; };

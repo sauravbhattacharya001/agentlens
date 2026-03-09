@@ -16,6 +16,7 @@ var express = require("express");
 var crypto = require("crypto");
 var router = express.Router();
 var dbMod = require("../db");
+var { wrapRoute } = require("../lib/request-helpers");
 
 // ── SSE client management ───────────────────────────────────────────
 
@@ -253,7 +254,7 @@ router.get("/stream", function (req, res) {
 });
 
 /** POST /schedules — Create or update a schedule for a rule */
-router.post("/schedules", function (req, res) {
+router.post("/schedules", wrapRoute("create/update correlation schedule", function (req, res) {
   ensureSchedulerTables();
   var db = dbMod.getDb();
   var body = req.body;
@@ -285,10 +286,10 @@ router.post("/schedules", function (req, res) {
     enabled: !!enabled,
     next_run_at: nextRun,
   });
-});
+}));
 
 /** GET /schedules — List all schedules */
-router.get("/schedules", function (req, res) {
+router.get("/schedules", wrapRoute("list correlation schedules", function (req, res) {
   ensureSchedulerTables();
   var db = dbMod.getDb();
   var schedules = db.prepare(
@@ -296,36 +297,36 @@ router.get("/schedules", function (req, res) {
     "JOIN correlation_rules r ON s.rule_id = r.rule_id ORDER BY s.next_run_at ASC"
   ).all();
   res.json({ schedules: schedules, total: schedules.length });
-});
+}));
 
 /** DELETE /schedules/:ruleId — Remove a schedule */
-router.delete("/schedules/:ruleId", function (req, res) {
+router.delete("/schedules/:ruleId", wrapRoute("delete correlation schedule", function (req, res) {
   ensureSchedulerTables();
   var db = dbMod.getDb();
   var result = db.prepare("DELETE FROM correlation_schedules WHERE rule_id = ?").run(req.params.ruleId);
   if (result.changes === 0) return res.status(404).json({ error: "Schedule not found" });
   res.json({ deleted: true, rule_id: req.params.ruleId });
-});
+}));
 
 /** POST /scheduler/start — Start the scheduler loop */
-router.post("/scheduler/start", function (req, res) {
+router.post("/scheduler/start", wrapRoute("start correlation scheduler", function (req, res) {
   startScheduler();
   res.json({ status: "running" });
-});
+}));
 
 /** POST /scheduler/stop — Stop the scheduler loop */
-router.post("/scheduler/stop", function (req, res) {
+router.post("/scheduler/stop", wrapRoute("stop correlation scheduler", function (req, res) {
   stopScheduler();
   res.json({ status: "stopped" });
-});
+}));
 
 /** GET /scheduler/status — Get scheduler status */
-router.get("/scheduler/status", function (req, res) {
+router.get("/scheduler/status", wrapRoute("get scheduler status", function (req, res) {
   res.json({
     running: schedulerInterval !== null,
     connected_clients: sseClients.length,
   });
-});
+}));
 
 // ── Auto-start on require ───────────────────────────────────────────
 // Delay start to let DB initialize

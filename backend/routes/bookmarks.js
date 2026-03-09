@@ -8,7 +8,7 @@ const router = express.Router();
 // ── GET /bookmarks — list all bookmarked sessions ───────────────────
 router.get(
   "/",
-  wrapRoute((req, res) => {
+  wrapRoute("list bookmarks", (req, res) => {
     const db = getDb();
     const rows = db
       .prepare(
@@ -28,7 +28,7 @@ router.get(
 router.get(
   "/:sessionId",
   requireSessionId,
-  wrapRoute((req, res) => {
+  wrapRoute("check bookmark", (req, res) => {
     const db = getDb();
     const row = db
       .prepare("SELECT session_id, note, created_at FROM session_bookmarks WHERE session_id = ?")
@@ -41,7 +41,7 @@ router.get(
 router.put(
   "/:sessionId",
   requireSessionId,
-  wrapRoute((req, res) => {
+  wrapRoute("upsert bookmark", (req, res) => {
     const db = getDb();
     const { sessionId } = req.params;
     const note = typeof req.body.note === "string" ? req.body.note.slice(0, 500) : "";
@@ -68,7 +68,7 @@ router.put(
 router.delete(
   "/:sessionId",
   requireSessionId,
-  wrapRoute((req, res) => {
+  wrapRoute("delete bookmark", (req, res) => {
     const db = getDb();
     const result = db
       .prepare("DELETE FROM session_bookmarks WHERE session_id = ?")

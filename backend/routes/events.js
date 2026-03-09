@@ -10,6 +10,7 @@ const {
   clampNonNegInt,
   clampNonNegFloat,
 } = require("../lib/validation");
+const { wrapRoute } = require("../lib/request-helpers");
 
 const router = express.Router();
 
@@ -50,7 +51,7 @@ function getStatements() {
 }
 
 // POST /events — Ingest events (batched)
-router.post("/", (req, res) => {
+router.post("/", wrapRoute("ingest events", (req, res) => {
   const db = getDb();
   const { events } = req.body;
 
@@ -166,6 +167,6 @@ router.post("/", (req, res) => {
     console.error("Error ingesting events:", err);
     res.status(500).json({ error: "Failed to ingest events" });
   }
-});
+}));
 
 module.exports = router;
