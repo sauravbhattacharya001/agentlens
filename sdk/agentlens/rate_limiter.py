@@ -289,13 +289,12 @@ class RateLimiter:
             util_pct = (current / rl.limit) * 100 if rl.limit else 0
 
             if current + estimated > rl.limit:
+                label = rl.label or f"{rl.resource}/{rl.window_seconds}s"
+                violated.append(label)
                 if rl.action == RateLimitAction.BLOCK:
                     all_allowed = False
                     retry = window.ms_until_capacity(estimated, rl.limit, now)
                     max_retry = max(max_retry, retry)
-                label = rl.label or f"{rl.resource}/{rl.window_seconds}s"
-                violated.append(label)
-                self._stats_blocked[resource] = self._stats_blocked.get(resource, 0) + 1
 
             if util_pct >= self.policy.warn_at_pct:
                 label = rl.label or f"{rl.resource}/{rl.window_seconds}s"
@@ -309,6 +308,9 @@ class RateLimiter:
                 worst_util = util_pct
                 worst_limit = rl.limit
                 worst_usage = current
+
+        if not all_allowed:
+            self._stats_blocked[resource] = self._stats_blocked.get(resource, 0) + 1
 
         return CheckResult(
             allowed=all_allowed,
