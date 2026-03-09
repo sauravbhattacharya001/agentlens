@@ -18,7 +18,7 @@ def transport():
     """Transport with mocked _client for testing convenience methods."""
     t = Transport(endpoint="http://test:3000", api_key="secret-key-42")
     yield t
-    t._running = False
+    t._stop_event.set()
     try:
         t._client.close()
     except Exception:
@@ -42,7 +42,7 @@ class TestAuthHeaders:
         try:
             assert t._auth_headers() == {"X-API-Key": "other-key"}
         finally:
-            t._running = False
+            t._stop_event.set()
 
 
 class TestGet:
@@ -251,7 +251,7 @@ class TestConvenienceMethodEdgeCases:
                 # Should be test:3000/sessions not test:3000//sessions
                 assert mock_get.call_args[0][0] == "http://test:3000/sessions"
         finally:
-            t._running = False
+            t._stop_event.set()
 
     def test_custom_headers_dont_overwrite_auth(self, transport):
         """Custom X-API-Key header shouldn't override the configured one."""
@@ -297,4 +297,4 @@ class TestConvenienceMethodEdgeCases:
             assert "****" in repr(t)
             assert "abc" not in repr(t)
         finally:
-            t._running = False
+            t._stop_event.set()

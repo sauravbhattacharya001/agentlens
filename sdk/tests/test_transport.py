@@ -39,7 +39,7 @@ class TestSendEvents:
                 mock_send.assert_not_called()
                 assert len(t._buffer) == 1
         finally:
-            t._running = False
+            t._stop_event.set()
 
     def test_flushes_at_batch_size(self):
         t = Transport(endpoint="http://test:3000", batch_size=2)
@@ -49,7 +49,7 @@ class TestSendEvents:
                 mock_send.assert_called_once()
                 assert len(t._buffer) == 0
         finally:
-            t._running = False
+            t._stop_event.set()
 
     def test_caps_buffer_at_max(self):
         t = Transport(endpoint="http://test:3000", batch_size=_MAX_BUFFER_SIZE + 100)
@@ -60,7 +60,7 @@ class TestSendEvents:
                 t.send_events(events)
                 assert len(t._buffer) == _MAX_BUFFER_SIZE
         finally:
-            t._running = False
+            t._stop_event.set()
 
 
 class TestFlush:
@@ -73,7 +73,7 @@ class TestFlush:
                 mock_send.assert_called_once_with([{"type": "a"}, {"type": "b"}])
                 assert len(t._buffer) == 0
         finally:
-            t._running = False
+            t._stop_event.set()
 
     def test_flush_empty_buffer_noop(self):
         t = Transport(endpoint="http://test:3000")
@@ -82,7 +82,7 @@ class TestFlush:
                 t.flush()
                 mock_send.assert_not_called()
         finally:
-            t._running = False
+            t._stop_event.set()
 
 
 class TestSendBatch:
@@ -96,7 +96,7 @@ class TestSendBatch:
                 t._send_batch([{"type": "test"}])
                 assert t._consecutive_failures == 0
         finally:
-            t._running = False
+            t._stop_event.set()
 
     def test_failed_send_requeues_events(self):
         t = Transport(endpoint="http://test:3000", max_retries=3)
@@ -110,7 +110,7 @@ class TestSendBatch:
                 assert t._consecutive_failures == 1
                 assert len(t._buffer) == 1  # requeued
         finally:
-            t._running = False
+            t._stop_event.set()
 
     def test_drops_after_max_retries(self):
         t = Transport(endpoint="http://test:3000", max_retries=2)
@@ -125,7 +125,7 @@ class TestSendBatch:
                 assert len(t._buffer) == 0
                 assert t._consecutive_failures == 0  # reset after drop
         finally:
-            t._running = False
+            t._stop_event.set()
 
     def test_http_error_triggers_retry(self):
         t = Transport(endpoint="http://test:3000", max_retries=3)
@@ -137,7 +137,7 @@ class TestSendBatch:
                 assert t._consecutive_failures == 1
                 assert len(t._buffer) == 1
         finally:
-            t._running = False
+            t._stop_event.set()
 
     def test_empty_batch_noop(self):
         t = Transport(endpoint="http://test:3000")
@@ -146,7 +146,7 @@ class TestSendBatch:
                 t._send_batch([])
                 mock_post.assert_not_called()
         finally:
-            t._running = False
+            t._stop_event.set()
 
 
 class TestClose:
@@ -154,5 +154,5 @@ class TestClose:
         t = Transport(endpoint="http://test:3000")
         with patch.object(t, "flush") as mock_flush:
             t.close()
-            assert t._running is False
+            assert t._stop_event.is_set()
             mock_flush.assert_called_once()
