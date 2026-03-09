@@ -84,8 +84,7 @@ function seedDefaults() {
 }
 
 // GET /pricing — List all model pricing
-router.get("/", (req, res) => {
-  try {
+router.get("/", wrapRoute("list model pricing", (req, res) => {
     seedDefaults();
     const stmts = getPricingStatements();
     const rows = stmts.getAll.all();
@@ -104,21 +103,16 @@ router.get("/", (req, res) => {
       pricing,
       defaults: DEFAULT_PRICING,
     });
-  } catch (err) {
-    console.error("Error fetching pricing:", err);
-    res.status(500).json({ error: "Failed to fetch pricing" });
-  }
-});
+}));
 
 // PUT /pricing — Update pricing for one or more models
-router.put("/", (req, res) => {
+router.put("/", wrapRoute("update model pricing", (req, res) => {
   const { pricing } = req.body;
 
   if (!pricing || typeof pricing !== "object") {
     return res.status(400).json({ error: "Missing 'pricing' object in request body" });
   }
 
-  try {
     seedDefaults();
     const db = getDb();
     const stmts = getPricingStatements();
@@ -144,20 +138,15 @@ router.put("/", (req, res) => {
     updateAll();
 
     res.json({ status: "ok", updated });
-  } catch (err) {
-    console.error("Error updating pricing:", err);
-    res.status(500).json({ error: "Failed to update pricing" });
-  }
-});
+}));
 
 // DELETE /pricing/:model — Remove custom pricing for a model
-router.delete("/:model", (req, res) => {
+router.delete("/:model", wrapRoute("delete model pricing", (req, res) => {
   const model = sanitizeString(req.params.model, 128);
   if (!model) {
     return res.status(400).json({ error: "Invalid model name" });
   }
 
-  try {
     const stmts = getPricingStatements();
     const result = stmts.deleteModel.run(model);
 
@@ -166,17 +155,12 @@ router.delete("/:model", (req, res) => {
     }
 
     res.json({ status: "ok", deleted: model });
-  } catch (err) {
-    console.error("Error deleting pricing:", err);
-    res.status(500).json({ error: "Failed to delete pricing" });
-  }
-});
+}));
 
 // GET /pricing/costs/:sessionId — Calculate costs for a session
-router.get("/costs/:sessionId", requireSessionId, (req, res) => {
+router.get("/costs/:sessionId", requireSessionId, wrapRoute("calculate session costs", (req, res) => {
   const { sessionId } = req.params;
 
-  try {
     seedDefaults();
     const stmts = getPricingStatements();
 
@@ -306,10 +290,6 @@ router.get("/costs/:sessionId", requireSessionId, (req, res) => {
       unmatched_models: [...unmatchedModels],
       pricing_used: pricingMap,
     });
-  } catch (err) {
-    console.error("Error calculating costs:", err);
-    res.status(500).json({ error: "Failed to calculate costs" });
-  }
-});
+}));
 
 module.exports = router;
