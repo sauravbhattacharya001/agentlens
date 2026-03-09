@@ -269,29 +269,70 @@ function correlateByErrorCascade(events, config) {
   return groups;
 }
 
+/** Extract comparable key-value pairs from a raw JSON field string. */
+function extractMatchValues(raw) {
+  if (!raw) return {};
+  try {
+    var parsed = JSON.parse(raw);
+    if (typeof parsed !== "object" || parsed === null) return { _raw: String(parsed) };
+    return parsed;
+  } catch (e) {
+    // Not JSON — treat the raw string as a single value
+    return { _raw: raw };
+  }
+}
+
+/** Check if any value from `source` appears in the `target` object (recursive). */
+function hasOverlappingValues(source, target) {
+  if (typeof source !== "object" || source === null) return false;
+  if (typeof target !== "object" || target === null) return false;
+
+  var targetStr = JSON.stringify(target);
+  var sourceKeys = Object.keys(source);
+  for (var i = 0; i < sourceKeys.length; i++) {
+    var val = source[sourceKeys[i]];
+    if (val === null || val === undefined || val === "") continue;
+    var strVal = typeof val === "object" ? JSON.stringify(val) : String(val);
+    // Skip very short values (< 4 chars) to avoid false positives on common strings
+    if (strVal.length < 4) continue;
+    if (targetStr.indexOf(strVal) >= 0) return true;
+  }
+  return false;
+}
+
 /** Find causal chains: output of one event matches input of another. */
 function correlateByCausalChain(events, config) {
   var maxGapMs = (config.max_gap_seconds || 60) * 1000;
-  var matchFields = config.match_fields || ["tool_call"];
+  var matchFields = config.match_fields || ["output_data"];
   var groups = [];
 
   for (var i = 0; i < events.length; i++) {
-    var chain = [events[i]];
-    var outputData = events[i].output_data || "";
-    if (!outputData) continue;
+    // Require the source event to have output data to form a chain
+    var outputRaw = events[i].output_data || "";
+    if (!outputRaw) continue;
 
+    var chain = [events[i]];
     var ts1 = new Date(events[i].timestamp).getTime();
+
+    // Parse source fields once for reuse
+    var sourceValues = [];
+    for (var k = 0; k < matchFields.length; k++) {
+      var fieldVal = events[i][matchFields[k]] || "";
+      if (fieldVal) sourceValues.push(extractMatchValues(fieldVal));
+    }
+    if (sourceValues.length === 0) continue;
 
     for (var j = i + 1; j < events.length; j++) {
       var ts2 = new Date(events[j].timestamp).getTime();
       if (ts2 - ts1 > maxGapMs) break;
       if (events[j].session_id === events[i].session_id) continue;
 
+      var inputParsed = extractMatchValues(events[j].input_data);
+      if (Object.keys(inputParsed).length === 0) continue;
+
       var matched = false;
-      for (var k = 0; k < matchFields.length; k++) {
-        var val1 = events[i][matchFields[k]] || "";
-        var val2 = events[j].input_data || "";
-        if (val1 && val2 && val2.indexOf(val1) >= 0) { matched = true; break; }
+      for (var s = 0; s < sourceValues.length; s++) {
+        if (hasOverlappingValues(sourceValues[s], inputParsed)) { matched = true; break; }
       }
       if (matched) chain.push(events[j]);
     }
