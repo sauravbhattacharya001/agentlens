@@ -219,4 +219,6 @@ class Transport:
         """Flush remaining events and stop the background thread."""
         self._running = False
         self.flush()
+        if self._flush_thread.is_alive():
+            self._flush_thread.join(timeout=5.0)
         self._client.close()

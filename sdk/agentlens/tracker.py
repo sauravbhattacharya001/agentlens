@@ -48,22 +48,34 @@ class AgentTracker(AlertMixin, TagMixin, AnnotationMixin, RetentionMixin):
         self,
         session_id: str | None,
         error_msg: str = "No session specified. Specify session_id or start a session first.",
+        *,
+        require_local: bool = False,
     ) -> str:
         """Resolve a session ID, falling back to the current session.
 
         Args:
             session_id: Explicit session ID, or None to use current.
             error_msg: Error message if no session can be resolved.
+            require_local: If True, also verify the session exists in
+                ``self.sessions``. Methods that need to access session
+                data locally (e.g. ``health_score``, ``timeline``,
+                ``explain``) should set this to True.
 
         Returns:
             The resolved session ID.
 
         Raises:
-            RuntimeError: If no session can be resolved.
+            RuntimeError: If no session can be resolved or (when
+                *require_local* is True) the session is not tracked locally.
         """
         sid = session_id or self._current_session_id
         if not sid:
             raise RuntimeError(error_msg)
+        if require_local and sid not in self.sessions:
+            raise RuntimeError(
+                f"Session '{sid}' not found locally. "
+                "It may have been ended or was never started by this tracker."
+            )
         return sid
 
     @contextmanager
@@ -207,7 +219,7 @@ class AgentTracker(AlertMixin, TagMixin, AnnotationMixin, RetentionMixin):
         Raises:
             RuntimeError: If the session is not found.
         """
-        sid = self._resolve_session(session_id, "Session not found")
+        sid = self._resolve_session(session_id, "Session not found", require_local=True)
         session = self.sessions[sid]
         scorer = HealthScorer(thresholds)
         return scorer.score_session(session)
@@ -231,7 +243,7 @@ class AgentTracker(AlertMixin, TagMixin, AnnotationMixin, RetentionMixin):
         Raises:
             RuntimeError: If the session is not found.
         """
-        sid = self._resolve_session(session_id, "Session not found")
+        sid = self._resolve_session(session_id, "Session not found", require_local=True)
 
         session = self.sessions[sid]
 
