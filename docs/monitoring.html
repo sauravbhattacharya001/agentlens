@@ -1,0 +1,593 @@
+<!DOCTYPE html>
+<html lang="en">
+<head>
+  <meta charset="UTF-8">
+  <meta name="viewport" content="width=device-width, initial-scale=1.0">
+  <title>Monitoring &amp; Analysis - AgentLens Docs</title>
+  <link rel="stylesheet" href="style.css">
+</head>
+<body>
+
+<header class="header">
+  <button class="menu-toggle" onclick="document.querySelector('.sidebar').classList.toggle('open')">&#9776;</button>
+  <a href="index.html" class="header-logo">&#128270; <span>AgentLens</span> Docs</a>
+  <nav class="header-nav">
+    <a href="getting-started.html">Getting Started</a>
+    <a href="sdk-reference.html">SDK</a>
+    <a href="api.html">API</a>
+    <a href="https://github.com/sauravbhattacharya001/agentlens" class="github-link" target="_blank">&#128279; GitHub</a>
+  </nav>
+</header>
+
+<aside class="sidebar">
+  <div class="sidebar-section">
+    <div class="sidebar-section-title">Overview</div>
+    <a href="index.html">Introduction</a>
+    <a href="architecture.html">Architecture</a>
+  </div>
+  <div class="sidebar-section">
+    <div class="sidebar-section-title">Guides</div>
+    <a href="getting-started.html">Getting Started</a>
+    <a href="quickstart.html">5-Minute Quickstart</a>
+    <a href="deployment.html">Deployment</a>
+  </div>
+  <div class="sidebar-section">
+    <div class="sidebar-section-title">SDK</div>
+    <a href="sdk-reference.html">Python SDK Reference</a>
+    <a href="decorators.html">Decorators</a>
+    <a href="models.html">Data Models</a>
+    <a href="transport.html">Transport &amp; Batching</a>
+    <a href="sampling.html">Sampling &amp; Rate Limiting</a>
+  </div>
+  <div class="sidebar-section">
+    <div class="sidebar-section-title">Backend</div>
+    <a href="api.html">REST API</a>
+    <a href="database.html">Database Schema</a>
+    <a href="dashboard.html">Dashboard</a>
+  </div>
+  <div class="sidebar-section">
+    <div class="sidebar-section-title">Advanced</div>
+    <a href="explainability.html">Explainability</a>
+    <a href="integrations.html">Integrations</a>
+    <a href="monitoring.html" class="active">Monitoring &amp; Analysis</a>
+  </div>
+</aside>
+
+<main class="main">
+  <h1>Monitoring &amp; Analysis</h1>
+  <p class="subtitle">Health scoring, anomaly detection, SLA evaluation, budgets, postmortem generation, and latency profiling for production AI agents.</p>
+
+  <div class="info-box">
+    <strong>Overview:</strong> AgentLens provides six monitoring modules that work together to
+    give you production-grade observability over AI agent behavior. Each module operates on
+    the same event and session data, so you can combine them into a comprehensive monitoring
+    pipeline.
+  </div>
+
+  <nav>
+    <strong>On this page:</strong>
+    <ul>
+      <li><a href="#health-scoring">Health Scoring</a></li>
+      <li><a href="#anomaly-detection">Anomaly Detection</a></li>
+      <li><a href="#sla-evaluation">SLA Evaluation</a></li>
+      <li><a href="#token-budgets">Token Budgets</a></li>
+      <li><a href="#latency-profiling">Latency Profiling</a></li>
+      <li><a href="#postmortem">Postmortem Generation</a></li>
+      <li><a href="#prompt-tracking">Prompt Version Tracking</a></li>
+      <li><a href="#cost-optimization">Cost Optimization</a></li>
+      <li><a href="#capacity-planning">Capacity Planning</a></li>
+      <li><a href="#pipeline">Building a Monitoring Pipeline</a></li>
+    </ul>
+  </nav>
+
+  <!-- ═══════════════════════════════════════════════════════════════ -->
+  <h2 id="health-scoring">Health Scoring</h2>
+  <p>Score agent sessions on 6 dimensions with letter grades (A&ndash;F) and actionable
+  recommendations. Use this for at-a-glance session quality assessment.</p>
+
+  <pre><code>from agentlens import HealthScorer, HealthThresholds
+
+# Default thresholds
+scorer = HealthScorer()
+
+# Score a list of events
+report = scorer.score(events, session_id="session-123")
+print(report.render())
+
+# Score a Session object directly
+report = scorer.score_session(session)
+
+# Inspect results
+print(f"Grade: {report.grade.value}")    # A, B, C, D, F
+print(f"Score: {report.overall_score}")  # 0-100
+for metric in report.metrics:
+    print(f"  {metric.name}: {metric.score}/100 ({metric.grade.value})")
+
+# Actionable recommendations
+for rec in report.recommendations:
+    print(f"  → {rec}")</code></pre>
+
+  <h3>Scored Dimensions</h3>
+  <table>
+    <thead><tr><th>Metric</th><th>What It Measures</th><th>Weight</th></tr></thead>
+    <tbody>
+      <tr><td>Error Rate</td><td>Fraction of events that are errors</td><td>High</td></tr>
+      <tr><td>Avg Latency</td><td>Mean response time across events</td><td>Medium</td></tr>
+      <tr><td>P95 Latency</td><td>95th percentile latency</td><td>Medium</td></tr>
+      <tr><td>Tool Success</td><td>Ratio of successful tool calls</td><td>Medium</td></tr>
+      <tr><td>Token Efficiency</td><td>Tokens used relative to event count</td><td>Low</td></tr>
+      <tr><td>Event Volume</td><td>Whether event count is in a healthy range</td><td>Low</td></tr>
+    </tbody>
+  </table>
+
+  <h3>Custom Thresholds</h3>
+  <pre><code># Tighter thresholds for production
+thresholds = HealthThresholds(
+    error_rate_warn=0.05,        # Warn at 5% errors
+    error_rate_critical=0.15,    # Critical at 15%
+    latency_warn_ms=2000,        # Warn at 2s avg latency
+    latency_critical_ms=8000,    # Critical at 8s
+)
+scorer = HealthScorer(thresholds=thresholds)</code></pre>
+
+  <h3>Grade Scale</h3>
+  <table>
+    <thead><tr><th>Grade</th><th>Score</th><th>Interpretation</th></tr></thead>
+    <tbody>
+      <tr><td><strong>A</strong></td><td>90&ndash;100</td><td>Excellent &mdash; agent is performing optimally</td></tr>
+      <tr><td><strong>B</strong></td><td>80&ndash;89</td><td>Good &mdash; minor areas for improvement</td></tr>
+      <tr><td><strong>C</strong></td><td>70&ndash;79</td><td>Acceptable &mdash; several metrics need attention</td></tr>
+      <tr><td><strong>D</strong></td><td>60&ndash;69</td><td>Poor &mdash; significant issues present</td></tr>
+      <tr><td><strong>F</strong></td><td>0&ndash;59</td><td>Failing &mdash; immediate action required</td></tr>
+    </tbody>
+  </table>
+
+  <!-- ═══════════════════════════════════════════════════════════════ -->
+  <h2 id="anomaly-detection">Anomaly Detection</h2>
+  <p>Statistical anomaly detection using z-scores against learned baselines. Detects
+  latency spikes, token anomalies, and error bursts in real time.</p>
+
+  <pre><code>from agentlens import AnomalyDetector, AnomalyDetectorConfig
+
+config = AnomalyDetectorConfig(
+    z_score_threshold=2.5,         # σ threshold for anomaly
+    min_baseline_events=10,        # Min events before detection starts
+    latency_weight=1.0,
+    token_weight=1.0,
+    error_weight=1.5,              # Weight errors more heavily
+)
+
+detector = AnomalyDetector(config=config)
+
+# Train on historical (known-good) events
+detector.train(historical_events)
+
+# Analyze new events
+report = detector.analyze(new_events)
+
+print(f"Anomalies: {report.anomaly_count}")
+print(f"Max severity: {report.max_severity}")
+print(report.summary())
+
+# Group anomalies
+by_kind = report.by_kind()          # dict[AnomalyKind, list]
+critical = report.critical_count()
+warnings = report.warning_count()</code></pre>
+
+  <h3>Anomaly Kinds</h3>
+  <table>
+    <thead><tr><th>Kind</th><th>Description</th><th>Typical Cause</th></tr></thead>
+    <tbody>
+      <tr><td><code>LATENCY_SPIKE</code></td><td>Response time significantly above baseline</td><td>API throttling, model overload</td></tr>
+      <tr><td><code>TOKEN_SPIKE</code></td><td>Token usage significantly above baseline</td><td>Prompt injection, unexpected input</td></tr>
+      <tr><td><code>ERROR_BURST</code></td><td>Error rate significantly above baseline</td><td>API outage, bad deployment</td></tr>
+      <tr><td><code>LATENCY_DROP</code></td><td>Unusually fast responses</td><td>Short-circuiting, cached responses</td></tr>
+      <tr><td><code>TOKEN_DROP</code></td><td>Unusually low token usage</td><td>Truncated responses, model errors</td></tr>
+    </tbody>
+  </table>
+
+  <h3>Severity Levels</h3>
+  <table>
+    <thead><tr><th>Severity</th><th>z-score Range</th><th>Action</th></tr></thead>
+    <tbody>
+      <tr><td><code>LOW</code></td><td>2.0&ndash;2.5&sigma;</td><td>Monitor, log for trending</td></tr>
+      <tr><td><code>MEDIUM</code></td><td>2.5&ndash;3.0&sigma;</td><td>Investigate within 1 hour</td></tr>
+      <tr><td><code>HIGH</code></td><td>3.0&ndash;4.0&sigma;</td><td>Investigate immediately</td></tr>
+      <tr><td><code>CRITICAL</code></td><td>&gt; 4.0&sigma;</td><td>Page on-call, potential incident</td></tr>
+    </tbody>
+  </table>
+
+  <!-- ═══════════════════════════════════════════════════════════════ -->
+  <h2 id="sla-evaluation">SLA Evaluation</h2>
+  <p>Evaluate agent sessions against Service Level Objectives (SLOs). Built-in
+  production and development policies, or define your own.</p>
+
+  <pre><code>from agentlens import SLAEvaluator, SLObjective, SLAPolicy
+
+policy = SLAPolicy(
+    name="production-sla",
+    objectives=[
+        SLObjective.latency_p95(target_ms=3000, slo_percent=99.0),
+        SLObjective.error_rate(target_rate=0.01, slo_percent=99.5),
+        SLObjective.token_budget(target_per_session=10000, slo_percent=95.0),
+        SLObjective.tool_success_rate(target_rate=0.95),
+        SLObjective.throughput(min_events=5, slo_percent=95.0),
+    ],
+)
+
+# Or use built-in policies
+from agentlens import production_policy, development_policy
+policy = production_policy()
+
+evaluator = SLAEvaluator()
+report = evaluator.evaluate(sessions, policy)
+print(report.render())
+
+for result in report.results:
+    print(f"  {result.objective.name}: {result.compliance_rate:.1%} "
+          f"(target: {result.objective.slo_percent}%) — {result.status.value}")</code></pre>
+
+  <h3>Objective Types</h3>
+  <table>
+    <thead><tr><th>Kind</th><th>Factory Method</th><th>What It Measures</th></tr></thead>
+    <tbody>
+      <tr><td><code>LATENCY_P95</code></td><td><code>SLObjective.latency_p95()</code></td><td>95th percentile latency per session</td></tr>
+      <tr><td><code>LATENCY_AVG</code></td><td><code>SLObjective.latency_avg()</code></td><td>Average latency per session</td></tr>
+      <tr><td><code>ERROR_RATE</code></td><td><code>SLObjective.error_rate()</code></td><td>Fraction of error events</td></tr>
+      <tr><td><code>TOKEN_BUDGET</code></td><td><code>SLObjective.token_budget()</code></td><td>Mean tokens per session</td></tr>
+      <tr><td><code>TOOL_SUCCESS</code></td><td><code>SLObjective.tool_success_rate()</code></td><td>Tool call success ratio</td></tr>
+      <tr><td><code>THROUGHPUT</code></td><td><code>SLObjective.throughput()</code></td><td>Minimum events per session</td></tr>
+    </tbody>
+  </table>
+
+  <h3>Compliance Statuses</h3>
+  <table>
+    <thead><tr><th>Status</th><th>Meaning</th></tr></thead>
+    <tbody>
+      <tr><td><code>MET</code></td><td>Objective fully satisfied</td></tr>
+      <tr><td><code>AT_RISK</code></td><td>Within 5% of threshold</td></tr>
+      <tr><td><code>BREACHED</code></td><td>Below target SLO percentage</td></tr>
+      <tr><td><code>NO_DATA</code></td><td>Insufficient data to evaluate</td></tr>
+    </tbody>
+  </table>
+
+  <!-- ═══════════════════════════════════════════════════════════════ -->
+  <h2 id="token-budgets">Token Budgets</h2>
+  <p>Enforce per-session or per-agent token and cost budgets with threshold
+  callbacks. Prevents runaway costs from misbehaving agents.</p>
+
+  <pre><code>from agentlens import BudgetTracker, BudgetStatus
+
+tracker = BudgetTracker()
+
+# Create a budget with token and cost caps
+budget = tracker.create_budget(
+    budget_id="agent-session-1",
+    max_tokens=50000,
+    max_cost=2.50,
+    warn_threshold=0.8,   # Fire callback at 80%
+)
+
+# Threshold notifications
+def on_threshold(budget, status):
+    print(f"Budget '{budget.budget_id}' → {status.value}")
+
+tracker.on_threshold(on_threshold)
+
+# Record token usage
+tracker.record(
+    budget_id="agent-session-1",
+    tokens_in=1200,
+    tokens_out=800,
+    model="gpt-4",
+)
+
+# Check status
+print(f"Used: {budget.utilization:.0%}")
+print(f"Remaining: {budget.remaining_tokens}")
+print(f"Status: {budget.status.value}")  # OK, WARNING, EXCEEDED
+
+# Link budgets to sessions
+tracker.record_for_session(
+    session_id="sess-abc",
+    tokens_in=500, tokens_out=200, model="gpt-4",
+)
+report = tracker.report_for_session("sess-abc")</code></pre>
+
+  <h3>Budget Statuses</h3>
+  <table>
+    <thead><tr><th>Status</th><th>Meaning</th><th>Behavior</th></tr></thead>
+    <tbody>
+      <tr><td><code>OK</code></td><td>Under warning threshold</td><td>Normal operation</td></tr>
+      <tr><td><code>WARNING</code></td><td>Approaching limit (&ge; warn_threshold)</td><td>Callback fires</td></tr>
+      <tr><td><code>EXCEEDED</code></td><td>Over budget</td><td>Raises <code>BudgetExceededError</code> when <code>enforce=True</code></td></tr>
+    </tbody>
+  </table>
+
+  <!-- ═══════════════════════════════════════════════════════════════ -->
+  <h2 id="latency-profiling">Latency Profiling</h2>
+  <p>Profile agent execution with step-by-step timing, percentile stats, and
+  slow-step detection. Identifies performance bottlenecks in multi-step
+  agent workflows.</p>
+
+  <pre><code>from agentlens import LatencyProfiler
+
+profiler = LatencyProfiler()
+
+# Start a profiling session
+session = profiler.start_session("agent-workflow")
+
+# Record steps (manually or from events)
+session.record_step("prompt-build", duration_ms=45)
+session.record_step("llm-call", duration_ms=2300)
+session.record_step("tool-execution", duration_ms=150)
+session.record_step("response-format", duration_ms=30)
+
+# Get the session report
+report = session.report()
+print(f"Total duration: {report.total_duration_ms}ms")
+print(f"Slowest step: {report.slowest_step.name} ({report.slowest_step.duration_ms}ms)")
+
+# Percentile stats across multiple sessions
+profiler.add_session(session)
+stats = profiler.percentiles("llm-call")
+print(f"P50: {stats.p50}ms, P95: {stats.p95}ms, P99: {stats.p99}ms")
+
+# Slow step alerts
+alerts = profiler.slow_step_alerts(threshold_ms=2000)
+for alert in alerts:
+    print(f"  ⚠ {alert.step_name}: {alert.duration_ms}ms (threshold: {alert.threshold_ms}ms)")</code></pre>
+
+  <!-- ═══════════════════════════════════════════════════════════════ -->
+  <h2 id="postmortem">Postmortem Generation</h2>
+  <p>Automatically generate structured incident postmortem reports from session
+  data. Identifies root causes, assesses impact, and suggests remediations.</p>
+
+  <pre><code>from agentlens import PostmortemGenerator, PostmortemConfig
+
+config = PostmortemConfig(
+    error_rate_threshold=0.1,       # Incident if > 10% errors
+    latency_threshold_ms=5000,      # Incident if avg > 5s
+    include_timeline=True,
+    include_remediation=True,
+)
+
+generator = PostmortemGenerator(config=config)
+
+# Generate from a session's events
+report = generator.generate(
+    events=session_events,
+    session_id="sess-incident-42",
+    title="Agent latency spike at 14:30 UTC",
+)
+
+# Inspect the report
+print(f"Severity: {report.severity.value}")
+
+for cause in report.root_causes:
+    print(f"Root cause: {cause.description}")
+    print(f"  Confidence: {cause.confidence}")
+    print(f"  Evidence: {cause.evidence}")
+
+for fix in report.remediations:
+    print(f"Fix: {fix.description} ({fix.category.value})")
+    print(f"  Priority: {fix.priority}")
+
+# Impact assessment
+print(f"Affected events: {report.impact.affected_events}")
+print(f"Error rate: {report.impact.error_rate:.1%}")
+print(f"Duration: {report.impact.duration_ms}ms")
+
+# Lessons learned
+for lesson in report.lessons_learned:
+    print(f"Lesson: {lesson.description}")
+
+# Export as Markdown
+md = report.render_markdown()
+
+# Export as dict (for storage / dashboards)
+data = report.to_dict()</code></pre>
+
+  <h3>Remediation Categories</h3>
+  <table>
+    <thead><tr><th>Category</th><th>Examples</th></tr></thead>
+    <tbody>
+      <tr><td><code>CONFIGURATION</code></td><td>Adjust timeouts, rate limits, retry policies</td></tr>
+      <tr><td><code>CODE_CHANGE</code></td><td>Fix bugs, add error handling, optimize prompts</td></tr>
+      <tr><td><code>INFRASTRUCTURE</code></td><td>Scale resources, add caching, improve monitoring</td></tr>
+      <tr><td><code>PROCESS</code></td><td>Add runbooks, update on-call procedures</td></tr>
+      <tr><td><code>EXTERNAL</code></td><td>Upstream API issues, provider outages</td></tr>
+    </tbody>
+  </table>
+
+  <!-- ═══════════════════════════════════════════════════════════════ -->
+  <h2 id="prompt-tracking">Prompt Version Tracking</h2>
+  <p>Track prompt versions, compare diffs, and correlate prompt changes with
+  quality outcomes. Essential for prompt engineering workflows.</p>
+
+  <pre><code>from agentlens import PromptVersionTracker, Outcome
+
+tracker = PromptVersionTracker()
+
+# Register prompt versions
+v1 = tracker.add_version(
+    prompt_id="summarizer",
+    version="1.0",
+    template="Summarize the following text: {text}",
+    metadata={"author": "alice", "model": "gpt-4"},
+)
+
+v2 = tracker.add_version(
+    prompt_id="summarizer",
+    version="1.1",
+    template="Provide a concise summary (max 3 sentences) of: {text}",
+    metadata={"author": "bob", "model": "gpt-4"},
+)
+
+# Record outcomes for each version
+tracker.record_outcome("summarizer", "1.0", Outcome.SUCCESS, latency_ms=1200)
+tracker.record_outcome("summarizer", "1.0", Outcome.SUCCESS, latency_ms=1100)
+tracker.record_outcome("summarizer", "1.1", Outcome.SUCCESS, latency_ms=900)
+tracker.record_outcome("summarizer", "1.1", Outcome.FAILURE, latency_ms=2500)
+
+# Compare versions
+diff = tracker.diff("summarizer", "1.0", "1.1")
+print(f"Diff kind: {diff.kind.value}")  # MODIFIED, ADDED, REMOVED
+print(f"Changes: {diff.changes}")
+
+# Generate a report
+report = tracker.report("summarizer")
+print(report.render())
+for stat in report.version_stats:
+    print(f"  v{stat.version}: {stat.success_rate:.0%} success, "
+          f"avg latency {stat.avg_latency_ms:.0f}ms")</code></pre>
+
+  <!-- ═══════════════════════════════════════════════════════════════ -->
+  <h2 id="cost-optimization">Cost Optimization</h2>
+  <p>Analyze token usage patterns and recommend cheaper models for simpler tasks.
+  Includes complexity analysis to route requests to the right model tier.</p>
+
+  <pre><code>from agentlens import CostOptimizer, ComplexityAnalyzer, ComplexityLevel
+
+# Analyze prompt complexity
+analyzer = ComplexityAnalyzer()
+assessment = analyzer.assess("What is the capital of France?")
+print(f"Complexity: {assessment.level.value}")  # LOW, MEDIUM, HIGH, EXPERT
+
+# Get optimization recommendations
+optimizer = CostOptimizer()
+report = optimizer.analyze(events)
+
+for rec in report.recommendations:
+    print(f"  {rec.description}")
+    print(f"  Current model: {rec.current_model}")
+    print(f"  Suggested: {rec.suggested_model}")
+    print(f"  Savings: ${rec.estimated_savings:.2f}/month")
+    print(f"  Confidence: {rec.confidence.value}")
+
+# Migration plan
+for step in report.migration_steps:
+    print(f"Step {step.order}: {step.description}")
+
+print(f"Total potential savings: ${report.total_savings:.2f}/month")</code></pre>
+
+  <h3>Model Tiers</h3>
+  <table>
+    <thead><tr><th>Tier</th><th>Use Case</th><th>Example Models</th></tr></thead>
+    <tbody>
+      <tr><td><code>ECONOMY</code></td><td>Simple lookups, classification</td><td>GPT-3.5-turbo, Claude Haiku</td></tr>
+      <tr><td><code>STANDARD</code></td><td>General tasks, summarization</td><td>GPT-4o-mini, Claude Sonnet</td></tr>
+      <tr><td><code>PREMIUM</code></td><td>Complex reasoning, code gen</td><td>GPT-4, Claude Opus</td></tr>
+      <tr><td><code>ENTERPRISE</code></td><td>Critical, high-stakes tasks</td><td>GPT-4-turbo, Claude 3.5 Sonnet</td></tr>
+    </tbody>
+  </table>
+
+  <!-- ═══════════════════════════════════════════════════════════════ -->
+  <h2 id="capacity-planning">Capacity Planning</h2>
+  <p>Forecast resource needs and identify bottlenecks before they hit production.
+  Analyze workload trends and generate scaling recommendations.</p>
+
+  <pre><code>from agentlens import CapacityPlanner, WorkloadSample, ResourceKind
+from datetime import datetime
+
+planner = CapacityPlanner()
+
+# Feed workload samples
+planner.add_samples([
+    WorkloadSample(
+        timestamp=datetime(2025, 1, d),
+        requests=1000 * d,
+        tokens=50000 * d,
+        cost=2.5 * d,
+        latency_p95_ms=800 + d * 10,
+    )
+    for d in range(1, 31)
+])
+
+# Generate capacity report
+report = planner.report()
+
+# Workload projections (7, 30, 90 day)
+for proj in report.projections:
+    print(f"  {proj.horizon_days}d: {proj.projected_requests:.0f} req/day, "
+          f"${proj.projected_cost:.2f}/day")
+
+# Bottleneck detection
+for bottleneck in report.bottlenecks:
+    print(f"  ⚠ {bottleneck.resource.value}: {bottleneck.severity.value}")
+    print(f"    Current: {bottleneck.current_utilization:.0%}")
+    print(f"    Projected peak: {bottleneck.projected_peak:.0%}")
+
+# Scaling recommendations
+for rec in report.scaling_recommendations:
+    print(f"  {rec.action.value}: {rec.description}")
+    print(f"  When: {rec.trigger_condition}")</code></pre>
+
+  <!-- ═══════════════════════════════════════════════════════════════ -->
+  <h2 id="pipeline">Building a Monitoring Pipeline</h2>
+  <p>Combine modules into a comprehensive monitoring pipeline. Here&rsquo;s a
+  production-ready example that runs health checks, anomaly detection,
+  SLA evaluation, and budget tracking together:</p>
+
+  <pre><code>from agentlens import (
+    HealthScorer, AnomalyDetector, AnomalyDetectorConfig,
+    SLAEvaluator, BudgetTracker, PostmortemGenerator,
+    production_policy,
+)
+
+# ── Initialize monitors ──────────────────────────────────────
+scorer = HealthScorer()
+detector = AnomalyDetector(AnomalyDetectorConfig(z_score_threshold=2.5))
+evaluator = SLAEvaluator()
+tracker = BudgetTracker()
+postmortem_gen = PostmortemGenerator()
+
+sla_policy = production_policy()
+
+# ── Train anomaly detector on baseline data ──────────────────
+detector.train(baseline_events)
+
+# ── Per-session monitoring loop ──────────────────────────────
+def monitor_session(session, events):
+    # 1. Health check
+    health = scorer.score(events, session_id=session["id"])
+    print(f"Health: {health.grade.value} ({health.overall_score}/100)")
+
+    # 2. Anomaly scan
+    anomalies = detector.analyze(events)
+    if anomalies.has_anomalies:
+        print(f"⚠ {anomalies.anomaly_count} anomalies detected")
+        if anomalies.critical_count() > 0:
+            # Auto-generate postmortem for critical anomalies
+            report = postmortem_gen.generate(
+                events=events,
+                session_id=session["id"],
+                title=f"Critical anomaly in {session['agent_name']}",
+            )
+            send_to_slack(report.render_markdown())
+
+    # 3. SLA evaluation
+    sla = evaluator.evaluate([session], sla_policy)
+    for result in sla.results:
+        if result.status.value == "BREACHED":
+            alert(f"SLA breached: {result.objective.name}")
+
+    # 4. Budget tracking
+    tracker.record_for_session(
+        session_id=session["id"],
+        tokens_in=sum(e.get("tokens_in", 0) for e in events),
+        tokens_out=sum(e.get("tokens_out", 0) for e in events),
+        model=events[0].get("model", "unknown"),
+    )</code></pre>
+
+  <div class="info-box">
+    <strong>Tip:</strong> Start with <code>HealthScorer</code> for a quick overview,
+    add <code>AnomalyDetector</code> when you have baseline data, and layer in
+    <code>SLAEvaluator</code> and <code>BudgetTracker</code> as you define SLOs and
+    cost targets. Use <code>PostmortemGenerator</code> to automate incident documentation.
+  </div>
+
+</main>
+
+</body>
+</html>
