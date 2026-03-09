@@ -401,9 +401,10 @@ class SessionCorrelator:
         start = getattr(session, "started_at", datetime.now(timezone.utc))
         end = getattr(session, "ended_at", None)
         if end is None and events:
-            # Estimate end from last event
-            last_ts = max(getattr(e, "timestamp", start) for e in events)
-            last_dur = getattr(events[-1], "duration_ms", 0) or 0
+            # Estimate end from the event with the latest timestamp
+            last_event = max(events, key=lambda e: getattr(e, "timestamp", start))
+            last_ts = getattr(last_event, "timestamp", start)
+            last_dur = getattr(last_event, "duration_ms", 0) or 0
             end = last_ts + timedelta(milliseconds=last_dur)
 
         return SessionWindow(
