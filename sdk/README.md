@@ -765,3 +765,364 @@ span_dict = span.to_dict()
 ```
 
 Spans can be nested and attached to events for distributed tracing context.
+
+## A/B Testing
+
+Run controlled experiments comparing models, prompts, or configurations with statistical significance testing.
+
+```python
+from agentlens.ab_test import ABTestAnalyzer, SignificanceLevel
+
+analyzer = ABTestAnalyzer()
+
+# Create an experiment
+exp = analyzer.create_experiment(
+    "gpt4-vs-claude",
+    hypothesis="GPT-4 has lower latency",
+)
+exp.add_variant("gpt4", description="OpenAI GPT-4")
+exp.add_variant("claude", description="Anthropic Claude", is_control=True)
+
+# Record observations
+for latency in [230, 210, 250, 220, 240]:
+    exp.record("gpt4", metric="latency_ms", value=latency)
+for latency in [310, 290, 330, 300, 320]:
+    exp.record("claude", metric="latency_ms", value=latency)
+
+# Analyze results (Welch's t-test)
+result = analyzer.analyze("gpt4-vs-claude", metric="latency_ms")
+print(f"Winner: {result.winner}")        # "gpt4"
+print(f"p-value: {result.p_value:.4f}")
+print(f"Significant: {result.significant}")
+print(f"Effect size: {result.effect_size}")  # Cohen's d interpretation
+
+# Check sample size requirements
+n = analyzer.required_sample_size(
+    effect_size=0.5,
+    alpha=0.05,
+    power=0.8,
+)
+
+# Full experiment report
+report = analyzer.report("gpt4-vs-claude")
+```
+
+### Statistical Methods
+
+| Method | Description |
+|--------|-------------|
+| Welch's t-test | Default significance test (unequal variances) |
+| Mann-Whitney U | Non-parametric alternative |
+| Cohen's d | Effect size measurement |
+
+### Effect Size Interpretation
+
+| Classification | Cohen's d |
+|---------------|-----------|
+| Negligible | < 0.2 |
+| Small | 0.2-0.5 |
+| Medium | 0.5-0.8 |
+| Large | 0.8-1.2 |
+| Very Large | > 1.2 |
+
+## Capacity Planning
+
+Fleet capacity planning for AI agent deployments — predict resource needs, detect bottlenecks, and generate scaling recommendations.
+
+```python
+from agentlens.capacity import CapacityPlanner, WorkloadSample
+
+planner = CapacityPlanner()
+
+# Add workload samples (tokens/s, requests/s, etc.)
+planner.add_samples([
+    WorkloadSample(timestamp=t, tokens_per_sec=1200, requests_per_sec=15)
+    for t in timestamps
+])
+
+# Detect bottlenecks
+bottlenecks = planner.detect_bottlenecks()
+for b in bottlenecks:
+    print(f"  [{b.severity}] {b.resource}: {b.message}")
+
+# Project future workload
+projection = planner.project_workload(horizon_hours=24)
+print(f"Projected peak: {projection.peak_tokens_per_sec} tok/s")
+
+# Get scaling recommendations
+report = planner.plan()
+for rec in report.recommendations:
+    print(f"  {rec.action}: {rec.reason}")
+
+# Current utilization
+util = planner.current_utilization()
+peak = planner.peak_utilization()
+```
+
+### Resource Kinds
+
+Tracks compute, memory, throughput, and concurrency resources. Bottleneck severities: `LOW`, `MEDIUM`, `HIGH`, `CRITICAL`.
+
+## Cost Optimizer
+
+Intelligent model selection — analyze task complexity and recommend cheaper model alternatives where premium models are overkill.
+
+```python
+from agentlens.cost_optimizer import CostOptimizer
+
+optimizer = CostOptimizer()
+
+# Analyze a session's events for optimization opportunities
+report = optimizer.analyze(events)
+print(f"Potential savings: {report.total_savings_pct:.1f}%")
+
+for rec in report.recommendations:
+    print(f"  Event {rec.event_id}: {rec.current_model} → {rec.suggested_model}")
+    print(f"    Complexity: {rec.complexity.level.value}")
+    print(f"    Savings: ${rec.savings:.4f}")
+
+# Quick estimate for a single model switch
+estimate = optimizer.quick_estimate(
+    current_model="gpt-4o",
+    tokens_in=1000,
+    tokens_out=500,
+)
+
+# Get model suggestion based on task complexity
+suggested = optimizer.suggest_model(complexity_level="simple")
+
+# Register custom models
+optimizer.register_model("my-model", tier="standard", cost_per_1m_in=1.0, cost_per_1m_out=3.0)
+
+# Session-level analysis
+report = optimizer.analyze_session_events(session_events)
+```
+
+### Model Tiers
+
+| Tier | Examples | Use Case |
+|------|----------|----------|
+| Economy | GPT-3.5 Turbo, Claude Haiku | Simple tasks, classification |
+| Standard | GPT-4o-mini | Moderate complexity |
+| Premium | GPT-4o, Claude Sonnet | Complex reasoning |
+| Flagship | GPT-4, Claude Opus | Maximum capability |
+
+### Complexity Levels
+
+| Level | Characteristics |
+|-------|----------------|
+| Simple | Low token count, no tool calls, short responses |
+| Moderate | Medium tokens, some tool usage |
+| Complex | High tokens, multiple tools, long chains |
+| Critical | Error-prone, requires highest reliability |
+
+## Prompt Version Tracker
+
+Track prompt template evolution over time and correlate changes with performance metrics.
+
+```python
+from agentlens import PromptVersionTracker
+
+tracker = PromptVersionTracker()
+
+# Register prompt versions (auto-increments version numbers)
+v1 = tracker.register("summarizer", "Summarize the following text: {text}")
+v2 = tracker.register(
+    "summarizer",
+    "You are a concise summarizer. Summarize: {text}",
+    tags=["concise"],
+)
+
+# Record performance outcomes for a version
+tracker.record_outcome(v2.version_id, tokens=450, latency_ms=1200, quality_score=0.92)
+tracker.record_outcome(v2.version_id, tokens=380, latency_ms=1050, quality_score=0.88)
+
+# Diff two versions (unified diff format)
+diff = tracker.diff("summarizer", v1.version_number, v2.version_number)
+print(diff.diff_text)
+print(f"Change kind: {diff.kind.value}")  # modified, added, removed
+
+# Get the best performing version by quality score
+report = tracker.report("summarizer")
+print(f"Best version: v{report.best_version.version_number}")
+print(f"Avg quality: {report.best_version.stats.avg_quality:.2f}")
+
+# List all versions
+versions = tracker.get_versions("summarizer")
+
+# Export full history
+data = tracker.export_json()
+```
+
+### Tracked Metrics Per Version
+
+| Metric | Description |
+|--------|-------------|
+| `avg_tokens` | Average token usage |
+| `avg_latency_ms` | Average response latency |
+| `avg_quality` | Average quality score (0-1) |
+| `outcome_count` | Number of recorded outcomes |
+
+## Rate Limiter
+
+Sliding-window rate limiting for LLM API calls — stay within provider limits and avoid 429 errors.
+
+```python
+from agentlens import RateLimiter, RateLimit, RateLimitPolicy
+
+# Define rate limits (per-resource, per-window)
+policy = RateLimitPolicy(limits=[
+    RateLimit(resource="requests", limit=60, window_seconds=60),
+    RateLimit(resource="tokens", limit=90_000, window_seconds=60),
+    RateLimit(resource="tokens", limit=1_000_000, window_seconds=3600),
+])
+
+limiter = RateLimiter(policy)
+
+# Check before making a call
+result = limiter.check("tokens", estimated=1500)
+if not result.allowed:
+    print(f"Rate limited! Retry after {result.retry_after_ms}ms")
+else:
+    # Make the call, then record actual usage
+    limiter.record("tokens", actual_tokens_used)
+    limiter.record("requests", 1)
+
+# Get utilization report
+report = limiter.report()
+for resource_report in report.resources:
+    print(f"  {resource_report.resource}: {resource_report.utilization:.0%}")
+
+# Use built-in provider policies
+from agentlens.rate_limiter import openai_tier1_policy, anthropic_tier1_policy
+limiter = RateLimiter(openai_tier1_policy())
+```
+
+### Rate Limit Actions
+
+| Action | Behavior |
+|--------|----------|
+| `WARN` | Log a warning but allow the request |
+| `BLOCK` | Reject the request until capacity frees up |
+
+## Session Replayer
+
+Step-by-step session replay for debugging agent runs — reconstruct timing, add breakpoints, filter events.
+
+```python
+from agentlens.replayer import SessionReplayer
+
+replayer = SessionReplayer(session)
+
+# Control replay speed
+replayer.set_speed(2.0)  # 2x speed
+
+# Filter to specific event types
+replayer.add_filter("llm_call", "tool_call")
+
+# Add breakpoints (pause on matching events)
+replayer.add_breakpoint(lambda e: e.event_type == "agent_error")
+
+# Play through the session
+for frame in replayer.play():
+    print(f"[{frame.progress_pct:.0f}%] {frame.event.event_type}")
+    print(f"  Delay: {frame.wall_delay_ms:.0f}ms")
+    if frame.is_breakpoint:
+        input("Breakpoint hit — press Enter to continue")
+
+# Export replay
+text_output = replayer.to_text()
+json_output = replayer.to_json()
+
+# Replay statistics
+stats = replayer.stats
+print(f"Total frames: {stats.total_frames}")
+print(f"Duration: {stats.total_duration_ms}ms")
+```
+
+### Replay Frame
+
+Each frame contains:
+- `index` / `total` — position in the replay
+- `event` — the original `AgentEvent`
+- `wall_delay_ms` — speed-adjusted delay since previous frame
+- `elapsed_ms` — cumulative time in original timeline
+- `is_breakpoint` — whether a breakpoint was triggered
+- `annotations` — any attached notes
+
+## Session Exporter
+
+Offline export to JSON, CSV, and standalone HTML reports.
+
+```python
+from agentlens.exporter import SessionExporter
+
+exporter = SessionExporter(session, events)
+
+# Export as JSON (returns dict)
+data = exporter.as_json()
+
+# Write JSON to file
+exporter.to_json("session_export.json")
+
+# Export as CSV (returns string)
+csv_text = exporter.as_csv()
+exporter.to_csv("session_export.csv")
+
+# Export as standalone HTML report
+html = exporter.as_html()
+exporter.to_html("session_report.html")
+```
+
+The HTML export creates a self-contained report with embedded CSS — no external dependencies needed. Includes session metadata, event timeline, and summary statistics.
+
+## Postmortem Generator
+
+Automated incident postmortem reports for sessions that experienced errors — root cause analysis, timeline, impact assessment, and remediation suggestions.
+
+```python
+from agentlens.postmortem import PostmortemGenerator, PostmortemConfig
+
+# Configure analysis depth
+config = PostmortemConfig(
+    min_error_count=1,           # Minimum errors to trigger postmortem
+    include_recommendations=True,
+    include_timeline=True,
+)
+
+generator = PostmortemGenerator(config=config)
+
+# Generate a postmortem from a session's events
+report = generator.generate(events, session_id="session-123")
+
+# Render as Markdown
+print(report.to_markdown())
+
+# Access structured data
+print(f"Root cause: {report.root_cause.description}")
+print(f"Impact: {report.impact.severity}")
+for phase in report.timeline:
+    print(f"  [{phase.timestamp}] {phase.description}")
+for remediation in report.remediations:
+    print(f"  → [{remediation.category.value}] {remediation.description}")
+for lesson in report.lessons_learned:
+    print(f"  💡 {lesson.insight}")
+
+# Export to dict
+data = report.to_dict()
+```
+
+### Remediation Categories
+
+| Category | Description |
+|----------|-------------|
+| Prompt Engineering | Improve prompt templates |
+| Model Selection | Switch to more appropriate model |
+| Tool Configuration | Fix tool setup or parameters |
+| Rate Limiting | Adjust rate limits or retry logic |
+| Monitoring | Add alerts or observability |
+| Architecture | Structural agent design changes |
+
+### Incident Phases
+
+Postmortem timelines are broken into phases: `DETECTION`, `INVESTIGATION`, `MITIGATION`, `RESOLUTION`, `POST_INCIDENT`.
