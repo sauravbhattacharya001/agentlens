@@ -127,16 +127,25 @@ function correlateByMetadata(events, config) {
   if (!key) return [];
 
   var groups = {};
+  var fields = ["input_data", "output_data", "decision_trace"];
+  // Cache parsed JSON per event to avoid re-parsing the same blob
+  // across multiple correlation runs in a single request.
+  var parseCache = new Map();
   for (var i = 0; i < events.length; i++) {
     var evt = events[i];
     var val = undefined;
-    var fields = ["input_data", "output_data", "decision_trace"];
     for (var f = 0; f < fields.length; f++) {
       if (val !== undefined) break;
-      try {
-        var parsed = JSON.parse(evt[fields[f]] || "{}");
-        if (parsed[key] !== undefined) val = parsed[key];
-      } catch (e) { /* ignore */ }
+      var raw = evt[fields[f]];
+      if (!raw) continue;
+      var parsed;
+      if (parseCache.has(raw)) {
+        parsed = parseCache.get(raw);
+      } else {
+        try { parsed = JSON.parse(raw); } catch (e) { parsed = null; }
+        parseCache.set(raw, parsed);
+      }
+      if (parsed && parsed[key] !== undefined) val = parsed[key];
     }
     if (val !== undefined && val !== null && val !== "") {
       var strVal = String(val);
