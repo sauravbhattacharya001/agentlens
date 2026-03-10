@@ -1,9 +1,19 @@
 const express = require("express");
 const { getDb } = require("../db");
 const { safeJsonParse } = require("../lib/validation");
-const { wrapRoute } = require("../lib/request-helpers");
+const { parseLimit, wrapRoute } = require("../lib/request-helpers");
 
 const router = express.Router();
+
+/**
+ * Compute a ratio as a percentage rounded to 2 decimal places.
+ * Returns 0 when the denominator is 0.
+ */
+function toPercent(numerator, denominator) {
+  return denominator > 0
+    ? Math.round((numerator / denominator) * 10000) / 100
+    : 0;
+}
 
 // ── Cached prepared statements ──────────────────────────────────────
 let _stmts = null;
@@ -209,32 +219,21 @@ function computeMtbf(timestamps) {
 
 // ── GET /errors — Full error analytics dashboard ────────────────────
 router.get("/", wrapRoute("compute error analytics", (req, res) => {
-    const limit = Math.min(Math.max(parseInt(req.query.limit) || 10, 1), 100);
-    const days = Math.min(Math.max(parseInt(req.query.days) || 30, 1), 365);
+    const limit = parseLimit(req.query.limit, 10, 100);
+    const days = parseLimit(req.query.days, 30, 365);
     const stmts = getStatements();
 
     // Summary
     const summary = stmts.errorSummary.get();
-    const errorRate =
-      summary.total_events > 0
-        ? Math.round((summary.total_errors / summary.total_events) * 10000) / 100
-        : 0;
-    const sessionErrorRate =
-      summary.total_sessions > 0
-        ? Math.round(
-            (summary.affected_sessions / summary.total_sessions) * 10000
-          ) / 100
-        : 0;
+    const errorRate = toPercent(summary.total_errors, summary.total_events);
+    const sessionErrorRate = toPercent(summary.affected_sessions, summary.total_sessions);
 
     // Error rate over time
     const rateOverTime = stmts.errorRateDaily.all(days).map((row) => ({
       day: row.day,
       error_count: row.error_count,
       total_events: row.total_events,
-      error_rate:
-        row.total_events > 0
-          ? Math.round((row.error_count / row.total_events) * 10000) / 100
-          : 0,
+      error_rate: toPercent(row.error_count, row.total_events),
     }));
 
     // By type
@@ -243,21 +242,13 @@ router.get("/", wrapRoute("compute error analytics", (req, res) => {
     // By model
     const byModel = stmts.errorsByModel.all(limit).map((row) => ({
       ...row,
-      error_rate:
-        row.total_calls > 0
-          ? Math.round((row.error_count / row.total_calls) * 10000) / 100
-          : 0,
+      error_rate: toPercent(row.error_count, row.total_calls),
     }));
 
     // By agent
     const byAgent = stmts.errorsByAgent.all(limit).map((row) => ({
       ...row,
-      error_rate:
-        row.total_sessions > 0
-          ? Math.round(
-              (row.error_sessions / row.total_sessions) * 10000
-            ) / 100
-          : 0,
+      error_rate: toPercent(row.error_sessions, row.total_sessions),
     }));
 
     // Top error patterns
@@ -308,10 +299,7 @@ router.get("/", wrapRoute("compute error analytics", (req, res) => {
 router.get("/summary", wrapRoute("compute error summary", (req, res) => {
     const stmts = getStatements();
     const summary = stmts.errorSummary.get();
-    const errorRate =
-      summary.total_events > 0
-        ? Math.round((summary.total_errors / summary.total_events) * 10000) / 100
-        : 0;
+    const errorRate = toPercent(summary.total_errors, summary.total_events);
 
     res.json({
       total_errors: summary.total_errors,
@@ -331,30 +319,22 @@ router.get("/by-type", wrapRoute("query errors by type", (req, res) => {
 
 // ── GET /errors/by-model — Error breakdown by model ─────────────────
 router.get("/by-model", wrapRoute("query errors by model", (req, res) => {
-    const limit = Math.min(Math.max(parseInt(req.query.limit) || 10, 1), 100);
+    const limit = parseLimit(req.query.limit, 10, 100);
     const stmts = getStatements();
     const byModel = stmts.errorsByModel.all(limit).map((row) => ({
       ...row,
-      error_rate:
-        row.total_calls > 0
-          ? Math.round((row.error_count / row.total_calls) * 10000) / 100
-          : 0,
+      error_rate: toPercent(row.error_count, row.total_calls),
     }));
     res.json({ by_model: byModel });
 }));
 
 // ── GET /errors/by-agent — Error breakdown by agent ─────────────────
 router.get("/by-agent", wrapRoute("query errors by agent", (req, res) => {
-    const limit = Math.min(Math.max(parseInt(req.query.limit) || 10, 1), 100);
+    const limit = parseLimit(req.query.limit, 10, 100);
     const stmts = getStatements();
     const byAgent = stmts.errorsByAgent.all(limit).map((row) => ({
       ...row,
-      error_rate:
-        row.total_sessions > 0
-          ? Math.round(
-              (row.error_sessions / row.total_sessions) * 10000
-            ) / 100
-          : 0,
+      error_rate: toPercent(row.error_sessions, row.total_sessions),
     }));
     res.json({ by_agent: byAgent });
 }));
