@@ -24,6 +24,7 @@ from agentlens.latency import LatencyProfiler, ProfilingSession, StepRecord, Ste
 from agentlens.cost_optimizer import CostOptimizer, ComplexityAnalyzer, ComplexityLevel, ComplexityAssessment, ModelTier, ModelInfo, Confidence, Recommendation, MigrationStep, OptimizationReport, MODEL_REGISTRY as OPTIMIZER_MODEL_REGISTRY
 from agentlens.capacity import CapacityPlanner, WorkloadSample, ResourceKind, ScalingAction, BottleneckSeverity, TrendDirection, WorkloadProjection, Bottleneck, ResourceSizing, ScalingRecommendation, CapacityReport
 from agentlens.ab_test import ABTestAnalyzer, Experiment, ExperimentStatus, Variant, Observation, TestResult, ExperimentReport, EffectSize, SignificanceLevel, required_sample_size
+from agentlens.error_fingerprint import ErrorFingerprinter, ErrorCluster, ErrorReport, ErrorOccurrence, Trend, Resolution
 
 __version__ = "0.1.0"
 __all__ = [
@@ -166,6 +167,12 @@ __all__ = [
     "EffectSize",
     "SignificanceLevel",
     "required_sample_size",
+    "ErrorFingerprinter",
+    "ErrorCluster",
+    "ErrorReport",
+    "ErrorOccurrence",
+    "Trend",
+    "Resolution",
 ]
 
 _tracker: AgentTracker | None = None
