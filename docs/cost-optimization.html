@@ -1,0 +1,472 @@
+<!DOCTYPE html>
+<html lang="en">
+<head>
+  <meta charset="UTF-8">
+  <meta name="viewport" content="width=device-width, initial-scale=1.0">
+  <title>Cost Optimization - AgentLens Docs</title>
+  <link rel="stylesheet" href="style.css">
+</head>
+<body>
+
+<header class="header">
+  <button class="menu-toggle" onclick="document.querySelector('.sidebar').classList.toggle('open')">&#9776;</button>
+  <a href="index.html" class="header-logo">&#128270; <span>AgentLens</span> Docs</a>
+  <nav class="header-nav">
+    <a href="getting-started.html">Getting Started</a>
+    <a href="sdk-reference.html">SDK</a>
+    <a href="api.html">API</a>
+    <a href="https://github.com/sauravbhattacharya001/agentlens" class="github-link" target="_blank">&#128279; GitHub</a>
+  </nav>
+</header>
+
+<aside class="sidebar">
+  <div class="sidebar-section">
+    <div class="sidebar-section-title">Overview</div>
+    <a href="index.html">Introduction</a>
+    <a href="architecture.html">Architecture</a>
+  </div>
+  <div class="sidebar-section">
+    <div class="sidebar-section-title">Guides</div>
+    <a href="getting-started.html">Getting Started</a>
+    <a href="quickstart.html">5-Minute Quickstart</a>
+    <a href="deployment.html">Deployment</a>
+  </div>
+  <div class="sidebar-section">
+    <div class="sidebar-section-title">SDK</div>
+    <a href="sdk-reference.html">Python SDK Reference</a>
+    <a href="decorators.html">Decorators</a>
+    <a href="models.html">Data Models</a>
+    <a href="transport.html">Transport &amp; Batching</a>
+    <a href="sampling.html">Sampling &amp; Rate Limiting</a>
+  </div>
+  <div class="sidebar-section">
+    <div class="sidebar-section-title">Backend</div>
+    <a href="api.html">REST API</a>
+    <a href="database.html">Database Schema</a>
+    <a href="dashboard.html">Dashboard</a>
+  </div>
+  <div class="sidebar-section">
+    <div class="sidebar-section-title">Advanced</div>
+    <a href="explainability.html">Explainability</a>
+    <a href="integrations.html">Integrations</a>
+    <a href="monitoring.html">Monitoring &amp; Analysis</a>
+    <a href="cost-optimization.html" class="active">Cost Optimization</a>
+    <a href="session-replay.html">Session Replay</a>
+  </div>
+</aside>
+
+<main class="main">
+
+<h1>Cost Optimization</h1>
+<p class="subtitle">Reduce LLM costs by 30&#8211;70% without meaningful quality degradation.</p>
+
+<div class="callout callout-info">
+  <strong>Module:</strong> <code>agentlens.cost_optimizer</code><br>
+  Analyzes agent event patterns and recommends cheaper model alternatives
+  where task complexity doesn&#8217;t require expensive models.
+</div>
+
+<!-- ── Quick Start ───────────────────────────────────────────── -->
+
+<h2 id="quick-start">Quick Start</h2>
+
+<pre><code class="language-python">from agentlens.cost_optimizer import CostOptimizer
+from agentlens.models import AgentEvent
+
+optimizer = CostOptimizer()
+
+events = [
+    AgentEvent(model="gpt-4o", tokens_in=500, tokens_out=100,
+               event_type="llm_call"),
+    AgentEvent(model="gpt-4-turbo", tokens_in=50, tokens_out=10,
+               event_type="classification"),
+]
+
+report = optimizer.analyze(events)
+
+print(f"Current cost:  ${report.current_cost_usd:.4f}")
+print(f"Optimized:     ${report.optimized_cost_usd:.4f}")
+print(f"Savings:       ${report.total_savings_usd:.4f} ({report.total_savings_pct}%)")
+</code></pre>
+
+<!-- ── How It Works ──────────────────────────────────────────── -->
+
+<h2 id="how-it-works">How It Works</h2>
+
+<p>The optimizer follows a three-step pipeline for every analyzable event:</p>
+
+<div class="table-wrap">
+<table>
+  <thead>
+    <tr><th>Step</th><th>What Happens</th><th>Key Factors</th></tr>
+  </thead>
+  <tbody>
+    <tr>
+      <td><strong>1. Complexity Assessment</strong></td>
+      <td>Scores each event from 0.0 (trivial) to 1.0 (critical)</td>
+      <td>Output ratio, token volume, tool calls, decision traces, event type</td>
+    </tr>
+    <tr>
+      <td><strong>2. Model Matching</strong></td>
+      <td>Finds the cheapest model in the recommended tier that fits</td>
+      <td>Same-provider preference, context window compatibility</td>
+    </tr>
+    <tr>
+      <td><strong>3. Savings Validation</strong></td>
+      <td>Filters out recommendations below the minimum savings threshold</td>
+      <td>Savings percentage, confidence level, aggressive mode</td>
+    </tr>
+  </tbody>
+</table>
+</div>
+
+<!-- ── Complexity Levels ─────────────────────────────────────── -->
+
+<h2 id="complexity">Complexity Levels</h2>
+
+<p>The <code>ComplexityAnalyzer</code> maps each event to one of five levels,
+each associated with a recommended model tier:</p>
+
+<div class="table-wrap">
+<table>
+  <thead>
+    <tr>
+      <th>Level</th><th>Score Range</th><th>Recommended Tier</th><th>Typical Tasks</th>
+    </tr>
+  </thead>
+  <tbody>
+    <tr><td><strong>Trivial</strong></td><td>&lt; 0.15</td><td>Economy</td><td>Formatting, simple extraction</td></tr>
+    <tr><td><strong>Low</strong></td><td>0.15 &#8211; 0.30</td><td>Economy</td><td>Classification, simple Q&amp;A</td></tr>
+    <tr><td><strong>Medium</strong></td><td>0.30 &#8211; 0.50</td><td>Standard</td><td>Summarization, code review</td></tr>
+    <tr><td><strong>High</strong></td><td>0.50 &#8211; 0.75</td><td>Premium</td><td>Complex reasoning, code gen</td></tr>
+    <tr><td><strong>Critical</strong></td><td>&#8805; 0.75</td><td>Flagship</td><td>Deep research, multi-step planning</td></tr>
+  </tbody>
+</table>
+</div>
+
+<h3>Complexity Factors</h3>
+
+<p>Five weighted factors contribute to the complexity score:</p>
+
+<pre><code class="language-python">FACTOR_WEIGHTS = {
+    "output_ratio":   0.25,   # High output &#8594; more generation work
+    "token_volume":   0.20,   # Large prompts &#8594; more context needed
+    "has_tool_call":  0.15,   # Tool usage signals agentic behavior
+    "has_decision":   0.20,   # Decision traces &#8594; reasoning required
+    "event_type":     0.20,   # Some types are inherently complex
+}
+</code></pre>
+
+<!-- ── Model Registry ────────────────────────────────────────── -->
+
+<h2 id="models">Model Registry</h2>
+
+<p>The built-in registry covers popular models across four tiers:</p>
+
+<div class="table-wrap">
+<table>
+  <thead>
+    <tr><th>Model</th><th>Tier</th><th>Input $/1M</th><th>Output $/1M</th><th>Context</th></tr>
+  </thead>
+  <tbody>
+    <tr><td>gpt-4o-mini</td><td>Economy</td><td>$0.15</td><td>$0.60</td><td>128K</td></tr>
+    <tr><td>gpt-3.5-turbo</td><td>Economy</td><td>$0.50</td><td>$1.50</td><td>16K</td></tr>
+    <tr><td>claude-3-haiku</td><td>Economy</td><td>$0.25</td><td>$1.25</td><td>200K</td></tr>
+    <tr><td>gpt-4o</td><td>Standard</td><td>$2.50</td><td>$10.00</td><td>128K</td></tr>
+    <tr><td>claude-3-sonnet</td><td>Standard</td><td>$3.00</td><td>$15.00</td><td>200K</td></tr>
+    <tr><td>claude-3.5-sonnet</td><td>Standard</td><td>$3.00</td><td>$15.00</td><td>200K</td></tr>
+    <tr><td>gpt-4-turbo</td><td>Premium</td><td>$10.00</td><td>$30.00</td><td>128K</td></tr>
+    <tr><td>gpt-4</td><td>Premium</td><td>$30.00</td><td>$60.00</td><td>8K</td></tr>
+    <tr><td>claude-3-opus</td><td>Flagship</td><td>$15.00</td><td>$75.00</td><td>200K</td></tr>
+  </tbody>
+</table>
+</div>
+
+<h3>Custom Models</h3>
+
+<p>Register your own models or override pricing:</p>
+
+<pre><code class="language-python">from agentlens.cost_optimizer import CostOptimizer, ModelInfo, ModelTier
+
+# Via constructor
+optimizer = CostOptimizer(custom_models={
+    "my-fine-tuned": ModelInfo(
+        name="my-fine-tuned",
+        tier=ModelTier.ECONOMY,
+        input_cost_per_1m=0.10,
+        output_cost_per_1m=0.30,
+        max_context=32_000,
+        strengths=["classification", "extraction"],
+    )
+})
+
+# Or after construction
+optimizer.register_model("llama-3-70b", ModelInfo(
+    name="llama-3-70b",
+    tier=ModelTier.STANDARD,
+    input_cost_per_1m=0.80,
+    output_cost_per_1m=0.80,
+    max_context=128_000,
+))
+</code></pre>
+
+<!-- ── Optimization Report ───────────────────────────────────── -->
+
+<h2 id="report">Optimization Report</h2>
+
+<p>The <code>analyze()</code> method returns an <code>OptimizationReport</code>
+with these key fields:</p>
+
+<div class="table-wrap">
+<table>
+  <thead>
+    <tr><th>Field</th><th>Type</th><th>Description</th></tr>
+  </thead>
+  <tbody>
+    <tr><td><code>total_events</code></td><td>int</td><td>Total events analyzed</td></tr>
+    <tr><td><code>optimizable_events</code></td><td>int</td><td>Events where a cheaper model is recommended</td></tr>
+    <tr><td><code>current_cost_usd</code></td><td>float</td><td>Total cost at current model selection</td></tr>
+    <tr><td><code>optimized_cost_usd</code></td><td>float</td><td>Projected cost after optimization</td></tr>
+    <tr><td><code>total_savings_usd</code></td><td>float</td><td>Dollar savings</td></tr>
+    <tr><td><code>total_savings_pct</code></td><td>float</td><td>Percentage reduction</td></tr>
+    <tr><td><code>recommendations</code></td><td>list</td><td>Per-event model change suggestions</td></tr>
+    <tr><td><code>model_usage</code></td><td>dict</td><td>Count of events per model</td></tr>
+    <tr><td><code>tier_distribution</code></td><td>dict</td><td>Count of events per tier</td></tr>
+    <tr><td><code>migration_plan</code></td><td>list</td><td>Phased rollout steps</td></tr>
+    <tr><td><code>summary</code></td><td>str</td><td>Human-readable summary</td></tr>
+  </tbody>
+</table>
+</div>
+
+<pre><code class="language-python">report = optimizer.analyze(events)
+
+# Check if optimizations were found
+if report.has_savings:
+    print(report.summary)
+
+    # Inspect individual recommendations
+    for rec in report.recommendations:
+        print(f"  {rec.current_model} &#8594; {rec.recommended_model}")
+        print(f"  Saves ${rec.estimated_savings_usd:.4f} ({rec.savings_pct}%)")
+        print(f"  Confidence: {rec.confidence.value}")
+        print(f"  Risk: {rec.risk}")
+        print()
+</code></pre>
+
+<!-- ── Migration Plan ────────────────────────────────────────── -->
+
+<h2 id="migration">Migration Plan</h2>
+
+<p>The optimizer generates a phased migration plan grouped by confidence level:</p>
+
+<div class="table-wrap">
+<table>
+  <thead>
+    <tr><th>Phase</th><th>Confidence</th><th>Risk</th><th>Approach</th></tr>
+  </thead>
+  <tbody>
+    <tr>
+      <td>1</td><td>High</td><td>Low</td>
+      <td>Quick wins &#8212; switch immediately with minimal risk</td>
+    </tr>
+    <tr>
+      <td>2</td><td>Medium</td><td>Medium</td>
+      <td>A/B test before full rollout</td>
+    </tr>
+    <tr>
+      <td>3</td><td>Low</td><td>High</td>
+      <td>Experimental &#8212; requires quality monitoring and rollback</td>
+    </tr>
+  </tbody>
+</table>
+</div>
+
+<pre><code class="language-python">for step in report.migration_plan:
+    print(f"Phase {step.phase}: {step.description}")
+    print(f"  Models to change: {step.models_to_change}")
+    print(f"  Target: {step.target_model}")
+    print(f"  Est. savings: {step.estimated_savings_pct}%")
+</code></pre>
+
+<!-- ── Quick Estimate ────────────────────────────────────────── -->
+
+<h2 id="quick-estimate">Quick Estimate</h2>
+
+<p>For a fast overview without full recommendations, use <code>quick_estimate()</code>:</p>
+
+<pre><code class="language-python">estimate = optimizer.quick_estimate(events)
+print(f"Current cost:        ${estimate['current_cost']:.4f}")
+print(f"Potential savings:   ${estimate['potential_savings']:.4f}")
+print(f"Savings %:           {estimate['savings_pct']}%")
+print(f"Overprovisioned:     {estimate['overprovisioned_count']}/{estimate['total_events']}")
+</code></pre>
+
+<!-- ── Single-Event Suggestion ───────────────────────────────── -->
+
+<h2 id="suggest">Single-Event Suggestion</h2>
+
+<p>Get a model recommendation for a single event:</p>
+
+<pre><code class="language-python">event = AgentEvent(model="gpt-4-turbo", tokens_in=50, tokens_out=10,
+                   event_type="classification")
+
+suggestion = optimizer.suggest_model(event)
+if suggestion:
+    print(f"Consider using {suggestion} instead of {event.model}")
+else:
+    print("Current model is appropriate for this task")
+</code></pre>
+
+<!-- ── Configuration ─────────────────────────────────────────── -->
+
+<h2 id="configuration">Configuration</h2>
+
+<div class="table-wrap">
+<table>
+  <thead>
+    <tr><th>Parameter</th><th>Default</th><th>Description</th></tr>
+  </thead>
+  <tbody>
+    <tr>
+      <td><code>aggressive</code></td><td><code>False</code></td>
+      <td>Include low-confidence recommendations (higher savings, higher risk)</td>
+    </tr>
+    <tr>
+      <td><code>min_savings_pct</code></td><td><code>10.0</code></td>
+      <td>Minimum savings percentage to include a recommendation</td>
+    </tr>
+    <tr>
+      <td><code>custom_models</code></td><td><code>None</code></td>
+      <td>Dict of additional or overridden model definitions</td>
+    </tr>
+  </tbody>
+</table>
+</div>
+
+<pre><code class="language-python"># Conservative (default) &#8212; only high/medium confidence
+optimizer = CostOptimizer()
+
+# Aggressive &#8212; include all recommendations
+optimizer = CostOptimizer(aggressive=True, min_savings_pct=5.0)
+</code></pre>
+
+<!-- ── Session Filtering ─────────────────────────────────────── -->
+
+<h2 id="sessions">Session-Specific Analysis</h2>
+
+<p>Analyze events from a specific session:</p>
+
+<pre><code class="language-python"># Filter events by session ID
+report = optimizer.analyze_session_events(all_events, session_id="sess-abc123")
+print(f"Session cost: ${report.current_cost_usd:.4f}")
+</code></pre>
+
+<!-- ── Confidence Levels ─────────────────────────────────────── -->
+
+<h2 id="confidence">Confidence Levels</h2>
+
+<p>Each recommendation carries a confidence assessment based on the complexity
+score and the tier gap between current and recommended models:</p>
+
+<div class="table-wrap">
+<table>
+  <thead>
+    <tr><th>Confidence</th><th>When Assigned</th><th>Action</th></tr>
+  </thead>
+  <tbody>
+    <tr>
+      <td><strong>High</strong></td>
+      <td>Low complexity + small tier gap (&#8804; 1)</td>
+      <td>Safe to switch immediately</td>
+    </tr>
+    <tr>
+      <td><strong>Medium</strong></td>
+      <td>Low complexity + larger gap, or medium complexity + small gap</td>
+      <td>A/B test recommended</td>
+    </tr>
+    <tr>
+      <td><strong>Low</strong></td>
+      <td>Higher complexity or large tier gaps</td>
+      <td>Only included in aggressive mode; monitor carefully</td>
+    </tr>
+  </tbody>
+</table>
+</div>
+
+<!-- ── Best Practices ────────────────────────────────────────── -->
+
+<h2 id="best-practices">Best Practices</h2>
+
+<ol>
+  <li><strong>Start conservative.</strong> Use default settings first.
+      Only enable <code>aggressive=True</code> after validating quality.</li>
+  <li><strong>A/B test medium-confidence changes.</strong> Run 10&#8211;20% of traffic
+      through the recommended model and compare output quality.</li>
+  <li><strong>Update the model registry.</strong> Pricing changes frequently.
+      Register updated costs to get accurate savings estimates.</li>
+  <li><strong>Classify your event types.</strong> The more specific the
+      <code>event_type</code> (e.g., <code>"classification"</code> vs
+      <code>"generic"</code>), the better the complexity assessment.</li>
+  <li><strong>Monitor after switching.</strong> Use AgentLens&#8217;s evaluation
+      and drift modules to detect quality regressions after model changes.</li>
+  <li><strong>Review periodically.</strong> Run optimization analysis weekly
+      or after major agent changes to catch new savings opportunities.</li>
+</ol>
+
+<!-- ── API Reference ─────────────────────────────────────────── -->
+
+<h2 id="api-reference">API Reference</h2>
+
+<h3><code>CostOptimizer</code></h3>
+<div class="table-wrap">
+<table>
+  <thead><tr><th>Method</th><th>Returns</th><th>Description</th></tr></thead>
+  <tbody>
+    <tr><td><code>analyze(events)</code></td><td><code>OptimizationReport</code></td><td>Full analysis with recommendations and migration plan</td></tr>
+    <tr><td><code>analyze_session_events(events, session_id)</code></td><td><code>OptimizationReport</code></td><td>Analyze events filtered to a specific session</td></tr>
+    <tr><td><code>quick_estimate(events)</code></td><td><code>dict</code></td><td>Fast cost overview without per-event details</td></tr>
+    <tr><td><code>suggest_model(event)</code></td><td><code>str | None</code></td><td>Single-event model recommendation</td></tr>
+    <tr><td><code>register_model(name, info)</code></td><td><code>None</code></td><td>Add or update a model in the registry</td></tr>
+  </tbody>
+</table>
+</div>
+
+<h3><code>ComplexityAnalyzer</code></h3>
+<div class="table-wrap">
+<table>
+  <thead><tr><th>Method</th><th>Returns</th><th>Description</th></tr></thead>
+  <tbody>
+    <tr><td><code>assess(event)</code></td><td><code>ComplexityAssessment</code></td><td>Score an event&#8217;s complexity (0.0&#8211;1.0) with level and reasoning</td></tr>
+  </tbody>
+</table>
+</div>
+
+<h3>Data Classes</h3>
+<div class="table-wrap">
+<table>
+  <thead><tr><th>Class</th><th>Key Fields</th></tr></thead>
+  <tbody>
+    <tr><td><code>ModelInfo</code></td><td>name, tier, input_cost_per_1m, output_cost_per_1m, max_context, strengths</td></tr>
+    <tr><td><code>ComplexityAssessment</code></td><td>level, score, factors, recommended_tier, reasoning</td></tr>
+    <tr><td><code>Recommendation</code></td><td>current_model, recommended_model, estimated_savings_usd, confidence, risk</td></tr>
+    <tr><td><code>MigrationStep</code></td><td>phase, description, models_to_change, target_model, estimated_savings_pct</td></tr>
+    <tr><td><code>OptimizationReport</code></td><td>total_events, recommendations, current_cost_usd, total_savings_pct, migration_plan</td></tr>
+  </tbody>
+</table>
+</div>
+
+<h3>Enums</h3>
+<div class="table-wrap">
+<table>
+  <thead><tr><th>Enum</th><th>Values</th></tr></thead>
+  <tbody>
+    <tr><td><code>ModelTier</code></td><td>ECONOMY, STANDARD, PREMIUM, FLAGSHIP</td></tr>
+    <tr><td><code>ComplexityLevel</code></td><td>TRIVIAL, LOW, MEDIUM, HIGH, CRITICAL</td></tr>
+    <tr><td><code>Confidence</code></td><td>HIGH, MEDIUM, LOW</td></tr>
+  </tbody>
+</table>
+</div>
+
+</main>
+</body>
+</html>
