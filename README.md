@@ -57,6 +57,7 @@ AgentLens provides:
 | 🔍 **Event Search** | Rich filtering across sessions — by type, model, tokens, duration |
 | 🔬 **Anomaly Detection** | Z-score statistical analysis to detect latency spikes, token surges, error bursts |
 | 🏥 **Health Scoring** | Grade sessions A–F based on error rates, latency, tool failures |
+| 💸 **Cost Budgets** | Per-agent and global spending limits with real-time tracking, warnings, and overage detection |
 
 ## 🏗️ Architecture
 

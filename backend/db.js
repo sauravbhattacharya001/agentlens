@@ -77,6 +77,18 @@ function initSchema() {
     CREATE INDEX IF NOT EXISTS idx_session_tags_tag ON session_tags(tag);
     CREATE INDEX IF NOT EXISTS idx_session_tags_session ON session_tags(session_id);
 
+    -- Cost budgets for spending limits
+    CREATE TABLE IF NOT EXISTS cost_budgets (
+      scope TEXT NOT NULL,
+      period TEXT NOT NULL CHECK(period IN ('daily', 'weekly', 'monthly', 'total')),
+      limit_usd REAL NOT NULL,
+      warn_pct REAL NOT NULL DEFAULT 80,
+      created_at TEXT NOT NULL DEFAULT (datetime('now')),
+      updated_at TEXT NOT NULL DEFAULT (datetime('now')),
+      PRIMARY KEY (scope, period)
+    );
+    CREATE INDEX IF NOT EXISTS idx_cost_budgets_scope ON cost_budgets(scope);
+
     -- Session bookmarks for starring important sessions
     CREATE TABLE IF NOT EXISTS session_bookmarks (
       session_id TEXT PRIMARY KEY,
