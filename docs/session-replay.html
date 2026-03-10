@@ -1,0 +1,382 @@
+<!DOCTYPE html>
+<html lang="en">
+<head>
+  <meta charset="UTF-8">
+  <meta name="viewport" content="width=device-width, initial-scale=1.0">
+  <title>Session Replay - AgentLens Docs</title>
+  <link rel="stylesheet" href="style.css">
+</head>
+<body>
+
+<header class="header">
+  <button class="menu-toggle" onclick="document.querySelector('.sidebar').classList.toggle('open')">&#9776;</button>
+  <a href="index.html" class="header-logo">&#128270; <span>AgentLens</span> Docs</a>
+  <nav class="header-nav">
+    <a href="getting-started.html">Getting Started</a>
+    <a href="sdk-reference.html">SDK</a>
+    <a href="api.html">API</a>
+    <a href="https://github.com/sauravbhattacharya001/agentlens" class="github-link" target="_blank">&#128279; GitHub</a>
+  </nav>
+</header>
+
+<aside class="sidebar">
+  <div class="sidebar-section">
+    <div class="sidebar-section-title">Overview</div>
+    <a href="index.html">Introduction</a>
+    <a href="architecture.html">Architecture</a>
+  </div>
+  <div class="sidebar-section">
+    <div class="sidebar-section-title">Guides</div>
+    <a href="getting-started.html">Getting Started</a>
+    <a href="quickstart.html">5-Minute Quickstart</a>
+    <a href="deployment.html">Deployment</a>
+  </div>
+  <div class="sidebar-section">
+    <div class="sidebar-section-title">SDK</div>
+    <a href="sdk-reference.html">Python SDK Reference</a>
+    <a href="decorators.html">Decorators</a>
+    <a href="models.html">Data Models</a>
+    <a href="transport.html">Transport &amp; Batching</a>
+    <a href="sampling.html">Sampling &amp; Rate Limiting</a>
+  </div>
+  <div class="sidebar-section">
+    <div class="sidebar-section-title">Backend</div>
+    <a href="api.html">REST API</a>
+    <a href="database.html">Database Schema</a>
+    <a href="dashboard.html">Dashboard</a>
+  </div>
+  <div class="sidebar-section">
+    <div class="sidebar-section-title">Advanced</div>
+    <a href="explainability.html">Explainability</a>
+    <a href="integrations.html">Integrations</a>
+    <a href="monitoring.html">Monitoring &amp; Analysis</a>
+    <a href="cost-optimization.html">Cost Optimization</a>
+    <a href="session-replay.html" class="active">Session Replay</a>
+  </div>
+</aside>
+
+<main class="main">
+
+<h1>Session Replay</h1>
+<p class="subtitle">Step through agent sessions event-by-event for debugging, demos, and code reviews.</p>
+
+<div class="callout callout-info">
+  <strong>Module:</strong> <code>agentlens.replayer</code><br>
+  Reconstructs timing from recorded events with speed control, filtering,
+  breakpoints, callbacks, and multiple export formats.
+</div>
+
+<!-- ── Quick Start ───────────────────────────────────────────── -->
+
+<h2 id="quick-start">Quick Start</h2>
+
+<pre><code class="language-python">from agentlens.replayer import SessionReplayer
+
+replayer = SessionReplayer(session)
+replayer.set_speed(2.0)  # 2x playback
+
+for frame in replayer.play():
+    print(frame.to_text())
+
+# Print aggregate stats
+print(replayer.stats.summary())
+</code></pre>
+
+<!-- ── Core Concepts ─────────────────────────────────────────── -->
+
+<h2 id="concepts">Core Concepts</h2>
+
+<h3>ReplayFrame</h3>
+<p>Each frame wraps a single <code>AgentEvent</code> with replay metadata:</p>
+
+<div class="table-wrap">
+<table>
+  <thead><tr><th>Field</th><th>Type</th><th>Description</th></tr></thead>
+  <tbody>
+    <tr><td><code>index</code></td><td>int</td><td>Zero-based position in the replay</td></tr>
+    <tr><td><code>total</code></td><td>int</td><td>Total number of frames</td></tr>
+    <tr><td><code>event</code></td><td>AgentEvent</td><td>The underlying event</td></tr>
+    <tr><td><code>wall_delay_ms</code></td><td>float</td><td>Delay since previous frame (speed-adjusted)</td></tr>
+    <tr><td><code>elapsed_ms</code></td><td>float</td><td>Cumulative elapsed time (original timeline)</td></tr>
+    <tr><td><code>is_breakpoint</code></td><td>bool</td><td>Whether a breakpoint was triggered</td></tr>
+    <tr><td><code>annotations</code></td><td>list[str]</td><td>User-added notes for this event</td></tr>
+    <tr><td><code>progress</code></td><td>float</td><td>0.0&#8211;1.0 progress (property)</td></tr>
+    <tr><td><code>progress_pct</code></td><td>float</td><td>Percentage progress (property)</td></tr>
+  </tbody>
+</table>
+</div>
+
+<h3>ReplayStats</h3>
+<p>Aggregate statistics computed during replay:</p>
+
+<div class="table-wrap">
+<table>
+  <thead><tr><th>Field</th><th>Description</th></tr></thead>
+  <tbody>
+    <tr><td><code>total_events</code></td><td>Total events in the session</td></tr>
+    <tr><td><code>played_events</code></td><td>Events actually played (after filtering)</td></tr>
+    <tr><td><code>filtered_events</code></td><td>Events excluded by filters</td></tr>
+    <tr><td><code>breakpoints_hit</code></td><td>Number of breakpoints triggered</td></tr>
+    <tr><td><code>original_duration_ms</code></td><td>Span of original session timeline</td></tr>
+    <tr><td><code>replay_duration_ms</code></td><td>Total wall-clock delay at playback speed</td></tr>
+    <tr><td><code>event_type_counts</code></td><td>Count of each event type played</td></tr>
+    <tr><td><code>models_used</code></td><td>Set of model names encountered</td></tr>
+    <tr><td><code>tools_used</code></td><td>Set of tool names encountered</td></tr>
+  </tbody>
+</table>
+</div>
+
+<!-- ── Speed Control ─────────────────────────────────────────── -->
+
+<h2 id="speed">Speed Control</h2>
+
+<p>Adjust playback speed to slow down for analysis or speed up for overview:</p>
+
+<pre><code class="language-python"># Constructor
+replayer = SessionReplayer(session, speed=0.5)  # Half speed
+
+# Or set later (chainable)
+replayer.set_speed(4.0)  # 4x speed
+</code></pre>
+
+<p>Speed affects <code>wall_delay_ms</code> on each frame. At 2x speed,
+delays are halved. The <code>elapsed_ms</code> field always reflects
+the original timeline.</p>
+
+<!-- ── Filtering ─────────────────────────────────────────────── -->
+
+<h2 id="filtering">Filtering</h2>
+
+<p>Focus on specific event types with include and exclude filters:</p>
+
+<pre><code class="language-python"># Include only LLM calls and decisions
+replayer.add_filter("llm_call", "decision")
+
+# Exclude errors
+replayer.exclude("error")
+
+# Remove a specific filter
+replayer.remove_filter("decision")
+
+# Clear all filters
+replayer.clear_filters()
+</code></pre>
+
+<p>Include filters (allowlist) and exclude filters (blocklist) can be
+combined. Exclude takes precedence.</p>
+
+<!-- ── Breakpoints ───────────────────────────────────────────── -->
+
+<h2 id="breakpoints">Breakpoints</h2>
+
+<p>Add conditional breakpoints to pause at interesting events:</p>
+
+<pre><code class="language-python"># Break on errors
+replayer.add_breakpoint(lambda e: e.event_type == "error")
+
+# Break on expensive calls
+replayer.add_breakpoint(lambda e: e.tokens_out > 2000)
+
+# Break on specific tools
+replayer.add_breakpoint(lambda e: e.tool_call and e.tool_call.tool_name == "execute_code")
+
+for frame in replayer.play():
+    print(frame.to_text())
+    if frame.is_breakpoint:
+        input("Breakpoint hit &#8212; press Enter to continue")
+
+# Clear all breakpoints
+replayer.clear_breakpoints()
+</code></pre>
+
+<!-- ── Callbacks ─────────────────────────────────────────────── -->
+
+<h2 id="callbacks">Callbacks</h2>
+
+<p>Register functions called for every frame during replay:</p>
+
+<pre><code class="language-python"># Log to a file
+def log_frame(frame):
+    with open("replay.log", "a") as f:
+        f.write(frame.to_text() + "\n")
+
+replayer.on_frame(log_frame)
+
+# Track progress
+replayer.on_frame(lambda f: print(f"Progress: {f.progress_pct}%"))
+</code></pre>
+
+<!-- ── Annotations ───────────────────────────────────────────── -->
+
+<h2 id="annotations">Annotations</h2>
+
+<p>Add notes to specific events before replay:</p>
+
+<pre><code class="language-python"># Annotate by event ID
+replayer.annotate("evt-abc123", "This is where the bug starts")
+replayer.annotate("evt-abc123", "Check the tool output here")
+replayer.annotate("evt-def456", "Recovery point")
+</code></pre>
+
+<p>Annotations appear in frame output and exports.</p>
+
+<!-- ── Step-Through ──────────────────────────────────────────── -->
+
+<h2 id="stepping">Step-Through Debugging</h2>
+
+<p>Step through events one at a time instead of streaming:</p>
+
+<pre><code class="language-python">replayer = SessionReplayer(session)
+
+# Step forward one frame at a time
+frame = replayer.step()
+while frame is not None:
+    print(frame.to_text())
+    frame = replayer.step()
+
+# Seek to a specific position
+replayer.seek(10)
+frame = replayer.step()  # Gets frame at index 10
+
+# Reset to beginning
+replayer.reset()
+</code></pre>
+
+<!-- ── Range Replay ──────────────────────────────────────────── -->
+
+<h2 id="range">Range Replay</h2>
+
+<p>Replay a specific slice of the session:</p>
+
+<pre><code class="language-python"># Replay events 5 through 15
+for frame in replayer.play_range(start=5, end=15):
+    print(frame.to_text())
+</code></pre>
+
+<!-- ── Export Formats ────────────────────────────────────────── -->
+
+<h2 id="export">Export Formats</h2>
+
+<h3>JSON</h3>
+<pre><code class="language-python">json_str = replayer.to_json(indent=2)
+
+# Contains: session_id, agent_name, speed, frames[], stats
+</code></pre>
+
+<h3>Plain Text</h3>
+<pre><code class="language-python">text = replayer.to_text()
+# Human-readable timeline with stats summary
+</code></pre>
+
+<h3>Markdown</h3>
+<pre><code class="language-python">md = replayer.to_markdown()
+# Formatted table with timeline + stats code block
+# Great for pasting into PRs, docs, or team reports
+</code></pre>
+
+<!-- ── Session Comparison ────────────────────────────────────── -->
+
+<h2 id="diff">Session Comparison</h2>
+
+<p>Compare two sessions to find structural differences:</p>
+
+<pre><code class="language-python">diff = SessionReplayer.diff(session_a, session_b)
+
+print(f"Events: {diff['event_count']['a']} vs {diff['event_count']['b']}")
+print(f"Duration: {diff['duration_ms']['a']:.0f}ms vs {diff['duration_ms']['b']:.0f}ms")
+print(f"Tokens in: {diff['tokens']['a']['in']} vs {diff['tokens']['b']['in']}")
+
+# Event type distribution
+for etype, counts in diff['event_types'].items():
+    print(f"  {etype}: {counts['a']} vs {counts['b']}")
+</code></pre>
+
+<p>Useful for comparing agent runs before and after changes.</p>
+
+<!-- ── Method Chaining ───────────────────────────────────────── -->
+
+<h2 id="chaining">Method Chaining</h2>
+
+<p>Most configuration methods return <code>self</code> for fluent chaining:</p>
+
+<pre><code class="language-python">frames = list(
+    SessionReplayer(session)
+    .set_speed(2.0)
+    .add_filter("llm_call", "tool_call")
+    .exclude("error")
+    .add_breakpoint(lambda e: e.tokens_out > 1000)
+    .annotate("evt-start", "Session begins")
+    .on_frame(lambda f: None)  # Logging callback
+    .play()
+)
+</code></pre>
+
+<!-- ── Use Cases ─────────────────────────────────────────────── -->
+
+<h2 id="use-cases">Use Cases</h2>
+
+<div class="table-wrap">
+<table>
+  <thead><tr><th>Scenario</th><th>Approach</th></tr></thead>
+  <tbody>
+    <tr>
+      <td><strong>Debugging</strong></td>
+      <td>Add breakpoints on errors, step through with <code>step()</code></td>
+    </tr>
+    <tr>
+      <td><strong>Code review</strong></td>
+      <td>Export as Markdown, paste into PR description</td>
+    </tr>
+    <tr>
+      <td><strong>Demo</strong></td>
+      <td>Use <code>set_speed(0.5)</code> for slow-motion walkthrough</td>
+    </tr>
+    <tr>
+      <td><strong>Regression testing</strong></td>
+      <td>Use <code>diff()</code> to compare before/after sessions</td>
+    </tr>
+    <tr>
+      <td><strong>Cost analysis</strong></td>
+      <td>Filter to <code>llm_call</code>, check token counts in stats</td>
+    </tr>
+    <tr>
+      <td><strong>Incident review</strong></td>
+      <td>Annotate key events, export JSON for the post-mortem</td>
+    </tr>
+  </tbody>
+</table>
+</div>
+
+<!-- ── API Reference ─────────────────────────────────────────── -->
+
+<h2 id="api-reference">API Reference</h2>
+
+<h3><code>SessionReplayer</code></h3>
+<div class="table-wrap">
+<table>
+  <thead><tr><th>Method</th><th>Returns</th><th>Description</th></tr></thead>
+  <tbody>
+    <tr><td><code>play()</code></td><td><code>Iterator[ReplayFrame]</code></td><td>Stream all frames</td></tr>
+    <tr><td><code>play_range(start, end)</code></td><td><code>Iterator[ReplayFrame]</code></td><td>Stream a slice of frames</td></tr>
+    <tr><td><code>step()</code></td><td><code>ReplayFrame | None</code></td><td>Advance one frame</td></tr>
+    <tr><td><code>seek(position)</code></td><td><code>self</code></td><td>Set step position</td></tr>
+    <tr><td><code>reset()</code></td><td><code>self</code></td><td>Reset to beginning</td></tr>
+    <tr><td><code>set_speed(speed)</code></td><td><code>self</code></td><td>Set playback speed multiplier</td></tr>
+    <tr><td><code>add_filter(*types)</code></td><td><code>self</code></td><td>Include only these event types</td></tr>
+    <tr><td><code>exclude(*types)</code></td><td><code>self</code></td><td>Exclude these event types</td></tr>
+    <tr><td><code>clear_filters()</code></td><td><code>self</code></td><td>Remove all filters</td></tr>
+    <tr><td><code>add_breakpoint(fn)</code></td><td><code>self</code></td><td>Add a conditional breakpoint</td></tr>
+    <tr><td><code>clear_breakpoints()</code></td><td><code>self</code></td><td>Remove all breakpoints</td></tr>
+    <tr><td><code>on_frame(callback)</code></td><td><code>self</code></td><td>Register a per-frame callback</td></tr>
+    <tr><td><code>annotate(event_id, note)</code></td><td><code>self</code></td><td>Add a note to an event</td></tr>
+    <tr><td><code>to_json(indent)</code></td><td><code>str</code></td><td>Export as JSON</td></tr>
+    <tr><td><code>to_text()</code></td><td><code>str</code></td><td>Export as plain text</td></tr>
+    <tr><td><code>to_markdown()</code></td><td><code>str</code></td><td>Export as Markdown table</td></tr>
+    <tr><td><code>diff(a, b)</code></td><td><code>dict</code></td><td>Compare two sessions (static)</td></tr>
+  </tbody>
+</table>
+</div>
+
+</main>
+</body>
+</html>
