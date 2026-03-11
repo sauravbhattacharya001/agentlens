@@ -77,6 +77,18 @@ class TestEscape:
     def test_quotes(self):
         assert _escape('"hello"') == "&quot;hello&quot;"
 
+    def test_single_quotes(self):
+        assert _escape("it's") == "it&#39;s"
+
+    def test_all_five_chars(self):
+        assert _escape("""<>&"'""") == "&lt;&gt;&amp;&quot;&#39;"
+
+    def test_xss_payload(self):
+        payload = '<script>alert("xss")</script>'
+        escaped = _escape(payload)
+        assert "<script>" not in escaped
+        assert "alert" in escaped  # content preserved, tags neutralised
+
 
 class TestSessionStats:
     def test_basic_stats(self):
@@ -217,6 +229,24 @@ class TestHtmlExport:
         exp = SessionExporter(s)
         html = exp.as_html()
         assert "<script>alert" not in html
+        assert "&lt;script&gt;" in html
+
+    def test_xss_safe_session_id(self):
+        """Session IDs with HTML payloads must be escaped."""
+        s = _make_session()
+        s.session_id = '"><img src=x onerror=alert(1)>'
+        exp = SessionExporter(s)
+        html = exp.as_html()
+        assert "<img src" not in html
+        assert "onerror" not in html or "&lt;img" in html
+
+    def test_xss_safe_status(self):
+        """Status field with HTML payloads must be escaped."""
+        s = _make_session()
+        s.status = '<script>document.cookie</script>'
+        exp = SessionExporter(s)
+        html = exp.as_html()
+        assert "<script>document" not in html
         assert "&lt;script&gt;" in html
 
 

@@ -185,7 +185,7 @@ class SessionExporter:
 <head>
 <meta charset="utf-8">
 <meta name="viewport" content="width=device-width, initial-scale=1">
-<title>AgentLens Report — {_escape(s.agent_name)} ({s.session_id})</title>
+<title>AgentLens Report — {_escape(s.agent_name)} ({_escape(s.session_id)})</title>
 <style>
   :root {{ --bg: #0f1117; --surface: #1a1d27; --border: #2a2d37; --text: #e1e4ea;
            --muted: #8b8fa3; --accent: #6366f1; --green: #22c55e; --red: #ef4444;
@@ -233,8 +233,8 @@ class SessionExporter:
 <div class="container">
   <h1>🔎 {_escape(s.agent_name)}</h1>
   <div class="subtitle">
-    Session <code>{s.session_id}</code> · {_iso(s.started_at) or '—'}
-    {(' → ' + _iso(s.ended_at)) if s.ended_at else ''} · Status: {s.status}
+    Session <code>{_escape(s.session_id)}</code> · {_iso(s.started_at) or '—'}
+    {(' → ' + _iso(s.ended_at)) if s.ended_at else ''} · Status: {_escape(s.status)}
   </div>
 
   <div class="cards">
@@ -318,10 +318,15 @@ class SessionExporter:
 
 
 def _escape(text: str) -> str:
-    """HTML-escape a string."""
+    """HTML-escape a string for safe embedding in HTML content and attributes.
+
+    Escapes all five characters recommended by OWASP for XSS prevention:
+    ``& < > " '``
+    """
     return (
         text.replace("&", "&amp;")
         .replace("<", "&lt;")
         .replace(">", "&gt;")
         .replace('"', "&quot;")
+        .replace("'", "&#39;")
     )
