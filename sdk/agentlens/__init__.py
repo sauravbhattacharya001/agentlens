@@ -25,6 +25,7 @@ from agentlens.cost_optimizer import CostOptimizer, ComplexityAnalyzer, Complexi
 from agentlens.capacity import CapacityPlanner, WorkloadSample, ResourceKind, ScalingAction, BottleneckSeverity, TrendDirection, WorkloadProjection, Bottleneck, ResourceSizing, ScalingRecommendation, CapacityReport
 from agentlens.ab_test import ABTestAnalyzer, Experiment, ExperimentStatus, Variant, Observation, TestResult, ExperimentReport, EffectSize, SignificanceLevel, required_sample_size
 from agentlens.error_fingerprint import ErrorFingerprinter, ErrorCluster, ErrorReport, ErrorOccurrence, Trend, Resolution
+from agentlens.session_diff import SessionDiff, DiffReport, EventPair, AlignmentStatus, ToolCallDelta
 
 __version__ = "0.1.0"
 __all__ = [
@@ -173,6 +174,11 @@ __all__ = [
     "ErrorOccurrence",
     "Trend",
     "Resolution",
+    "SessionDiff",
+    "DiffReport",
+    "EventPair",
+    "AlignmentStatus",
+    "ToolCallDelta",
 ]
 
 _tracker: AgentTracker | None = None
