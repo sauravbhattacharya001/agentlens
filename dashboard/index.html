@@ -33,6 +33,9 @@
             <button class="btn btn-analytics" onclick="toggleAnalytics()" id="analyticsToggleBtn">
               📈 Analytics
             </button>
+            <button class="btn btn-analytics" onclick="toggleLeaderboard()" id="leaderboardToggleBtn">
+              🏆 Leaderboard
+            </button>
             <button id="compareBtn" class="btn btn-compare" onclick="openCompareView()" style="display:none">
               ⚖️ Compare (<span id="compareCount">0</span>/2)
             </button>
@@ -100,6 +103,48 @@
                 <h3>🏆 Top Agents</h3>
                 <div id="topAgentsTable"></div>
               </div>
+            </div>
+          </div>
+        </div>
+
+        <!-- Leaderboard Panel (collapsible) -->
+        <div id="leaderboardPanel" class="leaderboard-panel" style="display:none">
+          <div class="leaderboard-loading" id="leaderboardLoading">Loading leaderboard...</div>
+          <div id="leaderboardContent" style="display:none">
+            <div class="leaderboard-controls">
+              <label>
+                Sort by:
+                <select id="leaderboardSort" onchange="loadLeaderboard()">
+                  <option value="efficiency">Efficiency</option>
+                  <option value="speed">Speed</option>
+                  <option value="reliability">Reliability</option>
+                  <option value="cost">Cost</option>
+                  <option value="volume">Volume</option>
+                </select>
+              </label>
+              <label>
+                Period:
+                <select id="leaderboardDays" onchange="loadLeaderboard()">
+                  <option value="7">7 days</option>
+                  <option value="30" selected>30 days</option>
+                  <option value="90">90 days</option>
+                  <option value="365">1 year</option>
+                </select>
+              </label>
+              <label>
+                Min sessions:
+                <select id="leaderboardMinSessions" onchange="loadLeaderboard()">
+                  <option value="1">1+</option>
+                  <option value="2" selected>2+</option>
+                  <option value="5">5+</option>
+                  <option value="10">10+</option>
+                </select>
+              </label>
+            </div>
+            <div id="leaderboardTable" class="leaderboard-table-wrap"></div>
+            <div id="leaderboardEmpty" class="leaderboard-empty" style="display:none">
+              <span style="font-size:2rem">🏆</span>
+              <p>No agents qualify yet. Adjust filters or wait for more sessions.</p>
             </div>
           </div>
         </div>

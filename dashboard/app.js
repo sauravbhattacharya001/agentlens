@@ -3628,3 +3628,128 @@ function renderPostmortemTimeline(data) {
   document.getElementById("postmortemTimeline").innerHTML = html;
 }
 
+
+// ── Leaderboard Panel ────────────────────────────────────────────────
+
+let leaderboardVisible = false;
+let leaderboardData = null;
+
+function toggleLeaderboard() {
+  const panel = document.getElementById("leaderboardPanel");
+  leaderboardVisible = !leaderboardVisible;
+  panel.style.display = leaderboardVisible ? "block" : "none";
+  if (leaderboardVisible && !leaderboardData) {
+    loadLeaderboard();
+  }
+}
+
+async function loadLeaderboard() {
+  const loading = document.getElementById("leaderboardLoading");
+  const content = document.getElementById("leaderboardContent");
+  const empty = document.getElementById("leaderboardEmpty");
+  const tableWrap = document.getElementById("leaderboardTable");
+
+  loading.style.display = "block";
+  content.style.display = "none";
+
+  const sort = document.getElementById("leaderboardSort")?.value || "efficiency";
+  const days = document.getElementById("leaderboardDays")?.value || "30";
+  const minSessions = document.getElementById("leaderboardMinSessions")?.value || "2";
+
+  try {
+    const res = await fetch(
+      `${API_BASE}/leaderboard?sort=${sort}&days=${days}&min_sessions=${minSessions}&limit=20`
+    );
+    leaderboardData = await res.json();
+
+    loading.style.display = "none";
+    content.style.display = "block";
+
+    if (!leaderboardData.agents || leaderboardData.agents.length === 0) {
+      tableWrap.style.display = "none";
+      empty.style.display = "block";
+      return;
+    }
+
+    tableWrap.style.display = "block";
+    empty.style.display = "none";
+    renderLeaderboardTable(leaderboardData);
+  } catch (err) {
+    loading.innerHTML = `<span style="color:#f85149">Failed to load leaderboard: ${escHtml(err.message)}</span>`;
+  }
+}
+
+function renderLeaderboardTable(data) {
+  const agents = data.agents;
+  const sort = data.sort;
+
+  // Compute max values for bar scaling
+  const maxSessions = Math.max(1, ...agents.map(a => a.total_sessions));
+  const maxSuccess = Math.max(1, ...agents.map(a => a.success_rate));
+  const maxEfficiency = Math.max(0.001, ...agents.map(a => a.efficiency_ratio));
+  const maxCost = Math.max(0.0001, ...agents.map(a => a.total_cost_usd));
+  const maxDuration = Math.max(1, ...agents.map(a => a.avg_session_duration_ms));
+
+  function medalFor(rank) {
+    if (rank === 1) return '<span class="rank-medal">🥇</span>';
+    if (rank === 2) return '<span class="rank-medal">🥈</span>';
+    if (rank === 3) return '<span class="rank-medal">🥉</span>';
+    return `<span style="color:#8b949e">#${rank}</span>`;
+  }
+
+  function formatMs(ms) {
+    if (!ms || ms === 0) return "—";
+    if (ms < 1000) return Math.round(ms) + "ms";
+    if (ms < 60000) return (ms / 1000).toFixed(1) + "s";
+    if (ms < 3600000) return (ms / 60000).toFixed(1) + "m";
+    return (ms / 3600000).toFixed(1) + "h";
+  }
+
+  function formatCostShort(cost) {
+    if (!cost || cost === 0) return "$0";
+    if (cost < 0.01) return "$" + cost.toFixed(4);
+    if (cost < 1) return "$" + cost.toFixed(2);
+    return "$" + cost.toFixed(2);
+  }
+
+  function bar(val, max, cls) {
+    const pct = Math.min(100, Math.round((val / max) * 100));
+    return `<span class="leaderboard-bar ${cls}" style="width:${pct}px" title="${val}"></span>`;
+  }
+
+  let html = '<table class="leaderboard-table"><thead><tr>';
+  html += '<th class="leaderboard-rank">Rank</th>';
+  html += `<th class="${sort === 'volume' ? 'sorted' : ''}">Agent</th>`;
+  html += `<th class="${sort === 'volume' ? 'sorted' : ''}">Sessions</th>`;
+  html += `<th class="${sort === 'reliability' ? 'sorted' : ''}">Success</th>`;
+  html += `<th class="${sort === 'efficiency' ? 'sorted' : ''}">Efficiency</th>`;
+  html += `<th class="${sort === 'speed' ? 'sorted' : ''}">Avg Duration</th>`;
+  html += `<th class="${sort === 'cost' ? 'sorted' : ''}">Cost</th>`;
+  html += '<th>Tokens</th>';
+  html += '<th>Tool Calls</th>';
+  html += '<th>Last Seen</th>';
+  html += '</tr></thead><tbody>';
+
+  for (const agent of agents) {
+    html += '<tr>';
+    html += `<td class="leaderboard-rank">${medalFor(agent.rank)}</td>`;
+    html += `<td class="leaderboard-agent" title="${escHtml(agent.agent_name)}">${escHtml(agent.agent_name)}</td>`;
+    html += `<td>${agent.total_sessions}${bar(agent.total_sessions, maxSessions, 'volume')}</td>`;
+    html += `<td>${agent.success_rate}%${bar(agent.success_rate, 100, '')}</td>`;
+    html += `<td>${agent.efficiency_ratio.toFixed(2)}${bar(agent.efficiency_ratio, maxEfficiency, '')}</td>`;
+    html += `<td>${formatMs(agent.avg_session_duration_ms)}${bar(maxDuration - agent.avg_session_duration_ms, maxDuration, 'speed')}</td>`;
+    html += `<td>${formatCostShort(agent.total_cost_usd)}<br><span class="leaderboard-stat-label">${formatCostShort(agent.cost_per_session_usd)}/session</span></td>`;
+    html += `<td>${formatTokenCount(agent.total_tokens)}<br><span class="leaderboard-stat-label">${formatTokenCount(agent.avg_tokens_per_session)}/session</span></td>`;
+    html += `<td>${agent.tool_calls.toLocaleString()}</td>`;
+    html += `<td>${agent.last_seen ? formatTime(agent.last_seen) : "—"}</td>`;
+    html += '</tr>';
+  }
+
+  html += '</tbody></table>';
+  html += `<div style="margin-top:8px;font-size:11px;color:#8b949e">`;
+  html += `${data.total_qualifying_agents} qualifying agent${data.total_qualifying_agents !== 1 ? 's' : ''} `;
+  html += `· Last ${data.period_days} days · Sorted by ${data.sort} (${data.order})`;
+  html += `</div>`;
+
+  document.getElementById("leaderboardTable").innerHTML = html;
+}
