@@ -1899,3 +1899,101 @@ body {
 .clickable-row:hover {
   background: rgba(255, 255, 255, 0.04);
 }
+
+/* ── Leaderboard Panel ─────────────────────────────────────────────── */
+.leaderboard-panel {
+  margin-bottom: 16px;
+  padding: 16px;
+  background: var(--card-bg, #161b22);
+  border: 1px solid var(--border-color, #30363d);
+  border-radius: 8px;
+}
+.leaderboard-controls {
+  display: flex;
+  gap: 16px;
+  flex-wrap: wrap;
+  margin-bottom: 16px;
+  align-items: center;
+}
+.leaderboard-controls label {
+  display: flex;
+  align-items: center;
+  gap: 6px;
+  font-size: 13px;
+  color: #8b949e;
+}
+.leaderboard-controls select {
+  background: #0d1117;
+  color: #c9d1d9;
+  border: 1px solid #30363d;
+  border-radius: 6px;
+  padding: 4px 8px;
+  font-size: 13px;
+}
+.leaderboard-table-wrap {
+  overflow-x: auto;
+}
+.leaderboard-table {
+  width: 100%;
+  border-collapse: collapse;
+  font-size: 13px;
+}
+.leaderboard-table th {
+  text-align: left;
+  padding: 8px 12px;
+  color: #8b949e;
+  font-weight: 600;
+  border-bottom: 1px solid #30363d;
+  cursor: pointer;
+  white-space: nowrap;
+  user-select: none;
+}
+.leaderboard-table th:hover {
+  color: #c9d1d9;
+}
+.leaderboard-table th.sorted {
+  color: #58a6ff;
+}
+.leaderboard-table td {
+  padding: 8px 12px;
+  border-bottom: 1px solid #21262d;
+  color: #c9d1d9;
+  white-space: nowrap;
+}
+.leaderboard-table tr:hover td {
+  background: #1c2128;
+}
+.leaderboard-rank {
+  font-weight: 700;
+  font-size: 14px;
+  min-width: 40px;
+  text-align: center;
+}
+.rank-medal { font-size: 16px; }
+.leaderboard-agent {
+  font-weight: 600;
+  max-width: 200px;
+  overflow: hidden;
+  text-overflow: ellipsis;
+}
+.leaderboard-bar {
+  display: inline-block;
+  height: 8px;
+  border-radius: 4px;
+  background: #238636;
+  vertical-align: middle;
+  margin-left: 6px;
+  transition: width 0.3s ease;
+}
+.leaderboard-bar.speed { background: #58a6ff; }
+.leaderboard-bar.cost { background: #f0883e; }
+.leaderboard-bar.volume { background: #8b5cf6; }
+.leaderboard-empty {
+  text-align: center;
+  padding: 32px;
+  color: #8b949e;
+}
+.leaderboard-stat-label {
+  color: #8b949e;
+  font-size: 11px;
+}
