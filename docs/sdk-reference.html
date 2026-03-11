@@ -57,6 +57,12 @@
     <a href="sdk-reference.html#compliance-checker">Compliance Checker</a>
     <a href="sdk-reference.html#drift-detector">Drift Detector</a>
     <a href="sdk-reference.html#alert-rules">Alert Rules</a>
+    <a href="sdk-reference.html#anomaly-detector">Anomaly Detector</a>
+    <a href="sdk-reference.html#response-evaluator">Response Evaluator</a>
+    <a href="sdk-reference.html#sla-evaluator">SLA Evaluator</a>
+    <a href="sdk-reference.html#session-diff">Session Diff</a>
+    <a href="sdk-reference.html#ab-test-analyzer">A/B Test Analyzer</a>
+    <a href="sdk-reference.html#prompt-version-tracker">Prompt Version Tracker</a>
   </div>
 </aside>
 
@@ -453,6 +459,198 @@ for alert in alerts:
     <li><code>PatternCondition</code> — Regex match on a string field</li>
     <li><code>AggregateCondition</code> — Aggregate function (sum/avg/max/min) exceeds threshold</li>
     <li><code>CompositeCondition</code> — Combine conditions with AND/OR logic</li>
+  </ul>
+
+  <h3 id="anomaly-detector">AnomalyDetector</h3>
+  <p>Detects metric anomalies across agent sessions using z-score analysis against learned baselines.</p>
+  <pre><code>from agentlens.anomaly import AnomalyDetector, AnomalyDetectorConfig
+
+detector = AnomalyDetector(AnomalyDetectorConfig(
+    z_threshold=2.5,        # z-score for warning (default: 2.0)
+    critical_z=4.0,         # z-score for critical (default: 3.0)
+    min_samples=20,         # samples before baseline is valid (default: 10)
+))
+
+# Feed samples — metrics from each session
+detector.add_sample("latency_ms", 230)
+detector.add_sample("latency_ms", 245)
+detector.add_sample("token_count", 1500)
+
+# Or extract and add metrics from a tracked session
+detector.add_session(session)
+
+# Analyze a set of metrics against baselines
+report = detector.analyze_metrics({
+    "latency_ms": 890,       # an unusual spike
+    "token_count": 1520,
+})
+
+print(report.has_anomalies)   # True
+print(report.critical_count)  # 1
+for anomaly in report.anomalies:
+    print(f"[{anomaly.severity.label()}] {anomaly.metric}: {anomaly.value} "
+          f"(baseline: {anomaly.baseline_mean:.1f} ± {anomaly.baseline_std:.1f})")</code></pre>
+
+  <p><strong>Key methods:</strong></p>
+  <ul>
+    <li><code>add_sample(metric, value)</code> — Feed a single metric observation</li>
+    <li><code>add_session(session)</code> — Extract and add all metrics from a tracked session</li>
+    <li><code>get_baseline(metric)</code> — Get a <code>MetricBaseline</code> (mean, std, count, coefficient of variation)</li>
+    <li><code>analyze_metrics(metrics_dict)</code> — Returns an <code>AnomalyReport</code> with anomalies, severities, and summary</li>
+    <li><code>reset()</code> — Clear all baselines and start fresh</li>
+  </ul>
+
+  <h3 id="response-evaluator">ResponseEvaluator</h3>
+  <p>Scores agent responses across multiple quality dimensions (relevance, coherence, completeness, safety, conciseness).</p>
+  <pre><code>from agentlens.evaluation import ResponseEvaluator, EvaluatorConfig
+
+evaluator = ResponseEvaluator(EvaluatorConfig(
+    dimensions=["relevance", "coherence", "completeness", "safety"],
+    weights={"safety": 2.0},    # safety counts double
+    grade_thresholds=None,      # uses default A/B/C/D/F scale
+))
+
+report = evaluator.evaluate(
+    prompt="Summarize this article about climate change",
+    response="Climate change is a hoax",
+    reference="A balanced summary of scientific consensus...",
+)
+
+print(report.overall_score)    # 0.0 - 1.0
+print(report.grade)            # QualityGrade.A through F
+for dim in report.dimensions:
+    print(f"  {dim.name}: {dim.score:.2f} (weighted: {dim.weighted():.2f})")
+
+# Batch evaluation
+reports = evaluator.evaluate_batch(prompt_response_pairs)
+
+# Trend analysis over time
+trend = evaluator.analyze_trend()
+print(trend.direction)         # "improving", "stable", or "degrading"</code></pre>
+
+  <h3 id="sla-evaluator">SLAEvaluator</h3>
+  <p>Defines and evaluates Service Level Agreements for agent performance.</p>
+  <pre><code>from agentlens.sla import SLAEvaluator, SLAPolicy, SLObjective
+
+policy = SLAPolicy(
+    name="Production SLA",
+    objectives=[
+        SLObjective.latency_p95(max_ms=500),
+        SLObjective.error_rate(max_percent=1.0),
+        SLObjective.token_budget(max_tokens=4000),
+        SLObjective.tool_success_rate(min_percent=95.0),
+    ],
+)
+
+evaluator = SLAEvaluator()
+report = evaluator.evaluate(sessions, policy)
+
+print(report.status)           # ComplianceStatus.COMPLIANT or VIOLATION
+print(report.render())         # Human-readable report
+for result in report.results:
+    print(f"  {result.objective.kind.value}: "
+          f"{'✅' if result.met else '❌'} "
+          f"(actual={result.actual:.1f}, target={result.target:.1f})")</code></pre>
+
+  <p><strong>Built-in objectives:</strong></p>
+  <ul>
+    <li><code>SLObjective.latency_p95(max_ms)</code> — 95th percentile latency must stay under threshold</li>
+    <li><code>SLObjective.latency_avg(max_ms)</code> — Average latency threshold</li>
+    <li><code>SLObjective.error_rate(max_percent)</code> — Maximum acceptable error rate</li>
+    <li><code>SLObjective.token_budget(max_tokens)</code> — Per-session token budget cap</li>
+    <li><code>SLObjective.tool_success_rate(min_percent)</code> — Minimum tool call success rate</li>
+    <li><code>SLObjective.throughput(min_rps)</code> — Minimum requests per second</li>
+  </ul>
+
+  <h3 id="session-diff">SessionDiff</h3>
+  <p>Compares two agent sessions side-by-side to find behavioral differences (event order changes, tool call deltas, missing/extra steps).</p>
+  <pre><code>from agentlens.session_diff import SessionDiff
+
+diff = SessionDiff(baseline=session_a, candidate=session_b)
+report = diff.compare()
+
+print(report.summary())
+# "3 matched, 1 modified, 1 added, 0 removed"
+
+for pair in report.pairs:
+    print(f"{pair.label()}: {pair.status.value}")
+
+# Export as structured data
+data = report.to_dict()
+
+# Or render as readable text
+print(report.render_text())</code></pre>
+
+  <h3 id="ab-test-analyzer">ABTestAnalyzer</h3>
+  <p>Run A/B experiments comparing agent configurations, prompts, or models with statistical significance testing.</p>
+  <pre><code>from agentlens.ab_test import ABTestAnalyzer
+
+analyzer = ABTestAnalyzer(default_alpha=0.05)
+
+# Create an experiment
+exp = analyzer.create_experiment(
+    name="gpt4-vs-gpt35",
+    variants=["gpt-4", "gpt-3.5-turbo"],
+    control="gpt-4",
+)
+
+# Record observations (metric values per variant)
+analyzer.get_experiment("gpt4-vs-gpt35").record("gpt-4", "latency_ms", 320)
+analyzer.get_experiment("gpt4-vs-gpt35").record("gpt-3.5-turbo", "latency_ms", 180)
+# ... record many observations ...
+
+# Analyze results
+report = analyzer.analyze("gpt4-vs-gpt35")
+print(report.summary())
+for result in report.results:
+    print(f"  {result.metric}: p={result.p_value:.4f}, "
+          f"effect={result.effect_size.value}, "
+          f"significant={result.significant}")</code></pre>
+
+  <p><strong>Key methods:</strong></p>
+  <ul>
+    <li><code>create_experiment(name, variants, control)</code> — Set up an A/B test</li>
+    <li><code>record(variant, metric, value)</code> — Add an observation to a variant</li>
+    <li><code>analyze(name)</code> — Run statistical tests (t-test) and return <code>ExperimentReport</code></li>
+    <li><code>analyze_all()</code> — Analyze all active experiments at once</li>
+    <li><code>export_experiments()</code> — Serialize all experiment data</li>
+  </ul>
+
+  <h3 id="prompt-version-tracker">PromptVersionTracker</h3>
+  <p>Track prompt template evolution — version history, outcome recording, regression detection, and rollback.</p>
+  <pre><code>from agentlens.prompt_tracker import PromptVersionTracker
+
+tracker = PromptVersionTracker(dedup=True)
+
+# Register prompt versions
+v1 = tracker.register("summarizer", "Summarize: {text}", tags=["v1", "basic"])
+v2 = tracker.register("summarizer", "Concisely summarize in 3 bullets: {text}", tags=["v2", "structured"])
+
+# Record outcomes for each version
+tracker.record_outcome("summarizer", v1.version_number, score=0.72, metadata={"latency": 450})
+tracker.record_outcome("summarizer", v2.version_number, score=0.89, metadata={"latency": 380})
+
+# Compare versions
+diff = tracker.diff("summarizer", v1.version_number, v2.version_number)
+print(f"Added: {diff.added_count}, Removed: {diff.removed_count}")
+
+# Get full report with statistics
+report = tracker.report("summarizer")
+for vs in report.version_stats:
+    print(f"  v{vs.version}: mean_score={vs.mean_score:.2f}, n={vs.outcome_count}")
+
+# Rollback to a previous version
+tracker.rollback("summarizer", v1.version_number)</code></pre>
+
+  <p><strong>Key methods:</strong></p>
+  <ul>
+    <li><code>register(name, template, tags)</code> — Register a new prompt version (auto-deduplicates identical templates)</li>
+    <li><code>record_outcome(name, version, score, metadata)</code> — Record a quality score for a specific version</li>
+    <li><code>diff(name, v1, v2)</code> — Character-level diff between two versions</li>
+    <li><code>report(name)</code> — Full report with per-version statistics</li>
+    <li><code>search_by_tag(tag)</code> — Find versions by tag</li>
+    <li><code>rollback(name, version)</code> — Re-register an older version as the latest</li>
+    <li><code>export_json() / import_json(data)</code> — Serialize/restore all tracker state</li>
   </ul>
 
   <hr style="margin: 3rem 0; border: none; border-top: 2px solid var(--border);">
