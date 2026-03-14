@@ -104,6 +104,33 @@
                 <div id="topAgentsTable"></div>
               </div>
             </div>
+
+            <!-- Cost Analytics Row -->
+            <div class="chart-card analytics-chart" style="width:100%;margin-bottom:16px">
+              <div style="display:flex;align-items:center;justify-content:space-between;margin-bottom:12px">
+                <h3 style="margin:0">💰 Cost Analytics</h3>
+                <select id="costDays" class="select-input" style="font-size:13px;padding:4px 8px" onchange="loadCostAnalytics()">
+                  <option value="7">7 days</option>
+                  <option value="30" selected>30 days</option>
+                  <option value="90">90 days</option>
+                </select>
+              </div>
+              <div id="costAnalyticsLoading" style="color:#8b949e;font-size:14px;padding:12px 0">Loading cost data...</div>
+              <div id="costAnalyticsContent" style="display:none">
+                <div class="analytics-cards" id="costCards"></div>
+                <div class="analytics-charts-row" style="margin-top:12px">
+                  <div class="chart-card analytics-chart">
+                    <h3 style="font-size:14px">Daily Cost Trend</h3>
+                    <canvas id="costTrendChart" width="500" height="180"></canvas>
+                  </div>
+                  <div class="chart-card analytics-chart">
+                    <h3 style="font-size:14px">Cost by Model</h3>
+                    <canvas id="costByModelChart" width="300" height="180"></canvas>
+                  </div>
+                </div>
+                <div id="costModelTable" style="margin-top:12px"></div>
+              </div>
+            </div>
           </div>
         </div>
 

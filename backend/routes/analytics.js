@@ -497,6 +497,175 @@ router.get("/heatmap", isTest ? analyticsCacheMw : cacheMiddleware(analyticsCach
     });
 }));
 
+// GET /analytics/costs — Aggregate cost breakdown by model and over time
+//
+// Joins event token data with model_pricing to compute estimated costs
+// across all sessions.  Returns per-model cost breakdown, daily cost
+// trend, and overall totals.  Optional ?days=N parameter (default 30).
+router.get("/costs", analyticsCacheMw, wrapRoute("fetch cost analytics", (req, res) => {
+  const db = getDb();
+  const days = Math.min(Math.max(1, parseInt(req.query.days) || 30), 365);
+  const cutoff = new Date(Date.now() - days * 86400000).toISOString();
+
+  // Load pricing map (DB + defaults)
+  const pricingRows = db.prepare("SELECT * FROM model_pricing ORDER BY model ASC").all();
+  const pricingMap = {};
+  for (const row of pricingRows) {
+    pricingMap[row.model.toLowerCase()] = {
+      input: row.input_cost_per_1m,
+      output: row.output_cost_per_1m,
+      currency: row.currency || "USD",
+    };
+  }
+
+  // Default pricing fallback
+  const DEFAULT_PRICING = {
+    "gpt-4": { input: 30.00, output: 60.00 },
+    "gpt-4-turbo": { input: 10.00, output: 30.00 },
+    "gpt-4o": { input: 2.50, output: 10.00 },
+    "gpt-4o-mini": { input: 0.15, output: 0.60 },
+    "gpt-3.5-turbo": { input: 0.50, output: 1.50 },
+    "claude-3-opus": { input: 15.00, output: 75.00 },
+    "claude-3-sonnet": { input: 3.00, output: 15.00 },
+    "claude-3-haiku": { input: 0.25, output: 1.25 },
+    "claude-3.5-sonnet": { input: 3.00, output: 15.00 },
+    "claude-4-opus": { input: 15.00, output: 75.00 },
+    "claude-4-sonnet": { input: 3.00, output: 15.00 },
+    "gemini-pro": { input: 0.50, output: 1.50 },
+    "gemini-1.5-pro": { input: 1.25, output: 5.00 },
+    "gemini-1.5-flash": { input: 0.075, output: 0.30 },
+  };
+  for (const [model, prices] of Object.entries(DEFAULT_PRICING)) {
+    if (!pricingMap[model]) {
+      pricingMap[model] = { input: prices.input, output: prices.output, currency: "USD" };
+    }
+  }
+
+  // Helper: find pricing for a model (exact or fuzzy prefix match)
+  function findPricing(model) {
+    if (!model) return null;
+    const lower = model.toLowerCase();
+    if (pricingMap[lower]) return pricingMap[lower];
+    const delimiters = new Set(["-", "_", ".", "/", " "]);
+    let bestKey = null;
+    let bestLen = 0;
+    for (const key of Object.keys(pricingMap)) {
+      if (lower.startsWith(key) && key.length > bestLen) {
+        if (key.length === lower.length || delimiters.has(lower[key.length])) {
+          bestKey = key;
+          bestLen = key.length;
+        }
+      }
+    }
+    return bestKey ? pricingMap[bestKey] : null;
+  }
+
+  // Aggregate by model
+  const modelRows = db.prepare(`
+    SELECT
+      model,
+      COUNT(*) as call_count,
+      COALESCE(SUM(tokens_in), 0) as total_tokens_in,
+      COALESCE(SUM(tokens_out), 0) as total_tokens_out
+    FROM events
+    WHERE model IS NOT NULL AND model != '' AND timestamp >= ?
+    GROUP BY model
+    ORDER BY (COALESCE(SUM(tokens_in), 0) + COALESCE(SUM(tokens_out), 0)) DESC
+  `).all(cutoff);
+
+  let totalCost = 0;
+  let totalInputCost = 0;
+  let totalOutputCost = 0;
+  const modelCosts = [];
+  const unmatchedModels = [];
+
+  for (const row of modelRows) {
+    const pricing = findPricing(row.model);
+    if (pricing) {
+      const inputCost = (row.total_tokens_in / 1_000_000) * pricing.input;
+      const outputCost = (row.total_tokens_out / 1_000_000) * pricing.output;
+      const cost = inputCost + outputCost;
+      totalCost += cost;
+      totalInputCost += inputCost;
+      totalOutputCost += outputCost;
+      modelCosts.push({
+        model: row.model,
+        call_count: row.call_count,
+        tokens_in: row.total_tokens_in,
+        tokens_out: row.total_tokens_out,
+        input_cost: Math.round(inputCost * 10000) / 10000,
+        output_cost: Math.round(outputCost * 10000) / 10000,
+        total_cost: Math.round(cost * 10000) / 10000,
+        percent: 0,  // filled below
+      });
+    } else {
+      unmatchedModels.push(row.model);
+    }
+  }
+
+  // Fill percent
+  for (const mc of modelCosts) {
+    mc.percent = totalCost > 0
+      ? Math.round((mc.total_cost / totalCost) * 10000) / 100
+      : 0;
+  }
+
+  // Daily cost trend
+  const dailyRows = db.prepare(`
+    SELECT
+      DATE(timestamp) as day,
+      model,
+      COALESCE(SUM(tokens_in), 0) as tokens_in,
+      COALESCE(SUM(tokens_out), 0) as tokens_out
+    FROM events
+    WHERE model IS NOT NULL AND model != '' AND timestamp >= ?
+    GROUP BY DATE(timestamp), model
+    ORDER BY day ASC
+  `).all(cutoff);
+
+  const dailyCosts = {};
+  for (const row of dailyRows) {
+    const pricing = findPricing(row.model);
+    if (!pricing) continue;
+    const cost = (row.tokens_in / 1_000_000) * pricing.input
+               + (row.tokens_out / 1_000_000) * pricing.output;
+    if (!dailyCosts[row.day]) {
+      dailyCosts[row.day] = { day: row.day, cost: 0, input_cost: 0, output_cost: 0 };
+    }
+    dailyCosts[row.day].cost += cost;
+    dailyCosts[row.day].input_cost += (row.tokens_in / 1_000_000) * pricing.input;
+    dailyCosts[row.day].output_cost += (row.tokens_out / 1_000_000) * pricing.output;
+  }
+
+  const dailyTrend = Object.values(dailyCosts).map(d => ({
+    day: d.day,
+    cost: Math.round(d.cost * 10000) / 10000,
+    input_cost: Math.round(d.input_cost * 10000) / 10000,
+    output_cost: Math.round(d.output_cost * 10000) / 10000,
+  }));
+
+  // Average daily cost
+  const avgDailyCost = dailyTrend.length > 0
+    ? totalCost / dailyTrend.length
+    : 0;
+
+  // Projected monthly cost (30-day extrapolation)
+  const projectedMonthlyCost = avgDailyCost * 30;
+
+  res.json({
+    period_days: days,
+    total_cost: Math.round(totalCost * 10000) / 10000,
+    total_input_cost: Math.round(totalInputCost * 10000) / 10000,
+    total_output_cost: Math.round(totalOutputCost * 10000) / 10000,
+    avg_daily_cost: Math.round(avgDailyCost * 10000) / 10000,
+    projected_monthly_cost: Math.round(projectedMonthlyCost * 100) / 100,
+    currency: "USD",
+    by_model: modelCosts,
+    daily_trend: dailyTrend,
+    unmatched_models: unmatchedModels,
+  });
+}));
+
 // GET /analytics/cache — Cache statistics (for monitoring)
 router.get("/cache", wrapRoute("fetch cache stats", (req, res) => {
   res.json(analyticsCache.stats());
