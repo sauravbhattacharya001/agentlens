@@ -26,6 +26,7 @@ from agentlens.capacity import CapacityPlanner, WorkloadSample, ResourceKind, Sc
 from agentlens.ab_test import ABTestAnalyzer, Experiment, ExperimentStatus, Variant, Observation, TestResult, ExperimentReport, EffectSize, SignificanceLevel, required_sample_size
 from agentlens.error_fingerprint import ErrorFingerprinter, ErrorCluster, ErrorReport, ErrorOccurrence, Trend, Resolution
 from agentlens.session_diff import SessionDiff, DiffReport, EventPair, AlignmentStatus, ToolCallDelta
+from agentlens.group_analyzer import SessionGroupAnalyzer, GroupStats, ComparisonReport
 
 __version__ = "0.1.0"
 __all__ = [
