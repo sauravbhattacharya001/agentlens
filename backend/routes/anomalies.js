@@ -27,7 +27,10 @@ function mean(arr) {
 function stddev(arr) {
   if (arr.length < 2) return 0;
   const m = mean(arr);
-  return Math.sqrt(arr.reduce((s, v) => s + (v - m) ** 2, 0) / arr.length);
+  // Bessel's correction: divide by (n-1) for sample standard deviation.
+  // Using population stddev (n) underestimates variance and inflates
+  // z-scores, causing false-positive anomaly detections.
+  return Math.sqrt(arr.reduce((s, v) => s + (v - m) ** 2, 0) / (arr.length - 1));
 }
 
 function zScore(value, m, sd) {
