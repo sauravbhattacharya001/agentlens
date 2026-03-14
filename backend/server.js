@@ -27,6 +27,7 @@ const bookmarksRouter = require("./routes/bookmarks");
 const baselinesRouter = require("./routes/baselines");
 const budgetsRouter = require("./routes/budgets");
 const slaRouter = require("./routes/sla");
+const anomaliesRouter = require("./routes/anomalies");
 
 const app = express();
 const PORT = process.env.PORT || 3000;
@@ -53,6 +54,7 @@ app.use("/baselines", createApiLimiter());
 app.use("/correlations", createApiLimiter());
 app.use("/budgets", createApiLimiter());
 app.use("/sla", createApiLimiter());
+app.use("/anomalies", createApiLimiter());
 
 // ── API key authentication ──────────────────────────────────────────
 const { authenticateApiKey, hasApiKey } = createApiKeyAuth();
@@ -73,6 +75,7 @@ app.use("/baselines", authenticateApiKey);
 app.use("/correlations", authenticateApiKey);
 app.use("/budgets", authenticateApiKey);
 app.use("/sla", authenticateApiKey);
+app.use("/anomalies", authenticateApiKey);
 
 // Body parser with size limit
 app.use(express.json({ limit: "10mb" }));
@@ -101,6 +104,7 @@ app.use("/bookmarks", bookmarksRouter);
 app.use("/baselines", baselinesRouter);
 app.use("/budgets", budgetsRouter);
 app.use("/sla", slaRouter);
+app.use("/anomalies", anomaliesRouter);
 // Mount session-scoped annotation routes on /sessions
 app.use("/sessions", annotationsRouter);
 
