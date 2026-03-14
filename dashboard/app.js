@@ -1102,6 +1102,7 @@ async function loadAnalytics() {
     renderModelUsageTable(analyticsData.model_usage);
     renderTopAgentsTable(analyticsData.top_agents);
     loadHeatmap();
+    loadCostAnalytics();
   } catch (err) {
     loadingEl.textContent = `Error loading analytics: ${escHtml(err.message)}`;
   }
@@ -3626,6 +3627,224 @@ function renderPostmortemTimeline(data) {
 
   html += '</div>';
   document.getElementById("postmortemTimeline").innerHTML = html;
+}
+
+
+// ── Cost Analytics ───────────────────────────────────────────────────
+
+let costTrendChart = null;
+let costByModelChart = null;
+
+const MODEL_COLORS = [
+  "#4cc9f0", "#f72585", "#7209b7", "#3a0ca3", "#4361ee",
+  "#4895ef", "#f0a500", "#2ec4b6", "#e63946", "#90be6d",
+];
+
+async function loadCostAnalytics() {
+  const loadingEl = document.getElementById("costAnalyticsLoading");
+  const contentEl = document.getElementById("costAnalyticsContent");
+  if (!loadingEl || !contentEl) return;
+
+  const days = document.getElementById("costDays")?.value || "30";
+
+  loadingEl.style.display = "block";
+  contentEl.style.display = "none";
+
+  try {
+    const res = await fetch(`${API_BASE}/analytics/costs?days=${days}`);
+    const data = await res.json();
+
+    loadingEl.style.display = "none";
+    contentEl.style.display = "block";
+
+    renderCostCards(data);
+    renderCostTrendChart(data.daily_trend);
+    renderCostByModelChart(data.by_model);
+    renderCostModelTable(data.by_model);
+  } catch (err) {
+    loadingEl.textContent = `Error loading cost data: ${err.message}`;
+  }
+}
+
+function formatCost(value) {
+  if (value >= 1) return `$${value.toFixed(2)}`;
+  if (value >= 0.01) return `$${value.toFixed(3)}`;
+  if (value > 0) return `$${value.toFixed(4)}`;
+  return "$0.00";
+}
+
+function renderCostCards(data) {
+  const cards = [
+    { value: formatCost(data.total_cost), label: `Total Cost (${data.period_days}d)`, color: "accent" },
+    { value: formatCost(data.avg_daily_cost), label: "Avg Daily Cost", color: "purple" },
+    { value: formatCost(data.projected_monthly_cost), label: "Projected Monthly", color: data.projected_monthly_cost > 100 ? "red" : "green" },
+    { value: formatCost(data.total_input_cost), label: "Input Cost", color: "yellow" },
+    { value: formatCost(data.total_output_cost), label: "Output Cost", color: "orange" },
+    { value: data.by_model.length, label: "Models Used", color: "green" },
+  ];
+
+  document.getElementById("costCards").innerHTML = cards
+    .map(c => `
+      <div class="analytics-stat">
+        <div class="stat-value ${c.color}">${c.value}</div>
+        <div class="stat-label">${c.label}</div>
+      </div>`
+    ).join("");
+}
+
+function renderCostTrendChart(dailyTrend) {
+  const canvas = document.getElementById("costTrendChart");
+  if (!canvas) return;
+  const ctx = canvas.getContext("2d");
+
+  if (costTrendChart) { costTrendChart.destroy(); costTrendChart = null; }
+
+  if (!dailyTrend || dailyTrend.length === 0) {
+    ctx.clearRect(0, 0, canvas.width, canvas.height);
+    ctx.fillStyle = "#8b949e";
+    ctx.font = "14px sans-serif";
+    ctx.textAlign = "center";
+    ctx.fillText("No cost data available", canvas.width / 2, canvas.height / 2);
+    return;
+  }
+
+  const labels = dailyTrend.map(d => d.day.slice(5)); // MM-DD
+  const inputData = dailyTrend.map(d => d.input_cost);
+  const outputData = dailyTrend.map(d => d.output_cost);
+
+  costTrendChart = new Chart(ctx, {
+    type: "bar",
+    data: {
+      labels,
+      datasets: [
+        {
+          label: "Input Cost",
+          data: inputData,
+          backgroundColor: "rgba(76, 201, 240, 0.7)",
+          borderColor: "#4cc9f0",
+          borderWidth: 1,
+        },
+        {
+          label: "Output Cost",
+          data: outputData,
+          backgroundColor: "rgba(247, 37, 133, 0.7)",
+          borderColor: "#f72585",
+          borderWidth: 1,
+        },
+      ],
+    },
+    options: {
+      responsive: true,
+      maintainAspectRatio: false,
+      plugins: {
+        legend: { labels: { color: "#c9d1d9", font: { size: 11 } } },
+        tooltip: {
+          callbacks: {
+            label: function(ctx) {
+              return `${ctx.dataset.label}: ${formatCost(ctx.parsed.y)}`;
+            },
+          },
+        },
+      },
+      scales: {
+        x: {
+          stacked: true,
+          ticks: { color: "#8b949e", maxRotation: 45, font: { size: 10 } },
+          grid: { display: false },
+        },
+        y: {
+          stacked: true,
+          ticks: { color: "#8b949e", callback: v => formatCost(v), font: { size: 10 } },
+          grid: { color: "rgba(255,255,255,0.06)" },
+        },
+      },
+    },
+  });
+}
+
+function renderCostByModelChart(byModel) {
+  const canvas = document.getElementById("costByModelChart");
+  if (!canvas) return;
+  const ctx = canvas.getContext("2d");
+
+  if (costByModelChart) { costByModelChart.destroy(); costByModelChart = null; }
+
+  if (!byModel || byModel.length === 0) {
+    ctx.clearRect(0, 0, canvas.width, canvas.height);
+    ctx.fillStyle = "#8b949e";
+    ctx.font = "14px sans-serif";
+    ctx.textAlign = "center";
+    ctx.fillText("No cost data", canvas.width / 2, canvas.height / 2);
+    return;
+  }
+
+  const top = byModel.slice(0, 8);
+  const labels = top.map(m => m.model);
+  const data = top.map(m => m.total_cost);
+  const colors = top.map((_, i) => MODEL_COLORS[i % MODEL_COLORS.length]);
+
+  costByModelChart = new Chart(ctx, {
+    type: "doughnut",
+    data: {
+      labels,
+      datasets: [{
+        data,
+        backgroundColor: colors,
+        borderColor: "#0d1117",
+        borderWidth: 2,
+      }],
+    },
+    options: {
+      responsive: true,
+      maintainAspectRatio: false,
+      plugins: {
+        legend: {
+          position: "right",
+          labels: { color: "#c9d1d9", font: { size: 10 }, boxWidth: 12 },
+        },
+        tooltip: {
+          callbacks: {
+            label: function(ctx) {
+              const item = top[ctx.dataIndex];
+              return `${item.model}: ${formatCost(item.total_cost)} (${item.percent}%)`;
+            },
+          },
+        },
+      },
+    },
+  });
+}
+
+function renderCostModelTable(byModel) {
+  const container = document.getElementById("costModelTable");
+  if (!container) return;
+
+  if (!byModel || byModel.length === 0) {
+    container.innerHTML = '<div style="color:#8b949e;font-size:13px">No model cost data</div>';
+    return;
+  }
+
+  let html = `<table class="data-table" style="width:100%">
+    <thead><tr>
+      <th>Model</th><th>Calls</th><th>Tokens In</th><th>Tokens Out</th>
+      <th>Input Cost</th><th>Output Cost</th><th>Total</th><th>%</th>
+    </tr></thead><tbody>`;
+
+  for (const m of byModel) {
+    html += `<tr>
+      <td><strong>${escHtml(m.model)}</strong></td>
+      <td>${m.call_count.toLocaleString()}</td>
+      <td>${formatTokenCount(m.tokens_in)}</td>
+      <td>${formatTokenCount(m.tokens_out)}</td>
+      <td>${formatCost(m.input_cost)}</td>
+      <td>${formatCost(m.output_cost)}</td>
+      <td><strong>${formatCost(m.total_cost)}</strong></td>
+      <td>${m.percent}%</td>
+    </tr>`;
+  }
+
+  html += "</tbody></table>";
+  container.innerHTML = html;
 }
 
 
