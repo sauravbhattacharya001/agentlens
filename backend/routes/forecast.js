@@ -1,0 +1,633 @@
+const express = require("express");
+const { getDb } = require("../db");
+const { wrapRoute } = require("../lib/request-helpers");
+
+const router = express.Router();
+
+// ── Helpers ─────────────────────────────────────────────────────
+
+/**
+ * Parse and clamp days query parameter (1-365, default 30).
+ */
+function parseDays(raw) {
+  const n = parseInt(raw) || 30;
+  return Math.min(Math.max(1, n), 365);
+}
+
+/**
+ * Parse and clamp forecastDays query parameter (1-90, default 7).
+ */
+function parseForecastDays(raw) {
+  const n = parseInt(raw) || 7;
+  return Math.min(Math.max(1, n), 90);
+}
+
+/**
+ * Load the pricing map from model_pricing table + sensible defaults.
+ * Returns { modelNameLower: { input: costPer1M, output: costPer1M } }.
+ */
+function loadPricingMap(db) {
+  const rows = db.prepare("SELECT * FROM model_pricing ORDER BY model ASC").all();
+  const map = {};
+  for (const row of rows) {
+    map[row.model.toLowerCase()] = {
+      input: row.input_cost_per_1m,
+      output: row.output_cost_per_1m,
+    };
+  }
+  // Defaults for common models
+  const defaults = {
+    "gpt-4": { input: 30, output: 60 },
+    "gpt-4o": { input: 2.5, output: 10 },
+    "gpt-4o-mini": { input: 0.15, output: 0.6 },
+    "gpt-3.5-turbo": { input: 0.5, output: 1.5 },
+    "claude-3-opus": { input: 15, output: 75 },
+    "claude-3-sonnet": { input: 3, output: 15 },
+    "claude-3-haiku": { input: 0.25, output: 1.25 },
+  };
+  for (const [model, prices] of Object.entries(defaults)) {
+    if (!map[model]) map[model] = prices;
+  }
+  return map;
+}
+
+/**
+ * Estimate cost for a single event using the pricing map.
+ */
+function estimateCost(event, pricingMap) {
+  const model = (event.model || "").toLowerCase();
+  const pricing = pricingMap[model];
+  if (!pricing) return 0;
+  const inCost = (event.tokens_in || 0) * pricing.input / 1_000_000;
+  const outCost = (event.tokens_out || 0) * pricing.output / 1_000_000;
+  return inCost + outCost;
+}
+
+/**
+ * Fetch daily aggregated usage from the events table.
+ *
+ * @param {object} db    - Database connection
+ * @param {number} days  - Lookback window in days
+ * @param {string|null} agent - Optional agent filter
+ * @param {string|null} model - Optional model filter
+ * @returns {Array<{date,tokens_in,tokens_out,tokens_total,event_count,session_count,cost}>}
+ */
+function fetchDailyAggregates(db, days, agent, model, pricingMap) {
+  let query = `
+    SELECT
+      DATE(e.timestamp) AS date,
+      SUM(e.tokens_in) AS tokens_in,
+      SUM(e.tokens_out) AS tokens_out,
+      SUM(e.tokens_in + e.tokens_out) AS tokens_total,
+      COUNT(*) AS event_count,
+      COUNT(DISTINCT e.session_id) AS session_count,
+      e.model
+    FROM events e
+    JOIN sessions s ON e.session_id = s.session_id
+    WHERE e.timestamp >= datetime('now', '-' || ? || ' days')
+  `;
+  const params = [days];
+
+  if (agent) {
+    query += " AND s.agent_name = ?";
+    params.push(agent);
+  }
+  if (model) {
+    query += " AND LOWER(e.model) = LOWER(?)";
+    params.push(model);
+  }
+
+  query += " GROUP BY DATE(e.timestamp), e.model ORDER BY date ASC";
+
+  const rows = db.prepare(query).all(...params);
+
+  // Aggregate per day (across models), computing cost per row
+  const dailyMap = {};
+  for (const row of rows) {
+    const d = row.date;
+    if (!dailyMap[d]) {
+      dailyMap[d] = {
+        date: d,
+        tokens_in: 0,
+        tokens_out: 0,
+        tokens_total: 0,
+        event_count: 0,
+        session_count: 0,
+        cost: 0,
+      };
+    }
+    dailyMap[d].tokens_in += row.tokens_in || 0;
+    dailyMap[d].tokens_out += row.tokens_out || 0;
+    dailyMap[d].tokens_total += row.tokens_total || 0;
+    dailyMap[d].event_count += row.event_count || 0;
+    // session_count is tricky with model grouping — take max per day
+    if (row.session_count > dailyMap[d].session_count) {
+      dailyMap[d].session_count = row.session_count;
+    }
+    dailyMap[d].cost += estimateCost(row, pricingMap);
+  }
+
+  return Object.values(dailyMap).sort((a, b) => a.date.localeCompare(b.date));
+}
+
+// ── Math utilities ──────────────────────────────────────────────
+
+/**
+ * Simple OLS linear regression: y = slope * x + intercept.
+ * x-values are 0, 1, 2, ...
+ *
+ * @param {number[]} values - y-values
+ * @returns {{ slope: number, intercept: number, r2: number }}
+ */
+function linearRegression(values) {
+  const n = values.length;
+  if (n === 0) return { slope: 0, intercept: 0, r2: 0 };
+  if (n === 1) return { slope: 0, intercept: values[0], r2: 1 };
+
+  const xMean = (n - 1) / 2;
+  let ySum = 0;
+  for (let i = 0; i < n; i++) ySum += values[i];
+  const yMean = ySum / n;
+
+  let num = 0, den = 0, ssTot = 0;
+  for (let i = 0; i < n; i++) {
+    const dx = i - xMean;
+    const dy = values[i] - yMean;
+    num += dx * dy;
+    den += dx * dx;
+    ssTot += dy * dy;
+  }
+
+  if (den === 0) return { slope: 0, intercept: yMean, r2: 0 };
+
+  const slope = num / den;
+  const intercept = yMean - slope * xMean;
+
+  // R² (coefficient of determination)
+  let ssRes = 0;
+  for (let i = 0; i < n; i++) {
+    const predicted = slope * i + intercept;
+    ssRes += (values[i] - predicted) ** 2;
+  }
+  const r2 = ssTot > 0 ? Math.max(0, 1 - ssRes / ssTot) : 0;
+
+  return { slope, intercept, r2 };
+}
+
+/**
+ * Exponential moving average — weights recent values more heavily.
+ * @param {number[]} values
+ * @param {number} alpha - smoothing factor (0-1), higher = more recent
+ * @returns {number}
+ */
+function ema(values, alpha) {
+  if (alpha === undefined) alpha = 0.3;
+  if (values.length === 0) return 0;
+  let val = values[0];
+  for (let i = 1; i < values.length; i++) {
+    val = alpha * values[i] + (1 - alpha) * val;
+  }
+  return val;
+}
+
+/**
+ * Sample standard deviation (Bessel's correction).
+ */
+function stddev(values) {
+  const n = values.length;
+  if (n < 2) return 0;
+  let sum = 0;
+  for (let i = 0; i < n; i++) sum += values[i];
+  const mean = sum / n;
+  let ss = 0;
+  for (let i = 0; i < n; i++) ss += (values[i] - mean) ** 2;
+  return Math.sqrt(ss / (n - 1));
+}
+
+/**
+ * Prediction interval (approximate) using residual standard error.
+ * @returns {{ low: number, high: number }}
+ */
+function predictionInterval(values, slope, intercept, futureX) {
+  const n = values.length;
+  if (n < 3) {
+    const predicted = Math.max(0, slope * futureX + intercept);
+    return { low: predicted * 0.5, high: predicted * 1.5 };
+  }
+  let ssRes = 0;
+  for (let i = 0; i < n; i++) {
+    ssRes += (values[i] - (slope * i + intercept)) ** 2;
+  }
+  const se = Math.sqrt(ssRes / (n - 2));
+  const z = 1.645; // ~90% confidence
+  const predicted = slope * futureX + intercept;
+  const margin = z * se * Math.sqrt(1 + 1 / n);
+  return {
+    low: Math.max(0, predicted - margin),
+    high: predicted + margin,
+  };
+}
+
+/**
+ * Detect trend: "increasing", "decreasing", "stable", or "insufficient_data".
+ */
+function detectTrend(values) {
+  if (values.length < 3) return { trend: "insufficient_data", pctPerDay: 0 };
+  const { slope } = linearRegression(values);
+  let sum = 0;
+  for (let i = 0; i < values.length; i++) sum += values[i];
+  const avg = sum / values.length || 1;
+  const pct = (slope / avg) * 100;
+
+  if (pct > 5) return { trend: "increasing", pctPerDay: round(pct, 2) };
+  if (pct < -5) return { trend: "decreasing", pctPerDay: round(pct, 2) };
+  return { trend: "stable", pctPerDay: round(pct, 2) };
+}
+
+function round(val, decimals) {
+  const factor = 10 ** (decimals || 2);
+  return Math.round(val * factor) / factor;
+}
+
+// ── Routes ──────────────────────────────────────────────────────
+
+/**
+ * GET /forecast
+ *
+ * Forecast future daily cost & token usage based on historical data.
+ *
+ * @query {number} [days=30]          - Lookback window for historical data (1-365)
+ * @query {number} [forecastDays=7]   - Number of days to forecast (1-90)
+ * @query {string} [agent]            - Filter by agent name
+ * @query {string} [model]            - Filter by model name
+ * @query {string} [method=auto]      - Forecast method: "linear", "ema", "average", "auto"
+ * @returns {object} Forecast with daily predictions, summary, trend
+ */
+router.get("/", wrapRoute("forecast usage", (req, res) => {
+  const db = getDb();
+  const days = parseDays(req.query.days);
+  const forecastDays = parseForecastDays(req.query.forecastDays);
+  const agent = req.query.agent || null;
+  const model = req.query.model || null;
+  let method = req.query.method || "auto";
+
+  if (!["linear", "ema", "average", "auto"].includes(method)) {
+    return res.status(400).json({ error: "method must be 'linear', 'ema', 'average', or 'auto'" });
+  }
+
+  const pricingMap = loadPricingMap(db);
+  const dailyData = fetchDailyAggregates(db, days, agent, model, pricingMap);
+
+  if (dailyData.length === 0) {
+    return res.json({
+      forecast: [],
+      summary: { totalPredictedCost: 0, totalPredictedTokens: 0 },
+      method: "none",
+      dataPointsUsed: 0,
+      message: "No historical data found for the given filters",
+    });
+  }
+
+  const costValues = dailyData.map(d => d.cost);
+  const tokenValues = dailyData.map(d => d.tokens_total);
+  const sessionValues = dailyData.map(d => d.session_count);
+  const n = costValues.length;
+
+  // Auto-select method based on data availability
+  if (method === "auto") {
+    if (n >= 5) method = "linear";
+    else if (n >= 2) method = "ema";
+    else method = "average";
+  }
+
+  // Last date in the dataset
+  const lastDate = new Date(dailyData[n - 1].date + "T00:00:00Z");
+
+  const predictions = [];
+  let totalPredictedCost = 0;
+  let totalPredictedTokens = 0;
+
+  if (method === "linear") {
+    const costReg = linearRegression(costValues);
+    const tokenReg = linearRegression(tokenValues.map(Number));
+    const sessionReg = linearRegression(sessionValues.map(Number));
+
+    for (let d = 1; d <= forecastDays; d++) {
+      const futureX = n - 1 + d;
+      const predCost = Math.max(0, costReg.slope * futureX + costReg.intercept);
+      const predTokens = Math.max(0, Math.round(tokenReg.slope * futureX + tokenReg.intercept));
+      const predSessions = Math.max(0, Math.round(sessionReg.slope * futureX + sessionReg.intercept));
+      const ci = predictionInterval(costValues, costReg.slope, costReg.intercept, futureX);
+
+      const predDate = new Date(lastDate);
+      predDate.setUTCDate(predDate.getUTCDate() + d);
+
+      predictions.push({
+        date: predDate.toISOString().split("T")[0],
+        predictedCost: round(predCost, 6),
+        predictedTokens: predTokens,
+        predictedSessions: predSessions,
+        confidenceLow: round(ci.low, 6),
+        confidenceHigh: round(ci.high, 6),
+        method: "linear",
+      });
+      totalPredictedCost += predCost;
+      totalPredictedTokens += predTokens;
+    }
+  } else if (method === "ema") {
+    const emaCost = ema(costValues);
+    const emaTokens = ema(tokenValues.map(Number));
+    const emaSessions = ema(sessionValues.map(Number));
+    const std = n >= 2 ? stddev(costValues) : emaCost * 0.5;
+
+    for (let d = 1; d <= forecastDays; d++) {
+      const predDate = new Date(lastDate);
+      predDate.setUTCDate(predDate.getUTCDate() + d);
+
+      predictions.push({
+        date: predDate.toISOString().split("T")[0],
+        predictedCost: round(Math.max(0, emaCost), 6),
+        predictedTokens: Math.max(0, Math.round(emaTokens)),
+        predictedSessions: Math.max(0, Math.round(emaSessions)),
+        confidenceLow: round(Math.max(0, emaCost - 1.5 * std), 6),
+        confidenceHigh: round(emaCost + 1.5 * std, 6),
+        method: "ema",
+      });
+      totalPredictedCost += emaCost;
+      totalPredictedTokens += Math.round(emaTokens);
+    }
+  } else {
+    // average
+    let costSum = 0, tokenSum = 0, sessionSum = 0;
+    for (let i = 0; i < n; i++) {
+      costSum += costValues[i];
+      tokenSum += tokenValues[i];
+      sessionSum += sessionValues[i];
+    }
+    const avgCost = costSum / n;
+    const avgTokens = Math.round(tokenSum / n);
+    const avgSessions = Math.round(sessionSum / n);
+    const std = n >= 2 ? stddev(costValues) : avgCost * 0.5;
+
+    for (let d = 1; d <= forecastDays; d++) {
+      const predDate = new Date(lastDate);
+      predDate.setUTCDate(predDate.getUTCDate() + d);
+
+      predictions.push({
+        date: predDate.toISOString().split("T")[0],
+        predictedCost: round(Math.max(0, avgCost), 6),
+        predictedTokens: Math.max(0, avgTokens),
+        predictedSessions: Math.max(0, avgSessions),
+        confidenceLow: round(Math.max(0, avgCost - 1.5 * std), 6),
+        confidenceHigh: round(avgCost + 1.5 * std, 6),
+        method: "average",
+      });
+      totalPredictedCost += avgCost;
+      totalPredictedTokens += avgTokens;
+    }
+  }
+
+  // Trend detection
+  const costTrend = detectTrend(costValues);
+  const tokenTrend = detectTrend(tokenValues.map(Number));
+
+  // Historical summary
+  let histTotalCost = 0, histTotalTokens = 0, histTotalSessions = 0;
+  for (let i = 0; i < n; i++) {
+    histTotalCost += costValues[i];
+    histTotalTokens += tokenValues[i];
+    histTotalSessions += sessionValues[i];
+  }
+  const dailyAvgCost = histTotalCost / n;
+
+  return res.json({
+    forecast: predictions,
+    summary: {
+      totalPredictedCost: round(totalPredictedCost, 4),
+      totalPredictedTokens: totalPredictedTokens,
+      averageDailyCost: round(totalPredictedCost / forecastDays, 4),
+      averageDailyTokens: Math.round(totalPredictedTokens / forecastDays),
+      weeklyProjection: round(dailyAvgCost * 7, 4),
+      monthlyProjection: round(dailyAvgCost * 30, 4),
+    },
+    trend: {
+      cost: costTrend,
+      tokens: tokenTrend,
+    },
+    historical: {
+      daysAnalyzed: n,
+      totalCost: round(histTotalCost, 4),
+      totalTokens: histTotalTokens,
+      totalSessions: histTotalSessions,
+      dailyAverageCost: round(dailyAvgCost, 4),
+      dailyAverageTokens: Math.round(histTotalTokens / n),
+    },
+    method,
+    dataPointsUsed: n,
+    filters: {
+      lookbackDays: days,
+      forecastDays,
+      agent: agent || "all",
+      model: model || "all",
+    },
+  });
+}));
+
+/**
+ * GET /forecast/budget
+ *
+ * Check if current spending pace will exceed a budget within a given period.
+ *
+ * @query {number} budget   - Monthly budget in USD (required)
+ * @query {number} [days=30]     - Lookback window for historical data
+ * @query {number} [period=30]   - Budget period in days (default 30)
+ * @query {string} [agent]       - Filter by agent name
+ * @returns {object} Budget alert with severity and projection
+ */
+router.get("/budget", wrapRoute("forecast budget check", (req, res) => {
+  const db = getDb();
+  const budget = parseFloat(req.query.budget);
+  if (!Number.isFinite(budget) || budget <= 0) {
+    return res.status(400).json({ error: "budget must be a positive number (USD)" });
+  }
+
+  const days = parseDays(req.query.days);
+  const period = Math.min(Math.max(1, parseInt(req.query.period) || 30), 365);
+  const agent = req.query.agent || null;
+
+  const pricingMap = loadPricingMap(db);
+  const dailyData = fetchDailyAggregates(db, days, agent, null, pricingMap);
+
+  if (dailyData.length === 0) {
+    return res.json({
+      severity: "unknown",
+      message: "No historical data — cannot assess budget",
+      budget,
+      projected: 0,
+    });
+  }
+
+  const costValues = dailyData.map(d => d.cost);
+  const n = costValues.length;
+
+  let totalSpent = 0;
+  for (let i = 0; i < n; i++) totalSpent += costValues[i];
+  const dailyAvg = totalSpent / n;
+
+  const projected = dailyAvg * period;
+  const remaining = budget - totalSpent;
+  const daysUntilExceeded = dailyAvg > 0 && remaining > 0
+    ? Math.floor(remaining / dailyAvg)
+    : dailyAvg > 0 ? 0 : null;
+
+  const overshootPct = Math.max(0, (projected - budget) / budget * 100);
+  const utilizationPct = projected / budget * 100;
+
+  let severity, message;
+  if (projected <= budget * 0.8) {
+    severity = "safe";
+    message = `On track: projected $${projected.toFixed(2)} of $${budget.toFixed(2)} budget (${utilizationPct.toFixed(0)}%)`;
+  } else if (projected <= budget) {
+    severity = "warning";
+    message = `Approaching limit: projected $${projected.toFixed(2)} of $${budget.toFixed(2)} (${utilizationPct.toFixed(0)}%). Consider reducing usage.`;
+  } else {
+    severity = "critical";
+    const exceed = daysUntilExceeded === 0
+      ? "Already exceeded!"
+      : `~${daysUntilExceeded} days until exceeded.`;
+    message = `Budget overrun likely: projected $${projected.toFixed(2)} vs $${budget.toFixed(2)} limit (+${overshootPct.toFixed(0)}%). ${exceed}`;
+  }
+
+  return res.json({
+    severity,
+    message,
+    budget: round(budget, 2),
+    totalSpentSoFar: round(totalSpent, 4),
+    dailyAverageCost: round(dailyAvg, 4),
+    projectedSpend: round(projected, 4),
+    overshootPct: round(overshootPct, 2),
+    utilizationPct: round(utilizationPct, 2),
+    daysUntilExceeded,
+    periodDays: period,
+    daysAnalyzed: n,
+    agent: agent || "all",
+  });
+}));
+
+/**
+ * GET /forecast/spending-summary
+ *
+ * Aggregated spending statistics with model breakdown and trend.
+ *
+ * @query {number} [days=30] - Lookback window
+ * @query {string} [agent]   - Optional agent filter
+ * @returns {object} Spending summary
+ */
+router.get("/spending-summary", wrapRoute("forecast spending summary", (req, res) => {
+  const db = getDb();
+  const days = parseDays(req.query.days);
+  const agent = req.query.agent || null;
+
+  const pricingMap = loadPricingMap(db);
+
+  // Fetch per-model daily data for model breakdown
+  let query = `
+    SELECT
+      e.model,
+      SUM(e.tokens_in) AS tokens_in,
+      SUM(e.tokens_out) AS tokens_out,
+      COUNT(*) AS event_count,
+      COUNT(DISTINCT e.session_id) AS session_count
+    FROM events e
+    JOIN sessions s ON e.session_id = s.session_id
+    WHERE e.timestamp >= datetime('now', '-' || ? || ' days')
+  `;
+  const params = [days];
+  if (agent) {
+    query += " AND s.agent_name = ?";
+    params.push(agent);
+  }
+  query += " GROUP BY e.model ORDER BY tokens_in + tokens_out DESC";
+
+  const modelRows = db.prepare(query).all(...params);
+
+  const modelBreakdown = {};
+  let totalCost = 0, totalTokensIn = 0, totalTokensOut = 0, totalEvents = 0;
+
+  for (const row of modelRows) {
+    const modelName = row.model || "unknown";
+    const cost = estimateCost(row, pricingMap);
+    totalCost += cost;
+    totalTokensIn += row.tokens_in || 0;
+    totalTokensOut += row.tokens_out || 0;
+    totalEvents += row.event_count;
+
+    modelBreakdown[modelName] = {
+      cost: round(cost, 6),
+      tokensIn: row.tokens_in || 0,
+      tokensOut: row.tokens_out || 0,
+      totalTokens: (row.tokens_in || 0) + (row.tokens_out || 0),
+      eventCount: row.event_count,
+      sessionCount: row.session_count,
+      costPct: 0, // filled below
+    };
+  }
+
+  // Fill cost percentages
+  for (const m in modelBreakdown) {
+    modelBreakdown[m].costPct = totalCost > 0
+      ? round(modelBreakdown[m].cost / totalCost * 100, 2)
+      : 0;
+  }
+
+  // Daily aggregates for trend
+  const dailyData = fetchDailyAggregates(db, days, agent, null, pricingMap);
+  const n = dailyData.length;
+  const costTrend = detectTrend(dailyData.map(d => d.cost));
+
+  const totalTokens = totalTokensIn + totalTokensOut;
+  const dailyAvgCost = n > 0 ? totalCost / n : 0;
+  const costPer1kTokens = totalTokens > 0 ? totalCost / totalTokens * 1000 : 0;
+
+  // Busiest day
+  let busiestDay = null, busiestDayCost = 0;
+  for (const d of dailyData) {
+    if (d.cost > busiestDayCost) {
+      busiestDayCost = d.cost;
+      busiestDay = d.date;
+    }
+  }
+
+  return res.json({
+    totalCost: round(totalCost, 4),
+    totalTokens,
+    totalTokensIn,
+    totalTokensOut,
+    totalEvents,
+    daysTracked: n,
+    dailyAverageCost: round(dailyAvgCost, 4),
+    dailyAverageTokens: n > 0 ? Math.round(totalTokens / n) : 0,
+    weeklyProjection: round(dailyAvgCost * 7, 4),
+    monthlyProjection: round(dailyAvgCost * 30, 4),
+    costPer1kTokens: round(costPer1kTokens, 6),
+    busiestDay,
+    busiestDayCost: round(busiestDayCost, 6),
+    modelBreakdown,
+    trend: costTrend,
+    filters: { lookbackDays: days, agent: agent || "all" },
+  });
+}));
+
+// ── Exported for testing ────────────────────────────────────────
+
+router._testExports = {
+  linearRegression,
+  ema,
+  stddev,
+  predictionInterval,
+  detectTrend,
+  estimateCost,
+  round,
+};
+
+module.exports = router;
