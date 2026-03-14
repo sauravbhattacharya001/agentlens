@@ -272,7 +272,7 @@ function correlateByErrorCascade(events, config) {
 /** Find causal chains: output of one event matches input of another. */
 function correlateByCausalChain(events, config) {
   var maxGapMs = (config.max_gap_seconds || 60) * 1000;
-  var matchFields = config.match_fields || ["tool_call"];
+  var matchFields = config.match_fields || ["output_data"];
   var groups = [];
 
   for (var i = 0; i < events.length; i++) {

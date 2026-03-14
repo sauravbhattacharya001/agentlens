@@ -451,6 +451,14 @@ router.get("/:id/export", requireSessionId, wrapRoute("export session", (req, re
     const csvEscape = (val) => {
       if (val == null) return "";
       let str = typeof val === "object" ? JSON.stringify(val) : String(val);
+      // Numeric values (including negatives like -5, +3.14) are safe data,
+      // not formula injections — skip the formula-trigger prefix for them.
+      if (str.length > 0 && isFinite(Number(str))) {
+        if (str.includes(",") || str.includes('"') || str.includes("\n")) {
+          return `"${str.replace(/"/g, '""')}"`;
+        }
+        return str;
+      }
       // CSV formula injection defense (OWASP): prefix values that start
       // with formula-trigger characters so spreadsheet applications
       // (Excel, Google Sheets, LibreOffice) don't execute them as DDE
