@@ -26,6 +26,10 @@ All endpoints require API key authentication via the `x-api-key` header unless o
 - [Leaderboard](#leaderboard)
 - [Postmortem](#postmortem)
 - [Webhooks](#webhooks)
+- [Anomalies](#anomalies)
+- [Budgets](#budgets)
+- [Session Replay](#session-replay)
+- [SLA Targets](#sla-targets)
 - [Retention](#retention)
 - [Health Check](#health-check)
 
@@ -574,6 +578,311 @@ Send a test payload to a webhook to verify connectivity.
 ### `GET /webhooks/:webhookId/deliveries`
 
 View delivery history for a webhook (success/failure, response codes).
+
+---
+
+## Anomalies
+
+Statistical outlier detection for agent sessions. Computes z-scores across multiple dimensions (tokens, duration, event count, errors) and flags sessions that exceed configurable thresholds.
+
+### `GET /anomalies`
+
+List detected anomalies across all sessions.
+
+| Parameter | Type | Description |
+|-----------|------|-------------|
+| `threshold` | float | Z-score threshold for flagging (default: 2) |
+| `agent` | string | Filter by agent name |
+| `limit` | int | Max anomalies to return (default: 50) |
+
+**Response:**
+
+```json
+{
+  "anomalies": [
+    {
+      "session_id": "abc123",
+      "agent_name": "my-agent",
+      "severity": "high",
+      "maxZScore": 3.45,
+      "dimensions": {
+        "totalTokens": { "value": 75000, "zScore": 3.45 }
+      }
+    }
+  ],
+  "baselines": {
+    "totalTokens": { "mean": 500, "stddev": 120 },
+    "duration_ms": { "mean": 30000, "stddev": 5000 },
+    "eventCount": { "mean": 10, "stddev": 3 },
+    "errorCount": { "mean": 0.5, "stddev": 0.8 },
+    "sampleSize": 100
+  },
+  "total": 3
+}
+```
+
+Severity levels: `low` (z ≥ 2), `medium` (z ≥ 2), `high` (z ≥ 3), `critical` (z ≥ 4).
+
+### `GET /anomalies/stats`
+
+Baseline statistics used for anomaly detection.
+
+| Parameter | Type | Description |
+|-----------|------|-------------|
+| `agent` | string | Filter by agent name |
+
+### `GET /anomalies/session/:id`
+
+Anomaly report for a single session. Returns z-scores for all dimensions regardless of threshold.
+
+**Response includes:** `session_id`, `isAnomaly` (bool), `dimensions` (with z-scores), `baselines`.
+
+### `POST /anomalies/scan`
+
+Trigger a full scan and return results.
+
+**Body:**
+
+```json
+{
+  "threshold": 2.5,
+  "agent": "my-agent",
+  "limit": 20
+}
+```
+
+---
+
+## Budgets
+
+Set and track spending limits per agent or globally. Budgets have a period (daily/weekly/monthly/total) and a USD limit. Real-time spend is calculated using model pricing.
+
+### `GET /budgets`
+
+List all budgets with current spend and status.
+
+### `GET /budgets/:scope`
+
+Get budgets for a specific scope. Scope must be `"global"` or `"agent:<name>"`.
+
+### `GET /budgets/check/:sessionId`
+
+Check if a session's agent is over budget. Returns budget status for all applicable budgets (agent-specific and global).
+
+**Response:**
+
+```json
+{
+  "session_id": "abc123",
+  "agent_name": "my-agent",
+  "budgets": [
+    {
+      "scope": "agent:my-agent",
+      "period": "monthly",
+      "limit_usd": 50.0,
+      "current_spend": 32.15,
+      "usage_pct": 64.3,
+      "status": "ok"
+    }
+  ],
+  "any_exceeded": false,
+  "any_warning": false
+}
+```
+
+### `PUT /budgets`
+
+Create or update a budget.
+
+**Body:**
+
+```json
+{
+  "scope": "agent:my-agent",
+  "period": "monthly",
+  "limit_usd": 50.0,
+  "warn_pct": 80
+}
+```
+
+| Field | Type | Description |
+|-------|------|-------------|
+| `scope` | string | `"global"` or `"agent:<name>"` |
+| `period` | string | `"daily"`, `"weekly"`, `"monthly"`, or `"total"` |
+| `limit_usd` | float | Budget limit in USD (must be positive) |
+| `warn_pct` | float | Warning threshold percentage (0-100, default: 80) |
+
+### `DELETE /budgets/:scope/:period`
+
+Delete a specific budget by scope and period.
+
+### `DELETE /budgets/:scope`
+
+Delete all budgets for a scope.
+
+---
+
+## Session Replay
+
+Step-by-step event playback for debugging agent sessions. Events are returned as timed frames with delay calculations for simulating real-time playback.
+
+### `GET /replay/:sessionId`
+
+Full replay with timing data and categorized frames.
+
+| Parameter | Type | Description |
+|-----------|------|-------------|
+| `speed` | float | Playback speed multiplier (0.1-100, default: 1) |
+| `maxDelay` | int | Maximum delay between frames in ms (default: 30000) |
+| `from` | int | Start frame index (inclusive) |
+| `to` | int | End frame index (exclusive) |
+
+**Response:**
+
+```json
+{
+  "session": {
+    "session_id": "abc123",
+    "agent_name": "my-agent",
+    "started_at": "2026-03-01T10:00:00Z",
+    "ended_at": "2026-03-01T10:05:00Z",
+    "status": "completed"
+  },
+  "replay": {
+    "speed": 1,
+    "max_delay_ms": 30000,
+    "total_frames": 15,
+    "total_duration_ms": 45000,
+    "speed_recommendation": "1x",
+    "frames": [
+      {
+        "index": 0,
+        "event_id": "evt1",
+        "event_type": "llm_call",
+        "category": "llm_call",
+        "timestamp": "2026-03-01T10:00:01Z",
+        "delay_ms": 0,
+        "elapsed_ms": 0,
+        "model": "gpt-4o",
+        "tokens_in": 500,
+        "tokens_out": 200,
+        "duration_ms": 1500
+      }
+    ]
+  }
+}
+```
+
+Event categories: `llm_call`, `tool_use`, `error`, `decision`, `generic`.
+
+### `GET /replay/:sessionId/frame/:index`
+
+Random-access to a single replay frame.
+
+**Response includes:** `frame` (the frame object), `total_frames`, `has_next`, `has_previous`.
+
+### `GET /replay/:sessionId/summary`
+
+Lightweight replay stats without full frame data.
+
+**Response includes:** `total_frames`, `total_duration_ms`, `event_types`, `categories`, `models_used`, `total_tokens_in`, `total_tokens_out`, `avg_delay_ms`, `max_delay_ms`, `speed_recommendation`.
+
+---
+
+## SLA Targets
+
+Define and monitor Service Level Agreement targets per agent. Supports latency percentiles, error rates, token averages, and throughput metrics.
+
+### `GET /sla/targets`
+
+List all SLA targets, optionally filtered by agent.
+
+| Parameter | Type | Description |
+|-----------|------|-------------|
+| `agent_name` | string | Filter by agent name |
+
+### `PUT /sla/targets`
+
+Create or update an SLA target.
+
+**Body:**
+
+```json
+{
+  "agent_name": "my-agent",
+  "metric": "p95_latency_ms",
+  "threshold": 5000,
+  "comparison": "lte"
+}
+```
+
+| Field | Type | Description |
+|-------|------|-------------|
+| `agent_name` | string | Agent identifier (max 128 chars) |
+| `metric` | string | One of: `p50_latency_ms`, `p95_latency_ms`, `p99_latency_ms`, `error_rate_pct`, `avg_tokens_in`, `avg_tokens_out`, `max_duration_ms`, `min_throughput` |
+| `threshold` | float | Numeric threshold value |
+| `comparison` | string | `lte`, `gte`, `lt`, `gt`, `eq` (default: `lte`) |
+
+### `DELETE /sla/targets`
+
+Delete an SLA target.
+
+| Parameter | Type | Description |
+|-----------|------|-------------|
+| `agent_name` | string | Agent name (required) |
+| `metric` | string | Metric to remove (required) |
+
+### `POST /sla/check`
+
+Check SLA compliance for an agent over a time window.
+
+**Body:**
+
+```json
+{
+  "agent_name": "my-agent",
+  "window_hours": 24
+}
+```
+
+**Response:**
+
+```json
+{
+  "agent_name": "my-agent",
+  "window_start": "2026-03-13T10:00:00Z",
+  "window_end": "2026-03-14T10:00:00Z",
+  "metrics": {
+    "p95_latency_ms": 3200,
+    "error_rate_pct": 2.5
+  },
+  "violations": [
+    {
+      "metric": "error_rate_pct",
+      "threshold": 1.0,
+      "actual": 2.5,
+      "comparison": "lte"
+    }
+  ],
+  "compliance_pct": 50
+}
+```
+
+### `POST /sla/snapshot`
+
+Save a compliance snapshot for historical tracking.
+
+**Body:** Same as `/sla/check`.
+
+### `GET /sla/history`
+
+Retrieve historical SLA snapshots.
+
+| Parameter | Type | Description |
+|-----------|------|-------------|
+| `agent_name` | string | Filter by agent name |
+| `limit` | int | Max results (default: 50) |
+| `offset` | int | Pagination offset |
 
 ---
 
