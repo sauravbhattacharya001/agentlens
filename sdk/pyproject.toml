@@ -52,6 +52,9 @@ dev = [
     "pytest-cov",
 ]
 
+[project.scripts]
+agentlens = "agentlens.cli:main"
+
 [tool.setuptools.packages.find]
 include = ["agentlens*"]
 

@@ -118,7 +118,48 @@ cd sdk
 pip install -e .
 ```
 
-### 4. Instrument Your Agent
+### 4. Use the CLI
+
+After installing the SDK, you get the `agentlens` command:
+
+```bash
+# Check backend connectivity
+agentlens status
+
+# List recent sessions
+agentlens sessions --limit 10
+
+# View cost breakdown for a session
+agentlens costs <session_id>
+
+# Search events by type or model
+agentlens events --type llm_call --model gpt-4
+
+# Export a session to JSON or CSV
+agentlens export <session_id> --format csv -o report.csv
+
+# Health score for a session (A–F grading)
+agentlens health <session_id>
+
+# Compare two sessions side-by-side
+agentlens compare <session_a> <session_b>
+
+# View aggregate analytics
+agentlens analytics
+
+# List recent alerts
+agentlens alerts
+```
+
+Configure via environment variables:
+```bash
+export AGENTLENS_ENDPOINT=http://localhost:3000
+export AGENTLENS_API_KEY=your-key
+```
+
+Or pass `--endpoint` and `--api-key` flags to any command.
+
+### 5. Instrument Your Agent
 
 ```python
 import agentlens
