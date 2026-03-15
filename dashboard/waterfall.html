@@ -1,0 +1,566 @@
+<!DOCTYPE html>
+<html lang="en">
+<head>
+  <meta charset="UTF-8">
+  <meta name="viewport" content="width=device-width, initial-scale=1.0">
+  <title>AgentLens — Trace Waterfall</title>
+  <style>
+    :root {
+      --bg: #0f172a; --surface: #1e293b; --surface2: #334155;
+      --border: #475569; --text: #e2e8f0; --text-muted: #94a3b8;
+      --accent: #3b82f6; --accent-hover: #2563eb;
+      --green: #22c55e; --yellow: #eab308; --red: #ef4444;
+      --purple: #a855f7; --cyan: #06b6d4; --orange: #f97316;
+      --font: -apple-system, BlinkMacSystemFont, 'Segoe UI', system-ui, sans-serif;
+      --mono: 'SF Mono', 'Cascadia Code', 'Fira Code', monospace;
+    }
+    * { box-sizing: border-box; margin: 0; padding: 0; }
+    body { font-family: var(--font); background: var(--bg); color: var(--text); min-height: 100vh; }
+
+    /* Header */
+    .header { display: flex; align-items: center; justify-content: space-between;
+              padding: 12px 24px; background: var(--surface); border-bottom: 1px solid var(--border); }
+    .header h1 { font-size: 18px; font-weight: 600; }
+    .header h1 a { color: var(--text); text-decoration: none; }
+    .header h1 a:hover { color: var(--accent); }
+    .header-right { display: flex; gap: 8px; align-items: center; }
+    .btn { padding: 6px 14px; border-radius: 6px; border: 1px solid var(--border);
+           background: var(--surface2); color: var(--text); cursor: pointer; font-size: 13px; }
+    .btn:hover { background: var(--border); }
+    .btn-primary { background: var(--accent); border-color: var(--accent); color: #fff; }
+    .btn-primary:hover { background: var(--accent-hover); }
+    input[type="text"] { padding: 6px 12px; border-radius: 6px; border: 1px solid var(--border);
+                         background: var(--surface); color: var(--text); font-size: 13px; width: 280px; }
+
+    /* Layout */
+    .container { display: flex; height: calc(100vh - 53px); }
+    .waterfall-panel { flex: 1; overflow: auto; padding: 0; }
+    .detail-panel { width: 360px; background: var(--surface); border-left: 1px solid var(--border);
+                    overflow-y: auto; display: none; }
+    .detail-panel.open { display: block; }
+    .detail-header { padding: 16px; border-bottom: 1px solid var(--border); display: flex;
+                     align-items: center; justify-content: space-between; }
+    .detail-header h3 { font-size: 15px; }
+    .detail-close { background: none; border: none; color: var(--text-muted); cursor: pointer;
+                    font-size: 18px; }
+    .detail-body { padding: 16px; }
+    .detail-row { margin-bottom: 12px; }
+    .detail-label { font-size: 11px; text-transform: uppercase; color: var(--text-muted);
+                    letter-spacing: 0.5px; margin-bottom: 2px; }
+    .detail-value { font-size: 14px; word-break: break-all; }
+    .detail-value.mono { font-family: var(--mono); font-size: 12px; }
+
+    /* Toolbar */
+    .toolbar { display: flex; align-items: center; gap: 12px; padding: 10px 20px;
+               background: var(--surface); border-bottom: 1px solid var(--border);
+               position: sticky; top: 0; z-index: 10; }
+    .toolbar label { font-size: 12px; color: var(--text-muted); }
+    .toolbar select { padding: 4px 8px; border-radius: 4px; border: 1px solid var(--border);
+                      background: var(--surface2); color: var(--text); font-size: 12px; }
+    .zoom-controls { display: flex; gap: 4px; margin-left: auto; }
+    .zoom-controls button { width: 28px; height: 28px; border-radius: 4px; border: 1px solid var(--border);
+                            background: var(--surface2); color: var(--text); cursor: pointer; font-size: 14px; }
+    .zoom-controls button:hover { background: var(--border); }
+
+    /* Summary bar */
+    .summary-bar { display: flex; gap: 24px; padding: 12px 20px; background: var(--surface);
+                   border-bottom: 1px solid var(--border); }
+    .summary-stat { text-align: center; }
+    .summary-stat .val { font-size: 20px; font-weight: 700; }
+    .summary-stat .lbl { font-size: 11px; color: var(--text-muted); text-transform: uppercase; }
+
+    /* Waterfall chart */
+    .wf-container { padding: 12px 20px 40px; min-width: fit-content; }
+    .wf-ruler { display: flex; align-items: flex-end; height: 24px; position: relative;
+                margin-left: 260px; margin-bottom: 4px; border-bottom: 1px solid var(--border); }
+    .wf-tick { position: absolute; font-size: 10px; color: var(--text-muted); font-family: var(--mono);
+               transform: translateX(-50%); bottom: 4px; }
+    .wf-row { display: flex; align-items: center; height: 32px; border-bottom: 1px solid rgba(71,85,105,0.3);
+              cursor: pointer; transition: background 0.1s; }
+    .wf-row:hover { background: rgba(59,130,246,0.08); }
+    .wf-row.selected { background: rgba(59,130,246,0.15); }
+    .wf-row.error { background: rgba(239,68,68,0.06); }
+    .wf-label { width: 260px; min-width: 260px; padding: 0 12px; display: flex;
+                align-items: center; gap: 6px; font-size: 13px; overflow: hidden;
+                text-overflow: ellipsis; white-space: nowrap; }
+    .wf-indent { display: inline-block; }
+    .wf-icon { font-size: 14px; flex-shrink: 0; }
+    .wf-name { overflow: hidden; text-overflow: ellipsis; }
+    .wf-bars { flex: 1; position: relative; height: 100%; }
+    .wf-bar { position: absolute; height: 18px; top: 7px; border-radius: 3px;
+              min-width: 2px; transition: opacity 0.15s; }
+    .wf-bar:hover { opacity: 0.85; }
+    .wf-bar-label { position: absolute; right: -4px; top: 50%; transform: translate(100%, -50%);
+                    font-size: 10px; color: var(--text-muted); font-family: var(--mono);
+                    white-space: nowrap; padding-left: 4px; }
+    .wf-bar-inner-label { position: absolute; left: 6px; top: 50%; transform: translateY(-50%);
+                          font-size: 10px; color: rgba(255,255,255,0.9); white-space: nowrap;
+                          pointer-events: none; }
+
+    /* Colors by event type */
+    .bar-llm_call { background: var(--accent); }
+    .bar-tool_call { background: var(--orange); }
+    .bar-session_start { background: var(--green); }
+    .bar-session_end { background: var(--text-muted); }
+    .bar-error { background: var(--red); }
+    .bar-decision { background: var(--purple); }
+    .bar-span { background: var(--cyan); opacity: 0.6; }
+    .bar-generic { background: var(--text-muted); }
+
+    /* Empty state */
+    .empty-state { text-align: center; padding: 80px 20px; color: var(--text-muted); }
+    .empty-state h2 { font-size: 20px; margin-bottom: 8px; color: var(--text); }
+    .empty-state p { font-size: 14px; max-width: 420px; margin: 0 auto; }
+
+    /* Legend */
+    .legend { display: flex; gap: 16px; flex-wrap: wrap; }
+    .legend-item { display: flex; align-items: center; gap: 4px; font-size: 11px; color: var(--text-muted); }
+    .legend-dot { width: 10px; height: 10px; border-radius: 2px; }
+
+    /* Minimap */
+    .minimap { height: 40px; margin: 0 20px 0 260px; position: relative;
+               background: rgba(30,41,59,0.5); border-radius: 4px; margin-bottom: 8px; }
+    .minimap-bar { position: absolute; height: 4px; border-radius: 1px; opacity: 0.7; }
+    .minimap-viewport { position: absolute; top: 0; height: 100%; background: rgba(59,130,246,0.15);
+                        border: 1px solid rgba(59,130,246,0.4); border-radius: 4px; cursor: grab; }
+  </style>
+</head>
+<body>
+
+<div class="header">
+  <h1><a href="index.html">🔍 AgentLens</a> › Trace Waterfall</h1>
+  <div class="header-right">
+    <input type="text" id="sessionInput" placeholder="Enter session ID or paste JSON..."
+           onkeydown="if(event.key==='Enter') loadSession()">
+    <button class="btn btn-primary" onclick="loadSession()">Load</button>
+    <button class="btn" onclick="loadDemo()">Demo</button>
+    <button class="btn" onclick="exportSVG()">Export SVG</button>
+  </div>
+</div>
+
+<div class="container">
+  <div class="waterfall-panel" id="waterfallPanel">
+    <!-- Summary -->
+    <div class="summary-bar" id="summaryBar" style="display:none">
+      <div class="summary-stat"><div class="val" id="sumEvents">0</div><div class="lbl">Events</div></div>
+      <div class="summary-stat"><div class="val" id="sumDuration">0s</div><div class="lbl">Duration</div></div>
+      <div class="summary-stat"><div class="val" id="sumTokens">0</div><div class="lbl">Tokens</div></div>
+      <div class="summary-stat"><div class="val" id="sumErrors">0</div><div class="lbl">Errors</div></div>
+      <div class="summary-stat"><div class="val" id="sumModels">0</div><div class="lbl">Models</div></div>
+    </div>
+
+    <!-- Toolbar -->
+    <div class="toolbar" id="toolbar" style="display:none">
+      <label>Filter:</label>
+      <select id="filterType" onchange="applyFilters()">
+        <option value="">All types</option>
+        <option value="llm_call">LLM Calls</option>
+        <option value="tool_call">Tool Calls</option>
+        <option value="error">Errors</option>
+        <option value="decision">Decisions</option>
+      </select>
+      <label>Min duration:</label>
+      <select id="filterDuration" onchange="applyFilters()">
+        <option value="0">Any</option>
+        <option value="100">&gt;100ms</option>
+        <option value="500">&gt;500ms</option>
+        <option value="1000">&gt;1s</option>
+        <option value="5000">&gt;5s</option>
+      </select>
+      <div class="legend">
+        <div class="legend-item"><div class="legend-dot" style="background:var(--accent)"></div>LLM</div>
+        <div class="legend-item"><div class="legend-dot" style="background:var(--orange)"></div>Tool</div>
+        <div class="legend-item"><div class="legend-dot" style="background:var(--red)"></div>Error</div>
+        <div class="legend-item"><div class="legend-dot" style="background:var(--purple)"></div>Decision</div>
+        <div class="legend-item"><div class="legend-dot" style="background:var(--cyan)"></div>Span</div>
+      </div>
+      <div class="zoom-controls">
+        <button onclick="zoom(-1)" title="Zoom out">−</button>
+        <button onclick="zoom(0)" title="Reset zoom">⊡</button>
+        <button onclick="zoom(1)" title="Zoom in">+</button>
+      </div>
+    </div>
+
+    <!-- Waterfall content -->
+    <div id="waterfallContent">
+      <div class="empty-state">
+        <h2>Trace Waterfall Viewer</h2>
+        <p>Enter a session ID to load from your AgentLens backend, paste raw JSON event data,
+           or click <strong>Demo</strong> to see a sample trace.</p>
+      </div>
+    </div>
+  </div>
+
+  <!-- Detail panel -->
+  <div class="detail-panel" id="detailPanel">
+    <div class="detail-header">
+      <h3 id="detailTitle">Event Details</h3>
+      <button class="detail-close" onclick="closeDetail()">✕</button>
+    </div>
+    <div class="detail-body" id="detailBody"></div>
+  </div>
+</div>
+
+<script>
+// ─── State ──────────────────────────────────────────────────────────
+let allEvents = [];
+let filteredEvents = [];
+let zoomLevel = 1;
+let selectedIdx = -1;
+const API_BASE = window.location.origin + '/api';
+
+// ─── Duration formatting ────────────────────────────────────────────
+function fmtDur(ms) {
+  if (ms == null) return '-';
+  if (ms < 1) return '<1ms';
+  if (ms < 1000) return Math.round(ms) + 'ms';
+  if (ms < 60000) return (ms / 1000).toFixed(1) + 's';
+  return (ms / 60000).toFixed(1) + 'm';
+}
+function fmtNum(n) {
+  if (n >= 1e6) return (n / 1e6).toFixed(1) + 'M';
+  if (n >= 1e3) return (n / 1e3).toFixed(1) + 'K';
+  return String(n);
+}
+
+// ─── Event type metadata ────────────────────────────────────────────
+const TYPE_META = {
+  session_start: { icon: '▶', color: 'var(--green)', cls: 'bar-session_start' },
+  session_end:   { icon: '⏹', color: 'var(--text-muted)', cls: 'bar-session_end' },
+  llm_call:      { icon: '🤖', color: 'var(--accent)', cls: 'bar-llm_call' },
+  tool_call:     { icon: '🔧', color: 'var(--orange)', cls: 'bar-tool_call' },
+  error:         { icon: '❌', color: 'var(--red)', cls: 'bar-error' },
+  decision:      { icon: '💡', color: 'var(--purple)', cls: 'bar-decision' },
+  span_start:    { icon: '📏', color: 'var(--cyan)', cls: 'bar-span' },
+  span_end:      { icon: '📏', color: 'var(--cyan)', cls: 'bar-span' },
+};
+function meta(type) { return TYPE_META[type] || { icon: '●', color: 'var(--text-muted)', cls: 'bar-generic' }; }
+
+// ─── Load session ───────────────────────────────────────────────────
+async function loadSession() {
+  const input = document.getElementById('sessionInput').value.trim();
+  if (!input) return;
+
+  // Try parsing as JSON first
+  try {
+    const data = JSON.parse(input);
+    const events = Array.isArray(data) ? data : (data.events || [data]);
+    setEvents(events);
+    return;
+  } catch {}
+
+  // Otherwise treat as session ID — fetch from API
+  try {
+    const res = await fetch(`${API_BASE}/sessions/${encodeURIComponent(input)}/events?limit=500`);
+    if (!res.ok) throw new Error(`HTTP ${res.status}`);
+    const data = await res.json();
+    const events = Array.isArray(data) ? data : (data.events || []);
+    if (!events.length) { alert('No events found for this session.'); return; }
+    setEvents(events);
+  } catch (err) {
+    alert('Failed to load session: ' + err.message);
+  }
+}
+
+// ─── Demo data ──────────────────────────────────────────────────────
+function loadDemo() {
+  const base = Date.now() - 15000;
+  const demo = [
+    { event_type: 'session_start', timestamp: new Date(base).toISOString(), model: 'gpt-4o', session_id: 'demo-abc123' },
+    { event_type: 'llm_call', timestamp: new Date(base + 200).toISOString(), duration_ms: 1850, model: 'gpt-4o',
+      tokens_in: 1240, tokens_out: 380, input_data: { prompt: 'Plan a trip to Tokyo' } },
+    { event_type: 'decision', timestamp: new Date(base + 2100).toISOString(), duration_ms: 50,
+      decision_trace: { reasoning: 'User wants travel planning, should search flights and hotels' } },
+    { event_type: 'tool_call', timestamp: new Date(base + 2200).toISOString(), duration_ms: 920,
+      tool_call: { tool_name: 'web_search', tool_input: { query: 'Tokyo flights March 2026' }, tool_output: { results: 5 } } },
+    { event_type: 'tool_call', timestamp: new Date(base + 3200).toISOString(), duration_ms: 780,
+      tool_call: { tool_name: 'web_search', tool_input: { query: 'Tokyo hotels Shinjuku' }, tool_output: { results: 8 } } },
+    { event_type: 'llm_call', timestamp: new Date(base + 4100).toISOString(), duration_ms: 2400, model: 'gpt-4o',
+      tokens_in: 3200, tokens_out: 1100, input_data: { prompt: 'Synthesize search results into itinerary' } },
+    { event_type: 'tool_call', timestamp: new Date(base + 6600).toISOString(), duration_ms: 340,
+      tool_call: { tool_name: 'calendar_create', tool_input: { event: 'Tokyo Trip' }, tool_output: { id: 'evt-1' } } },
+    { event_type: 'llm_call', timestamp: new Date(base + 7100).toISOString(), duration_ms: 1600, model: 'gpt-4o-mini',
+      tokens_in: 800, tokens_out: 450 },
+    { event_type: 'error', timestamp: new Date(base + 8800).toISOString(), duration_ms: 120,
+      output_data: { error: 'Rate limit exceeded', code: 429 } },
+    { event_type: 'llm_call', timestamp: new Date(base + 9200).toISOString(), duration_ms: 2100, model: 'gpt-4o',
+      tokens_in: 2100, tokens_out: 620 },
+    { event_type: 'tool_call', timestamp: new Date(base + 11400).toISOString(), duration_ms: 250,
+      tool_call: { tool_name: 'send_message', tool_input: { to: 'user' }, tool_output: { sent: true } } },
+    { event_type: 'session_end', timestamp: new Date(base + 11800).toISOString(), session_id: 'demo-abc123' },
+  ];
+  document.getElementById('sessionInput').value = 'demo-abc123';
+  setEvents(demo);
+}
+
+// ─── Process events ─────────────────────────────────────────────────
+function setEvents(events) {
+  // Sort by timestamp
+  events.sort((a, b) => {
+    const ta = a.timestamp ? new Date(a.timestamp).getTime() : 0;
+    const tb = b.timestamp ? new Date(b.timestamp).getTime() : 0;
+    return ta - tb;
+  });
+
+  // Compute offsets
+  const baseTime = events[0]?.timestamp ? new Date(events[0].timestamp).getTime() : 0;
+  events.forEach(e => {
+    const t = e.timestamp ? new Date(e.timestamp).getTime() : baseTime;
+    e._offset_ms = t - baseTime;
+    e._end_ms = e._offset_ms + (e.duration_ms || 0);
+  });
+
+  allEvents = events;
+  applyFilters();
+}
+
+function applyFilters() {
+  const typeFilter = document.getElementById('filterType').value;
+  const durFilter = parseFloat(document.getElementById('filterDuration').value) || 0;
+
+  filteredEvents = allEvents.filter(e => {
+    if (typeFilter && e.event_type !== typeFilter) return false;
+    if (durFilter && (e.duration_ms || 0) < durFilter) return false;
+    return true;
+  });
+  render();
+}
+
+// ─── Render ─────────────────────────────────────────────────────────
+function render() {
+  if (!allEvents.length) return;
+
+  // Show controls
+  document.getElementById('summaryBar').style.display = 'flex';
+  document.getElementById('toolbar').style.display = 'flex';
+
+  // Summary stats
+  const totalTokens = allEvents.reduce((s, e) => s + (e.tokens_in || 0) + (e.tokens_out || 0), 0);
+  const errors = allEvents.filter(e => e.event_type === 'error').length;
+  const models = new Set(allEvents.map(e => e.model).filter(Boolean));
+  const totalDur = allEvents.length ? Math.max(...allEvents.map(e => e._end_ms || 0)) : 0;
+
+  document.getElementById('sumEvents').textContent = allEvents.length;
+  document.getElementById('sumDuration').textContent = fmtDur(totalDur);
+  document.getElementById('sumTokens').textContent = fmtNum(totalTokens);
+  document.getElementById('sumErrors').textContent = errors;
+  document.getElementById('sumModels').textContent = models.size;
+
+  // Compute chart dimensions
+  const maxTime = Math.max(1, Math.max(...filteredEvents.map(e => e._end_ms || e._offset_ms || 0)));
+  const chartWidth = Math.max(600, (window.innerWidth - 320) * zoomLevel);
+
+  const content = document.getElementById('waterfallContent');
+  let html = '';
+
+  // Minimap
+  html += '<div class="minimap">';
+  filteredEvents.forEach(e => {
+    const left = (e._offset_ms / maxTime) * 100;
+    const w = Math.max(0.3, ((e.duration_ms || 0) / maxTime) * 100);
+    const m = meta(e.event_type);
+    html += `<div class="minimap-bar" style="left:${left}%;width:${w}%;background:${m.color};top:${8 + (Math.random() * 24)}px"></div>`;
+  });
+  html += '</div>';
+
+  // Ruler
+  const tickCount = Math.min(20, Math.max(5, Math.floor(chartWidth / 80)));
+  html += `<div class="wf-ruler" style="width:${chartWidth}px">`;
+  for (let i = 0; i <= tickCount; i++) {
+    const pct = (i / tickCount) * 100;
+    const ms = (i / tickCount) * maxTime;
+    html += `<div class="wf-tick" style="left:${pct}%">${fmtDur(ms)}</div>`;
+  }
+  html += '</div>';
+
+  // Rows
+  html += '<div class="wf-container">';
+  filteredEvents.forEach((e, idx) => {
+    const m = meta(e.event_type);
+    const isError = e.event_type === 'error';
+    const isSelected = idx === selectedIdx;
+
+    // Label
+    let name = e.event_type.toUpperCase();
+    if (e.model) name += ` [${e.model}]`;
+    const tc = e.tool_call;
+    if (tc && tc.tool_name) name = `🔧 ${tc.tool_name}`;
+    if (e.event_type === 'error') {
+      const errMsg = typeof e.output_data === 'object' ? (e.output_data?.error || '') : '';
+      if (errMsg) name += `: ${errMsg.slice(0, 30)}`;
+    }
+
+    // Bar position
+    const leftPct = (e._offset_ms / maxTime) * 100;
+    const widthPct = Math.max(0.3, ((e.duration_ms || 0) / maxTime) * 100);
+
+    html += `<div class="wf-row${isError ? ' error' : ''}${isSelected ? ' selected' : ''}" onclick="selectEvent(${idx})">`;
+    html += `<div class="wf-label"><span class="wf-icon">${m.icon}</span><span class="wf-name" title="${esc(name)}">${esc(name)}</span></div>`;
+    html += `<div class="wf-bars" style="width:${chartWidth}px">`;
+    html += `<div class="wf-bar ${m.cls}" style="left:${leftPct}%;width:${widthPct}%">`;
+    if (e.duration_ms && widthPct > 5) {
+      html += `<span class="wf-bar-inner-label">${fmtDur(e.duration_ms)}</span>`;
+    }
+    html += '</div>';
+    if (e.duration_ms && widthPct <= 5) {
+      html += `<span class="wf-bar-label" style="left:${leftPct + widthPct}%">${fmtDur(e.duration_ms)}</span>`;
+    }
+    // Token indicator
+    const tokens = (e.tokens_in || 0) + (e.tokens_out || 0);
+    if (tokens > 0) {
+      html += `<span class="wf-bar-label" style="left:${leftPct + widthPct}%;top:0;font-size:9px;color:var(--cyan)">${fmtNum(tokens)}t</span>`;
+    }
+    html += '</div></div>';
+  });
+  html += '</div>';
+
+  content.innerHTML = html;
+}
+
+function esc(s) {
+  const el = document.createElement('span');
+  el.textContent = s;
+  return el.innerHTML;
+}
+
+// ─── Event detail ───────────────────────────────────────────────────
+function selectEvent(idx) {
+  selectedIdx = idx;
+  const e = filteredEvents[idx];
+  if (!e) return;
+
+  const panel = document.getElementById('detailPanel');
+  const m = meta(e.event_type);
+  document.getElementById('detailTitle').textContent = `${m.icon} ${e.event_type.toUpperCase()}`;
+
+  let html = '';
+  const row = (label, value, mono) =>
+    `<div class="detail-row"><div class="detail-label">${label}</div><div class="detail-value${mono ? ' mono' : ''}">${value}</div></div>`;
+
+  html += row('Type', e.event_type);
+  html += row('Offset', fmtDur(e._offset_ms));
+  if (e.duration_ms != null) html += row('Duration', fmtDur(e.duration_ms));
+  if (e.model) html += row('Model', e.model);
+  if (e.session_id) html += row('Session', e.session_id, true);
+  if (e.tokens_in || e.tokens_out) {
+    html += row('Tokens In', fmtNum(e.tokens_in || 0));
+    html += row('Tokens Out', fmtNum(e.tokens_out || 0));
+    html += row('Total Tokens', fmtNum((e.tokens_in || 0) + (e.tokens_out || 0)));
+  }
+
+  // Tool call details
+  const tc = e.tool_call;
+  if (tc && typeof tc === 'object') {
+    html += row('Tool', tc.tool_name || '-');
+    if (tc.tool_input) html += row('Input', `<pre style="margin:0;white-space:pre-wrap;font-size:11px">${esc(JSON.stringify(tc.tool_input, null, 2))}</pre>`, false);
+    if (tc.tool_output) html += row('Output', `<pre style="margin:0;white-space:pre-wrap;font-size:11px">${esc(JSON.stringify(tc.tool_output, null, 2))}</pre>`, false);
+  }
+
+  // Error details
+  if (e.event_type === 'error' && e.output_data) {
+    html += row('Error', `<pre style="margin:0;white-space:pre-wrap;font-size:11px;color:var(--red)">${esc(JSON.stringify(e.output_data, null, 2))}</pre>`, false);
+  }
+
+  // Decision trace
+  if (e.decision_trace && typeof e.decision_trace === 'object') {
+    html += row('Reasoning', `<pre style="margin:0;white-space:pre-wrap;font-size:11px">${esc(JSON.stringify(e.decision_trace, null, 2))}</pre>`, false);
+  }
+
+  // Input/output data
+  if (e.input_data && typeof e.input_data === 'object' && Object.keys(e.input_data).length) {
+    html += row('Input Data', `<pre style="margin:0;white-space:pre-wrap;font-size:11px">${esc(JSON.stringify(e.input_data, null, 2))}</pre>`, false);
+  }
+
+  // Timestamp
+  if (e.timestamp) html += row('Timestamp', e.timestamp, true);
+
+  document.getElementById('detailBody').innerHTML = html;
+  panel.classList.add('open');
+  render(); // re-render to highlight
+}
+
+function closeDetail() {
+  selectedIdx = -1;
+  document.getElementById('detailPanel').classList.remove('open');
+  render();
+}
+
+// ─── Zoom ───────────────────────────────────────────────────────────
+function zoom(dir) {
+  if (dir === 0) zoomLevel = 1;
+  else if (dir > 0) zoomLevel = Math.min(5, zoomLevel * 1.4);
+  else zoomLevel = Math.max(0.3, zoomLevel / 1.4);
+  render();
+}
+
+// ─── SVG Export ─────────────────────────────────────────────────────
+function exportSVG() {
+  if (!filteredEvents.length) { alert('No data to export.'); return; }
+  const maxTime = Math.max(1, Math.max(...filteredEvents.map(e => e._end_ms || e._offset_ms || 0)));
+  const rowH = 28, labelW = 240, chartW = 700, pad = 20;
+  const svgW = labelW + chartW + pad * 2;
+  const svgH = pad * 2 + filteredEvents.length * rowH + 30;
+
+  let svg = `<svg xmlns="http://www.w3.org/2000/svg" width="${svgW}" height="${svgH}" style="font-family:sans-serif;font-size:12px">`;
+  svg += `<rect width="100%" height="100%" fill="#0f172a"/>`;
+
+  // Ruler
+  const tickCount = 10;
+  for (let i = 0; i <= tickCount; i++) {
+    const x = labelW + pad + (i / tickCount) * chartW;
+    const ms = (i / tickCount) * maxTime;
+    svg += `<line x1="${x}" y1="${pad}" x2="${x}" y2="${svgH - pad}" stroke="#334155" stroke-width="0.5"/>`;
+    svg += `<text x="${x}" y="${pad - 4}" fill="#94a3b8" text-anchor="middle" font-size="10">${fmtDur(ms)}</text>`;
+  }
+
+  // Rows
+  filteredEvents.forEach((e, i) => {
+    const y = pad + 20 + i * rowH;
+    const m = meta(e.event_type);
+    let name = e.event_type.toUpperCase();
+    if (e.model) name += ` [${e.model}]`;
+    const tc = e.tool_call;
+    if (tc && tc.tool_name) name = tc.tool_name;
+    if (name.length > 28) name = name.slice(0, 25) + '...';
+
+    // Label
+    svg += `<text x="${pad + 4}" y="${y + 16}" fill="#e2e8f0" font-size="11">${m.icon} ${escXml(name)}</text>`;
+
+    // Bar
+    const x = labelW + pad + (e._offset_ms / maxTime) * chartW;
+    const w = Math.max(2, ((e.duration_ms || 0) / maxTime) * chartW);
+    const colors = { 'bar-llm_call': '#3b82f6', 'bar-tool_call': '#f97316', 'bar-error': '#ef4444',
+                     'bar-decision': '#a855f7', 'bar-span': '#06b6d4', 'bar-session_start': '#22c55e',
+                     'bar-session_end': '#94a3b8', 'bar-generic': '#94a3b8' };
+    svg += `<rect x="${x}" y="${y + 4}" width="${w}" height="16" rx="2" fill="${colors[m.cls] || '#94a3b8'}"/>`;
+    if (e.duration_ms) {
+      svg += `<text x="${x + w + 4}" y="${y + 16}" fill="#94a3b8" font-size="10">${fmtDur(e.duration_ms)}</text>`;
+    }
+  });
+
+  svg += '</svg>';
+  const blob = new Blob([svg], { type: 'image/svg+xml' });
+  const url = URL.createObjectURL(blob);
+  const a = document.createElement('a');
+  a.href = url; a.download = 'trace-waterfall.svg'; a.click();
+  URL.revokeObjectURL(url);
+}
+
+function escXml(s) { return s.replace(/&/g, '&amp;').replace(/</g, '&lt;').replace(/>/g, '&gt;').replace(/"/g, '&quot;'); }
+
+// ─── Keyboard shortcuts ─────────────────────────────────────────────
+document.addEventListener('keydown', e => {
+  if (e.target.tagName === 'INPUT' || e.target.tagName === 'SELECT') return;
+  if (e.key === 'Escape') closeDetail();
+  if (e.key === 'ArrowDown' && selectedIdx < filteredEvents.length - 1) selectEvent(selectedIdx + 1);
+  if (e.key === 'ArrowUp' && selectedIdx > 0) selectEvent(selectedIdx - 1);
+  if (e.key === '+' || e.key === '=') zoom(1);
+  if (e.key === '-') zoom(-1);
+  if (e.key === '0') zoom(0);
+});
+
+// Resize handler
+window.addEventListener('resize', () => { if (allEvents.length) render(); });
+</script>
+</body>
+</html>
