@@ -217,7 +217,7 @@ function correlateByErrorCascade(events, config) {
   var windowMs = (config.cascade_window_seconds || 30) * 1000;
   var errors = [];
   for (var e = 0; e < events.length; e++) {
-    if (events[e].event_type === "error" || events[e].event_type === "exception") {
+    if (events[e].event_type === "error" || events[e].event_type === "agent_error" || events[e].event_type === "tool_error") {
       errors.push(events[e]);
     }
   }
