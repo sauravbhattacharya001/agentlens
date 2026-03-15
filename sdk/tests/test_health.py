@@ -687,7 +687,7 @@ class TestTrackerIntegration:
         from agentlens.tracker import AgentTracker
         transport = MagicMock()
         tracker = AgentTracker(transport=transport)
-        with pytest.raises(RuntimeError, match="Session not found"):
+        with pytest.raises(RuntimeError, match="not found locally"):
             tracker.health_score(session_id="nonexistent")
 
     def test_health_score_custom_thresholds(self):

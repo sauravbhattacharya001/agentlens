@@ -289,6 +289,6 @@ class TestCloseExtended:
 
     def test_close_stops_running(self):
         t = Transport(endpoint="http://test:3000")
-        assert t._running is True
+        assert not t._stop_event.is_set()
         t.close()
-        assert t._running is False
+        assert t._stop_event.is_set()
