@@ -25,7 +25,6 @@ trend analysis across a series of evaluations are also supported.
 
 from __future__ import annotations
 
-import math
 import re
 import statistics
 from dataclasses import dataclass, field

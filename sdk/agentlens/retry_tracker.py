@@ -28,7 +28,6 @@ Example::
 
 from __future__ import annotations
 
-import math
 from collections import defaultdict
 from dataclasses import dataclass, field
 from enum import Enum
@@ -633,7 +632,7 @@ def _parse_ts_ms(ts: str) -> float:
     if not ts:
         return 0.0
     try:
-        from datetime import datetime, timezone
+        from datetime import datetime
         # Handle Z suffix
         clean = ts.replace("Z", "+00:00")
         dt = datetime.fromisoformat(clean)

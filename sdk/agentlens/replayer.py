@@ -20,7 +20,6 @@ from __future__ import annotations
 
 import json
 from dataclasses import dataclass, field
-from datetime import datetime, timedelta, timezone
 from typing import Any, Callable, Iterator
 
 from agentlens.models import AgentEvent, Session

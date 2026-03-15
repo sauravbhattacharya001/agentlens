@@ -11,7 +11,6 @@
 
 const express = require("express");
 const { getDb } = require("../db");
-const { sanitizeString } = require("../lib/validation");
 const { wrapRoute } = require("../lib/request-helpers");
 
 const router = express.Router();

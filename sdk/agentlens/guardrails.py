@@ -40,7 +40,7 @@ from dataclasses import dataclass, field
 from enum import Enum
 from typing import Any, Callable
 
-from agentlens.models import AgentEvent, Session
+from agentlens.models import Session
 
 
 class Severity(str, Enum):
