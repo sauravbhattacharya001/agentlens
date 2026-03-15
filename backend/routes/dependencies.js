@@ -8,7 +8,6 @@ const {
   agentDependencyProfiles,
   detectServiceCoOccurrence,
   serviceTrend,
-  extractServiceName,
 } = require("../lib/dependency-map");
 
 const router = express.Router();
