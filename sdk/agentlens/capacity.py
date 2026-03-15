@@ -207,6 +207,22 @@ class CapacityPlanner:
         headroom_factor: float = 1.3,
         max_samples: int = 10000,
     ) -> None:
+        if max_error_threshold <= 0:
+            raise ValueError(
+                "max_error_threshold must be positive, got %s" % max_error_threshold
+            )
+        if max_cpu_threshold <= 0:
+            raise ValueError(
+                "max_cpu_threshold must be positive, got %s" % max_cpu_threshold
+            )
+        if max_memory_threshold <= 0:
+            raise ValueError(
+                "max_memory_threshold must be positive, got %s" % max_memory_threshold
+            )
+        if max_samples < 1:
+            raise ValueError(
+                "max_samples must be at least 1, got %s" % max_samples
+            )
         self._samples: List[WorkloadSample] = []
         self.max_cpu_threshold = max_cpu_threshold
         self.max_memory_threshold = max_memory_threshold
@@ -572,7 +588,11 @@ class CapacityPlanner:
         cur = self.current_utilization()
         cpu_headroom = 1.0 - cur["cpu"]
         mem_headroom = 1.0 - cur["memory"]
-        err_headroom = 1.0 - (cur["error_rate"] / self.max_error_threshold)
+        err_headroom = (
+            1.0 - (cur["error_rate"] / self.max_error_threshold)
+            if self.max_error_threshold > 0
+            else 0.0
+        )
 
         # Weighted average
         score = (
