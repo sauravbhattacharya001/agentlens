@@ -1,6 +1,5 @@
 const express = require("express");
 const { getDb } = require("../db");
-const { isValidSessionId } = require("../lib/validation");
 const { requireSessionId, wrapRoute } = require("../lib/request-helpers");
 
 const router = express.Router();

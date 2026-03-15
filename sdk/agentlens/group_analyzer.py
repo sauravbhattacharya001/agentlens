@@ -20,7 +20,7 @@ import json
 import math
 import statistics
 from collections import defaultdict
-from datetime import datetime, timedelta, timezone
+from datetime import datetime, timedelta
 from typing import Any, Callable, Sequence
 
 from agentlens.models import Session
