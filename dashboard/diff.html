@@ -1,0 +1,329 @@
+<!DOCTYPE html>
+<html lang="en">
+<head>
+  <meta charset="UTF-8">
+  <meta name="viewport" content="width=device-width, initial-scale=1.0">
+  <title>AgentLens — Session Diff</title>
+  <link rel="stylesheet" href="styles.css">
+  <style>
+    .diff-container { max-width: 1200px; margin: 0 auto; padding: 20px; }
+    .diff-selector { display: flex; gap: 16px; margin-bottom: 24px; align-items: flex-end; }
+    .diff-selector .field { flex: 1; }
+    .diff-selector label { display: block; font-size: 13px; color: var(--text-secondary); margin-bottom: 6px; }
+    .diff-selector select { width: 100%; padding: 8px 12px; background: var(--bg-tertiary); border: 1px solid var(--border); border-radius: var(--radius-sm); color: var(--text-primary); font-size: 14px; }
+    .diff-selector .btn-diff { padding: 8px 20px; height: 38px; }
+
+    .diff-summary { display: grid; grid-template-columns: repeat(auto-fit, minmax(180px, 1fr)); gap: 12px; margin-bottom: 24px; }
+    .diff-card { background: var(--bg-secondary); border: 1px solid var(--border); border-radius: var(--radius); padding: 16px; }
+    .diff-card .label { font-size: 12px; color: var(--text-secondary); text-transform: uppercase; letter-spacing: 0.5px; margin-bottom: 4px; }
+    .diff-card .value { font-size: 24px; font-weight: 600; }
+    .diff-card .sub { font-size: 12px; color: var(--text-muted); margin-top: 4px; }
+    .delta-pos { color: var(--red); }
+    .delta-neg { color: var(--green); }
+    .delta-zero { color: var(--text-muted); }
+
+    .diff-section { background: var(--bg-secondary); border: 1px solid var(--border); border-radius: var(--radius); padding: 20px; margin-bottom: 20px; }
+    .diff-section h3 { font-size: 15px; margin-bottom: 16px; color: var(--text-primary); display: flex; align-items: center; gap: 8px; }
+
+    /* Alignment table */
+    .align-table { width: 100%; border-collapse: collapse; font-size: 13px; }
+    .align-table th { text-align: left; padding: 8px 12px; border-bottom: 1px solid var(--border); color: var(--text-secondary); font-weight: 500; }
+    .align-table td { padding: 8px 12px; border-bottom: 1px solid var(--bg-tertiary); }
+    .align-table tr:hover { background: var(--bg-hover); }
+    .align-status { display: inline-block; padding: 2px 8px; border-radius: 10px; font-size: 11px; font-weight: 600; text-transform: uppercase; }
+    .align-status.matched { background: var(--green-dim); color: var(--green); }
+    .align-status.modified { background: var(--yellow-dim); color: var(--yellow); }
+    .align-status.added { background: var(--purple-dim); color: var(--purple); }
+    .align-status.removed { background: var(--red-dim); color: var(--red); }
+    .change-detail { font-size: 11px; color: var(--text-muted); }
+
+    /* Tool/model chips */
+    .chip-list { display: flex; flex-wrap: wrap; gap: 8px; }
+    .chip { display: inline-flex; align-items: center; gap: 4px; padding: 4px 10px; border-radius: 12px; font-size: 12px; font-weight: 500; }
+    .chip.added { background: var(--purple-dim); color: var(--purple); }
+    .chip.removed { background: var(--red-dim); color: var(--red); }
+    .chip.common { background: var(--bg-tertiary); color: var(--text-secondary); }
+    .chip .count { font-size: 11px; opacity: 0.7; }
+
+    /* Bar chart */
+    .bar-chart { display: flex; flex-direction: column; gap: 8px; }
+    .bar-row { display: flex; align-items: center; gap: 12px; }
+    .bar-label { min-width: 100px; font-size: 12px; color: var(--text-secondary); text-align: right; }
+    .bar-track { flex: 1; height: 20px; background: var(--bg-tertiary); border-radius: 4px; position: relative; overflow: hidden; display: flex; }
+    .bar-fill { height: 100%; border-radius: 4px; transition: width 0.4s ease; min-width: 2px; }
+    .bar-fill.baseline { background: var(--accent); opacity: 0.7; }
+    .bar-fill.candidate { background: var(--orange); opacity: 0.7; }
+    .bar-value { min-width: 60px; font-size: 12px; color: var(--text-muted); }
+
+    /* Similarity gauge */
+    .similarity-gauge { display: flex; align-items: center; gap: 16px; margin-bottom: 24px; }
+    .gauge-track { flex: 1; height: 8px; background: var(--bg-tertiary); border-radius: 4px; overflow: hidden; }
+    .gauge-fill { height: 100%; border-radius: 4px; transition: width 0.6s ease; }
+    .gauge-label { font-size: 28px; font-weight: 700; min-width: 80px; text-align: right; }
+
+    .empty-state { text-align: center; padding: 60px 20px; color: var(--text-muted); }
+    .empty-state .icon { font-size: 48px; margin-bottom: 16px; }
+    .empty-state p { font-size: 15px; }
+
+    /* Side-by-side session info */
+    .session-pair { display: grid; grid-template-columns: 1fr 1fr; gap: 16px; margin-bottom: 24px; }
+    .session-info { background: var(--bg-secondary); border: 1px solid var(--border); border-radius: var(--radius); padding: 16px; }
+    .session-info .role { font-size: 11px; text-transform: uppercase; letter-spacing: 1px; color: var(--text-muted); margin-bottom: 8px; }
+    .session-info .agent { font-size: 16px; font-weight: 600; color: var(--text-primary); }
+    .session-info .sid { font-size: 12px; color: var(--text-muted); font-family: monospace; }
+    .session-info.baseline { border-left: 3px solid var(--accent); }
+    .session-info.candidate { border-left: 3px solid var(--orange); }
+  </style>
+</head>
+<body>
+  <div id="app">
+    <header class="header">
+      <div class="header-left">
+        <h1 class="logo">🔍 AgentLens</h1>
+        <span class="tagline">Session Diff</span>
+      </div>
+      <div class="header-right">
+        <a href="/" class="btn btn-secondary" style="text-decoration:none">← Dashboard</a>
+        <a href="scorecards.html" class="btn btn-alert-header" style="text-decoration:none">🏅 Scorecards</a>
+        <a href="waterfall.html" class="btn btn-alert-header" style="text-decoration:none">📊 Waterfall</a>
+      </div>
+    </header>
+
+    <div class="diff-container">
+      <div class="diff-selector">
+        <div class="field">
+          <label>⬅ Baseline Session</label>
+          <select id="baselineSelect"><option value="">Loading sessions...</option></select>
+        </div>
+        <div class="field">
+          <label>➡ Candidate Session</label>
+          <select id="candidateSelect"><option value="">Loading sessions...</option></select>
+        </div>
+        <button class="btn btn-primary diff-btn" onclick="runDiff()">⚖️ Compare</button>
+      </div>
+
+      <div id="diffResult">
+        <div class="empty-state">
+          <div class="icon">⚖️</div>
+          <p>Select two sessions and click <strong>Compare</strong> to see their differences.</p>
+          <p style="margin-top:8px; font-size:13px;">Compare token usage, event sequences, tool calls, and model choices side by side.</p>
+        </div>
+      </div>
+    </div>
+  </div>
+
+  <script>
+    const API_BASE = window.location.origin;
+    let sessions = [];
+
+    document.addEventListener("DOMContentLoaded", loadSessions);
+
+    async function loadSessions() {
+      try {
+        const res = await fetch(`${API_BASE}/sessions`);
+        const data = await res.json();
+        sessions = data.sessions || data || [];
+        populateDropdowns();
+      } catch (err) {
+        console.error("Failed to load sessions:", err);
+      }
+    }
+
+    function populateDropdowns() {
+      const baselineEl = document.getElementById("baselineSelect");
+      const candidateEl = document.getElementById("candidateSelect");
+      const options = sessions.map(s => {
+        const label = `${s.agent_name || "unknown"} — ${s.session_id.slice(0, 12)}… (${s.status || "?"})`;
+        return `<option value="${s.session_id}">${label}</option>`;
+      }).join("");
+      const placeholder = '<option value="">— Select a session —</option>';
+      baselineEl.innerHTML = placeholder + options;
+      candidateEl.innerHTML = placeholder + options;
+      // Pre-select from URL params
+      const params = new URLSearchParams(window.location.search);
+      if (params.get("baseline")) baselineEl.value = params.get("baseline");
+      if (params.get("candidate")) candidateEl.value = params.get("candidate");
+      if (params.get("baseline") && params.get("candidate")) runDiff();
+    }
+
+    async function runDiff() {
+      const baselineId = document.getElementById("baselineSelect").value;
+      const candidateId = document.getElementById("candidateSelect").value;
+      const resultEl = document.getElementById("diffResult");
+
+      if (!baselineId || !candidateId) {
+        resultEl.innerHTML = '<div class="empty-state"><p>Please select both sessions.</p></div>';
+        return;
+      }
+      if (baselineId === candidateId) {
+        resultEl.innerHTML = '<div class="empty-state"><p>Cannot diff a session with itself. Pick two different sessions.</p></div>';
+        return;
+      }
+
+      resultEl.innerHTML = '<div class="empty-state"><div class="icon">⏳</div><p>Computing diff...</p></div>';
+
+      // Update URL
+      const url = new URL(window.location);
+      url.searchParams.set("baseline", baselineId);
+      url.searchParams.set("candidate", candidateId);
+      history.replaceState(null, "", url);
+
+      try {
+        const res = await fetch(`${API_BASE}/diff?baseline=${baselineId}&candidate=${candidateId}`);
+        if (!res.ok) {
+          const err = await res.json();
+          resultEl.innerHTML = `<div class="empty-state"><p>Error: ${err.error || res.statusText}</p></div>`;
+          return;
+        }
+        const diff = await res.json();
+        renderDiff(diff);
+      } catch (err) {
+        resultEl.innerHTML = `<div class="empty-state"><p>Failed to compute diff: ${err.message}</p></div>`;
+      }
+    }
+
+    function formatDelta(val, invert) {
+      if (val === 0) return `<span class="delta-zero">0</span>`;
+      const cls = (invert ? val < 0 : val > 0) ? "delta-pos" : "delta-neg";
+      const sign = val > 0 ? "+" : "";
+      return `<span class="${cls}">${sign}${val.toLocaleString()}</span>`;
+    }
+
+    function similarityColor(score) {
+      if (score >= 0.8) return "var(--green)";
+      if (score >= 0.5) return "var(--yellow)";
+      return "var(--red)";
+    }
+
+    function renderDiff(diff) {
+      const el = document.getElementById("diffResult");
+      const b = diff.baseline;
+      const c = diff.candidate;
+      const d = diff.deltas;
+
+      let html = "";
+
+      // Session pair header
+      html += `<div class="session-pair">
+        <div class="session-info baseline">
+          <div class="role">⬅ Baseline</div>
+          <div class="agent">${b.agent_name}</div>
+          <div class="sid">${b.session_id}</div>
+          <div class="sub" style="margin-top:6px">${b.event_count} events · ${b.status}</div>
+        </div>
+        <div class="session-info candidate">
+          <div class="role">➡ Candidate</div>
+          <div class="agent">${c.agent_name}</div>
+          <div class="sid">${c.session_id}</div>
+          <div class="sub" style="margin-top:6px">${c.event_count} events · ${c.status}</div>
+        </div>
+      </div>`;
+
+      // Similarity gauge
+      const simPct = Math.round(diff.similarity * 100);
+      html += `<div class="similarity-gauge">
+        <span style="font-size:13px;color:var(--text-secondary)">Similarity</span>
+        <div class="gauge-track"><div class="gauge-fill" style="width:${simPct}%;background:${similarityColor(diff.similarity)}"></div></div>
+        <div class="gauge-label" style="color:${similarityColor(diff.similarity)}">${simPct}%</div>
+      </div>`;
+
+      // Summary cards
+      html += `<div class="diff-summary">
+        <div class="diff-card">
+          <div class="label">Token Delta</div>
+          <div class="value">${formatDelta(d.tokens_total)}</div>
+          <div class="sub">In: ${formatDelta(d.tokens_in)} · Out: ${formatDelta(d.tokens_out)}</div>
+        </div>
+        <div class="diff-card">
+          <div class="label">Duration Delta</div>
+          <div class="value">${formatDelta(d.duration_ms)}ms</div>
+          <div class="sub">${b.duration_ms.toLocaleString()}ms → ${c.duration_ms.toLocaleString()}ms</div>
+        </div>
+        <div class="diff-card">
+          <div class="label">Event Count</div>
+          <div class="value">${formatDelta(d.event_count)}</div>
+          <div class="sub">${b.event_count} → ${c.event_count}</div>
+        </div>
+        <div class="diff-card">
+          <div class="label">Similarity</div>
+          <div class="value" style="color:${similarityColor(diff.similarity)}">${simPct}%</div>
+          <div class="sub">${diff.alignment.filter(e => e.status === "matched").length} matched · ${diff.alignment.filter(e => e.status === "modified").length} modified</div>
+        </div>
+      </div>`;
+
+      // Tool calls section
+      const tools = diff.tools;
+      if (tools.added.length || tools.removed.length || tools.common.length) {
+        html += `<div class="diff-section"><h3>🔧 Tool Calls</h3><div class="chip-list">`;
+        for (const t of tools.added) {
+          html += `<span class="chip added">+ ${t} <span class="count">×${tools.candidate_counts[t] || 0}</span></span>`;
+        }
+        for (const t of tools.removed) {
+          html += `<span class="chip removed">− ${t} <span class="count">×${tools.baseline_counts[t] || 0}</span></span>`;
+        }
+        for (const t of tools.common) {
+          const bc = tools.baseline_counts[t] || 0;
+          const cc = tools.candidate_counts[t] || 0;
+          const delta = bc !== cc ? ` (${bc}→${cc})` : "";
+          html += `<span class="chip common">= ${t} <span class="count">×${bc}${delta}</span></span>`;
+        }
+        html += `</div></div>`;
+      }
+
+      // Model usage bar chart
+      const allModels = [...new Set([...Object.keys(diff.models.baseline), ...Object.keys(diff.models.candidate)])].sort();
+      if (allModels.length) {
+        const maxModel = Math.max(...allModels.map(m => Math.max(diff.models.baseline[m] || 0, diff.models.candidate[m] || 0)), 1);
+        html += `<div class="diff-section"><h3>🤖 Model Usage</h3><div class="bar-chart">`;
+        html += `<div style="display:flex;gap:16px;margin-bottom:8px;font-size:12px;color:var(--text-muted)">
+          <span style="display:flex;align-items:center;gap:4px"><span style="width:12px;height:12px;background:var(--accent);border-radius:2px;opacity:0.7"></span> Baseline</span>
+          <span style="display:flex;align-items:center;gap:4px"><span style="width:12px;height:12px;background:var(--orange);border-radius:2px;opacity:0.7"></span> Candidate</span>
+        </div>`;
+        for (const m of allModels) {
+          const bv = diff.models.baseline[m] || 0;
+          const cv = diff.models.candidate[m] || 0;
+          html += `<div class="bar-row">
+            <div class="bar-label">${m}</div>
+            <div class="bar-track">
+              <div class="bar-fill baseline" style="width:${(bv/maxModel)*50}%"></div>
+              <div class="bar-fill candidate" style="width:${(cv/maxModel)*50}%"></div>
+            </div>
+            <div class="bar-value">${bv} / ${cv}</div>
+          </div>`;
+        }
+        html += `</div></div>`;
+      }
+
+      // Event alignment table
+      if (diff.alignment.length) {
+        html += `<div class="diff-section"><h3>📋 Event Alignment (${diff.alignment.length} events)</h3>`;
+        html += `<table class="align-table"><thead><tr>
+          <th>Status</th><th>Event</th><th>Baseline Tokens</th><th>Candidate Tokens</th><th>Duration</th><th>Changes</th>
+        </tr></thead><tbody>`;
+        for (const evt of diff.alignment) {
+          const changes = Object.entries(evt.changes || {}).map(([k,v]) => `${k}: ${v}`).join(", ");
+          html += `<tr>
+            <td><span class="align-status ${evt.status}">${evt.status}</span></td>
+            <td style="font-family:monospace;font-size:12px">${evt.label}</td>
+            <td>${evt.baseline_tokens != null ? evt.baseline_tokens.toLocaleString() : "—"}</td>
+            <td>${evt.candidate_tokens != null ? evt.candidate_tokens.toLocaleString() : "—"}</td>
+            <td style="font-size:12px">${evt.baseline_duration != null && evt.candidate_duration != null ? `${evt.baseline_duration}→${evt.candidate_duration}ms` : "—"}</td>
+            <td class="change-detail">${changes || "—"}</td>
+          </tr>`;
+        }
+        html += `</tbody></table></div>`;
+      }
+
+      // Event type changes
+      if (diff.event_types.added.length || diff.event_types.removed.length) {
+        html += `<div class="diff-section"><h3>📌 Event Type Changes</h3><div class="chip-list">`;
+        for (const t of diff.event_types.added) html += `<span class="chip added">+ ${t}</span>`;
+        for (const t of diff.event_types.removed) html += `<span class="chip removed">− ${t}</span>`;
+        html += `</div></div>`;
+      }
+
+      el.innerHTML = html;
+    }
+  </script>
+</body>
+</html>

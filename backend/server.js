@@ -31,6 +31,7 @@ const anomaliesRouter = require("./routes/anomalies");
 const replayRouter = require("./routes/replay");
 const forecastRouter = require("./routes/forecast");
 const scorecardsRouter = require("./routes/scorecards");
+const diffRouter = require("./routes/diff");
 
 const app = express();
 const PORT = process.env.PORT || 3000;
@@ -61,6 +62,7 @@ app.use("/anomalies", createApiLimiter());
 app.use("/replay", createApiLimiter());
 app.use("/forecast", createApiLimiter());
 app.use("/scorecards", createApiLimiter());
+app.use("/diff", createApiLimiter());
 
 // ── API key authentication ──────────────────────────────────────────
 const { authenticateApiKey, hasApiKey } = createApiKeyAuth();
@@ -85,6 +87,7 @@ app.use("/anomalies", authenticateApiKey);
 app.use("/replay", authenticateApiKey);
 app.use("/forecast", authenticateApiKey);
 app.use("/scorecards", authenticateApiKey);
+app.use("/diff", authenticateApiKey);
 
 // Body parser with size limit
 app.use(express.json({ limit: "10mb" }));
@@ -117,6 +120,7 @@ app.use("/anomalies", anomaliesRouter);
 app.use("/replay", replayRouter);
 app.use("/forecast", forecastRouter);
 app.use("/scorecards", scorecardsRouter);
+app.use("/diff", diffRouter);
 // Mount session-scoped annotation routes on /sessions
 app.use("/sessions", annotationsRouter);
 
