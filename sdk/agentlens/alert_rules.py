@@ -97,13 +97,16 @@ class ThresholdCondition(AlertCondition):
         self.value = value
 
     def evaluate(self, events: list[dict[str, Any]]) -> bool:
+        """Return True if the summed metric value crosses the threshold."""
         total = sum(e.get(self.metric, 0) for e in events)
         return _OPERATORS[self.op](total, self.value)
 
     def matched_events(self, events: list[dict[str, Any]]) -> list[dict[str, Any]]:
+        """Return events that contain the tracked metric."""
         return [e for e in events if self.metric in e]
 
     def to_dict(self) -> dict[str, Any]:
+        """Serialize to a dictionary."""
         return {"type": "threshold", "metric": self.metric, "operator": self.op, "value": self.value}
 
 
@@ -349,9 +352,11 @@ class AlertRule:
         return None
 
     def reset_cooldown(self) -> None:
+        """Reset the cooldown timer, allowing the rule to fire immediately."""
         self._last_fired = 0.0
 
     def to_dict(self) -> dict[str, Any]:
+        """Serialize the rule to a JSON-friendly dictionary."""
         return {
             "name": self.name,
             "description": self.description,
@@ -363,6 +368,7 @@ class AlertRule:
 
     @classmethod
     def from_dict(cls, data: dict[str, Any]) -> "AlertRule":
+        """Deserialize an AlertRule from a dictionary."""
         return cls(
             name=data["name"],
             condition=AlertCondition.from_dict(data["condition"]),
@@ -388,10 +394,12 @@ class AlertRulesEngine:
     # ── Rule management ────────────────────────────────────────────────
 
     def add_rule(self, rule: AlertRule) -> None:
+        """Register a rule with the engine (replaces any existing rule with the same name)."""
         with self._lock:
             self._rules[rule.name] = rule
 
     def remove_rule(self, name: str) -> bool:
+        """Remove a rule by name. Returns True if the rule existed."""
         with self._lock:
             if name in self._rules:
                 del self._rules[name]
@@ -399,14 +407,17 @@ class AlertRulesEngine:
             return False
 
     def get_rule(self, name: str) -> AlertRule | None:
+        """Return the rule with *name*, or ``None`` if not found."""
         with self._lock:
             return self._rules.get(name)
 
     def list_rules(self) -> list[AlertRule]:
+        """Return a snapshot of all registered rules."""
         with self._lock:
             return list(self._rules.values())
 
     def enable_rule(self, name: str) -> bool:
+        """Enable a rule by name. Returns False if the rule doesn't exist."""
         with self._lock:
             rule = self._rules.get(name)
             if rule is None:
@@ -415,6 +426,7 @@ class AlertRulesEngine:
             return True
 
     def disable_rule(self, name: str) -> bool:
+        """Disable a rule by name. Returns False if the rule doesn't exist."""
         with self._lock:
             rule = self._rules.get(name)
             if rule is None:
@@ -425,6 +437,7 @@ class AlertRulesEngine:
     # ── Handlers ───────────────────────────────────────────────────────
 
     def add_handler(self, callback: Callable[[AlertResult], Any]) -> None:
+        """Register a callback invoked whenever an alert fires."""
         self._handlers.append(callback)
 
     # ── Evaluation ─────────────────────────────────────────────────────
@@ -449,7 +462,7 @@ class AlertRulesEngine:
         return results
 
     def evaluate_incremental(self, new_events: list[dict[str, Any]]) -> list[AlertResult]:
-        """Append new events to the internal buffer and evaluate."""
+        """Append *new_events* to the internal buffer and evaluate all rules."""
         with self._lock:
             self._events.extend(new_events)
             all_events = list(self._events)
@@ -458,14 +471,17 @@ class AlertRulesEngine:
     # ── History / state ────────────────────────────────────────────────
 
     def get_alert_history(self) -> list[AlertResult]:
+        """Return a copy of all past alert results."""
         with self._lock:
             return list(self._history)
 
     def clear_history(self) -> None:
+        """Clear all stored alert history."""
         with self._lock:
             self._history.clear()
 
     def reset_cooldowns(self) -> None:
+        """Reset cooldown timers on all rules."""
         with self._lock:
             for rule in self._rules.values():
                 rule.reset_cooldown()
@@ -473,6 +489,7 @@ class AlertRulesEngine:
     # ── Serialization ──────────────────────────────────────────────────
 
     def to_dict(self) -> dict[str, Any]:
+        """Serialize the engine configuration (all rules) to a dictionary."""
         with self._lock:
             return {
                 "rules": [r.to_dict() for r in self._rules.values()],
@@ -480,6 +497,7 @@ class AlertRulesEngine:
 
     @classmethod
     def from_dict(cls, data: dict[str, Any]) -> "AlertRulesEngine":
+        """Reconstruct an engine from a serialized dictionary."""
         engine = cls()
         for rule_data in data.get("rules", []):
             engine.add_rule(AlertRule.from_dict(rule_data))

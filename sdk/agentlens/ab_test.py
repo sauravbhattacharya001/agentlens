@@ -78,15 +78,24 @@ class Variant:
         return [o.value for o in self.observations if o.metric == metric]
 
     def count(self, metric: str) -> int:
+        """Return the number of observations recorded for *metric*."""
         return len(self.values(metric))
 
     def mean(self, metric: str) -> float:
+        """Return the arithmetic mean of all observations for *metric*.
+
+        Returns 0.0 if no observations exist.
+        """
         vals = self.values(metric)
         if not vals:
             return 0.0
         return sum(vals) / len(vals)
 
     def variance(self, metric: str) -> float:
+        """Return the sample variance (Bessel-corrected) for *metric*.
+
+        Returns 0.0 if fewer than 2 observations exist.
+        """
         vals = self.values(metric)
         if len(vals) < 2:
             return 0.0
@@ -94,9 +103,11 @@ class Variant:
         return sum((v - m) ** 2 for v in vals) / (len(vals) - 1)
 
     def std(self, metric: str) -> float:
+        """Return the sample standard deviation for *metric*."""
         return math.sqrt(self.variance(metric))
 
     def metrics(self) -> List[str]:
+        """Return a list of distinct metric names recorded for this variant."""
         return list(set(o.metric for o in self.observations))
 
 
@@ -113,6 +124,19 @@ class Experiment:
     tags: List[str] = field(default_factory=list)
 
     def add_variant(self, name: str, description: str = "", is_control: bool = False) -> Variant:
+        """Add a variant (treatment arm) to this experiment.
+
+        Args:
+            name: Unique identifier for the variant (e.g. ``"gpt-4o"``).
+            description: Human-readable description.
+            is_control: Whether this variant is the control/baseline.
+
+        Returns:
+            The newly created :class:`Variant`.
+
+        Raises:
+            ValueError: If a variant with *name* already exists.
+        """
         if name in self.variants:
             raise ValueError(f"Variant '{name}' already exists")
         v = Variant(name=name, description=description, is_control=is_control)
@@ -120,6 +144,24 @@ class Experiment:
         return v
 
     def record(self, variant: str, metric: str, value: float, metadata: Optional[Dict] = None) -> Observation:
+        """Record a single metric observation for a variant.
+
+        Automatically transitions the experiment from DRAFT to RUNNING on the
+        first observation.
+
+        Args:
+            variant: Name of the variant to record against.
+            metric: Metric name (e.g. ``"latency_ms"``, ``"accuracy"``).
+            value: Observed numeric value.
+            metadata: Optional key-value metadata for this observation.
+
+        Returns:
+            The created :class:`Observation`.
+
+        Raises:
+            KeyError: If *variant* does not exist.
+            RuntimeError: If the experiment is stopped or concluded.
+        """
         if variant not in self.variants:
             raise KeyError(f"Unknown variant '{variant}'")
         if self.status not in (ExperimentStatus.DRAFT, ExperimentStatus.RUNNING):
@@ -132,36 +174,44 @@ class Experiment:
         return obs
 
     def start(self) -> None:
+        """Manually start the experiment (transition to RUNNING)."""
         self.status = ExperimentStatus.RUNNING
         self.started_at = time.time()
 
     def stop(self) -> None:
+        """Stop the experiment, preventing further observations."""
         self.status = ExperimentStatus.STOPPED
         self.stopped_at = time.time()
 
     def conclude(self) -> None:
+        """Mark the experiment as concluded (final state)."""
         self.status = ExperimentStatus.CONCLUDED
         self.stopped_at = self.stopped_at or time.time()
 
     def metrics(self) -> List[str]:
+        """Return a sorted list of all metric names across all variants."""
         all_metrics: set = set()
         for v in self.variants.values():
             all_metrics.update(v.metrics())
         return sorted(all_metrics)
 
     def variant_names(self) -> List[str]:
+        """Return the names of all variants in insertion order."""
         return list(self.variants.keys())
 
     def control(self) -> Optional[Variant]:
+        """Return the control variant, or ``None`` if none is marked."""
         for v in self.variants.values():
             if v.is_control:
                 return v
         return None
 
     def total_observations(self) -> int:
+        """Return the total number of observations across all variants."""
         return sum(len(v.observations) for v in self.variants.values())
 
     def to_dict(self) -> Dict:
+        """Serialize the experiment to a dictionary suitable for JSON export."""
         return {
             "name": self.name,
             "hypothesis": self.hypothesis,
@@ -211,10 +261,7 @@ class TestResult:
     confidence_interval: tuple
 
     def to_dict(self) -> Dict:
-        return {
-            "experiment": self.experiment,
-            "metric": self.metric,
-            "variant_a": self.variant_a,
+        """Serialize the test result to a JSON-friendly dictionary."""
             "variant_b": self.variant_b,
             "mean_a": round(self.mean_a, 4),
             "mean_b": round(self.mean_b, 4),
@@ -234,8 +281,7 @@ class TestResult:
         }
 
     def summary(self) -> str:
-        lines = [
-            f"A/B Test: {self.experiment} — {self.metric}",
+        """Return a human-readable multi-line summary of this test result."""
             f"  {self.variant_a}: mean={self.mean_a:.4f} (n={self.n_a})",
             f"  {self.variant_b}: mean={self.mean_b:.4f} (n={self.n_b})",
             f"  t={self.t_statistic:.4f}, p={self.p_value:.6f} (α={self.alpha})",
@@ -265,6 +311,7 @@ class ExperimentReport:
     overall_winner: Optional[str]
 
     def to_dict(self) -> Dict:
+        """Serialize the full experiment report to a JSON-friendly dictionary."""
         return {
             "experiment": self.experiment,
             "hypothesis": self.hypothesis,
@@ -278,6 +325,7 @@ class ExperimentReport:
         }
 
     def summary(self) -> str:
+        """Return a formatted multi-line experiment report with all results."""
         lines = [
             f"═══ Experiment Report: {self.experiment} ═══",
             f"Hypothesis: {self.hypothesis}" if self.hypothesis else "",
@@ -533,17 +581,28 @@ class ABTestAnalyzer:
         return exp
 
     def get_experiment(self, name: str) -> Experiment:
+        """Retrieve an experiment by name.
+
+        Raises:
+            KeyError: If no experiment with *name* exists.
+        """
         if name not in self.experiments:
             raise KeyError(f"Unknown experiment '{name}'")
         return self.experiments[name]
 
     def list_experiments(self, status: Optional[ExperimentStatus] = None) -> List[Experiment]:
+        """Return all experiments, optionally filtered by *status*."""
         exps = list(self.experiments.values())
         if status is not None:
             exps = [e for e in exps if e.status == status]
         return exps
 
     def delete_experiment(self, name: str) -> None:
+        """Delete an experiment by name.
+
+        Raises:
+            KeyError: If no experiment with *name* exists.
+        """
         if name not in self.experiments:
             raise KeyError(f"Unknown experiment '{name}'")
         del self.experiments[name]
