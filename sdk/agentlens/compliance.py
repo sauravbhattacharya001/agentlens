@@ -495,11 +495,11 @@ class ComplianceChecker:
     def _check_required_tools(
         self, session: Session, rule: ComplianceRule
     ) -> RuleResult:
-        required = set(rule.tools)
+        required = set(t.lower() for t in rule.tools)
         used_tools: set[str] = set()
         for event in session.events:
             if event.tool_call and event.tool_call.tool_name:
-                used_tools.add(event.tool_call.tool_name)
+                used_tools.add(event.tool_call.tool_name.lower())
 
         missing = required - used_tools
         if not missing:
@@ -522,11 +522,11 @@ class ComplianceChecker:
     def _check_forbidden_tools(
         self, session: Session, rule: ComplianceRule
     ) -> RuleResult:
-        forbidden = set(rule.tools)
+        forbidden = set(t.lower() for t in rule.tools)
         used_tools: set[str] = set()
         for event in session.events:
             if event.tool_call and event.tool_call.tool_name:
-                used_tools.add(event.tool_call.tool_name)
+                used_tools.add(event.tool_call.tool_name.lower())
 
         violations = used_tools & forbidden
         if not violations:

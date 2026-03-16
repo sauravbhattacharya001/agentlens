@@ -198,9 +198,8 @@ class SessionReplayer:
         return self
 
     def remove_filter(self, *event_types: str) -> "SessionReplayer":
-        self._filters.discard(*event_types) if len(event_types) == 1 else [
-            self._filters.discard(t) for t in event_types
-        ]
+        for t in event_types:
+            self._filters.discard(t)
         return self
 
     def clear_filters(self) -> "SessionReplayer":
