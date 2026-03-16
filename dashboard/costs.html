@@ -1,0 +1,579 @@
+<!DOCTYPE html>
+<html lang="en">
+<head>
+  <meta charset="UTF-8">
+  <meta name="viewport" content="width=device-width, initial-scale=1.0">
+  <title>AgentLens — Cost Forecast</title>
+  <link rel="stylesheet" href="styles.css">
+  <style>
+    .costs-container { padding: 24px; max-width: 1400px; margin: 0 auto; }
+    .costs-grid { display: grid; grid-template-columns: repeat(4, 1fr); gap: 16px; margin-bottom: 24px; }
+    .cost-card { background: var(--bg-secondary); border: 1px solid var(--border); border-radius: var(--radius); padding: 20px; }
+    .cost-card h3 { font-size: 0.8rem; color: var(--text-secondary); text-transform: uppercase; letter-spacing: 0.5px; margin-bottom: 8px; }
+    .cost-card .value { font-size: 2rem; font-weight: 700; }
+    .cost-card .sub { font-size: 0.8rem; color: var(--text-secondary); margin-top: 4px; }
+    .cost-card .trend-up { color: var(--red); }
+    .cost-card .trend-down { color: var(--green); }
+    .cost-card .trend-flat { color: var(--yellow); }
+
+    .panel-row { display: grid; grid-template-columns: 2fr 1fr; gap: 16px; margin-bottom: 24px; }
+    .panel { background: var(--bg-secondary); border: 1px solid var(--border); border-radius: var(--radius); padding: 20px; }
+    .panel h2 { font-size: 1rem; margin-bottom: 16px; display: flex; align-items: center; gap: 8px; }
+    .panel-full { grid-column: 1 / -1; }
+
+    /* Chart area */
+    .chart-area { position: relative; width: 100%; height: 320px; }
+    .chart-area canvas { width: 100% !important; height: 100% !important; }
+
+    /* Controls */
+    .controls-bar { display: flex; gap: 12px; align-items: center; margin-bottom: 16px; flex-wrap: wrap; }
+    .control-group { display: flex; align-items: center; gap: 6px; }
+    .control-group label { font-size: 0.8rem; color: var(--text-secondary); }
+    .control-group input, .control-group select { background: var(--bg-tertiary); border: 1px solid var(--border); color: var(--text-primary); padding: 6px 10px; border-radius: var(--radius-sm); font-size: 0.85rem; }
+    .control-group input[type="range"] { width: 120px; accent-color: var(--accent); }
+
+    /* Budget bar */
+    .budget-track { height: 24px; background: var(--bg-tertiary); border-radius: 12px; overflow: hidden; position: relative; margin: 12px 0; }
+    .budget-fill { height: 100%; border-radius: 12px; transition: width 0.5s ease; }
+    .budget-marker { position: absolute; top: -6px; width: 2px; height: 36px; background: var(--text-primary); }
+    .budget-labels { display: flex; justify-content: space-between; font-size: 0.75rem; color: var(--text-secondary); }
+
+    /* Breakdown table */
+    .breakdown-table { width: 100%; border-collapse: collapse; font-size: 0.85rem; }
+    .breakdown-table th { text-align: left; padding: 8px 12px; color: var(--text-secondary); font-weight: 600; border-bottom: 1px solid var(--border); font-size: 0.75rem; text-transform: uppercase; }
+    .breakdown-table td { padding: 8px 12px; border-bottom: 1px solid var(--bg-tertiary); }
+    .breakdown-table tr:hover { background: var(--bg-hover); }
+    .model-dot { display: inline-block; width: 8px; height: 8px; border-radius: 50%; margin-right: 6px; }
+
+    /* What-if */
+    .whatif-result { background: var(--bg-tertiary); border-radius: var(--radius-sm); padding: 16px; margin-top: 12px; }
+    .whatif-result .projected { font-size: 1.5rem; font-weight: 700; color: var(--accent); }
+    .whatif-delta { font-size: 0.85rem; margin-top: 4px; }
+    .whatif-savings { color: var(--green); }
+    .whatif-increase { color: var(--red); }
+
+    /* Alerts */
+    .alert-item { display: flex; align-items: center; gap: 10px; padding: 10px; border-radius: var(--radius-sm); margin-bottom: 8px; font-size: 0.85rem; }
+    .alert-item.warning { background: var(--yellow-dim); border-left: 3px solid var(--yellow); }
+    .alert-item.danger { background: var(--red-dim); border-left: 3px solid var(--red); }
+    .alert-item.info { background: var(--purple-dim); border-left: 3px solid var(--purple); }
+
+    /* Export dropdown */
+    .export-menu { position: relative; display: inline-block; }
+    .export-dropdown { display: none; position: absolute; right: 0; top: 100%; background: var(--bg-secondary); border: 1px solid var(--border); border-radius: var(--radius-sm); min-width: 140px; z-index: 10; box-shadow: var(--shadow); }
+    .export-dropdown.show { display: block; }
+    .export-dropdown button { display: block; width: 100%; text-align: left; padding: 8px 12px; border: none; background: none; color: var(--text-primary); cursor: pointer; font-size: 0.85rem; }
+    .export-dropdown button:hover { background: var(--bg-hover); }
+
+    @media (max-width: 900px) {
+      .costs-grid { grid-template-columns: repeat(2, 1fr); }
+      .panel-row { grid-template-columns: 1fr; }
+    }
+    @media (max-width: 600px) {
+      .costs-grid { grid-template-columns: 1fr; }
+    }
+  </style>
+</head>
+<body>
+  <header class="header">
+    <div class="header-left">
+      <h1 class="logo">🔍 AgentLens</h1>
+      <span class="tagline">Cost Forecast</span>
+    </div>
+    <div class="header-right">
+      <a href="index.html" class="btn btn-alert-header" style="text-decoration:none">📋 Sessions</a>
+      <a href="errors.html" class="btn btn-alert-header" style="text-decoration:none">🐛 Errors</a>
+      <a href="scorecards.html" class="btn btn-alert-header" style="text-decoration:none">🏅 Scorecards</a>
+      <a href="waterfall.html" class="btn btn-alert-header" style="text-decoration:none">📊 Waterfall</a>
+      <div class="export-menu">
+        <button class="btn btn-alert-header" onclick="toggleExport()">📥 Export</button>
+        <div class="export-dropdown" id="exportMenu">
+          <button onclick="exportJSON()">📄 JSON Report</button>
+          <button onclick="exportCSV()">📊 CSV Data</button>
+          <button onclick="exportPNG()">🖼️ Chart PNG</button>
+        </div>
+      </div>
+    </div>
+  </header>
+
+  <div class="costs-container">
+    <!-- Summary Cards -->
+    <div class="costs-grid" id="summaryCards"></div>
+
+    <!-- Controls -->
+    <div class="controls-bar">
+      <div class="control-group">
+        <label>Forecast:</label>
+        <select id="forecastDays" onchange="recalculate()">
+          <option value="7">7 days</option>
+          <option value="14">14 days</option>
+          <option value="30" selected>30 days</option>
+          <option value="60">60 days</option>
+          <option value="90">90 days</option>
+        </select>
+      </div>
+      <div class="control-group">
+        <label>Monthly Budget: $</label>
+        <input type="number" id="budgetInput" value="500" min="0" step="50" onchange="recalculate()">
+      </div>
+      <div class="control-group">
+        <label>History:</label>
+        <select id="historyDays" onchange="regenerateAndRecalculate()">
+          <option value="7">7 days</option>
+          <option value="14">14 days</option>
+          <option value="30" selected>30 days</option>
+          <option value="60">60 days</option>
+        </select>
+      </div>
+    </div>
+
+    <!-- Cost Trend Chart + Budget Gauge -->
+    <div class="panel-row">
+      <div class="panel">
+        <h2>💰 Cost Trend & Forecast</h2>
+        <div class="chart-area"><canvas id="costChart"></canvas></div>
+      </div>
+      <div class="panel">
+        <h2>🎯 Budget Tracking</h2>
+        <div id="budgetGauge"></div>
+        <h2 style="margin-top:24px">⚠️ Alerts</h2>
+        <div id="alertsList"></div>
+      </div>
+    </div>
+
+    <!-- Model Breakdown + What-If -->
+    <div class="panel-row">
+      <div class="panel">
+        <h2>🤖 Cost by Model</h2>
+        <div style="display:grid;grid-template-columns:1fr 1fr;gap:16px;">
+          <div class="chart-area" style="height:260px"><canvas id="modelChart"></canvas></div>
+          <div><table class="breakdown-table" id="modelTable"></table></div>
+        </div>
+      </div>
+      <div class="panel">
+        <h2>🔮 What-If Simulator</h2>
+        <div class="control-group" style="margin-bottom:12px">
+          <label>Traffic change:</label>
+          <input type="range" id="trafficSlider" min="-50" max="100" value="0" oninput="updateWhatIf()">
+          <span id="trafficLabel" style="min-width:40px">0%</span>
+        </div>
+        <div class="control-group" style="margin-bottom:12px">
+          <label>Switch model:</label>
+          <select id="modelSwitch" onchange="updateWhatIf()">
+            <option value="">No change</option>
+            <option value="gpt-3.5-turbo">→ GPT-3.5 Turbo</option>
+            <option value="gpt-4o-mini">→ GPT-4o Mini</option>
+            <option value="claude-3-haiku">→ Claude 3 Haiku</option>
+          </select>
+        </div>
+        <div class="control-group" style="margin-bottom:12px">
+          <label>Cache hit rate:</label>
+          <input type="range" id="cacheSlider" min="0" max="80" value="0" oninput="updateWhatIf()">
+          <span id="cacheLabel" style="min-width:40px">0%</span>
+        </div>
+        <div class="whatif-result" id="whatifResult"></div>
+      </div>
+    </div>
+
+    <!-- Daily Breakdown -->
+    <div class="panel-row" style="grid-template-columns:1fr">
+      <div class="panel">
+        <h2>📅 Daily Breakdown</h2>
+        <div style="max-height:300px;overflow-y:auto">
+          <table class="breakdown-table" id="dailyTable"></table>
+        </div>
+      </div>
+    </div>
+  </div>
+
+  <script>
+  // ── Simulated data generation ──
+  const MODEL_PRICING = {
+    'gpt-4o':          { input: 2.50, output: 10.00, color: '#58a6ff' },
+    'gpt-4o-mini':     { input: 0.15, output: 0.60,  color: '#3fb950' },
+    'gpt-3.5-turbo':   { input: 0.50, output: 1.50,  color: '#d29922' },
+    'claude-3-opus':   { input: 15.0, output: 75.0,   color: '#bc8cff' },
+    'claude-3-sonnet': { input: 3.00, output: 15.0,   color: '#f0883e' },
+    'claude-3-haiku':  { input: 0.25, output: 1.25,  color: '#f85149' },
+  };
+
+  let dailyData = [];
+  let forecastData = [];
+
+  function generateData() {
+    const histDays = parseInt(document.getElementById('historyDays').value);
+    dailyData = [];
+    const models = Object.keys(MODEL_PRICING);
+    const baseRequests = 800 + Math.random() * 400;
+    const trend = 1 + (Math.random() * 0.02 - 0.005); // slight upward trend
+
+    for (let i = histDays - 1; i >= 0; i--) {
+      const d = new Date();
+      d.setDate(d.getDate() - i);
+      const dateStr = d.toISOString().slice(0, 10);
+      const dayFactor = (1 + Math.sin(d.getDay() * Math.PI / 3.5) * 0.3); // weekly pattern
+      const trendFactor = Math.pow(trend, histDays - i);
+      const noise = 0.8 + Math.random() * 0.4;
+      const requests = Math.round(baseRequests * dayFactor * trendFactor * noise);
+
+      const modelBreakdown = {};
+      let remaining = requests;
+      const modelDist = [0.35, 0.25, 0.15, 0.10, 0.10, 0.05];
+      models.forEach((m, idx) => {
+        const share = idx < models.length - 1 ? Math.round(requests * modelDist[idx] * (0.8 + Math.random() * 0.4)) : remaining;
+        const count = Math.max(0, Math.min(share, remaining));
+        remaining -= count;
+        const avgInputTokens = 500 + Math.random() * 1500;
+        const avgOutputTokens = 200 + Math.random() * 800;
+        const cost = count * (avgInputTokens * MODEL_PRICING[m].input + avgOutputTokens * MODEL_PRICING[m].output) / 1e6;
+        modelBreakdown[m] = { requests: count, cost: Math.round(cost * 100) / 100 };
+      });
+
+      const totalCost = Object.values(modelBreakdown).reduce((s, v) => s + v.cost, 0);
+      dailyData.push({ date: dateStr, requests, cost: Math.round(totalCost * 100) / 100, models: modelBreakdown });
+    }
+  }
+
+  function computeForecast() {
+    const days = parseInt(document.getElementById('forecastDays').value);
+    forecastData = [];
+    const n = dailyData.length;
+    if (n < 2) return;
+
+    // Linear regression on costs
+    const xs = dailyData.map((_, i) => i);
+    const ys = dailyData.map(d => d.cost);
+    const xm = xs.reduce((a, b) => a + b) / n;
+    const ym = ys.reduce((a, b) => a + b) / n;
+    let num = 0, den = 0;
+    for (let i = 0; i < n; i++) { num += (xs[i] - xm) * (ys[i] - ym); den += (xs[i] - xm) ** 2; }
+    const slope = den ? num / den : 0;
+    const intercept = ym - slope * xm;
+
+    // Residual std for confidence interval
+    const residuals = ys.map((y, i) => y - (slope * i + intercept));
+    const resStd = Math.sqrt(residuals.reduce((s, r) => s + r * r, 0) / n);
+
+    for (let i = 0; i < days; i++) {
+      const x = n + i;
+      const d = new Date();
+      d.setDate(d.getDate() + i + 1);
+      const predicted = Math.max(0, slope * x + intercept);
+      const ci = resStd * 1.96 * Math.sqrt(1 + 1/n + (x - xm)**2 / den);
+      forecastData.push({
+        date: d.toISOString().slice(0, 10),
+        cost: Math.round(predicted * 100) / 100,
+        upper: Math.round((predicted + ci) * 100) / 100,
+        lower: Math.round(Math.max(0, predicted - ci) * 100) / 100,
+      });
+    }
+  }
+
+  // ── Rendering ──
+  function renderSummaryCards() {
+    const total = dailyData.reduce((s, d) => s + d.cost, 0);
+    const avg = total / dailyData.length;
+    const recent7 = dailyData.slice(-7).reduce((s, d) => s + d.cost, 0);
+    const prev7 = dailyData.slice(-14, -7).reduce((s, d) => s + d.cost, 0);
+    const change = prev7 ? ((recent7 - prev7) / prev7 * 100) : 0;
+    const forecastTotal = forecastData.reduce((s, d) => s + d.cost, 0);
+    const budget = parseFloat(document.getElementById('budgetInput').value) || 500;
+    const projectedMonthly = avg * 30;
+    const budgetPct = (projectedMonthly / budget * 100);
+
+    const cards = [
+      { title: 'Total Spend (Period)', value: `$${total.toFixed(2)}`, sub: `${dailyData.length} days`, cls: '' },
+      { title: 'Daily Average', value: `$${avg.toFixed(2)}`, sub: `${change >= 0 ? '↑' : '↓'} ${Math.abs(change).toFixed(1)}% vs prev week`, cls: change > 5 ? 'trend-up' : change < -5 ? 'trend-down' : 'trend-flat' },
+      { title: 'Forecasted Cost', value: `$${forecastTotal.toFixed(2)}`, sub: `Next ${forecastData.length} days`, cls: '' },
+      { title: 'Monthly Projection', value: `$${projectedMonthly.toFixed(2)}`, sub: `${budgetPct.toFixed(0)}% of $${budget} budget`, cls: budgetPct > 100 ? 'trend-up' : budgetPct > 80 ? 'trend-flat' : 'trend-down' },
+    ];
+
+    document.getElementById('summaryCards').innerHTML = cards.map(c => `
+      <div class="cost-card">
+        <h3>${c.title}</h3>
+        <div class="value ${c.cls}">${c.value}</div>
+        <div class="sub ${c.cls}">${c.sub}</div>
+      </div>
+    `).join('');
+  }
+
+  function renderCostChart() {
+    const canvas = document.getElementById('costChart');
+    const ctx = canvas.getContext('2d');
+    canvas.width = canvas.parentElement.clientWidth;
+    canvas.height = canvas.parentElement.clientHeight;
+    const W = canvas.width, H = canvas.height;
+    const pad = { top: 20, right: 20, bottom: 40, left: 60 };
+
+    ctx.clearRect(0, 0, W, H);
+
+    const allDates = [...dailyData.map(d => d.date), ...forecastData.map(d => d.date)];
+    const allCosts = [...dailyData.map(d => d.cost), ...forecastData.map(d => d.upper || d.cost)];
+    const maxCost = Math.max(...allCosts) * 1.15;
+    const n = allDates.length;
+
+    const xScale = (i) => pad.left + (i / (n - 1)) * (W - pad.left - pad.right);
+    const yScale = (v) => pad.top + (1 - v / maxCost) * (H - pad.top - pad.bottom);
+
+    // Grid
+    ctx.strokeStyle = '#21262d'; ctx.lineWidth = 1;
+    for (let i = 0; i <= 5; i++) {
+      const y = yScale(maxCost * i / 5);
+      ctx.beginPath(); ctx.moveTo(pad.left, y); ctx.lineTo(W - pad.right, y); ctx.stroke();
+      ctx.fillStyle = '#8b949e'; ctx.font = '11px sans-serif'; ctx.textAlign = 'right';
+      ctx.fillText(`$${(maxCost * i / 5).toFixed(0)}`, pad.left - 8, y + 4);
+    }
+
+    // Budget line
+    const budget = parseFloat(document.getElementById('budgetInput').value) || 500;
+    const dailyBudget = budget / 30;
+    if (dailyBudget < maxCost) {
+      const by = yScale(dailyBudget);
+      ctx.strokeStyle = '#f85149'; ctx.lineWidth = 1; ctx.setLineDash([6, 4]);
+      ctx.beginPath(); ctx.moveTo(pad.left, by); ctx.lineTo(W - pad.right, by); ctx.stroke();
+      ctx.setLineDash([]); ctx.fillStyle = '#f85149'; ctx.font = '10px sans-serif'; ctx.textAlign = 'left';
+      ctx.fillText(`Daily budget: $${dailyBudget.toFixed(2)}`, pad.left + 4, by - 6);
+    }
+
+    // Forecast confidence interval
+    if (forecastData.length > 0) {
+      const startIdx = dailyData.length;
+      ctx.fillStyle = 'rgba(88, 166, 255, 0.08)';
+      ctx.beginPath();
+      forecastData.forEach((d, i) => { const x = xScale(startIdx + i); i === 0 ? ctx.moveTo(x, yScale(d.upper)) : ctx.lineTo(x, yScale(d.upper)); });
+      for (let i = forecastData.length - 1; i >= 0; i--) ctx.lineTo(xScale(startIdx + i), yScale(forecastData[i].lower));
+      ctx.closePath(); ctx.fill();
+    }
+
+    // Historical line
+    ctx.strokeStyle = '#58a6ff'; ctx.lineWidth = 2;
+    ctx.beginPath();
+    dailyData.forEach((d, i) => { const x = xScale(i), y = yScale(d.cost); i === 0 ? ctx.moveTo(x, y) : ctx.lineTo(x, y); });
+    ctx.stroke();
+
+    // Forecast line
+    if (forecastData.length > 0) {
+      ctx.strokeStyle = '#58a6ff'; ctx.lineWidth = 2; ctx.setLineDash([6, 4]);
+      ctx.beginPath();
+      ctx.moveTo(xScale(dailyData.length - 1), yScale(dailyData[dailyData.length - 1].cost));
+      forecastData.forEach((d, i) => ctx.lineTo(xScale(dailyData.length + i), yScale(d.cost)));
+      ctx.stroke(); ctx.setLineDash([]);
+    }
+
+    // Divider
+    if (forecastData.length > 0) {
+      const dx = xScale(dailyData.length - 0.5);
+      ctx.strokeStyle = '#30363d'; ctx.lineWidth = 1; ctx.setLineDash([3, 3]);
+      ctx.beginPath(); ctx.moveTo(dx, pad.top); ctx.lineTo(dx, H - pad.bottom); ctx.stroke();
+      ctx.setLineDash([]); ctx.fillStyle = '#8b949e'; ctx.font = '10px sans-serif'; ctx.textAlign = 'center';
+      ctx.fillText('← Actual | Forecast →', dx, pad.top - 4);
+    }
+
+    // X-axis labels (every 5th or 7th)
+    const step = n > 30 ? 7 : n > 14 ? 5 : n > 7 ? 3 : 1;
+    ctx.fillStyle = '#6e7681'; ctx.font = '10px sans-serif'; ctx.textAlign = 'center';
+    for (let i = 0; i < n; i += step) {
+      ctx.fillText(allDates[i].slice(5), xScale(i), H - pad.bottom + 16);
+    }
+
+    // Dots on historical
+    dailyData.forEach((d, i) => {
+      ctx.beginPath(); ctx.arc(xScale(i), yScale(d.cost), 3, 0, Math.PI * 2);
+      ctx.fillStyle = d.cost > dailyBudget ? '#f85149' : '#58a6ff'; ctx.fill();
+    });
+  }
+
+  function renderBudgetGauge() {
+    const budget = parseFloat(document.getElementById('budgetInput').value) || 500;
+    const now = new Date();
+    const daysInMonth = new Date(now.getFullYear(), now.getMonth() + 1, 0).getDate();
+    const dayOfMonth = now.getDate();
+    const monthSpend = dailyData.slice(-dayOfMonth).reduce((s, d) => s + d.cost, 0);
+    const pct = Math.min(150, (monthSpend / budget) * 100);
+    const expectedPct = (dayOfMonth / daysInMonth) * 100;
+    const color = pct > 100 ? 'var(--red)' : pct > 80 ? 'var(--yellow)' : 'var(--green)';
+
+    document.getElementById('budgetGauge').innerHTML = `
+      <div style="text-align:center;margin-bottom:12px">
+        <span style="font-size:2rem;font-weight:700;color:${color}">$${monthSpend.toFixed(2)}</span>
+        <span style="color:var(--text-secondary)"> / $${budget.toFixed(2)}</span>
+      </div>
+      <div class="budget-track">
+        <div class="budget-fill" style="width:${Math.min(100, pct)}%;background:${color}"></div>
+        <div class="budget-marker" style="left:${Math.min(100, expectedPct)}%" title="Expected spend at this date"></div>
+      </div>
+      <div class="budget-labels">
+        <span>$0</span>
+        <span style="color:var(--text-muted)">▲ Expected (${expectedPct.toFixed(0)}%)</span>
+        <span>$${budget.toFixed(0)}</span>
+      </div>
+      <div style="margin-top:12px;font-size:0.8rem;color:var(--text-secondary)">
+        Day ${dayOfMonth}/${daysInMonth} · ${pct > expectedPct + 10 ? '⚠️ Spending ahead of pace' : pct < expectedPct - 10 ? '✅ Under budget pace' : '📊 On track'}
+      </div>
+    `;
+  }
+
+  function renderAlerts() {
+    const budget = parseFloat(document.getElementById('budgetInput').value) || 500;
+    const avg = dailyData.reduce((s, d) => s + d.cost, 0) / dailyData.length;
+    const projected = avg * 30;
+    const recent = dailyData.slice(-3);
+    const recentAvg = recent.reduce((s, d) => s + d.cost, 0) / recent.length;
+    const spike = recentAvg > avg * 1.5;
+    const alerts = [];
+
+    if (projected > budget) alerts.push({ type: 'danger', msg: `Projected monthly cost ($${projected.toFixed(0)}) exceeds budget ($${budget})` });
+    if (projected > budget * 0.8 && projected <= budget) alerts.push({ type: 'warning', msg: `Projected cost at ${(projected/budget*100).toFixed(0)}% of budget` });
+    if (spike) alerts.push({ type: 'warning', msg: `Cost spike detected: recent 3-day avg ($${recentAvg.toFixed(2)}) is ${(recentAvg/avg*100).toFixed(0)}% of overall avg` });
+
+    // Model cost alerts
+    const modelTotals = {};
+    dailyData.forEach(d => Object.entries(d.models).forEach(([m, v]) => { modelTotals[m] = (modelTotals[m] || 0) + v.cost; }));
+    const topModel = Object.entries(modelTotals).sort((a, b) => b[1] - a[1])[0];
+    const totalCost = Object.values(modelTotals).reduce((s, v) => s + v, 0);
+    if (topModel && topModel[1] / totalCost > 0.6) alerts.push({ type: 'info', msg: `${topModel[0]} accounts for ${(topModel[1]/totalCost*100).toFixed(0)}% of costs — consider cheaper alternatives` });
+
+    if (alerts.length === 0) alerts.push({ type: 'info', msg: 'No cost alerts — spending is healthy' });
+
+    document.getElementById('alertsList').innerHTML = alerts.map(a => `<div class="alert-item ${a.type}">${a.msg}</div>`).join('');
+  }
+
+  function renderModelBreakdown() {
+    const modelTotals = {};
+    dailyData.forEach(d => Object.entries(d.models).forEach(([m, v]) => {
+      if (!modelTotals[m]) modelTotals[m] = { cost: 0, requests: 0 };
+      modelTotals[m].cost += v.cost;
+      modelTotals[m].requests += v.requests;
+    }));
+    const sorted = Object.entries(modelTotals).sort((a, b) => b[1].cost - a[1].cost);
+    const totalCost = sorted.reduce((s, [, v]) => s + v.cost, 0);
+
+    // Table
+    document.getElementById('modelTable').innerHTML = `
+      <thead><tr><th>Model</th><th>Cost</th><th>Share</th><th>Requests</th></tr></thead>
+      <tbody>${sorted.map(([m, v]) => `
+        <tr>
+          <td><span class="model-dot" style="background:${MODEL_PRICING[m]?.color || '#888'}"></span>${m}</td>
+          <td>$${v.cost.toFixed(2)}</td>
+          <td>${(v.cost/totalCost*100).toFixed(1)}%</td>
+          <td>${v.requests.toLocaleString()}</td>
+        </tr>`).join('')}</tbody>`;
+
+    // Donut chart
+    const canvas = document.getElementById('modelChart');
+    const ctx = canvas.getContext('2d');
+    canvas.width = canvas.parentElement.clientWidth;
+    canvas.height = canvas.parentElement.clientHeight;
+    const cx = canvas.width / 2, cy = canvas.height / 2, r = Math.min(cx, cy) - 20, ir = r * 0.55;
+    ctx.clearRect(0, 0, canvas.width, canvas.height);
+
+    let startAngle = -Math.PI / 2;
+    sorted.forEach(([m, v]) => {
+      const sweep = (v.cost / totalCost) * Math.PI * 2;
+      ctx.beginPath(); ctx.moveTo(cx + ir * Math.cos(startAngle), cy + ir * Math.sin(startAngle));
+      ctx.arc(cx, cy, r, startAngle, startAngle + sweep);
+      ctx.arc(cx, cy, ir, startAngle + sweep, startAngle, true);
+      ctx.closePath();
+      ctx.fillStyle = MODEL_PRICING[m]?.color || '#888'; ctx.fill();
+      startAngle += sweep;
+    });
+
+    ctx.fillStyle = '#e6edf3'; ctx.font = 'bold 16px sans-serif'; ctx.textAlign = 'center';
+    ctx.fillText(`$${totalCost.toFixed(2)}`, cx, cy - 4);
+    ctx.font = '11px sans-serif'; ctx.fillStyle = '#8b949e';
+    ctx.fillText('total', cx, cy + 14);
+  }
+
+  function renderDailyTable() {
+    const rows = [...dailyData].reverse();
+    document.getElementById('dailyTable').innerHTML = `
+      <thead><tr><th>Date</th><th>Requests</th><th>Cost</th><th>Top Model</th><th>Bar</th></tr></thead>
+      <tbody>${rows.map(d => {
+        const topModel = Object.entries(d.models).sort((a, b) => b[1].cost - a[1].cost)[0];
+        const maxCost = Math.max(...dailyData.map(x => x.cost));
+        const barPct = (d.cost / maxCost * 100);
+        const budget = parseFloat(document.getElementById('budgetInput').value) || 500;
+        const dailyBudget = budget / 30;
+        const barColor = d.cost > dailyBudget ? 'var(--red)' : 'var(--accent)';
+        return `<tr>
+          <td>${d.date}</td>
+          <td>${d.requests.toLocaleString()}</td>
+          <td>$${d.cost.toFixed(2)}</td>
+          <td><span class="model-dot" style="background:${MODEL_PRICING[topModel[0]]?.color || '#888'}"></span>${topModel[0]}</td>
+          <td><div style="width:${barPct}%;height:6px;background:${barColor};border-radius:3px;min-width:2px"></div></td>
+        </tr>`;
+      }).join('')}</tbody>`;
+  }
+
+  function updateWhatIf() {
+    const traffic = parseInt(document.getElementById('trafficSlider').value);
+    const cacheRate = parseInt(document.getElementById('cacheSlider').value);
+    const modelSwitch = document.getElementById('modelSwitch').value;
+    document.getElementById('trafficLabel').textContent = `${traffic > 0 ? '+' : ''}${traffic}%`;
+    document.getElementById('cacheLabel').textContent = `${cacheRate}%`;
+
+    const currentMonthly = (dailyData.reduce((s, d) => s + d.cost, 0) / dailyData.length) * 30;
+    let projected = currentMonthly * (1 + traffic / 100) * (1 - cacheRate / 100);
+
+    if (modelSwitch) {
+      // Estimate savings from switching cheapest cost ratio
+      const currentAvgPerReq = currentMonthly / (dailyData.reduce((s, d) => s + d.requests, 0) / dailyData.length * 30);
+      const cheaperRate = (MODEL_PRICING[modelSwitch].input * 800 + MODEL_PRICING[modelSwitch].output * 400) / 1e6;
+      projected = projected * (cheaperRate / Math.max(currentAvgPerReq, 0.001));
+    }
+
+    const delta = projected - currentMonthly;
+    const pct = (delta / currentMonthly * 100);
+
+    document.getElementById('whatifResult').innerHTML = `
+      <div>Projected monthly cost:</div>
+      <div class="projected">$${projected.toFixed(2)}</div>
+      <div class="whatif-delta ${delta < 0 ? 'whatif-savings' : delta > 0 ? 'whatif-increase' : ''}">
+        ${delta < 0 ? '↓' : delta > 0 ? '↑' : '→'} $${Math.abs(delta).toFixed(2)} (${pct > 0 ? '+' : ''}${pct.toFixed(1)}%)
+        ${delta < 0 ? ' — potential savings!' : delta > 0 ? ' — cost increase' : ' — no change'}
+      </div>
+    `;
+  }
+
+  // ── Export ──
+  function toggleExport() { document.getElementById('exportMenu').classList.toggle('show'); }
+  document.addEventListener('click', e => { if (!e.target.closest('.export-menu')) document.getElementById('exportMenu').classList.remove('show'); });
+
+  function exportJSON() {
+    const data = { generated: new Date().toISOString(), history: dailyData, forecast: forecastData, budget: parseFloat(document.getElementById('budgetInput').value) };
+    const blob = new Blob([JSON.stringify(data, null, 2)], { type: 'application/json' });
+    downloadBlob(blob, 'agentlens-cost-forecast.json');
+  }
+
+  function exportCSV() {
+    let csv = 'Date,Requests,Cost,Type\n';
+    dailyData.forEach(d => csv += `${d.date},${d.requests},${d.cost.toFixed(2)},actual\n`);
+    forecastData.forEach(d => csv += `${d.date},,${d.cost.toFixed(2)},forecast\n`);
+    downloadBlob(new Blob([csv], { type: 'text/csv' }), 'agentlens-cost-forecast.csv');
+  }
+
+  function exportPNG() {
+    const canvas = document.getElementById('costChart');
+    canvas.toBlob(blob => downloadBlob(blob, 'agentlens-cost-chart.png'));
+  }
+
+  function downloadBlob(blob, name) {
+    const a = document.createElement('a'); a.href = URL.createObjectURL(blob);
+    a.download = name; a.click(); URL.revokeObjectURL(a.href);
+  }
+
+  // ── Init ──
+  function recalculate() { computeForecast(); render(); }
+  function regenerateAndRecalculate() { generateData(); computeForecast(); render(); }
+  function render() {
+    renderSummaryCards(); renderCostChart(); renderBudgetGauge();
+    renderAlerts(); renderModelBreakdown(); renderDailyTable(); updateWhatIf();
+  }
+
+  generateData();
+  computeForecast();
+  render();
+  window.addEventListener('resize', () => { renderCostChart(); renderModelBreakdown(); });
+  </script>
+</body>
+</html>
