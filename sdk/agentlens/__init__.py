@@ -27,6 +27,7 @@ from agentlens.ab_test import ABTestAnalyzer, Experiment, ExperimentStatus, Vari
 from agentlens.error_fingerprint import ErrorFingerprinter, ErrorCluster, ErrorReport, ErrorOccurrence, Trend, Resolution
 from agentlens.session_diff import SessionDiff, DiffReport, EventPair, AlignmentStatus, ToolCallDelta
 from agentlens.group_analyzer import SessionGroupAnalyzer, GroupStats, ComparisonReport
+from agentlens.heatmap import HeatmapBuilder, HeatmapBucket
 
 __version__ = "0.1.0"
 __all__ = [
@@ -180,6 +181,8 @@ __all__ = [
     "EventPair",
     "AlignmentStatus",
     "ToolCallDelta",
+    "HeatmapBuilder",
+    "HeatmapBucket",
 ]
 
 _tracker: AgentTracker | None = None
