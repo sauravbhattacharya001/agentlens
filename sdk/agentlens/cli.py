@@ -11,6 +11,7 @@ Usage:
     agentlens-cli compare <session_a> <session_b> [--endpoint URL] [--api-key KEY]
     agentlens-cli alerts [--endpoint URL] [--api-key KEY]
     agentlens-cli tail [--session SESSION] [--type TYPE] [--interval SECS] [--endpoint URL] [--api-key KEY]
+    agentlens-cli top [--sort cost|tokens|events] [--limit N] [--interval SECS] [--endpoint URL] [--api-key KEY]
     agentlens-cli status [--endpoint URL] [--api-key KEY]
 
 Environment variables:
@@ -290,6 +291,98 @@ def cmd_tail(args: argparse.Namespace) -> None:
         print("\n👋 Stopped tailing.")
 
 
+def cmd_top(args: argparse.Namespace) -> None:
+    """Live leaderboard of sessions ranked by cost, tokens, or event count — like htop for agents."""
+    import time as _time
+
+    client, endpoint = _get_client(args)
+    interval = args.interval
+    sort_key = args.sort
+    limit = args.limit
+
+    sort_field_map = {
+        "cost": "total_cost",
+        "tokens": "total_tokens",
+        "events": "event_count",
+    }
+    sort_field = sort_field_map.get(sort_key, "total_cost")
+
+    def _bar(value: float, max_val: float, width: int = 20) -> str:
+        if max_val <= 0:
+            return " " * width
+        filled = int(round(value / max_val * width))
+        filled = min(filled, width)
+        return "█" * filled + "░" * (width - filled)
+
+    def _fetch_and_display() -> None:
+        try:
+            resp = client.get("/sessions", params={"limit": limit * 2})
+            resp.raise_for_status()
+        except httpx.HTTPError as exc:
+            print(f"⚠ Error fetching sessions: {exc}", file=sys.stderr)
+            return
+
+        data = resp.json()
+        sessions = data if isinstance(data, list) else data.get("sessions", [data])
+
+        # Enrich with cost data if sorting by cost
+        if sort_key == "cost":
+            for s in sessions:
+                if "total_cost" not in s:
+                    sid = s.get("id", "")
+                    try:
+                        cr = client.get(f"/sessions/{sid}/costs")
+                        cr.raise_for_status()
+                        cost_data = cr.json()
+                        s["total_cost"] = cost_data.get("total_cost", 0)
+                    except httpx.HTTPError:
+                        s["total_cost"] = 0
+
+        # Sort and limit
+        sessions.sort(key=lambda s: s.get(sort_field, 0) or 0, reverse=True)
+        sessions = sessions[:limit]
+
+        # Clear screen
+        if sys.stdout.isatty():
+            print("\033[2J\033[H", end="")
+
+        print(f"⚡ AgentLens Top — sorted by {sort_key} | {endpoint} | Ctrl+C to stop")
+        print(f"   Refreshing every {interval}s\n")
+
+        if not sessions:
+            print("  (no sessions)")
+            return
+
+        max_val = max((s.get(sort_field, 0) or 0) for s in sessions) or 1
+
+        # Header
+        print(f"  {'#':<3} {'SESSION':<12} {'AGENT':<18} {'STATUS':<10} {'EVENTS':>7} {'TOKENS':>10} {'COST':>10}  {'':20}")
+        print(f"  {'─'*3} {'─'*12} {'─'*18} {'─'*10} {'─'*7} {'─'*10} {'─'*10}  {'─'*20}")
+
+        for i, s in enumerate(sessions, 1):
+            sid = str(s.get("id", ""))[:12]
+            agent = str(s.get("agent_name", "") or "")[:18]
+            status = str(s.get("status", "") or "")[:10]
+            events = s.get("event_count", 0) or 0
+            tokens = s.get("total_tokens", 0) or 0
+            cost = s.get("total_cost", 0) or 0
+            val = s.get(sort_field, 0) or 0
+            bar = _bar(val, max_val)
+
+            cost_str = f"${cost:.4f}" if cost > 0 else "—"
+            print(f"  {i:<3} {sid:<12} {agent:<18} {status:<10} {events:>7} {tokens:>10} {cost_str:>10}  {bar}")
+
+        print(f"\n  Showing {len(sessions)} sessions")
+
+    print(f"⚡ AgentLens Top — connecting to {endpoint}...")
+    try:
+        while True:
+            _fetch_and_display()
+            _time.sleep(interval)
+    except KeyboardInterrupt:
+        print("\n👋 Stopped.")
+
+
 def cmd_status(args: argparse.Namespace) -> None:
     client, endpoint = _get_client(args)
     try:
@@ -365,6 +458,12 @@ def main() -> None:
     p.add_argument("--type", help="Filter by event type")
     p.add_argument("--interval", type=float, default=2.0, help="Poll interval in seconds (default: 2)")
 
+    # top
+    p = sub.add_parser("top", help="Live session leaderboard (like htop for agents)")
+    p.add_argument("--sort", choices=["cost", "tokens", "events"], default="cost", help="Sort sessions by (default: cost)")
+    p.add_argument("--limit", type=int, default=15, help="Max sessions to show (default: 15)")
+    p.add_argument("--interval", type=float, default=3.0, help="Refresh interval in seconds (default: 3)")
+
     # status
     sub.add_parser("status", help="Check backend connectivity")
 
@@ -381,6 +480,7 @@ def main() -> None:
         "compare": cmd_compare,
         "alerts": cmd_alerts,
         "tail": cmd_tail,
+        "top": cmd_top,
         "status": cmd_status,
     }
     commands[args.command](args)
