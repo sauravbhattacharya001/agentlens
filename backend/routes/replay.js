@@ -205,21 +205,69 @@ router.get(
       return res.status(404).json({ error: "Session not found" });
     }
 
-    const events = db
-      .prepare("SELECT * FROM events WHERE session_id = ? ORDER BY timestamp ASC")
-      .all(sessionId);
+    // Count total events without loading them all
+    const countRow = db
+      .prepare("SELECT COUNT(*) AS total FROM events WHERE session_id = ?")
+      .get(sessionId);
+    const totalFrames = countRow.total;
 
-    if (frameIndex >= events.length) {
-      return res.status(404).json({ error: "Frame index out of range", total_frames: events.length });
+    if (frameIndex >= totalFrames) {
+      return res.status(404).json({ error: "Frame index out of range", total_frames: totalFrames });
     }
 
-    const frames = buildFrames(events);
-    const frame = frames[frameIndex];
+    // Fetch only the target event and the previous one (for delay calculation).
+    // LIMIT 2 with OFFSET (frameIndex > 0 ? frameIndex - 1 : 0) gives us at
+    // most 2 rows: the predecessor (if any) and the target event, avoiding a
+    // full table scan + frame build for all events.
+    const offset = frameIndex > 0 ? frameIndex - 1 : 0;
+    const limit = frameIndex > 0 ? 2 : 1;
+    const nearby = db
+      .prepare("SELECT * FROM events WHERE session_id = ? ORDER BY timestamp ASC LIMIT ? OFFSET ?")
+      .all(sessionId, limit, offset);
+
+    // Build the single frame with correct delay
+    const targetEvent = frameIndex > 0 ? nearby[1] : nearby[0];
+    const prevEvent = frameIndex > 0 ? nearby[0] : null;
+
+    let delayMs = 0;
+    if (prevEvent) {
+      delayMs = Math.min(msBetween(prevEvent.timestamp, targetEvent.timestamp), 30000);
+    }
+
+    // For cumulative elapsed_ms we need the sum of all delays up to this frame.
+    // Compute it from the timestamps of the first event and the target event.
+    let elapsedMs = 0;
+    if (frameIndex > 0) {
+      const firstEvent = db
+        .prepare("SELECT timestamp FROM events WHERE session_id = ? ORDER BY timestamp ASC LIMIT 1")
+        .get(sessionId);
+      if (firstEvent) {
+        elapsedMs = msBetween(firstEvent.timestamp, targetEvent.timestamp);
+      }
+    }
+
+    const frame = {
+      index: frameIndex,
+      event_id: targetEvent.event_id,
+      event_type: targetEvent.event_type,
+      category: classifyEvent(targetEvent),
+      timestamp: targetEvent.timestamp,
+      delay_ms: delayMs,
+      elapsed_ms: elapsedMs,
+      model: targetEvent.model || null,
+      tokens_in: targetEvent.tokens_in || 0,
+      tokens_out: targetEvent.tokens_out || 0,
+      duration_ms: targetEvent.duration_ms || null,
+      input_data: safeJsonParse(targetEvent.input_data),
+      output_data: safeJsonParse(targetEvent.output_data),
+      tool_call: safeJsonParse(targetEvent.tool_call),
+      decision_trace: safeJsonParse(targetEvent.decision_trace),
+    };
 
     return res.json({
       frame,
-      total_frames: frames.length,
-      has_next: frameIndex < frames.length - 1,
+      total_frames: totalFrames,
+      has_next: frameIndex < totalFrames - 1,
       has_previous: frameIndex > 0,
     });
   })
