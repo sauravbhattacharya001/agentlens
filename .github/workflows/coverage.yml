@@ -10,7 +10,8 @@ permissions:
   contents: read
 
 jobs:
-  coverage:
+  # ── Python SDK Coverage ────────────────────────────────────────────
+  sdk-coverage:
     name: SDK Coverage (Python 3.12)
     runs-on: ubuntu-latest
     defaults:
@@ -41,10 +42,43 @@ jobs:
             --cov-branch \
             --cov-fail-under=90
 
-      - name: Upload coverage report
+      - name: Upload SDK coverage report
         if: always()
         uses: actions/upload-artifact@v7
         with:
-          name: coverage-report
+          name: sdk-coverage-report
           path: sdk/htmlcov/
+          retention-days: 14
+
+  # ── Node.js Backend Coverage ───────────────────────────────────────
+  backend-coverage:
+    name: Backend Coverage (Node.js 22)
+    runs-on: ubuntu-latest
+    defaults:
+      run:
+        working-directory: backend
+
+    steps:
+      - name: Checkout
+        uses: actions/checkout@v6
+
+      - name: Setup Node.js
+        uses: actions/setup-node@v6
+        with:
+          node-version: 22
+          cache: npm
+          cache-dependency-path: backend/package-lock.json
+
+      - name: Install dependencies
+        run: npm ci
+
+      - name: Run tests with coverage
+        run: npx jest --coverage --verbose --coverageReporters=text --coverageReporters=lcov --coverageReporters=json-summary
+
+      - name: Upload backend coverage report
+        if: always()
+        uses: actions/upload-artifact@v7
+        with:
+          name: backend-coverage-report
+          path: backend/coverage/
           retention-days: 14
