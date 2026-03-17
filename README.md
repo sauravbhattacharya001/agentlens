@@ -14,12 +14,8 @@
 [![npm version](https://img.shields.io/npm/v/agentlens-backend?logo=npm&logoColor=white)](https://www.npmjs.com/package/agentlens-backend)
 [![Python 3.9+](https://img.shields.io/badge/Python-3.9%2B-3776AB?logo=python&logoColor=white)](https://python.org)
 [![Node.js](https://img.shields.io/badge/Node.js-18%2B-339933?logo=node.js&logoColor=white)](https://nodejs.org)
-[![GitHub repo size](https://img.shields.io/github/repo-size/sauravbhattacharya001/agentlens)](https://github.com/sauravbhattacharya001/agentlens)
-[![GitHub last commit](https://img.shields.io/github/last-commit/sauravbhattacharya001/agentlens)](https://github.com/sauravbhattacharya001/agentlens/commits)
-[![GitHub issues](https://img.shields.io/github/issues/sauravbhattacharya001/agentlens)](https://github.com/sauravbhattacharya001/agentlens/issues)
-[![GitHub stars](https://img.shields.io/github/stars/sauravbhattacharya001/agentlens?style=social)](https://github.com/sauravbhattacharya001/agentlens)
 
-[Getting Started](#-getting-started) · [Features](#-features) · [SDK Reference](#-sdk-reference) · [Dashboard](#-dashboard) · [Architecture](#-architecture) · [Contributing](#-contributing) · [📖 Full Docs](https://sauravbhattacharya001.github.io/agentlens/) · [🎯 Live Demo](https://sauravbhattacharya001.github.io/agentlens/demo/)
+[Quick Start](#-quick-start) · [Features](#-features) · [SDK Guide](#-sdk-guide) · [Dashboard](#-dashboard) · [Architecture](#-architecture) · [API Reference](#-api-reference) · [📖 Full Docs](https://sauravbhattacharya001.github.io/agentlens/) · [🎯 Live Demo](https://sauravbhattacharya001.github.io/agentlens/demo/)
 
 </div>
 
@@ -27,37 +23,41 @@
 
 ## 🎯 What is AgentLens?
 
-AgentLens gives you full visibility into what your AI agents are doing, why they're doing it, and how much it costs. As AI agents become more autonomous — making decisions, calling tools, chaining actions — you need to **see inside the black box**.
+As AI agents become more autonomous — making decisions, calling tools, chaining actions — you need to **see inside the black box**. AgentLens gives you full visibility into what your agents are doing, why they're doing it, and how much it costs.
 
-AgentLens provides:
-- **Session-level tracing** for every agent run
-- **Token and cost tracking** across models and calls
-- **Decision traces** capturing *why* an agent made each choice
-- **Human-readable explanations** of agent behavior
-- **A real-time dashboard** to monitor everything visually
+**In 30 seconds:**
+
+```python
+import agentlens
+
+agentlens.init(endpoint="http://localhost:3000")
+session = agentlens.start_session(agent_name="my-agent")
+
+agentlens.track(
+    event_type="llm_call",
+    input_data={"prompt": "What is 2+2?"},
+    output_data={"response": "4"},
+    model="gpt-4",
+    tokens_in=12, tokens_out=3,
+    reasoning="Simple arithmetic — answered directly",
+)
+
+print(agentlens.explain())  # Human-readable summary of what happened
+agentlens.end_session()
+```
+
+Then open `http://localhost:3000` to see session traces, token charts, cost breakdowns, and decision timelines.
 
 ## ✨ Features
 
-| Feature | Description |
-|---------|-------------|
-| 📊 **Session Tracking** | Group agent actions into sessions with full execution traces |
-| 🛠️ **Tool Call Capture** | Record every tool invocation with inputs, outputs, and duration |
-| 💰 **Token Usage** | Track token consumption and costs across models |
-| 🧠 **Decision Traces** | Capture the reasoning behind each agent decision |
-| 📈 **Visual Timeline** | Interactive timeline view of agent actions in the dashboard |
-| 💡 **Explainability** | Generate human-readable summaries of agent behavior |
-| 🎨 **Decorators** | Zero-config instrumentation with Python decorators |
-| 📈 **Analytics Dashboard** | Aggregate stats, model usage, hourly activity heatmap, sessions-over-time |
-| ⚖️ **Session Comparison** | Compare two sessions side-by-side — token deltas, event breakdowns, tool usage diffs |
-| 💲 **Cost Estimation** | Configurable model pricing, per-session/event cost tracking, cost breakdown dashboard |
-| 🔔 **Alert Rules** | Configurable alert rules with metric thresholds and event triggers |
-| 🏷️ **Session Tags** | Tag sessions for filtering, organization, and retention exemption |
-| 📝 **Annotations** | Timestamped notes on sessions and events for auditing |
-| 🗄️ **Data Retention** | Configurable retention policies with auto-purge and exempt tags |
-| 🔍 **Event Search** | Rich filtering across sessions — by type, model, tokens, duration |
-| 🔬 **Anomaly Detection** | Z-score statistical analysis to detect latency spikes, token surges, error bursts |
-| 🏥 **Health Scoring** | Grade sessions A–F based on error rates, latency, tool failures |
-| 💸 **Cost Budgets** | Per-agent and global spending limits with real-time tracking, warnings, and overage detection |
+| Category | Capabilities |
+|----------|-------------|
+| **Tracing** | Session-level execution traces, interactive timelines, tool call capture with I/O and duration |
+| **Cost & Tokens** | Per-model token tracking, configurable pricing, per-session cost breakdowns, budget limits with overage alerts |
+| **Explainability** | Decision traces capturing agent reasoning, human-readable behavior summaries |
+| **Analysis** | Anomaly detection (z-score), health scoring (A–F grades), session comparison, error analysis by type/agent/model |
+| **Ops** | Alert rules with metric thresholds, webhooks, data retention policies, correlation rules with scheduling |
+| **Organization** | Session tags, bookmarks, annotations, dependency graphing, agent leaderboard, postmortem reports |
 
 ## 🏗️ Architecture
 
@@ -73,319 +73,156 @@ AgentLens provides:
                                      └──────────────────┘
 ```
 
-| Component | Directory | Tech Stack |
-|-----------|-----------|------------|
+| Component | Directory | Stack |
+|-----------|-----------|-------|
 | **Python SDK** | `sdk/` | Python 3.9+, Pydantic, httpx |
-| **Backend API** | `backend/` | Node.js, Express, better-sqlite3 |
+| **Backend API** | `backend/` | Node.js 18+, Express, better-sqlite3 |
 | **Dashboard** | `dashboard/` | Vanilla HTML/CSS/JS (no build step) |
 
-## 🚀 Getting Started
+## 🚀 Quick Start
 
 ### Prerequisites
 
-- **Python 3.9+** (for the SDK)
-- **Node.js 18+** (for the backend)
-- **npm** (comes with Node.js)
+- **Python 3.9+** (SDK) and **Node.js 18+** (backend)
 
-### 1. Clone the repo
+### 1. Start the backend
 
 ```bash
 git clone https://github.com/sauravbhattacharya001/agentlens.git
-cd agentlens
-```
-
-### 2. Start the Backend
-
-```bash
-cd backend
+cd agentlens/backend
 npm install
-node seed.js      # Load demo data (optional)
-node server.js    # Starts on http://localhost:3000
+node seed.js      # Optional: load demo data
+node server.js    # http://localhost:3000
 ```
 
 The dashboard is served automatically at [http://localhost:3000](http://localhost:3000).
 
-### 3. Install the Python SDK
+### 2. Install the SDK
 
 ```bash
 pip install agentlens
 ```
 
-Or install from source for development:
+Or from source: `cd sdk && pip install -e .`
 
-```bash
-cd sdk
-pip install -e .
-```
-
-### 4. Use the CLI
-
-After installing the SDK, you get the `agentlens` command:
-
-```bash
-# Check backend connectivity
-agentlens status
-
-# List recent sessions
-agentlens sessions --limit 10
-
-# View cost breakdown for a session
-agentlens costs <session_id>
-
-# Search events by type or model
-agentlens events --type llm_call --model gpt-4
-
-# Export a session to JSON or CSV
-agentlens export <session_id> --format csv -o report.csv
-
-# Health score for a session (A–F grading)
-agentlens health <session_id>
-
-# Compare two sessions side-by-side
-agentlens compare <session_a> <session_b>
-
-# View aggregate analytics
-agentlens analytics
-
-# List recent alerts
-agentlens alerts
-```
-
-Configure via environment variables:
-```bash
-export AGENTLENS_ENDPOINT=http://localhost:3000
-export AGENTLENS_API_KEY=your-key
-```
-
-Or pass `--endpoint` and `--api-key` flags to any command.
-
-### 5. Instrument Your Agent
+### 3. Instrument your agent
 
 ```python
 import agentlens
 
-# Initialize the SDK
 agentlens.init(api_key="your-key", endpoint="http://localhost:3000")
-
-# Start a tracking session
 session = agentlens.start_session(agent_name="my-agent")
 
-# Track events manually
-agentlens.track(
-    event_type="llm_call",
-    input_data={"prompt": "What is 2+2?"},
-    output_data={"response": "4"},
-    model="gpt-4",
-    tokens_in=12,
-    tokens_out=3,
-    reasoning="Simple arithmetic question, answered directly",
-)
+# Track events manually...
+agentlens.track(event_type="llm_call", model="gpt-4", ...)
 
-# Get a human-readable explanation
-print(agentlens.explain())
+# ...or use decorators for zero-config instrumentation
+@agentlens.track_agent(model="gpt-4")
+def my_agent(prompt):
+    return call_llm(prompt)
 
-# End the session
+@agentlens.track_tool_call(tool_name="web_search")
+def search(query):
+    return do_search(query)
+
 agentlens.end_session()
 ```
 
-### 5. Run the Demo
+### 4. Run the demo
 
 ```bash
-cd sdk/examples
-python mock_agent.py
-# Then open http://localhost:3000 to see the results
+cd sdk/examples && python mock_agent.py
+# Then open http://localhost:3000
 ```
 
-## 📖 SDK Reference
+### 5. Use the CLI
 
-### Initialization
-
-```python
-import agentlens
-
-# Connect to your AgentLens backend
-tracker = agentlens.init(
-    api_key="your-key",           # API key for authentication
-    endpoint="http://localhost:3000"  # Backend URL
-)
+```bash
+agentlens status                              # Check backend connectivity
+agentlens sessions --limit 10                 # List recent sessions
+agentlens costs <session_id>                  # Cost breakdown
+agentlens health <session_id>                 # Health score (A–F)
+agentlens compare <session_a> <session_b>     # Side-by-side comparison
+agentlens events --type llm_call --model gpt-4  # Search events
+agentlens export <session_id> --format csv -o report.csv
+agentlens analytics                           # Aggregate stats
+agentlens alerts                              # Recent alerts
 ```
+
+Configure via environment variables (`AGENTLENS_ENDPOINT`, `AGENTLENS_API_KEY`) or `--endpoint`/`--api-key` flags.
+
+## 📖 SDK Guide
 
 ### Session Management
 
 ```python
-# Start a session
 session = agentlens.start_session(
-    agent_name="my-agent",        # Name of the agent
-    metadata={"env": "prod"}      # Optional metadata
+    agent_name="my-agent",
+    metadata={"env": "prod"}
 )
-
-# End the session (flushes all pending events)
+# ... track events ...
 agentlens.end_session()
 ```
 
-### Manual Event Tracking
+### Event Tracking
 
 ```python
-event = agentlens.track(
-    event_type="llm_call",        # Event type: llm_call, tool_call, generic
-    input_data={"prompt": "..."},  # Input to the operation
-    output_data={"text": "..."},   # Output from the operation
-    model="gpt-4",                # Model used (if applicable)
-    tokens_in=100,                # Input tokens
-    tokens_out=50,                # Output tokens
-    reasoning="...",              # Why the agent made this decision
-    tool_name="search",           # Tool name (for tool calls)
-    tool_input={"query": "..."},  # Tool input
-    tool_output={"results": []},  # Tool output
-    duration_ms=1500.0,           # Execution duration in ms
+agentlens.track(
+    event_type="llm_call",         # llm_call | tool_call | generic
+    input_data={"prompt": "..."},
+    output_data={"text": "..."},
+    model="gpt-4",
+    tokens_in=100, tokens_out=50,
+    reasoning="...",               # Decision trace
+    tool_name="search",            # For tool_call events
+    tool_input={"query": "..."},
+    tool_output={"results": []},
+    duration_ms=1500.0,
 )
 ```
 
-### Decorators (Zero-Config)
+### Decorators
 
 ```python
 from agentlens import track_agent, track_tool_call
 
 @track_agent(model="gpt-4")
 def my_agent(prompt):
-    """Automatically tracked — captures input, output, and timing."""
+    """Automatically captures input, output, timing, and tokens."""
     return call_llm(prompt)
 
 @track_tool_call(tool_name="web_search")
 def search(query):
-    """Automatically tracked — captures tool input/output."""
+    """Automatically captures tool I/O."""
     return do_search(query)
 ```
 
 ### Explainability
 
 ```python
-# Get a human-readable explanation of agent behavior
 explanation = agentlens.explain()
-print(explanation)
-# Output: "The agent received a question about arithmetic.
-#          It called GPT-4 which responded with '4'.
-#          Total tokens used: 15 (12 in, 3 out)."
+# "The agent received a question about arithmetic.
+#  It called GPT-4 which responded with '4'.
+#  Total tokens used: 15 (12 in, 3 out)."
+```
+
+### Cost Tracking
+
+```python
+costs = agentlens.get_costs()
+print(f"Total: ${costs['total_cost']:.4f}")
+
+# Configure custom pricing (per 1M tokens)
+agentlens.set_pricing({
+    "my-model": {"input_cost_per_1m": 5.00, "output_cost_per_1m": 15.00}
+})
 ```
 
 ### Session Comparison
 
 ```python
-# Compare two sessions side-by-side
-result = agentlens.compare_sessions(
-    session_a="abc123",
-    session_b="def456",
-)
-
-# Result includes metrics, deltas, and shared breakdowns
+result = agentlens.compare_sessions("session-a", "session-b")
 print(f"Token delta: {result['deltas']['total_tokens']['percent']}%")
-print(f"Session A events: {result['session_a']['event_count']}")
-print(f"Session B events: {result['session_b']['event_count']}")
-print(f"Shared tools: {result['shared']['tools']}")
-```
-
-### Cost Estimation
-
-```python
-# Get cost breakdown for the current session
-costs = agentlens.get_costs()
-print(f"Total cost: ${costs['total_cost']:.4f}")
-print(f"Input cost: ${costs['total_input_cost']:.4f}")
-print(f"Output cost: ${costs['total_output_cost']:.4f}")
-
-# Per-model breakdown
-for model, mc in costs['model_costs'].items():
-    print(f"  {model}: ${mc['total_cost']:.4f} ({mc['calls']} calls)")
-
-# View/update model pricing (per 1M tokens, USD)
-pricing = agentlens.get_pricing()
-print(pricing['pricing'])  # Current pricing config
-
-# Set custom pricing
-agentlens.set_pricing({
-    "my-custom-model": {
-        "input_cost_per_1m": 5.00,
-        "output_cost_per_1m": 15.00,
-    }
-})
-```
-
-### Event Search
-
-```python
-# Search events with rich filtering
-results = tracker.search_events(
-    q="error",                    # Full-text search
-    event_type="tool_call",       # Filter by type
-    model="gpt-4",               # Filter by model
-    min_tokens=100,               # Minimum token count
-    has_tools=True,               # Only events with tool calls
-    after="2024-01-01T00:00:00Z", # Date range
-    limit=50,                     # Max results
-)
-for event in results["events"]:
-    print(f"{event['event_type']}: {event.get('model', 'N/A')}")
-```
-
-### Session Tags
-
-```python
-# Add tags to the current session
-tracker.add_tags(["production", "v2.0", "critical"])
-
-# Remove specific tags
-tracker.remove_tags(["v2.0"])
-
-# Get tags for a session
-tags = tracker.get_tags()
-
-# List all tags across sessions
-all_tags = tracker.list_all_tags()
-
-# Find sessions by tag
-sessions = tracker.list_sessions_by_tag("production")
-```
-
-### Annotations
-
-```python
-# Annotate a session with timestamped notes
-tracker.annotate(
-    "Latency spike detected at step 5",
-    annotation_type="warning",
-    author="monitoring-bot",
-)
-tracker.annotate(
-    "Reached goal state",
-    annotation_type="milestone",
-)
-
-# Retrieve annotations
-annotations = tracker.get_annotations(annotation_type="warning")
-for ann in annotations["annotations"]:
-    print(f"[{ann['type']}] {ann['text']}")
-
-# Update or delete annotations
-tracker.update_annotation("ann-id-123", text="Updated note")
-tracker.delete_annotation("ann-id-456")
-```
-
-### Alert Rules
-
-```python
-# Create an alert rule
-tracker.create_alert_rule(
-    name="High Error Rate",
-    metric="error_rate",
-    condition="gt",
-    threshold=0.1,
-    description="Fires when error rate exceeds 10%",
-)
-
-# List and evaluate rules
-rules = tracker.list_alert_rules()
-alerts = tracker.evaluate_alerts()  # Check all rules against recent data
-alert_events = tracker.get_alert_events(limit=20)
 ```
 
 ### Anomaly Detection
@@ -393,290 +230,102 @@ alert_events = tracker.get_alert_events(limit=20)
 ```python
 from agentlens import AnomalyDetector, AnomalyDetectorConfig
 
-config = AnomalyDetectorConfig(
-    warning_threshold=2.0,   # 2σ = warning
-    critical_threshold=3.0,  # 3σ = critical
-)
-detector = AnomalyDetector(config)
-
-# Analyze a session for anomalies
+detector = AnomalyDetector(AnomalyDetectorConfig(
+    warning_threshold=2.0,    # 2σ warning
+    critical_threshold=3.0,   # 3σ critical
+))
 report = detector.analyze(session_events)
-print(f"Found {len(report.anomalies)} anomalies")
 for anomaly in report.anomalies:
-    print(f"  [{anomaly.severity.value}] {anomaly.kind.value}: {anomaly.description}")
+    print(f"[{anomaly.severity.value}] {anomaly.kind.value}: {anomaly.description}")
 ```
 
 ### Health Scoring
 
 ```python
-from agentlens import HealthScorer, HealthThresholds
+from agentlens import HealthScorer
 
-scorer = HealthScorer()
-report = scorer.score(session_events)
-
+report = HealthScorer().score(session_events)
 print(f"Overall: {report.overall_grade.value} ({report.overall_score:.0f}/100)")
-for metric in report.metrics:
-    print(f"  {metric.name}: {metric.grade.value} ({metric.score:.0f}/100)")
+```
+
+### Tags, Annotations & Alerts
+
+```python
+# Tags
+tracker.add_tags(["production", "v2.0"])
+tracker.list_sessions_by_tag("production")
+
+# Annotations
+tracker.annotate("Latency spike at step 5", annotation_type="warning", author="bot")
+
+# Alert rules
+tracker.create_alert_rule(
+    name="High Error Rate", metric="error_rate",
+    condition="gt", threshold=0.1,
+)
+alerts = tracker.evaluate_alerts()
 ```
 
 ### Data Retention
 
 ```python
-# Configure retention policy
 tracker.set_retention_config(
-    max_age_days=30,              # Delete sessions older than 30 days
-    max_sessions=10000,           # Keep max 10k sessions
-    exempt_tags=["production"],   # Never delete production sessions
-    auto_purge=True,              # Enable automatic cleanup
+    max_age_days=30, max_sessions=10000,
+    exempt_tags=["production"], auto_purge=True,
 )
-
-# Preview what would be purged
 preview = tracker.purge(dry_run=True)
-print(preview["message"])
-
-# Actually purge
-result = tracker.purge()
-print(f"Purged {result['purged_sessions']} sessions")
 ```
-
-### Data Models
-
-| Model | Description |
-|-------|-------------|
-| `AgentEvent` | A single observable event (LLM call, tool use, decision) |
-| `ToolCall` | A tool/function invocation with input and output |
-| `DecisionTrace` | The reasoning behind an agent's decision |
-| `Session` | A collection of events for one agent run |
-| `AlertRule` | A configurable alert rule with metric and threshold |
-| `Anomaly` | A detected statistical anomaly in session metrics |
-| `HealthReport` | Graded health assessment of a session (A–F) |
 
 ## 📊 Dashboard
 
-The dashboard provides a real-time view of your agent sessions:
-
-- **Sessions List** — Filter by status (active, completed, error)
-- **Session Comparison** — Select two sessions and compare side-by-side with visual diffs
-- **Analytics Overview** — Click 📈 Analytics to see aggregate stats, model usage, hourly activity, and top agents
-- **Timeline View** — Interactive timeline of every event in a session
-- **Token Charts** — Per-event and cumulative token usage visualization
-- **Explain Tab** — Human-readable behavior summaries
-- **Costs Tab** — Per-event and per-model cost breakdowns, cumulative cost chart, configurable model pricing
-
 The dashboard is a lightweight HTML/CSS/JS app served directly by the backend — no build step required.
 
-## 🔌 API Endpoints
+- **Sessions List** — Browse and filter by status, search across sessions
+- **Timeline View** — Interactive timeline of every event in a session
+- **Token & Cost Charts** — Per-event and cumulative usage visualization
+- **Explain Tab** — Human-readable behavior summaries
+- **Session Comparison** — Side-by-side diffs with visual deltas
+- **Analytics Overview** — Aggregate stats, model usage, hourly activity heatmap
 
-### Sessions
+## 🔌 API Reference
 
-| Endpoint | Method | Description |
-|----------|--------|-------------|
-| `/sessions` | GET | List all sessions (paginated) |
-| `/sessions/search` | GET | Full-text search across sessions with filters |
-| `/sessions/:id` | GET | Get session details with events |
-| `/sessions/:id/events` | GET | Get events for a session |
-| `/sessions/:id/events/search` | GET | Search events within a session |
-| `/sessions/:id/explain` | GET | Human-readable explanation of session behavior |
-| `/sessions/:id/export` | GET | Export session data as JSON or CSV |
-| `/sessions/compare` | POST | Compare two sessions side-by-side |
+The backend exposes a comprehensive REST API. Key endpoint groups:
 
-### Events
+| Group | Base Path | Description |
+|-------|-----------|-------------|
+| **Sessions** | `/sessions` | List, search, get details, export, compare |
+| **Events** | `/events` | Ingest events (batched, up to 500/call) |
+| **Analytics** | `/analytics` | Aggregate stats, performance metrics, heatmap |
+| **Pricing & Costs** | `/pricing` | Model pricing config, per-session cost calculation |
+| **Alerts** | `/alerts` | Alert rules, evaluation, event history |
+| **Webhooks** | `/webhooks` | Webhook management, test deliveries, delivery history |
+| **Correlations** | `/correlations` | Correlation rules, groups, scheduling |
+| **Tags** | `/tags` | Session tagging and tag-based queries |
+| **Bookmarks** | `/bookmarks` | Session bookmarking |
+| **Annotations** | `/annotations` | Timestamped notes on sessions/events |
+| **Baselines** | `/baselines` | Agent performance baselines and checks |
+| **Errors** | `/errors` | Error analysis by type, agent, and model |
+| **Dependencies** | `/dependencies` | Service dependency graphs and trends |
+| **Leaderboard** | `/leaderboard` | Top-performing agents ranking |
+| **Postmortem** | `/postmortem` | Auto-generated postmortem reports |
+| **Retention** | `/retention` | Data retention config and manual purge |
+| **Health** | `/health` | Health check |
 
-| Endpoint | Method | Description |
-|----------|--------|-------------|
-| `/events` | POST | Ingest events (batched, up to 500 per call) |
-
-### Analytics
-
-| Endpoint | Method | Description |
-|----------|--------|-------------|
-| `/analytics` | GET | Aggregate statistics across all sessions |
-| `/analytics/performance` | GET | Performance metrics (latency, throughput) |
-| `/analytics/heatmap` | GET | Activity heatmap data |
-| `/analytics/cache` | GET | Cache statistics |
-
-### Pricing & Costs
-
-| Endpoint | Method | Description |
-|----------|--------|-------------|
-| `/pricing` | GET | Get model pricing configuration |
-| `/pricing` | PUT | Update model pricing (per 1M tokens) |
-| `/pricing/:model` | DELETE | Remove custom pricing for a model |
-| `/pricing/costs/:id` | GET | Calculate costs for a session |
-
-### Alerts
-
-| Endpoint | Method | Description |
-|----------|--------|-------------|
-| `/alerts/rules` | GET | List alert rules |
-| `/alerts/rules` | POST | Create an alert rule |
-| `/alerts/rules/:ruleId` | PUT | Update an alert rule |
-| `/alerts/rules/:ruleId` | DELETE | Delete an alert rule |
-| `/alerts/evaluate` | POST | Evaluate all enabled rules now |
-| `/alerts/events` | GET | List triggered alert events |
-| `/alerts/events/:alertId/acknowledge` | PUT | Acknowledge an alert |
-| `/alerts/metrics` | GET | List available alert metrics and operators |
-
-### Webhooks
-
-| Endpoint | Method | Description |
-|----------|--------|-------------|
-| `/webhooks` | GET | List configured webhooks |
-| `/webhooks` | POST | Create a webhook (SSRF-safe URL validation) |
-| `/webhooks/:webhookId` | PUT | Update a webhook |
-| `/webhooks/:webhookId` | DELETE | Delete a webhook |
-| `/webhooks/:webhookId/test` | POST | Send a test delivery |
-| `/webhooks/:webhookId/deliveries` | GET | List delivery history |
-
-### Correlations
-
-| Endpoint | Method | Description |
-|----------|--------|-------------|
-| `/correlations/rules` | GET | List correlation rules |
-| `/correlations/rules` | POST | Create a correlation rule |
-| `/correlations/rules/:ruleId` | GET | Get a correlation rule |
-| `/correlations/rules/:ruleId` | DELETE | Delete a correlation rule |
-| `/correlations/rules/:ruleId/run` | POST | Run a rule manually |
-| `/correlations/groups` | GET | List correlation groups |
-| `/correlations/groups/:groupId` | GET | Get a group with members |
-| `/correlations/groups/:groupId` | DELETE | Delete a correlation group |
-| `/correlations/event/:eventId` | GET | Get correlations for an event |
-| `/correlations/stats` | GET | Correlation statistics |
-
-### Correlation Scheduler
-
-| Endpoint | Method | Description |
-|----------|--------|-------------|
-| `/correlation-scheduler/stream` | GET | SSE stream for real-time correlation events |
-| `/correlation-scheduler/schedules` | GET | List all schedules |
-| `/correlation-scheduler/schedules` | POST | Create/update a schedule |
-| `/correlation-scheduler/schedules/:ruleId` | DELETE | Remove a schedule |
-| `/correlation-scheduler/scheduler/start` | POST | Start the scheduler loop |
-| `/correlation-scheduler/scheduler/stop` | POST | Stop the scheduler loop |
-| `/correlation-scheduler/scheduler/status` | GET | Get scheduler status |
-
-### Tags
-
-| Endpoint | Method | Description |
-|----------|--------|-------------|
-| `/tags/tags` | GET | List all tags with counts |
-| `/tags/by-tag/:tag` | GET | List sessions by tag |
-| `/tags/:id/tags` | GET | Get tags for a session |
-| `/tags/:id/tags` | POST | Add tags to a session |
-| `/tags/:id/tags` | DELETE | Remove a tag from a session |
-
-### Bookmarks
-
-| Endpoint | Method | Description |
-|----------|--------|-------------|
-| `/bookmarks` | GET | List all bookmarked sessions |
-| `/bookmarks/:sessionId` | GET | Check if a session is bookmarked |
-| `/bookmarks/:sessionId` | PUT | Add or update a bookmark |
-| `/bookmarks/:sessionId` | DELETE | Remove a bookmark |
-
-### Annotations
-
-| Endpoint | Method | Description |
-|----------|--------|-------------|
-| `/annotations` | GET | List recent annotations (paginated) |
-| `/annotations/:id/annotations` | GET | Get annotations for an event |
-| `/annotations/:id/annotations` | POST | Add an annotation to an event |
-| `/annotations/:id/annotations/:annId` | PUT | Update an annotation |
-| `/annotations/:id/annotations/:annId` | DELETE | Delete an annotation |
-
-### Baselines
-
-| Endpoint | Method | Description |
-|----------|--------|-------------|
-| `/baselines` | GET | List all agent baselines |
-| `/baselines/:agentName` | GET | Get baseline for an agent |
-| `/baselines/:agentName` | DELETE | Delete a baseline |
-| `/baselines/record` | POST | Record a new baseline snapshot |
-| `/baselines/check` | POST | Check current metrics against baseline |
-
-### Error Analysis
-
-| Endpoint | Method | Description |
-|----------|--------|-------------|
-| `/errors` | GET | List errors (paginated) |
-| `/errors/summary` | GET | Error summary statistics |
-| `/errors/by-type` | GET | Errors grouped by type |
-| `/errors/by-agent` | GET | Errors grouped by agent |
-| `/errors/by-model` | GET | Errors grouped by model |
-
-### Dependencies
-
-| Endpoint | Method | Description |
-|----------|--------|-------------|
-| `/dependencies` | GET | List all tracked service dependencies |
-| `/dependencies/agents` | GET | Agent dependency graph |
-| `/dependencies/co-occurrence` | GET | Service co-occurrence matrix |
-| `/dependencies/critical` | GET | Critical dependency paths |
-| `/dependencies/trend/:service` | GET | Usage trend for a service |
-
-### Leaderboard
-
-| Endpoint | Method | Description |
-|----------|--------|-------------|
-| `/leaderboard` | GET | Agent leaderboard (top performers) |
-
-### Postmortem
-
-| Endpoint | Method | Description |
-|----------|--------|-------------|
-| `/postmortem/:sessionId` | POST | Generate postmortem report for a session |
-| `/postmortem/candidates` | GET | List sessions eligible for postmortem |
-
-### Data Retention
-
-| Endpoint | Method | Description |
-|----------|--------|-------------|
-| `/retention/config` | GET | Get retention settings |
-| `/retention/config` | PUT | Update retention settings |
-| `/retention/stats` | GET | Database size and age statistics |
-| `/retention/purge` | POST | Manually purge old data (supports dry-run) |
-
-### Health
-
-| Endpoint | Method | Description |
-|----------|--------|-------------|
-| `/health` | GET | Health check |
-
-## 🛠️ Tech Stack
-
-- **Python SDK**: Pydantic for data validation, httpx for async HTTP
-- **Backend**: Express.js with better-sqlite3 for zero-config persistence
-- **Dashboard**: Vanilla JS with Canvas-based charts (no framework dependencies)
-- **Database**: SQLite (embedded, no external DB setup needed)
+For full endpoint details, see the [API documentation](https://sauravbhattacharya001.github.io/agentlens/).
 
 ## 🤝 Contributing
 
-Contributions are welcome! Here's how to get started:
-
-1. Fork the repo
-2. Create a feature branch (`git checkout -b feature/amazing-feature`)
-3. Make your changes
-4. Run tests: `cd sdk && pytest`
-5. Commit (`git commit -m 'Add amazing feature'`)
-6. Push (`git push origin feature/amazing-feature`)
-7. Open a Pull Request
-
-### Development Setup
+Contributions are welcome! See [CONTRIBUTING.md](CONTRIBUTING.md) for guidelines.
 
 ```bash
-# Backend (with auto-reload)
-cd backend && npm install && node server.js
-
-# SDK (editable install with dev deps)
-cd sdk && pip install -e ".[dev]"
-
-# Run SDK tests
-cd sdk && pytest
+# Quick dev setup
+cd backend && npm install && node server.js    # Backend with auto-reload
+cd sdk && pip install -e ".[dev]" && pytest     # SDK with tests
 ```
 
 ## 📄 License
 
-MIT — see [LICENSE](LICENSE) for details.
+MIT — see [LICENSE](LICENSE).
 
 ---
 
