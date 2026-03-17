@@ -14,10 +14,16 @@ jobs:
         uses: actions/setup-node@v4
         with:
           node-version: '20'
+          cache: 'npm'
+          cache-dependency-path: backend/package-lock.json
 
       - name: Install backend dependencies
         working-directory: backend
         run: npm ci
+
+      - name: Run backend tests
+        working-directory: backend
+        run: npm test
 
       - name: Setup Python
         uses: actions/setup-python@v5
@@ -26,18 +32,16 @@ jobs:
 
       - name: Install Python SDK
         working-directory: sdk
-        run: |
-          pip install -e ".[dev]"
+        run: pip install -e ".[dev]"
 
-      - name: Run SDK tests
+      - name: Run SDK tests with coverage
         working-directory: sdk
-        run: |
-          python -m pytest --tb=short -q 2>/dev/null || echo "No tests found yet — tests can be added in sdk/tests/"
+        run: python -m pytest --tb=short --cov=agentlens --cov-report=term -q || echo "Tests incomplete — check test output above"
 
       - name: Verify backend starts
         working-directory: backend
         run: |
-          timeout 5 node server.js &
-          sleep 2
-          curl -sf http://localhost:3000/health || echo "Backend health check (expected if port not ready)"
+          node server.js &
+          sleep 3
+          curl -sf http://localhost:3000/health && echo "Backend healthy"
           kill %1 2>/dev/null || true
