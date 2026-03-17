@@ -24,18 +24,21 @@ jobs:
     runs-on: ubuntu-latest
     steps:
       - name: Checkout
-        uses: actions/checkout@v6
+        uses: actions/checkout@v4
 
       - name: Build site
         run: |
           mkdir -p _site
           # Copy docs as the main site
           cp -r docs/* _site/
-          # Copy demo dashboard
+          # Copy interactive demo
           mkdir -p _site/demo
           cp -r demo/* _site/demo/
-          # Add navigation link from docs to demo
-          echo '<meta http-equiv="refresh" content="0;url=demo/">' > _site/dashboard.html
+          # Copy full dashboard app
+          mkdir -p _site/dashboard
+          cp -r dashboard/* _site/dashboard/
+          # Add navigation redirects
+          echo '<meta http-equiv="refresh" content="0;url=dashboard/">' > _site/app.html
 
       - name: Setup Pages
         uses: actions/configure-pages@v5
