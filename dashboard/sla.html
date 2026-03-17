@@ -1,0 +1,390 @@
+<!DOCTYPE html>
+<html lang="en">
+<head>
+  <meta charset="UTF-8">
+  <meta name="viewport" content="width=device-width, initial-scale=1.0">
+  <title>AgentLens — SLA Compliance</title>
+  <link rel="stylesheet" href="styles.css">
+  <style>
+    .sla-grid { display: grid; grid-template-columns: repeat(auto-fill, minmax(320px, 1fr)); gap: 16px; margin-bottom: 24px; }
+    .sla-card { background: var(--bg-secondary); border: 1px solid var(--border); border-radius: var(--radius); padding: 20px; }
+    .sla-card h3 { font-size: 16px; margin-bottom: 12px; display: flex; align-items: center; gap: 8px; }
+    .sla-card .badge { padding: 2px 8px; border-radius: 12px; font-size: 12px; font-weight: 600; }
+    .badge-ok { background: var(--green-dim); color: var(--green); }
+    .badge-warn { background: var(--yellow-dim); color: var(--yellow); }
+    .badge-fail { background: var(--red-dim); color: var(--red); }
+    .badge-none { background: var(--bg-tertiary); color: var(--text-muted); }
+    .compliance-ring { width: 100px; height: 100px; margin: 0 auto 12px; position: relative; }
+    .compliance-ring svg { width: 100%; height: 100%; transform: rotate(-90deg); }
+    .compliance-ring .ring-bg { fill: none; stroke: var(--bg-tertiary); stroke-width: 8; }
+    .compliance-ring .ring-fg { fill: none; stroke-width: 8; stroke-linecap: round; transition: stroke-dashoffset 0.6s ease; }
+    .compliance-ring .ring-label { position: absolute; top: 50%; left: 50%; transform: translate(-50%, -50%); font-size: 20px; font-weight: 700; }
+    .metric-row { display: flex; justify-content: space-between; align-items: center; padding: 6px 0; border-bottom: 1px solid var(--border); font-size: 13px; }
+    .metric-row:last-child { border-bottom: none; }
+    .metric-name { color: var(--text-secondary); }
+    .metric-val { font-weight: 600; }
+    .metric-val.pass { color: var(--green); }
+    .metric-val.fail { color: var(--red); }
+    .violation-item { background: var(--red-dim); border-radius: var(--radius-sm); padding: 8px 12px; margin: 4px 0; font-size: 13px; color: var(--red); }
+    .history-chart { width: 100%; height: 160px; position: relative; margin-top: 12px; }
+    .history-bar { display: inline-block; width: 12px; margin: 0 2px; border-radius: 3px 3px 0 0; vertical-align: bottom; cursor: pointer; transition: opacity 0.2s; }
+    .history-bar:hover { opacity: 0.7; }
+    .targets-table { width: 100%; border-collapse: collapse; font-size: 13px; }
+    .targets-table th, .targets-table td { padding: 8px 12px; text-align: left; border-bottom: 1px solid var(--border); }
+    .targets-table th { color: var(--text-muted); font-weight: 600; text-transform: uppercase; font-size: 11px; letter-spacing: 0.5px; }
+    .add-form { display: grid; grid-template-columns: 1fr 1fr 1fr 1fr auto; gap: 8px; align-items: end; margin-bottom: 16px; }
+    .add-form label { font-size: 12px; color: var(--text-secondary); display: block; margin-bottom: 4px; }
+    .add-form input, .add-form select { background: var(--bg-tertiary); color: var(--text-primary); border: 1px solid var(--border); border-radius: var(--radius-sm); padding: 6px 10px; font-size: 13px; }
+    .add-form button { padding: 6px 16px; }
+    .section-title { font-size: 18px; margin: 24px 0 12px; display: flex; align-items: center; gap: 8px; }
+    .tab-bar { display: flex; gap: 4px; margin-bottom: 16px; }
+    .tab-btn { background: var(--bg-tertiary); color: var(--text-secondary); border: 1px solid var(--border); border-radius: var(--radius-sm); padding: 6px 16px; cursor: pointer; font-size: 13px; transition: all 0.2s; }
+    .tab-btn.active { background: var(--accent); color: #fff; border-color: var(--accent); }
+    .empty-state { text-align: center; padding: 40px; color: var(--text-muted); }
+    .refresh-btn { background: var(--bg-tertiary); border: 1px solid var(--border); color: var(--text-primary); border-radius: var(--radius-sm); padding: 6px 14px; cursor: pointer; font-size: 13px; }
+    .refresh-btn:hover { background: var(--bg-hover); }
+    .tooltip { position: absolute; background: var(--bg-secondary); border: 1px solid var(--border); border-radius: var(--radius-sm); padding: 8px 12px; font-size: 12px; pointer-events: none; z-index: 100; white-space: nowrap; box-shadow: var(--shadow); display: none; }
+    .delete-btn { background: none; border: none; color: var(--red); cursor: pointer; font-size: 14px; padding: 2px 6px; }
+    .delete-btn:hover { opacity: 0.7; }
+    .check-btn { background: var(--accent); color: #fff; border: none; border-radius: var(--radius-sm); padding: 4px 12px; cursor: pointer; font-size: 12px; }
+    .check-btn:hover { background: var(--accent-hover); }
+  </style>
+</head>
+<body>
+  <div id="app">
+    <header class="header">
+      <div class="header-left">
+        <h1 class="logo">🔍 AgentLens</h1>
+        <span class="tagline">SLA Compliance</span>
+      </div>
+      <div class="header-right">
+        <a href="index.html" class="btn btn-alert-header" style="text-decoration:none">📋 Sessions</a>
+        <a href="errors.html" class="btn btn-alert-header" style="text-decoration:none">🐛 Errors</a>
+        <a href="scorecards.html" class="btn btn-alert-header" style="text-decoration:none">🏅 Scorecards</a>
+        <a href="costs.html" class="btn btn-alert-header" style="text-decoration:none">💰 Costs</a>
+        <button class="refresh-btn" onclick="refreshAll()">↻ Refresh</button>
+      </div>
+    </header>
+
+    <main class="main" style="padding: 24px;">
+      <div class="tab-bar">
+        <button class="tab-btn active" onclick="switchTab('overview')">Overview</button>
+        <button class="tab-btn" onclick="switchTab('targets')">Targets</button>
+        <button class="tab-btn" onclick="switchTab('history')">History</button>
+      </div>
+
+      <!-- Overview Tab -->
+      <div id="tab-overview" class="tab-content">
+        <div id="summaryCards" class="sla-grid"></div>
+        <div id="emptyOverview" class="empty-state" style="display:none">
+          <p>📋 No SLA targets configured yet</p>
+          <p style="font-size:13px; margin-top:8px">Switch to the <strong>Targets</strong> tab to add SLA targets for your agents.</p>
+        </div>
+      </div>
+
+      <!-- Targets Tab -->
+      <div id="tab-targets" class="tab-content" style="display:none">
+        <h3 class="section-title">➕ Add SLA Target</h3>
+        <div class="add-form" id="addForm">
+          <div>
+            <label>Agent Name</label>
+            <input type="text" id="inputAgent" placeholder="e.g. planner-agent" />
+          </div>
+          <div>
+            <label>Metric</label>
+            <select id="inputMetric">
+              <option value="p50_latency_ms">P50 Latency (ms)</option>
+              <option value="p95_latency_ms">P95 Latency (ms)</option>
+              <option value="p99_latency_ms">P99 Latency (ms)</option>
+              <option value="error_rate_pct">Error Rate (%)</option>
+              <option value="avg_tokens_in">Avg Tokens In</option>
+              <option value="avg_tokens_out">Avg Tokens Out</option>
+              <option value="max_duration_ms">Max Duration (ms)</option>
+              <option value="min_throughput">Min Throughput</option>
+            </select>
+          </div>
+          <div>
+            <label>Threshold</label>
+            <input type="number" id="inputThreshold" placeholder="e.g. 500" step="any" />
+          </div>
+          <div>
+            <label>Comparison</label>
+            <select id="inputComparison">
+              <option value="lte">≤ (at most)</option>
+              <option value="gte">≥ (at least)</option>
+              <option value="lt">&lt; (less than)</option>
+              <option value="gt">&gt; (greater than)</option>
+              <option value="eq">= (exactly)</option>
+            </select>
+          </div>
+          <div>
+            <label>&nbsp;</label>
+            <button class="btn" style="background:var(--green);color:#fff;border:none;padding:6px 16px;border-radius:var(--radius-sm);cursor:pointer" onclick="addTarget()">Add</button>
+          </div>
+        </div>
+        <h3 class="section-title">📋 Current Targets</h3>
+        <div id="targetsTableWrap">
+          <table class="targets-table">
+            <thead><tr><th>Agent</th><th>Metric</th><th>Comparison</th><th>Threshold</th><th>Updated</th><th></th></tr></thead>
+            <tbody id="targetsBody"></tbody>
+          </table>
+        </div>
+        <div id="emptyTargets" class="empty-state" style="display:none">No targets configured.</div>
+      </div>
+
+      <!-- History Tab -->
+      <div id="tab-history" class="tab-content" style="display:none">
+        <div style="display:flex; gap:12px; align-items:end; margin-bottom:16px;">
+          <div>
+            <label style="font-size:12px;color:var(--text-secondary);display:block;margin-bottom:4px">Agent</label>
+            <select id="historyAgent" style="background:var(--bg-tertiary);color:var(--text-primary);border:1px solid var(--border);border-radius:var(--radius-sm);padding:6px 10px;font-size:13px" onchange="loadHistory()"></select>
+          </div>
+          <button class="refresh-btn" onclick="loadHistory()">Load</button>
+        </div>
+        <div id="historyChartWrap"></div>
+        <div id="historyList"></div>
+        <div id="emptyHistory" class="empty-state" style="display:none">No compliance history found. Run a compliance check first.</div>
+      </div>
+    </main>
+
+    <div class="tooltip" id="tooltip"></div>
+  </div>
+
+<script>
+const API = window.location.origin.includes('file:') ? 'http://localhost:3000/api' : `${window.location.origin}/api`;
+
+const METRIC_LABELS = {
+  p50_latency_ms: 'P50 Latency',
+  p95_latency_ms: 'P95 Latency',
+  p99_latency_ms: 'P99 Latency',
+  error_rate_pct: 'Error Rate',
+  avg_tokens_in: 'Avg Tokens In',
+  avg_tokens_out: 'Avg Tokens Out',
+  max_duration_ms: 'Max Duration',
+  min_throughput: 'Min Throughput',
+};
+
+const COMP_LABELS = { lte: '≤', gte: '≥', lt: '<', gt: '>', eq: '=' };
+
+let allTargets = [];
+let allAgents = [];
+
+// ── Tab switching ──
+function switchTab(name) {
+  document.querySelectorAll('.tab-content').forEach(el => el.style.display = 'none');
+  document.querySelectorAll('.tab-btn').forEach(el => el.classList.remove('active'));
+  document.getElementById('tab-' + name).style.display = '';
+  event.target.classList.add('active');
+  if (name === 'overview') loadOverview();
+  else if (name === 'targets') loadTargets();
+  else if (name === 'history') loadHistory();
+}
+
+// ── API helpers ──
+async function api(path, opts) {
+  try {
+    const res = await fetch(API + path, opts);
+    if (!res.ok) { const e = await res.json().catch(() => ({})); throw new Error(e.error || res.statusText); }
+    return res.json();
+  } catch (e) { console.error('API error:', e); return null; }
+}
+
+// ── Overview ──
+async function loadOverview() {
+  const data = await api('/sla/summary');
+  const wrap = document.getElementById('summaryCards');
+  const empty = document.getElementById('emptyOverview');
+  if (!data || !data.agents || data.agents.length === 0) {
+    wrap.innerHTML = '';
+    empty.style.display = '';
+    return;
+  }
+  empty.style.display = 'none';
+  allAgents = data.agents.map(a => a.agent_name);
+  wrap.innerHTML = data.agents.map(a => renderAgentCard(a)).join('');
+}
+
+function renderAgentCard(agent) {
+  const lc = agent.latest_check;
+  const pct = lc ? lc.compliance_pct : null;
+  const badgeClass = pct === null ? 'badge-none' : pct >= 100 ? 'badge-ok' : pct >= 80 ? 'badge-warn' : 'badge-fail';
+  const badgeText = pct === null ? 'No data' : pct >= 100 ? 'Compliant' : 'Violated';
+  const color = pct === null ? 'var(--text-muted)' : pct >= 100 ? 'var(--green)' : pct >= 80 ? 'var(--yellow)' : 'var(--red)';
+  const circumference = 2 * Math.PI * 42;
+  const offset = pct !== null ? circumference - (pct / 100) * circumference : circumference;
+
+  let metricsHtml = '';
+  if (lc && lc.violation_count > 0) {
+    metricsHtml = `<div class="violation-item">⚠️ ${lc.violation_count} violation${lc.violation_count > 1 ? 's' : ''} detected</div>`;
+  }
+
+  return `
+    <div class="sla-card">
+      <h3>${agent.agent_name} <span class="badge ${badgeClass}">${badgeText}</span></h3>
+      <div class="compliance-ring">
+        <svg viewBox="0 0 100 100">
+          <circle class="ring-bg" cx="50" cy="50" r="42"/>
+          <circle class="ring-fg" cx="50" cy="50" r="42"
+            stroke="${color}"
+            stroke-dasharray="${circumference}"
+            stroke-dashoffset="${offset}"/>
+        </svg>
+        <div class="ring-label" style="color:${color}">${pct !== null ? pct + '%' : '—'}</div>
+      </div>
+      <div style="text-align:center;font-size:12px;color:var(--text-muted);margin-bottom:8px">
+        ${agent.target_count} target${agent.target_count !== 1 ? 's' : ''} configured
+      </div>
+      ${metricsHtml}
+      ${lc ? `<div style="font-size:11px;color:var(--text-muted);margin-top:8px;text-align:center">Checked: ${new Date(lc.checked_at).toLocaleString()}</div>` : ''}
+      <div style="text-align:center;margin-top:8px">
+        <button class="check-btn" onclick="runCheck('${agent.agent_name}')">▶ Run Check</button>
+      </div>
+    </div>`;
+}
+
+// ── Targets ──
+async function loadTargets() {
+  const data = await api('/sla/targets');
+  const tbody = document.getElementById('targetsBody');
+  const empty = document.getElementById('emptyTargets');
+  if (!data || !data.targets || data.targets.length === 0) {
+    tbody.innerHTML = '';
+    empty.style.display = '';
+    document.getElementById('targetsTableWrap').style.display = 'none';
+    return;
+  }
+  empty.style.display = 'none';
+  document.getElementById('targetsTableWrap').style.display = '';
+  allTargets = data.targets;
+  allAgents = [...new Set(data.targets.map(t => t.agent_name))];
+  tbody.innerHTML = data.targets.map(t => `
+    <tr>
+      <td>${t.agent_name}</td>
+      <td>${METRIC_LABELS[t.metric] || t.metric}</td>
+      <td>${COMP_LABELS[t.comparison] || t.comparison}</td>
+      <td>${t.threshold}</td>
+      <td style="color:var(--text-muted);font-size:12px">${new Date(t.updated_at).toLocaleString()}</td>
+      <td><button class="delete-btn" onclick="deleteTarget('${t.agent_name}','${t.metric}')" title="Delete">✕</button></td>
+    </tr>
+  `).join('');
+}
+
+async function addTarget() {
+  const agent = document.getElementById('inputAgent').value.trim();
+  const metric = document.getElementById('inputMetric').value;
+  const threshold = parseFloat(document.getElementById('inputThreshold').value);
+  const comparison = document.getElementById('inputComparison').value;
+  if (!agent) return alert('Agent name required');
+  if (isNaN(threshold)) return alert('Threshold must be a number');
+  await api('/sla/targets', {
+    method: 'PUT',
+    headers: { 'Content-Type': 'application/json' },
+    body: JSON.stringify({ agent_name: agent, metric, threshold, comparison }),
+  });
+  document.getElementById('inputAgent').value = '';
+  document.getElementById('inputThreshold').value = '';
+  loadTargets();
+}
+
+async function deleteTarget(agent, metric) {
+  if (!confirm(`Delete ${metric} target for ${agent}?`)) return;
+  await api(`/sla/targets?agent_name=${encodeURIComponent(agent)}&metric=${encodeURIComponent(metric)}`, { method: 'DELETE' });
+  loadTargets();
+}
+
+// ── Run Check ──
+async function runCheck(agent) {
+  const data = await api('/sla/check', {
+    method: 'POST',
+    headers: { 'Content-Type': 'application/json' },
+    body: JSON.stringify({ agent_name: agent, window_hours: 24 }),
+  });
+  if (data) {
+    loadOverview();
+    if (data.violations && data.violations.length > 0) {
+      alert(`${agent}: ${data.violations.length} violation(s)\n` +
+        data.violations.map(v => `${METRIC_LABELS[v.metric]}: ${v.actual} (threshold ${COMP_LABELS[v.comparison]} ${v.threshold})`).join('\n'));
+    } else {
+      alert(`${agent}: ✅ All SLA targets met (${data.compliance_pct}%)`);
+    }
+  }
+}
+
+// ── History ──
+async function loadHistory() {
+  const select = document.getElementById('historyAgent');
+  if (select.options.length === 0) {
+    const data = await api('/sla/targets');
+    if (data && data.targets) {
+      const agents = [...new Set(data.targets.map(t => t.agent_name))];
+      select.innerHTML = agents.map(a => `<option value="${a}">${a}</option>`).join('');
+    }
+  }
+  const agent = select.value;
+  if (!agent) {
+    document.getElementById('emptyHistory').style.display = '';
+    return;
+  }
+  const data = await api(`/sla/history?agent_name=${encodeURIComponent(agent)}&limit=50`);
+  const chartWrap = document.getElementById('historyChartWrap');
+  const listWrap = document.getElementById('historyList');
+  const empty = document.getElementById('emptyHistory');
+  if (!data || !data.snapshots || data.snapshots.length === 0) {
+    chartWrap.innerHTML = '';
+    listWrap.innerHTML = '';
+    empty.style.display = '';
+    return;
+  }
+  empty.style.display = 'none';
+  const snapshots = data.snapshots.reverse();
+
+  // Bar chart
+  const maxH = 140;
+  const bars = snapshots.map((s, i) => {
+    const h = (s.compliance_pct / 100) * maxH;
+    const color = s.compliance_pct >= 100 ? 'var(--green)' : s.compliance_pct >= 80 ? 'var(--yellow)' : 'var(--red)';
+    return `<div class="history-bar" style="height:${h}px;background:${color}" 
+      onmouseenter="showTip(event,'${new Date(s.created_at).toLocaleString()}\\n${s.compliance_pct}% compliance\\n${(s.violations||[]).length} violations')"
+      onmouseleave="hideTip()"></div>`;
+  }).join('');
+  chartWrap.innerHTML = `
+    <div style="font-size:12px;color:var(--text-muted);margin-bottom:4px">Compliance over last ${snapshots.length} checks</div>
+    <div class="history-chart" style="display:flex;align-items:flex-end;border-bottom:1px solid var(--border);padding-bottom:4px">${bars}</div>
+    <div style="display:flex;justify-content:space-between;font-size:10px;color:var(--text-muted);margin-top:4px">
+      <span>${new Date(snapshots[0].created_at).toLocaleDateString()}</span>
+      <span>${new Date(snapshots[snapshots.length-1].created_at).toLocaleDateString()}</span>
+    </div>`;
+
+  // List
+  listWrap.innerHTML = '<h3 class="section-title" style="margin-top:20px">📜 Check Log</h3>' +
+    data.snapshots.reverse().slice(0, 20).map(s => {
+      const viol = s.violations || [];
+      const icon = viol.length === 0 ? '✅' : '❌';
+      return `<div class="metric-row">
+        <span>${icon} ${new Date(s.created_at).toLocaleString()}</span>
+        <span class="metric-val ${viol.length === 0 ? 'pass' : 'fail'}">${s.compliance_pct}% — ${viol.length} violation${viol.length !== 1 ? 's' : ''}</span>
+      </div>`;
+    }).join('');
+}
+
+// ── Tooltip ──
+function showTip(e, text) {
+  const tip = document.getElementById('tooltip');
+  tip.textContent = text;
+  tip.style.display = 'block';
+  tip.style.left = e.pageX + 10 + 'px';
+  tip.style.top = e.pageY - 30 + 'px';
+}
+function hideTip() { document.getElementById('tooltip').style.display = 'none'; }
+
+// ── Refresh ──
+function refreshAll() {
+  const active = document.querySelector('.tab-btn.active');
+  if (active) active.click();
+}
+
+// ── Init ──
+loadOverview();
+</script>
+</body>
+</html>
