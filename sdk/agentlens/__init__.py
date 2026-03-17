@@ -29,6 +29,13 @@ from agentlens.session_diff import SessionDiff, DiffReport, EventPair, Alignment
 from agentlens.group_analyzer import SessionGroupAnalyzer, GroupStats, ComparisonReport
 from agentlens.heatmap import HeatmapBuilder, HeatmapBucket
 from agentlens.narrative import NarrativeGenerator, NarrativeConfig, NarrativeStyle, Narrative, NarrativeSection, ToolSummary
+from agentlens.guardrails import Guardrails, GuardrailSuite, Violation, ValidationResult, SuiteReport, Severity as GuardrailSeverity
+from agentlens.replayer import SessionReplayer, ReplayFrame, ReplayStats
+from agentlens.correlation import SessionCorrelator, CorrelationReport, CorrelationKind, TemporalOverlap, SharedResource, ErrorPropagation, ResourceContention
+from agentlens.flamegraph import Flamegraph, flamegraph_html
+from agentlens.quota import QuotaManager, QuotaPolicy, QuotaCheck, QuotaReport, QuotaScope, QuotaWindow, QuotaAction
+from agentlens.retry_tracker import RetryTracker, RetryReport, RetryChain, RetryStorm, RetryRecommendation, RetryOutcome
+from agentlens.alert_rules import AlertRulesEngine, AlertRule as AlertRuleDef, AlertCondition, ThresholdCondition, RateCondition, AlertResult, AlertSeverity as RuleSeverity
 
 __version__ = "0.1.0"
 __all__ = [
@@ -184,6 +191,51 @@ __all__ = [
     "ToolCallDelta",
     "HeatmapBuilder",
     "HeatmapBucket",
+    # Guardrails
+    "Guardrails",
+    "GuardrailSuite",
+    "Violation",
+    "ValidationResult",
+    "SuiteReport",
+    "GuardrailSeverity",
+    # Replayer
+    "SessionReplayer",
+    "ReplayFrame",
+    "ReplayStats",
+    # Correlation
+    "SessionCorrelator",
+    "CorrelationReport",
+    "CorrelationKind",
+    "TemporalOverlap",
+    "SharedResource",
+    "ErrorPropagation",
+    "ResourceContention",
+    # Flamegraph
+    "Flamegraph",
+    "flamegraph_html",
+    # Quota
+    "QuotaManager",
+    "QuotaPolicy",
+    "QuotaCheck",
+    "QuotaReport",
+    "QuotaScope",
+    "QuotaWindow",
+    "QuotaAction",
+    # Retry tracking
+    "RetryTracker",
+    "RetryReport",
+    "RetryChain",
+    "RetryStorm",
+    "RetryRecommendation",
+    "RetryOutcome",
+    # Alert rules engine
+    "AlertRulesEngine",
+    "AlertRuleDef",
+    "AlertCondition",
+    "ThresholdCondition",
+    "RateCondition",
+    "AlertResult",
+    "RuleSeverity",
 ]
 
 _tracker: AgentTracker | None = None
