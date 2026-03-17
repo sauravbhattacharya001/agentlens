@@ -23,7 +23,6 @@ from __future__ import annotations
 
 import html as _html
 import json
-import math
 from collections import defaultdict
 from datetime import datetime, timezone, timedelta
 from typing import Any, Literal
