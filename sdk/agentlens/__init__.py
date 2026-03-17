@@ -28,6 +28,7 @@ from agentlens.error_fingerprint import ErrorFingerprinter, ErrorCluster, ErrorR
 from agentlens.session_diff import SessionDiff, DiffReport, EventPair, AlignmentStatus, ToolCallDelta
 from agentlens.group_analyzer import SessionGroupAnalyzer, GroupStats, ComparisonReport
 from agentlens.heatmap import HeatmapBuilder, HeatmapBucket
+from agentlens.narrative import NarrativeGenerator, NarrativeConfig, NarrativeStyle, Narrative, NarrativeSection, ToolSummary
 
 __version__ = "0.1.0"
 __all__ = [

@@ -262,6 +262,7 @@ class TestResult:
 
     def to_dict(self) -> Dict:
         """Serialize the test result to a JSON-friendly dictionary."""
+        return {
             "variant_b": self.variant_b,
             "mean_a": round(self.mean_a, 4),
             "mean_b": round(self.mean_b, 4),
@@ -282,6 +283,8 @@ class TestResult:
 
     def summary(self) -> str:
         """Return a human-readable multi-line summary of this test result."""
+        lines = [
+            f"A/B Test: {self.metric} ({self.variant_a} vs {self.variant_b})",
             f"  {self.variant_a}: mean={self.mean_a:.4f} (n={self.n_a})",
             f"  {self.variant_b}: mean={self.mean_b:.4f} (n={self.n_b})",
             f"  t={self.t_statistic:.4f}, p={self.p_value:.6f} (α={self.alpha})",
