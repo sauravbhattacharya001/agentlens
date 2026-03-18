@@ -1,0 +1,63 @@
+name: 🔒 Security Vulnerability
+description: Report a security vulnerability (for non-critical issues only — for critical vulnerabilities, email directly)
+title: "[Security]: "
+labels: ["security", "triage"]
+body:
+  - type: markdown
+    attributes:
+      value: |
+        ⚠️ **For critical security vulnerabilities** (RCE, auth bypass, data exposure), please use GitHub's private vulnerability reporting instead of this public template.
+
+        This template is for lower-severity security concerns like missing input validation, dependency vulnerabilities, or hardening suggestions.
+
+  - type: dropdown
+    id: severity
+    attributes:
+      label: Severity
+      description: How severe is this vulnerability?
+      options:
+        - Low (hardening suggestion, best practice)
+        - Medium (requires specific conditions to exploit)
+        - High (easily exploitable, significant impact)
+    validations:
+      required: true
+
+  - type: dropdown
+    id: component
+    attributes:
+      label: Affected Component
+      description: Which part of AgentLens is affected?
+      options:
+        - Python SDK
+        - Backend API (Node.js)
+        - Dashboard (Web UI)
+        - Dependencies
+        - Deployment / Configuration
+        - Other
+    validations:
+      required: true
+
+  - type: textarea
+    id: description
+    attributes:
+      label: Vulnerability Description
+      description: Describe the security issue. Include the attack vector and potential impact.
+      placeholder: "The /api/events endpoint doesn't validate the project_id parameter, allowing access to events from other projects via IDOR."
+    validations:
+      required: true
+
+  - type: textarea
+    id: reproduction
+    attributes:
+      label: Steps to Reproduce
+      description: How can this vulnerability be demonstrated?
+    validations:
+      required: true
+
+  - type: textarea
+    id: mitigation
+    attributes:
+      label: Suggested Mitigation
+      description: How should this be fixed?
+    validations:
+      required: false
