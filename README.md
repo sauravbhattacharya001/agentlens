@@ -172,6 +172,12 @@ agentlens tail <session_id>
 
 # Generate time-range summary report
 agentlens report --from 2024-01-01 --to 2024-01-31
+
+# Generate interactive HTML flamegraph for a session
+agentlens flamegraph <session_id> -o profile.html --open
+
+# Print flamegraph statistics without generating HTML
+agentlens flamegraph <session_id> --stats
 ```
 
 Configure via environment variables:

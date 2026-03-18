@@ -15,6 +15,7 @@ Usage:
     agentlens-cli tail [--session SESSION] [--type TYPE] [--interval SECS] [--endpoint URL] [--api-key KEY]
     agentlens-cli top [--sort cost|tokens|events] [--limit N] [--interval SECS] [--endpoint URL] [--api-key KEY]
     agentlens-cli report [--period day|week|month] [--format table|json|markdown] [--output FILE] [--endpoint URL] [--api-key KEY]
+    agentlens-cli flamegraph <session_id> [--output FILE] [--open] [--stats] [--endpoint URL] [--api-key KEY]
     agentlens-cli status [--endpoint URL] [--api-key KEY]
 
 Environment variables:
@@ -713,6 +714,73 @@ def cmd_report(args: argparse.Namespace) -> None:
         print(text)
 
 
+def cmd_flamegraph(args: argparse.Namespace) -> None:
+    """Generate an interactive HTML flamegraph for a session."""
+    import webbrowser as _wb
+    from pathlib import Path
+
+    from agentlens.flamegraph import Flamegraph
+    from agentlens.models import AgentEvent
+
+    client, _ = _get_client(args)
+
+    # Fetch session metadata
+    resp = client.get(f"/sessions/{args.session_id}")
+    resp.raise_for_status()
+    session_data = resp.json()
+    session_name = session_data.get("agent_name", args.session_id)
+
+    # Fetch events for this session
+    resp = client.get("/events", params={"session_id": args.session_id, "limit": 5000})
+    resp.raise_for_status()
+    raw_events = resp.json()
+    if isinstance(raw_events, dict):
+        raw_events = raw_events.get("events", [raw_events])
+
+    if not raw_events:
+        print(f"⚠️  No events found for session {args.session_id}")
+        sys.exit(1)
+
+    # Convert raw dicts to AgentEvent objects
+    events: list[AgentEvent] = []
+    for raw in raw_events:
+        try:
+            events.append(AgentEvent(**raw))
+        except Exception:
+            # Skip malformed events
+            continue
+
+    print(f"📊 Building flamegraph for session {args.session_id} ({len(events)} events)...")
+
+    fg = Flamegraph(events=events, session_name=session_name)
+
+    if args.stats:
+        stats = fg.get_stats()
+        print(f"\n🔥 Flamegraph Statistics")
+        print(f"   Total duration: {stats['total_ms']:.1f} ms")
+        print(f"   Node count:     {stats['node_count']}")
+        print(f"   Max depth:      {stats['max_depth']}")
+        print(f"   Total tokens:   {stats['total_tokens']:,}")
+        if stats.get("time_by_type"):
+            print(f"\n   Time by event type:")
+            for etype, ms in stats["time_by_type"].items():
+                print(f"     {etype}: {ms:.1f} ms")
+        if stats.get("slowest_events"):
+            print(f"\n   Slowest events:")
+            for i, ev in enumerate(stats["slowest_events"][:5], 1):
+                print(f"     {i}. {ev.get('name', 'unknown')} — {ev.get('duration', 0):.1f} ms")
+        return
+
+    output = args.output or f"flamegraph-{args.session_id}.html"
+    fg.save(output)
+    abs_path = str(Path(output).resolve())
+    print(f"✅ Flamegraph saved to {abs_path}")
+
+    if args.open:
+        _wb.open(f"file://{abs_path}")
+        print("🌐 Opened in browser")
+
+
 def cmd_status(args: argparse.Namespace) -> None:
     client, endpoint = _get_client(args)
     try:
@@ -807,6 +875,13 @@ def main() -> None:
     p.add_argument("--format", choices=["table", "json", "markdown"], default="table", help="Output format (default: table)")
     p.add_argument("--output", "-o", help="Write report to file")
 
+    # flamegraph
+    p = sub.add_parser("flamegraph", help="Generate interactive HTML flamegraph for a session")
+    p.add_argument("session_id", help="Session ID to visualise")
+    p.add_argument("--output", "-o", default=None, help="Output HTML file (default: flamegraph-<session_id>.html)")
+    p.add_argument("--open", action="store_true", help="Open the flamegraph in a browser after generating")
+    p.add_argument("--stats", action="store_true", help="Print flamegraph statistics instead of generating HTML")
+
     # status
     sub.add_parser("status", help="Check backend connectivity")
 
@@ -826,6 +901,7 @@ def main() -> None:
         "tail": cmd_tail,
         "top": cmd_top,
         "report": cmd_report,
+        "flamegraph": cmd_flamegraph,
         "status": cmd_status,
     }
     commands[args.command](args)
