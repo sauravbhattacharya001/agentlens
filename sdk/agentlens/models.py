@@ -63,12 +63,12 @@ class AgentEvent(BaseModel):
     duration_ms: float | None = None
 
     def to_api_dict(self) -> dict[str, Any]:
-        """Convert to a dict suitable for the API."""
-        d = self.model_dump(mode="json", exclude_none=True)
-        # Ensure timestamp is ISO string
-        if isinstance(d.get("timestamp"), str):
-            pass
-        return d
+        """Convert to a dict suitable for the API.
+
+        Uses Pydantic's ``model_dump(mode="json")`` which serialises
+        datetimes as ISO-8601 strings automatically.
+        """
+        return self.model_dump(mode="json", exclude_none=True)
 
 
 class Session(BaseModel):
