@@ -14,6 +14,7 @@ Usage:
     agentlens-cli postmortem candidates [--min-errors N] [--limit N] [--endpoint URL] [--api-key KEY]
     agentlens-cli tail [--session SESSION] [--type TYPE] [--interval SECS] [--endpoint URL] [--api-key KEY]
     agentlens-cli top [--sort cost|tokens|events] [--limit N] [--interval SECS] [--endpoint URL] [--api-key KEY]
+    agentlens-cli report [--period day|week|month] [--format table|json|markdown] [--output FILE] [--endpoint URL] [--api-key KEY]
     agentlens-cli status [--endpoint URL] [--api-key KEY]
 
 Environment variables:
@@ -506,6 +507,212 @@ def cmd_top(args: argparse.Namespace) -> None:
         print("\n👋 Stopped.")
 
 
+def cmd_report(args: argparse.Namespace) -> None:
+    """Generate a summary report for sessions over a time period."""
+    from datetime import datetime, timedelta, timezone
+
+    client, endpoint = _get_client(args)
+    period = getattr(args, "period", "day") or "day"
+    fmt = getattr(args, "format", "table") or "table"
+    output = getattr(args, "output", None)
+
+    # Calculate time range
+    now = datetime.now(timezone.utc)
+    period_days = {"day": 1, "week": 7, "month": 30}[period]
+    since = now - timedelta(days=period_days)
+    period_label = {"day": "Daily", "week": "Weekly", "month": "Monthly"}[period]
+
+    # Fetch all sessions
+    resp = client.get("/sessions", params={"limit": 500})
+    resp.raise_for_status()
+    data = resp.json()
+    all_sessions = data if isinstance(data, list) else data.get("sessions", [data])
+
+    # Filter to time range
+    sessions = []
+    for s in all_sessions:
+        created = s.get("created_at", "")
+        if created:
+            try:
+                ts = datetime.fromisoformat(str(created).replace("Z", "+00:00"))
+                if ts >= since:
+                    sessions.append(s)
+            except (ValueError, TypeError):
+                sessions.append(s)  # include if can't parse
+        else:
+            sessions.append(s)
+
+    # Aggregate stats
+    total_sessions = len(sessions)
+    total_events = sum(s.get("event_count", 0) or 0 for s in sessions)
+    total_tokens = sum(s.get("total_tokens", 0) or 0 for s in sessions)
+    total_errors = sum(s.get("error_count", 0) or 0 for s in sessions)
+
+    # Status breakdown
+    status_counts: dict[str, int] = {}
+    for s in sessions:
+        st = str(s.get("status", "unknown") or "unknown")
+        status_counts[st] = status_counts.get(st, 0) + 1
+
+    # Agent breakdown
+    agent_counts: dict[str, dict[str, Any]] = {}
+    for s in sessions:
+        agent = str(s.get("agent_name", "") or "unknown")
+        if agent not in agent_counts:
+            agent_counts[agent] = {"sessions": 0, "events": 0, "tokens": 0, "errors": 0}
+        agent_counts[agent]["sessions"] += 1
+        agent_counts[agent]["events"] += s.get("event_count", 0) or 0
+        agent_counts[agent]["tokens"] += s.get("total_tokens", 0) or 0
+        agent_counts[agent]["errors"] += s.get("error_count", 0) or 0
+
+    # Fetch cost data (sample up to 20 sessions)
+    total_cost = 0.0
+    model_costs: dict[str, float] = {}
+    cost_sessions = sessions[:20]
+    for s in cost_sessions:
+        sid = s.get("id", "")
+        if not sid:
+            continue
+        try:
+            cr = client.get(f"/sessions/{sid}/costs")
+            cr.raise_for_status()
+            cd = cr.json()
+            cost = cd.get("total_cost", 0) or 0
+            total_cost += cost
+            for model, mc in (cd.get("model_costs", {}) or {}).items():
+                c = mc.get("total", mc) if isinstance(mc, dict) else mc
+                model_costs[model] = model_costs.get(model, 0) + (c or 0)
+        except httpx.HTTPError:
+            pass
+
+    # Extrapolate cost if we sampled
+    if len(cost_sessions) < total_sessions and len(cost_sessions) > 0:
+        factor = total_sessions / len(cost_sessions)
+        total_cost *= factor
+        model_costs = {k: v * factor for k, v in model_costs.items()}
+
+    error_rate = (total_errors / total_events * 100) if total_events > 0 else 0
+
+    # Sort agents by sessions desc
+    top_agents = sorted(agent_counts.items(), key=lambda x: x[1]["sessions"], reverse=True)[:10]
+
+    # Build report
+    report: dict[str, Any] = {
+        "title": f"{period_label} Report",
+        "period": period,
+        "from": since.isoformat(),
+        "to": now.isoformat(),
+        "endpoint": endpoint,
+        "summary": {
+            "total_sessions": total_sessions,
+            "total_events": total_events,
+            "total_tokens": total_tokens,
+            "total_errors": total_errors,
+            "error_rate_pct": round(error_rate, 2),
+            "estimated_cost": round(total_cost, 4),
+        },
+        "status_breakdown": status_counts,
+        "model_costs": {k: round(v, 4) for k, v in sorted(model_costs.items(), key=lambda x: x[1], reverse=True)},
+        "top_agents": [
+            {"agent": a, **stats} for a, stats in top_agents
+        ],
+    }
+
+    if fmt == "json":
+        text = json.dumps(report, indent=2, default=str)
+    elif fmt == "markdown":
+        lines = [
+            f"# 📊 AgentLens {period_label} Report",
+            f"",
+            f"**Period:** {since.strftime('%Y-%m-%d %H:%M')} → {now.strftime('%Y-%m-%d %H:%M')} UTC",
+            f"**Endpoint:** {endpoint}",
+            f"",
+            f"## Summary",
+            f"",
+            f"| Metric | Value |",
+            f"|--------|-------|",
+            f"| Sessions | {total_sessions} |",
+            f"| Events | {total_events:,} |",
+            f"| Tokens | {total_tokens:,} |",
+            f"| Errors | {total_errors} |",
+            f"| Error Rate | {error_rate:.1f}% |",
+            f"| Est. Cost | ${total_cost:.4f} |",
+            f"",
+            f"## Status Breakdown",
+            f"",
+        ]
+        for st, cnt in sorted(status_counts.items(), key=lambda x: x[1], reverse=True):
+            lines.append(f"- **{st}**: {cnt}")
+        lines.append("")
+
+        if model_costs:
+            lines.append("## Cost by Model")
+            lines.append("")
+            lines.append("| Model | Cost |")
+            lines.append("|-------|------|")
+            for m, c in sorted(model_costs.items(), key=lambda x: x[1], reverse=True):
+                lines.append(f"| {m} | ${c:.4f} |")
+            lines.append("")
+
+        if top_agents:
+            lines.append("## Top Agents")
+            lines.append("")
+            lines.append("| Agent | Sessions | Events | Tokens | Errors |")
+            lines.append("|-------|----------|--------|--------|--------|")
+            for a, stats in top_agents:
+                lines.append(f"| {a} | {stats['sessions']} | {stats['events']} | {stats['tokens']:,} | {stats['errors']} |")
+            lines.append("")
+
+        text = "\n".join(lines)
+    else:
+        # table format
+        lines = [
+            f"╔══════════════════════════════════════════════════╗",
+            f"║  📊 AgentLens {period_label} Report{' ' * (34 - len(period_label))}║",
+            f"╠══════════════════════════════════════════════════╣",
+            f"║  Period: {since.strftime('%Y-%m-%d')} → {now.strftime('%Y-%m-%d')}{' ' * 17}║",
+            f"╚══════════════════════════════════════════════════╝",
+            f"",
+            f"  Sessions:    {total_sessions}",
+            f"  Events:      {total_events:,}",
+            f"  Tokens:      {total_tokens:,}",
+            f"  Errors:      {total_errors}  ({error_rate:.1f}%)",
+            f"  Est. Cost:   ${total_cost:.4f}",
+            f"",
+        ]
+
+        if status_counts:
+            lines.append("  Status Breakdown:")
+            for st, cnt in sorted(status_counts.items(), key=lambda x: x[1], reverse=True):
+                pct = cnt / total_sessions * 100 if total_sessions > 0 else 0
+                bar_len = int(pct / 5)
+                lines.append(f"    {st:<15} {cnt:>5}  {'█' * bar_len}{'░' * (20 - bar_len)} {pct:.0f}%")
+            lines.append("")
+
+        if model_costs:
+            lines.append("  Cost by Model:")
+            for m, c in sorted(model_costs.items(), key=lambda x: x[1], reverse=True):
+                lines.append(f"    {m:<30} ${c:.4f}")
+            lines.append("")
+
+        if top_agents:
+            lines.append("  Top Agents:")
+            lines.append(f"    {'AGENT':<20} {'SESS':>5} {'EVENTS':>7} {'TOKENS':>10} {'ERRORS':>6}")
+            lines.append(f"    {'─' * 20} {'─' * 5} {'─' * 7} {'─' * 10} {'─' * 6}")
+            for a, stats in top_agents:
+                lines.append(f"    {a:<20} {stats['sessions']:>5} {stats['events']:>7} {stats['tokens']:>10,} {stats['errors']:>6}")
+            lines.append("")
+
+        text = "\n".join(lines)
+
+    if output:
+        with open(output, "w", encoding="utf-8") as f:
+            f.write(text)
+        print(f"Report written to {output}")
+    else:
+        print(text)
+
+
 def cmd_status(args: argparse.Namespace) -> None:
     client, endpoint = _get_client(args)
     try:
@@ -594,6 +801,12 @@ def main() -> None:
     p.add_argument("--limit", type=int, default=15, help="Max sessions to show (default: 15)")
     p.add_argument("--interval", type=float, default=3.0, help="Refresh interval in seconds (default: 3)")
 
+    # report
+    p = sub.add_parser("report", help="Generate summary report for a time period")
+    p.add_argument("--period", choices=["day", "week", "month"], default="day", help="Time period (default: day)")
+    p.add_argument("--format", choices=["table", "json", "markdown"], default="table", help="Output format (default: table)")
+    p.add_argument("--output", "-o", help="Write report to file")
+
     # status
     sub.add_parser("status", help="Check backend connectivity")
 
@@ -612,6 +825,7 @@ def main() -> None:
         "postmortem": cmd_postmortem,
         "tail": cmd_tail,
         "top": cmd_top,
+        "report": cmd_report,
         "status": cmd_status,
     }
     commands[args.command](args)
