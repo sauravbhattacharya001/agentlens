@@ -149,6 +149,12 @@ agentlens analytics
 
 # List recent alerts
 agentlens alerts
+
+# Generate incident postmortem for a session
+agentlens postmortem <session_id>
+
+# List sessions eligible for postmortem analysis
+agentlens postmortem --candidates --min-errors 3
 ```
 
 Configure via environment variables:

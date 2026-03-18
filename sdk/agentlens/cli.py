@@ -10,6 +10,8 @@ Usage:
     agentlens-cli health <session_id> [--endpoint URL] [--api-key KEY]
     agentlens-cli compare <session_a> <session_b> [--endpoint URL] [--api-key KEY]
     agentlens-cli alerts [--endpoint URL] [--api-key KEY]
+    agentlens-cli postmortem <session_id> [--endpoint URL] [--api-key KEY]
+    agentlens-cli postmortem candidates [--min-errors N] [--limit N] [--endpoint URL] [--api-key KEY]
     agentlens-cli tail [--session SESSION] [--type TYPE] [--interval SECS] [--endpoint URL] [--api-key KEY]
     agentlens-cli top [--sort cost|tokens|events] [--limit N] [--interval SECS] [--endpoint URL] [--api-key KEY]
     agentlens-cli status [--endpoint URL] [--api-key KEY]
@@ -213,6 +215,127 @@ def cmd_alerts(args: argparse.Namespace) -> None:
     data = resp.json()
     alerts = data if isinstance(data, list) else data.get("alerts", [data])
     _print_table(alerts, ["id", "rule_id", "severity", "message", "created_at"])
+
+
+def cmd_postmortem(args: argparse.Namespace) -> None:
+    """Generate an incident postmortem for a session, or list candidate sessions."""
+    client, _ = _get_client(args)
+
+    if args.candidates:
+        params: dict[str, Any] = {}
+        if args.min_errors:
+            params["min_errors"] = args.min_errors
+        if args.limit:
+            params["limit"] = args.limit
+        resp = client.get("/postmortem/candidates", params=params)
+        resp.raise_for_status()
+        data = resp.json()
+        candidates = data.get("candidates", [])
+        if not candidates:
+            print("No sessions with enough errors for a postmortem.")
+            return
+        _print_table(candidates, ["session_id", "agent_name", "started_at", "error_count"])
+        return
+
+    if not args.session_id:
+        print("Error: provide a session ID or use --candidates to list candidates.", file=sys.stderr)
+        sys.exit(1)
+
+    resp = client.post(f"/postmortem/{args.session_id}")
+    resp.raise_for_status()
+    report = resp.json()
+
+    if report.get("incident_id") == "INC-NONE":
+        print(f"✅ Session {args.session_id}: No incidents detected.")
+        print(f"   Events analysed: {report.get('event_count', 0)}")
+        return
+
+    # Pretty-print the postmortem
+    severity = report.get("severity", "?")
+    sev_colors = {"SEV-1": "🔴", "SEV-2": "🟠", "SEV-3": "🟡", "SEV-4": "🟢"}
+    icon = sev_colors.get(severity, "⚪")
+
+    print(f"\n{'='*60}")
+    print(f"  {icon} INCIDENT POSTMORTEM — {report.get('incident_id', '')}")
+    print(f"{'='*60}")
+    print(f"\n  Title:    {report.get('title', '')}")
+    print(f"  Severity: {severity}")
+    print(f"  Session:  {report.get('session_id', '')}")
+    print(f"  Duration: {_format_duration(report.get('duration_ms', 0))}")
+    print(f"  Generated: {report.get('generated_at', '')}")
+    print(f"\n  Summary: {report.get('summary', '')}")
+
+    # Impact
+    impact = report.get("impact", {})
+    if impact:
+        print(f"\n  {'─'*50}")
+        print(f"  IMPACT")
+        print(f"  {'─'*50}")
+        print(f"    Errors:        {impact.get('error_count', 0)} / {impact.get('total_events', 0)} events ({_pct(impact.get('error_rate', 0))})")
+        print(f"    Tokens wasted: {impact.get('tokens_wasted', 0):,}")
+        print(f"    Est. cost:     ${impact.get('estimated_cost_impact', 0):.4f}")
+        print(f"    Downtime:      {_format_duration(impact.get('downtime_ms', 0))}")
+        tools = impact.get("affected_tools", [])
+        if tools:
+            print(f"    Tools:         {', '.join(tools)}")
+        models = impact.get("affected_models", [])
+        if models:
+            print(f"    Models:        {', '.join(models)}")
+        if impact.get("user_facing"):
+            print(f"    ⚠ User-facing errors detected")
+
+    # Root causes
+    root_causes = report.get("root_causes", [])
+    if root_causes:
+        print(f"\n  {'─'*50}")
+        print(f"  ROOT CAUSES")
+        print(f"  {'─'*50}")
+        for i, rc in enumerate(root_causes, 1):
+            conf = rc.get("confidence", 0)
+            conf_bar = "█" * int(conf * 10) + "░" * (10 - int(conf * 10))
+            print(f"    {i}. {rc.get('description', '')}")
+            print(f"       Confidence: [{conf_bar}] {conf:.0%}")
+            print(f"       Category:   {rc.get('category', '')}")
+            print(f"       Affected:   {rc.get('affected_events', 0)} events")
+            for ev in rc.get("evidence", []):
+                print(f"       • {ev}")
+
+    # Timeline
+    timeline = report.get("timeline", [])
+    if timeline:
+        print(f"\n  {'─'*50}")
+        print(f"  TIMELINE")
+        print(f"  {'─'*50}")
+        for entry in timeline:
+            sev_icon = {"error": "❌", "warning": "⚠️", "info": "ℹ️"}.get(entry.get("severity", ""), "•")
+            elapsed = _format_duration(entry.get("elapsed_ms", 0))
+            print(f"    {sev_icon} +{elapsed:<10} {entry.get('description', '')}")
+
+    print(f"\n{'='*60}\n")
+
+
+def _format_duration(ms: Any) -> str:
+    """Format milliseconds into a human-readable duration string."""
+    if ms is None:
+        return "—"
+    ms = float(ms)
+    if ms < 1000:
+        return f"{ms:.0f}ms"
+    secs = ms / 1000
+    if secs < 60:
+        return f"{secs:.1f}s"
+    mins = secs / 60
+    if mins < 60:
+        return f"{mins:.1f}m"
+    hours = mins / 60
+    return f"{hours:.1f}h"
+
+
+def _pct(rate: Any) -> str:
+    """Format a 0-1 rate as a percentage string."""
+    if rate is None:
+        return "0%"
+    return f"{float(rate) * 100:.1f}%"
 
 
 def cmd_tail(args: argparse.Namespace) -> None:
@@ -452,6 +575,13 @@ def main() -> None:
     # alerts
     sub.add_parser("alerts", help="List recent alerts")
 
+    # postmortem
+    p = sub.add_parser("postmortem", help="Generate incident postmortem for a session")
+    p.add_argument("session_id", nargs="?", default=None, help="Session ID to generate postmortem for")
+    p.add_argument("--candidates", action="store_true", help="List sessions eligible for postmortem")
+    p.add_argument("--min-errors", type=int, default=None, help="Min errors for candidate listing (default: 2)")
+    p.add_argument("--limit", type=int, default=None, help="Max candidates to show")
+
     # tail
     p = sub.add_parser("tail", help="Live-follow events (like tail -f)")
     p.add_argument("--session", help="Filter by session ID")
@@ -479,6 +609,7 @@ def main() -> None:
         "health": cmd_health,
         "compare": cmd_compare,
         "alerts": cmd_alerts,
+        "postmortem": cmd_postmortem,
         "tail": cmd_tail,
         "top": cmd_top,
         "status": cmd_status,
