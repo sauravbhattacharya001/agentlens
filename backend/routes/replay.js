@@ -8,9 +8,13 @@
  */
 const express = require("express");
 const { getDb } = require("../db");
+const { isValidSessionId } = require("../lib/validation");
 const { wrapRoute } = require("../lib/request-helpers");
 
 const router = express.Router();
+
+// Maximum events loaded for replay to prevent OOM on huge sessions
+const REPLAY_EVENT_CAP = 5000;
 
 function safeJsonParse(str, fallback = null) {
   if (!str) return fallback;
@@ -140,13 +144,20 @@ function replaySummary(frames, session) {
   };
 }
 
+// Shared session ID validation middleware for all replay routes
+function validateSessionIdParam(req, res, next) {
+  const { sessionId } = req.params;
+  if (!isValidSessionId(sessionId)) {
+    return res.status(400).json({ error: "Invalid session ID format" });
+  }
+  next();
+}
+
 router.get(
   "/:sessionId",
-  wrapRoute((req, res) => {
+  validateSessionIdParam,
+  wrapRoute("replay session", (req, res) => {
     const { sessionId } = req.params;
-    if (!sessionId || typeof sessionId !== "string" || sessionId.length > 128) {
-      return res.status(400).json({ error: "Invalid session ID" });
-    }
 
     const db = getDb();
     const session = db.prepare("SELECT * FROM sessions WHERE session_id = ?").get(sessionId);
@@ -155,13 +166,16 @@ router.get(
     }
 
     const events = db
-      .prepare("SELECT * FROM events WHERE session_id = ? ORDER BY timestamp ASC")
-      .all(sessionId);
+      .prepare("SELECT * FROM events WHERE session_id = ? ORDER BY timestamp ASC LIMIT ?")
+      .all(sessionId, REPLAY_EVENT_CAP + 1);
+
+    const truncated = events.length > REPLAY_EVENT_CAP;
+    const cappedEvents = truncated ? events.slice(0, REPLAY_EVENT_CAP) : events;
 
     const speed = Math.max(0.1, Math.min(100, parseFloat(req.query.speed) || 1));
     const maxDelay = Math.max(0, parseInt(req.query.maxDelay, 10) || 30000);
 
-    let frames = buildFrames(events, { speedMultiplier: speed, maxDelayMs: maxDelay });
+    let frames = buildFrames(cappedEvents, { speedMultiplier: speed, maxDelayMs: maxDelay });
 
     const from = parseInt(req.query.from, 10);
     const to = parseInt(req.query.to, 10);
@@ -181,18 +195,16 @@ router.get(
         ended_at: session.ended_at,
         status: session.status,
       },
-      replay: { speed, max_delay_ms: maxDelay, ...summary, frames },
+      replay: { speed, max_delay_ms: maxDelay, truncated, ...summary, frames },
     });
   })
 );
 
 router.get(
   "/:sessionId/frame/:index",
-  wrapRoute((req, res) => {
+  validateSessionIdParam,
+  wrapRoute("replay frame", (req, res) => {
     const { sessionId, index } = req.params;
-    if (!sessionId || typeof sessionId !== "string" || sessionId.length > 128) {
-      return res.status(400).json({ error: "Invalid session ID" });
-    }
 
     const frameIndex = parseInt(index, 10);
     if (isNaN(frameIndex) || frameIndex < 0) {
@@ -275,11 +287,9 @@ router.get(
 
 router.get(
   "/:sessionId/summary",
-  wrapRoute((req, res) => {
+  validateSessionIdParam,
+  wrapRoute("replay summary", (req, res) => {
     const { sessionId } = req.params;
-    if (!sessionId || typeof sessionId !== "string" || sessionId.length > 128) {
-      return res.status(400).json({ error: "Invalid session ID" });
-    }
 
     const db = getDb();
     const session = db.prepare("SELECT * FROM sessions WHERE session_id = ?").get(sessionId);
@@ -288,8 +298,8 @@ router.get(
     }
 
     const events = db
-      .prepare("SELECT * FROM events WHERE session_id = ? ORDER BY timestamp ASC")
-      .all(sessionId);
+      .prepare("SELECT * FROM events WHERE session_id = ? ORDER BY timestamp ASC LIMIT ?")
+      .all(sessionId, REPLAY_EVENT_CAP);
 
     const frames = buildFrames(events);
     const summary = replaySummary(frames, session);
