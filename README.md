@@ -58,6 +58,14 @@ AgentLens provides:
 | 🔬 **Anomaly Detection** | Z-score statistical analysis to detect latency spikes, token surges, error bursts |
 | 🏥 **Health Scoring** | Grade sessions A–F based on error rates, latency, tool failures |
 | 💸 **Cost Budgets** | Per-agent and global spending limits with real-time tracking, warnings, and overage detection |
+| 📖 **Session Narratives** | Auto-generate human-readable summaries of agent session behavior |
+| 🏆 **Agent Scorecards** | Per-agent performance grading with composite scores and letter grades |
+| 🔮 **Cost Forecasting** | Budget projections with what-if simulator and model breakdown |
+| 📊 **Token Heatmap** | Calendar-style visualization of token consumption patterns |
+| ⏱️ **Trace Waterfall** | Interactive Gantt-style event visualization for session traces |
+| 🔄 **Session Diff** | Side-by-side visual comparison of two agent sessions |
+| ❌ **Error Analytics** | Error grouping by type, agent, and model with trend analysis |
+| 📋 **SLA Compliance** | Track SLA targets with compliance rings, violation alerts, and history |
 
 ## 🏗️ Architecture
 
@@ -155,6 +163,15 @@ agentlens postmortem <session_id>
 
 # List sessions eligible for postmortem analysis
 agentlens postmortem --candidates --min-errors 3
+
+# Live session leaderboard
+agentlens top
+
+# Live-follow session events
+agentlens tail <session_id>
+
+# Generate time-range summary report
+agentlens report --from 2024-01-01 --to 2024-01-31
 ```
 
 Configure via environment variables:
@@ -468,6 +485,13 @@ The dashboard provides a real-time view of your agent sessions:
 - **Token Charts** — Per-event and cumulative token usage visualization
 - **Explain Tab** — Human-readable behavior summaries
 - **Costs Tab** — Per-event and per-model cost breakdowns, cumulative cost chart, configurable model pricing
+- **Cost Forecast** — Budget projections with what-if simulator and model breakdown
+- **Agent Scorecards** — Per-agent performance grading with composite scores, letter grades, and sparkline trends
+- **Token Heatmap** — Calendar-style visualization of daily token consumption
+- **Trace Waterfall** — Gantt-style visualization of event timing within a session
+- **Session Diff Viewer** — Side-by-side comparison of two sessions with event-level diffs
+- **Error Analytics** — Error grouping by type, agent, and model with trends
+- **SLA Compliance** — Compliance rings, violation alerts, and history charts
 
 The dashboard is a lightweight HTML/CSS/JS app served directly by the backend — no build step required.
 
