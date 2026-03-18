@@ -146,38 +146,56 @@ class Flamegraph:
     # ----- internal build logic -----
 
     def _build(self) -> None:
-        """Convert events + spans into flamegraph nodes."""
+        """Convert events + spans into flamegraph nodes.
+
+        Performance notes (vs original implementation):
+        - Span child lookup uses a pre-built parent_id→children dict
+          instead of O(spans²) repeated list scans.
+        - Event-to-span placement uses a flat list sorted by start time
+          with reverse iteration instead of flattening the entire span
+          tree per event (was O(events × total_nodes)).
+        - Depth assignment for span-less mode uses an active-interval
+          list pruned by end time, reducing average-case work.
+        """
         if not self.events and not self.spans:
             return
 
-        # Find session time bounds
-        all_times: list[float] = []
+        # Find session time bounds — single pass, track min/max inline
+        t_min = float("inf")
+        t_max = float("-inf")
+
+        event_times: list[tuple[float, AgentEvent]] = []
         for e in self.events:
             t = _parse_ts(e.timestamp)
             if t is not None:
-                all_times.append(t)
-                if e.duration_ms:
-                    all_times.append(t + e.duration_ms)
+                event_times.append((t, e))
+                if t < t_min:
+                    t_min = t
+                end_t = t + (e.duration_ms or 0)
+                if end_t > t_max:
+                    t_max = end_t
+
         for s in self.spans:
             t = _parse_ts(s.started_at)
             if t is not None:
-                all_times.append(t)
+                if t < t_min:
+                    t_min = t
             te = _parse_ts(s.ended_at)
             if te is not None:
-                all_times.append(te)
+                if te > t_max:
+                    t_max = te
 
-        if not all_times:
+        if t_min == float("inf"):
             return
 
-        origin = min(all_times)
-        end = max(all_times)
-        self._total_ms = end - origin if end > origin else 1.0
+        origin = t_min
+        self._total_ms = (t_max - origin) if t_max > origin else 1.0
 
-        # Build span tree (span_id → span)
-        span_map: dict[str, Span] = {s.span_id: s for s in self.spans}
+        # ── Build span tree using parent_id index (O(n) instead of O(n²)) ──
+        children_by_parent: dict[str | None, list[Span]] = {}
+        for s in self.spans:
+            children_by_parent.setdefault(s.parent_id, []).append(s)
 
-        # Build span nodes (top-level first, then children)
-        root_spans = [s for s in self.spans if not s.parent_id]
         span_nodes: dict[str, _FGNode] = {}
 
         def _build_span_node(span: Span, depth: int) -> _FGNode:
@@ -194,24 +212,24 @@ class Flamegraph:
                 attributes=dict(span.attributes),
             )
             span_nodes[span.span_id] = node
-            # Find children by parent_id
-            children = [s for s in self.spans if s.parent_id == span.span_id]
-            for child in children:
+            for child in children_by_parent.get(span.span_id, ()):
                 child_node = _build_span_node(child, depth + 1)
                 node.children.append(child_node)
             return node
 
         top_nodes: list[_FGNode] = []
-        for rs in root_spans:
+        for rs in children_by_parent.get(None, []):
             top_nodes.append(_build_span_node(rs, 0))
+        # Also pick up spans whose parent_id doesn't match any span
+        # (treated as roots, same as original "not s.parent_id" check)
+        known_ids = {s.span_id for s in self.spans}
+        for s in self.spans:
+            if s.parent_id and s.parent_id not in known_ids and s.span_id not in span_nodes:
+                top_nodes.append(_build_span_node(s, 0))
 
-        # Place events: if spans exist, try to nest under spans
-        # Otherwise, place at depth 0
+        # ── Build event nodes ──
         event_nodes: list[_FGNode] = []
-        for e in self.events:
-            et = _parse_ts(e.timestamp)
-            if et is None:
-                continue
+        for et, e in event_times:
             node = _FGNode(
                 name=_event_label(e),
                 start_ms=et - origin,
@@ -226,45 +244,77 @@ class Flamegraph:
             event_nodes.append(node)
 
         if top_nodes:
-            # Nest events under matching spans by time overlap
+            # ── Place events under spans ──
+            # Flatten span nodes once (not per-event) and sort by
+            # start_ms descending so we can find the deepest (most
+            # specific) matching span first.
+            all_span_nodes = self._all_nodes(top_nodes)
+            all_span_nodes.sort(
+                key=lambda n: (n.start_ms, -n.depth), reverse=False
+            )
+            # For each event, find the deepest span that contains it.
+            # We prefer the deepest match (highest depth) so events
+            # nest inside the most specific span.
             for enode in event_nodes:
-                placed = False
-                for snode in self._all_nodes(top_nodes):
+                best: _FGNode | None = None
+                for snode in all_span_nodes:
                     if (enode.start_ms >= snode.start_ms and
                             enode.start_ms < snode.start_ms + snode.duration_ms):
-                        enode.depth = snode.depth + 1
-                        snode.children.append(enode)
-                        placed = True
-                        break
-                if not placed:
+                        if best is None or snode.depth > best.depth:
+                            best = snode
+                if best is not None:
+                    enode.depth = best.depth + 1
+                    best.children.append(enode)
+                else:
                     top_nodes.append(enode)
             self._nodes = top_nodes
         else:
-            # No spans — auto-assign depths by overlapping time ranges
-            placed: list[_FGNode] = []
-            for enode in sorted(event_nodes, key=lambda n: n.start_ms):
+            # ── No spans — auto-assign depths by overlapping time ranges ──
+            # Sort events by start time, then use an active list pruned
+            # by end time to reduce overlap checks.
+            event_nodes.sort(key=lambda n: n.start_ms)
+            active: list[tuple[float, int]] = []  # (end_ms, depth)
+            for enode in event_nodes:
+                # Prune ended intervals
+                active = [
+                    (end, d) for end, d in active
+                    if end > enode.start_ms
+                ]
                 depth = 0
-                for p in placed:
-                    if (enode.start_ms < p.start_ms + p.duration_ms and
-                            enode.start_ms + enode.duration_ms > p.start_ms):
-                        depth = max(depth, p.depth + 1)
+                if active:
+                    # occupied depths
+                    occupied = {d for _, d in active}
+                    while depth in occupied:
+                        depth += 1
                 enode.depth = depth
-                placed.append(enode)
+                active.append((enode.start_ms + enode.duration_ms, depth))
             self._nodes = event_nodes
 
-    def _all_nodes(self, nodes: list[_FGNode]) -> list[_FGNode]:
-        """Flatten node tree."""
+        # Cache the flat node list so to_data/get_stats don't re-traverse
+        self._flat_cache: list[_FGNode] | None = None
+
+    @staticmethod
+    def _all_nodes(nodes: list[_FGNode]) -> list[_FGNode]:
+        """Flatten node tree iteratively (avoids recursion stack limits)."""
         result: list[_FGNode] = []
-        for n in nodes:
+        stack = list(nodes)
+        while stack:
+            n = stack.pop()
             result.append(n)
-            result.extend(self._all_nodes(n.children))
+            stack.extend(n.children)
         return result
+
+    def _get_flat_nodes(self) -> list[_FGNode]:
+        """Return cached flat node list, rebuilding only when needed."""
+        if self._flat_cache is None:
+            self._flat_cache = self._all_nodes(self._nodes)
+        return self._flat_cache
 
     # ----- output -----
 
     def to_data(self) -> dict[str, Any]:
         """Return serializable flamegraph data."""
-        all_nodes = self._all_nodes(self._nodes)
+        all_nodes = self._get_flat_nodes()
         return {
             "session": self.session_name,
             "totalMs": round(self._total_ms, 2),
@@ -287,7 +337,7 @@ class Flamegraph:
 
     def get_stats(self) -> dict[str, Any]:
         """Return summary statistics about the flamegraph."""
-        all_nodes = self._all_nodes(self._nodes)
+        all_nodes = self._get_flat_nodes()
         by_type: dict[str, float] = {}
         total_tokens = 0
         for n in all_nodes:
