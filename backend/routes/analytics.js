@@ -3,6 +3,7 @@ const { getDb } = require("../db");
 const { latencyStats, round2 } = require("../lib/stats");
 const { wrapRoute } = require("../lib/request-helpers");
 const { createCache, cacheMiddleware } = require("../lib/response-cache");
+const { loadPricingMap, findPricing } = require("../lib/pricing");
 
 const router = express.Router();
 
@@ -507,58 +508,8 @@ router.get("/costs", analyticsCacheMw, wrapRoute("fetch cost analytics", (req, r
   const days = Math.min(Math.max(1, parseInt(req.query.days) || 30), 365);
   const cutoff = new Date(Date.now() - days * 86400000).toISOString();
 
-  // Load pricing map (DB + defaults)
-  const pricingRows = db.prepare("SELECT * FROM model_pricing ORDER BY model ASC").all();
-  const pricingMap = {};
-  for (const row of pricingRows) {
-    pricingMap[row.model.toLowerCase()] = {
-      input: row.input_cost_per_1m,
-      output: row.output_cost_per_1m,
-      currency: row.currency || "USD",
-    };
-  }
-
-  // Default pricing fallback
-  const DEFAULT_PRICING = {
-    "gpt-4": { input: 30.00, output: 60.00 },
-    "gpt-4-turbo": { input: 10.00, output: 30.00 },
-    "gpt-4o": { input: 2.50, output: 10.00 },
-    "gpt-4o-mini": { input: 0.15, output: 0.60 },
-    "gpt-3.5-turbo": { input: 0.50, output: 1.50 },
-    "claude-3-opus": { input: 15.00, output: 75.00 },
-    "claude-3-sonnet": { input: 3.00, output: 15.00 },
-    "claude-3-haiku": { input: 0.25, output: 1.25 },
-    "claude-3.5-sonnet": { input: 3.00, output: 15.00 },
-    "claude-4-opus": { input: 15.00, output: 75.00 },
-    "claude-4-sonnet": { input: 3.00, output: 15.00 },
-    "gemini-pro": { input: 0.50, output: 1.50 },
-    "gemini-1.5-pro": { input: 1.25, output: 5.00 },
-    "gemini-1.5-flash": { input: 0.075, output: 0.30 },
-  };
-  for (const [model, prices] of Object.entries(DEFAULT_PRICING)) {
-    if (!pricingMap[model]) {
-      pricingMap[model] = { input: prices.input, output: prices.output, currency: "USD" };
-    }
-  }
-
-  // Helper: find pricing for a model (exact or fuzzy prefix match)
-  function findPricing(model) {
-    if (!model) return null;
-    const lower = model.toLowerCase();
-    if (pricingMap[lower]) return pricingMap[lower];
-    const delimiters = new Set(["-", "_", ".", "/", " "]);
-    let bestKey = null;
-    let bestLen = 0;
-    for (const key of Object.keys(pricingMap)) {
-      if (lower.startsWith(key) && key.length > bestLen) {
-        if (key.length === lower.length || delimiters.has(lower[key.length])) {
-          bestKey = key;
-          bestLen = key.length;
-        }
-      }
-    }
-    return bestKey ? pricingMap[bestKey] : null;
-  }
+  // Load merged pricing map (DB overrides + built-in defaults)
+  const pricingMap = loadPricingMap();
 
   // Aggregate by model
   const modelRows = db.prepare(`
@@ -580,7 +531,7 @@ router.get("/costs", analyticsCacheMw, wrapRoute("fetch cost analytics", (req, r
   const unmatchedModels = [];
 
   for (const row of modelRows) {
-    const pricing = findPricing(row.model);
+    const pricing = findPricing(row.model, pricingMap);
     if (pricing) {
       const inputCost = (row.total_tokens_in / 1_000_000) * pricing.input;
       const outputCost = (row.total_tokens_out / 1_000_000) * pricing.output;
@@ -625,7 +576,7 @@ router.get("/costs", analyticsCacheMw, wrapRoute("fetch cost analytics", (req, r
 
   const dailyCosts = {};
   for (const row of dailyRows) {
-    const pricing = findPricing(row.model);
+    const pricing = findPricing(row.model, pricingMap);
     if (!pricing) continue;
     const cost = (row.tokens_in / 1_000_000) * pricing.input
                + (row.tokens_out / 1_000_000) * pricing.output;
