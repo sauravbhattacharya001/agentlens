@@ -36,6 +36,21 @@ AgentLens provides:
 - **Human-readable explanations** of agent behavior
 - **A real-time dashboard** to monitor everything visually
 
+## 🤔 Why AgentLens?
+
+| | LangSmith | Helicone | Weights & Biases | **AgentLens** |
+|---|:---:|:---:|:---:|:---:|
+| Self-hosted | ❌ | ❌ | ❌ | ✅ |
+| Zero external dependencies | ❌ | ❌ | ❌ | ✅ |
+| Decision-level explainability | ❌ | ❌ | ❌ | ✅ |
+| Built-in anomaly detection | ❌ | ❌ | ❌ | ✅ |
+| Session comparison & diff | ❌ | ❌ | ❌ | ✅ |
+| Cost forecasting | ❌ | Partial | ❌ | ✅ |
+| No vendor lock-in | ❌ | ❌ | ❌ | ✅ |
+| Free & open source | ❌ | Partial | ❌ | ✅ |
+
+AgentLens runs entirely on your infrastructure — SQLite for storage, no cloud dependencies, no data leaving your network.
+
 ## ✨ Features
 
 | Feature | Description |
@@ -503,180 +518,30 @@ The dashboard is a lightweight HTML/CSS/JS app served directly by the backend �
 
 ## 🔌 API Endpoints
 
-### Sessions
+The backend exposes a comprehensive REST API with **80+ endpoints** across 16 route groups:
 
-| Endpoint | Method | Description |
-|----------|--------|-------------|
-| `/sessions` | GET | List all sessions (paginated) |
-| `/sessions/search` | GET | Full-text search across sessions with filters |
-| `/sessions/:id` | GET | Get session details with events |
-| `/sessions/:id/events` | GET | Get events for a session |
-| `/sessions/:id/events/search` | GET | Search events within a session |
-| `/sessions/:id/explain` | GET | Human-readable explanation of session behavior |
-| `/sessions/:id/export` | GET | Export session data as JSON or CSV |
-| `/sessions/compare` | POST | Compare two sessions side-by-side |
+| Route Group | Endpoints | Description |
+|-------------|-----------|-------------|
+| **Sessions** | 8 | CRUD, search, explain, export, compare |
+| **Events** | 1 | Batch event ingestion (up to 500/call) |
+| **Analytics** | 4 | Aggregate stats, performance, heatmaps, cache |
+| **Pricing & Costs** | 4 | Model pricing config, per-session cost calculation |
+| **Alerts** | 8 | Alert rules CRUD, evaluation, acknowledgment |
+| **Webhooks** | 6 | Webhook CRUD, test delivery, delivery history |
+| **Correlations** | 10 | Correlation rules, groups, event correlations |
+| **Correlation Scheduler** | 6 | SSE stream, schedule management, scheduler control |
+| **Tags** | 5 | Session tagging, tag-based filtering |
+| **Bookmarks** | 4 | Session bookmarking |
+| **Annotations** | 5 | Timestamped notes on sessions and events |
+| **Baselines** | 5 | Agent performance baselines and drift detection |
+| **Error Analysis** | 5 | Error grouping by type, agent, model with trends |
+| **Dependencies** | 5 | Service dependency graph, co-occurrence, critical paths |
+| **Leaderboard** | 1 | Agent performance ranking |
+| **Postmortem** | 2 | Incident report generation and candidate listing |
+| **Retention** | 4 | Retention config, stats, manual purge |
+| **Health** | 1 | Health check |
 
-### Events
-
-| Endpoint | Method | Description |
-|----------|--------|-------------|
-| `/events` | POST | Ingest events (batched, up to 500 per call) |
-
-### Analytics
-
-| Endpoint | Method | Description |
-|----------|--------|-------------|
-| `/analytics` | GET | Aggregate statistics across all sessions |
-| `/analytics/performance` | GET | Performance metrics (latency, throughput) |
-| `/analytics/heatmap` | GET | Activity heatmap data |
-| `/analytics/cache` | GET | Cache statistics |
-
-### Pricing & Costs
-
-| Endpoint | Method | Description |
-|----------|--------|-------------|
-| `/pricing` | GET | Get model pricing configuration |
-| `/pricing` | PUT | Update model pricing (per 1M tokens) |
-| `/pricing/:model` | DELETE | Remove custom pricing for a model |
-| `/pricing/costs/:id` | GET | Calculate costs for a session |
-
-### Alerts
-
-| Endpoint | Method | Description |
-|----------|--------|-------------|
-| `/alerts/rules` | GET | List alert rules |
-| `/alerts/rules` | POST | Create an alert rule |
-| `/alerts/rules/:ruleId` | PUT | Update an alert rule |
-| `/alerts/rules/:ruleId` | DELETE | Delete an alert rule |
-| `/alerts/evaluate` | POST | Evaluate all enabled rules now |
-| `/alerts/events` | GET | List triggered alert events |
-| `/alerts/events/:alertId/acknowledge` | PUT | Acknowledge an alert |
-| `/alerts/metrics` | GET | List available alert metrics and operators |
-
-### Webhooks
-
-| Endpoint | Method | Description |
-|----------|--------|-------------|
-| `/webhooks` | GET | List configured webhooks |
-| `/webhooks` | POST | Create a webhook (SSRF-safe URL validation) |
-| `/webhooks/:webhookId` | PUT | Update a webhook |
-| `/webhooks/:webhookId` | DELETE | Delete a webhook |
-| `/webhooks/:webhookId/test` | POST | Send a test delivery |
-| `/webhooks/:webhookId/deliveries` | GET | List delivery history |
-
-### Correlations
-
-| Endpoint | Method | Description |
-|----------|--------|-------------|
-| `/correlations/rules` | GET | List correlation rules |
-| `/correlations/rules` | POST | Create a correlation rule |
-| `/correlations/rules/:ruleId` | GET | Get a correlation rule |
-| `/correlations/rules/:ruleId` | DELETE | Delete a correlation rule |
-| `/correlations/rules/:ruleId/run` | POST | Run a rule manually |
-| `/correlations/groups` | GET | List correlation groups |
-| `/correlations/groups/:groupId` | GET | Get a group with members |
-| `/correlations/groups/:groupId` | DELETE | Delete a correlation group |
-| `/correlations/event/:eventId` | GET | Get correlations for an event |
-| `/correlations/stats` | GET | Correlation statistics |
-
-### Correlation Scheduler
-
-| Endpoint | Method | Description |
-|----------|--------|-------------|
-| `/correlation-scheduler/stream` | GET | SSE stream for real-time correlation events |
-| `/correlation-scheduler/schedules` | GET | List all schedules |
-| `/correlation-scheduler/schedules` | POST | Create/update a schedule |
-| `/correlation-scheduler/schedules/:ruleId` | DELETE | Remove a schedule |
-| `/correlation-scheduler/scheduler/start` | POST | Start the scheduler loop |
-| `/correlation-scheduler/scheduler/stop` | POST | Stop the scheduler loop |
-| `/correlation-scheduler/scheduler/status` | GET | Get scheduler status |
-
-### Tags
-
-| Endpoint | Method | Description |
-|----------|--------|-------------|
-| `/tags/tags` | GET | List all tags with counts |
-| `/tags/by-tag/:tag` | GET | List sessions by tag |
-| `/tags/:id/tags` | GET | Get tags for a session |
-| `/tags/:id/tags` | POST | Add tags to a session |
-| `/tags/:id/tags` | DELETE | Remove a tag from a session |
-
-### Bookmarks
-
-| Endpoint | Method | Description |
-|----------|--------|-------------|
-| `/bookmarks` | GET | List all bookmarked sessions |
-| `/bookmarks/:sessionId` | GET | Check if a session is bookmarked |
-| `/bookmarks/:sessionId` | PUT | Add or update a bookmark |
-| `/bookmarks/:sessionId` | DELETE | Remove a bookmark |
-
-### Annotations
-
-| Endpoint | Method | Description |
-|----------|--------|-------------|
-| `/annotations` | GET | List recent annotations (paginated) |
-| `/annotations/:id/annotations` | GET | Get annotations for an event |
-| `/annotations/:id/annotations` | POST | Add an annotation to an event |
-| `/annotations/:id/annotations/:annId` | PUT | Update an annotation |
-| `/annotations/:id/annotations/:annId` | DELETE | Delete an annotation |
-
-### Baselines
-
-| Endpoint | Method | Description |
-|----------|--------|-------------|
-| `/baselines` | GET | List all agent baselines |
-| `/baselines/:agentName` | GET | Get baseline for an agent |
-| `/baselines/:agentName` | DELETE | Delete a baseline |
-| `/baselines/record` | POST | Record a new baseline snapshot |
-| `/baselines/check` | POST | Check current metrics against baseline |
-
-### Error Analysis
-
-| Endpoint | Method | Description |
-|----------|--------|-------------|
-| `/errors` | GET | List errors (paginated) |
-| `/errors/summary` | GET | Error summary statistics |
-| `/errors/by-type` | GET | Errors grouped by type |
-| `/errors/by-agent` | GET | Errors grouped by agent |
-| `/errors/by-model` | GET | Errors grouped by model |
-
-### Dependencies
-
-| Endpoint | Method | Description |
-|----------|--------|-------------|
-| `/dependencies` | GET | List all tracked service dependencies |
-| `/dependencies/agents` | GET | Agent dependency graph |
-| `/dependencies/co-occurrence` | GET | Service co-occurrence matrix |
-| `/dependencies/critical` | GET | Critical dependency paths |
-| `/dependencies/trend/:service` | GET | Usage trend for a service |
-
-### Leaderboard
-
-| Endpoint | Method | Description |
-|----------|--------|-------------|
-| `/leaderboard` | GET | Agent leaderboard (top performers) |
-
-### Postmortem
-
-| Endpoint | Method | Description |
-|----------|--------|-------------|
-| `/postmortem/:sessionId` | POST | Generate postmortem report for a session |
-| `/postmortem/candidates` | GET | List sessions eligible for postmortem |
-
-### Data Retention
-
-| Endpoint | Method | Description |
-|----------|--------|-------------|
-| `/retention/config` | GET | Get retention settings |
-| `/retention/config` | PUT | Update retention settings |
-| `/retention/stats` | GET | Database size and age statistics |
-| `/retention/purge` | POST | Manually purge old data (supports dry-run) |
-
-### Health
-
-| Endpoint | Method | Description |
-|----------|--------|-------------|
-| `/health` | GET | Health check |
+> 📖 **Full API reference with request/response examples:** [docs/API.md](docs/API.md)
 
 ## 🛠️ Tech Stack
 
