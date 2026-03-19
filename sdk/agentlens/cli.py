@@ -19,6 +19,7 @@ Usage:
     agentlens-cli dashboard [--limit N] [--output FILE] [--open] [--endpoint URL] [--api-key KEY]
     agentlens-cli trace <session_id> [--no-color] [--json] [--type TYPE] [--min-ms N] [--endpoint URL] [--api-key KEY]
     agentlens-cli heatmap [--metric sessions|cost|tokens|events] [--weeks N] [--limit N] [--endpoint URL] [--api-key KEY]
+    agentlens-cli replay <session_id> [--speed N] [--type TYPES] [--exclude TYPES] [--format text|json|markdown] [--live] [--no-color] [--output FILE] [--endpoint URL] [--api-key KEY]
     agentlens-cli status [--endpoint URL] [--api-key KEY]
 
 Environment variables:
@@ -1262,6 +1263,192 @@ new Chart(document.getElementById('topChart'),{{
         print("🌐 Opened in browser")
 
 
+# ── Replay ───────────────────────────────────────────────────────────
+
+
+def _build_session_from_api(session_data: dict, events_data: list[dict]) -> Any:
+    """Construct a Session + AgentEvent tree from raw API dicts."""
+    from datetime import datetime, timezone
+    from agentlens.models import AgentEvent, Session, ToolCall
+
+    def _parse_ts(val: Any) -> datetime:
+        if isinstance(val, datetime):
+            return val
+        if isinstance(val, str):
+            # handle Z suffix and +00:00
+            val = val.replace("Z", "+00:00")
+            try:
+                return datetime.fromisoformat(val)
+            except Exception:
+                return datetime.now(timezone.utc)
+        return datetime.now(timezone.utc)
+
+    events: list[AgentEvent] = []
+    for raw in events_data:
+        tc = None
+        if raw.get("tool_call"):
+            tc_raw = raw["tool_call"]
+            tc = ToolCall(
+                tool_call_id=tc_raw.get("tool_call_id", ""),
+                tool_name=tc_raw.get("tool_name", "unknown"),
+                tool_input=tc_raw.get("tool_input", {}),
+                tool_output=tc_raw.get("tool_output"),
+                duration_ms=tc_raw.get("duration_ms"),
+            )
+        events.append(AgentEvent(
+            event_id=raw.get("event_id", raw.get("id", "")),
+            session_id=raw.get("session_id", session_data.get("session_id", "")),
+            event_type=raw.get("event_type", raw.get("type", "generic")),
+            timestamp=_parse_ts(raw.get("timestamp")),
+            model=raw.get("model"),
+            tokens_in=raw.get("tokens_in", 0),
+            tokens_out=raw.get("tokens_out", 0),
+            tool_call=tc,
+            duration_ms=raw.get("duration_ms"),
+        ))
+
+    session = Session(
+        session_id=session_data.get("session_id", session_data.get("id", "unknown")),
+        agent_name=session_data.get("agent_name", "unknown"),
+        started_at=_parse_ts(session_data.get("started_at", session_data.get("created_at"))),
+        ended_at=_parse_ts(session_data["ended_at"]) if session_data.get("ended_at") else None,
+        status=session_data.get("status", "completed"),
+        events=events,
+        total_tokens_in=sum(e.tokens_in for e in events),
+        total_tokens_out=sum(e.tokens_out for e in events),
+    )
+    return session
+
+
+def cmd_replay(args: argparse.Namespace) -> None:
+    """Replay a session event-by-event in the terminal.
+
+    Fetches session data and events from the API, then uses
+    SessionReplayer to produce a formatted chronological replay
+    with optional speed control, type filtering, and multiple
+    output formats.
+    """
+    import time as _time
+    from agentlens.replayer import SessionReplayer
+
+    client, _ = _get_client(args)
+
+    # Fetch session metadata
+    resp = client.get(f"/sessions/{args.session_id}")
+    resp.raise_for_status()
+    session_data = resp.json()
+
+    # Fetch events
+    resp = client.get("/events", params={"session_id": args.session_id, "limit": 10000})
+    resp.raise_for_status()
+    events_raw = resp.json()
+    if isinstance(events_raw, dict):
+        events_raw = events_raw.get("events", [events_raw])
+
+    if not events_raw:
+        print(f"No events found for session {args.session_id}")
+        return
+
+    session = _build_session_from_api(session_data, events_raw)
+    replayer = SessionReplayer(session, speed=args.speed)
+
+    # Apply type filters
+    if args.type:
+        replayer.add_filter(*[t.strip() for t in args.type.split(",")])
+    if args.exclude:
+        replayer.exclude(*[t.strip() for t in args.exclude.split(",")])
+
+    # Non-live output formats
+    fmt = args.format or "text"
+    if fmt == "json":
+        output = replayer.to_json()
+        if args.output:
+            with open(args.output, "w", encoding="utf-8") as f:
+                f.write(output)
+            print(f"✅ JSON replay written to {args.output}")
+        else:
+            print(output)
+        return
+
+    if fmt == "markdown":
+        output = replayer.to_markdown()
+        if args.output:
+            with open(args.output, "w", encoding="utf-8") as f:
+                f.write(output)
+            print(f"✅ Markdown replay written to {args.output}")
+        else:
+            print(output)
+        return
+
+    # Live text mode — stream frames to terminal with delays
+    if args.live:
+        print(
+            f"▶ Replaying session {session.session_id}"
+            f"  agent={session.agent_name}  speed={args.speed}x"
+            f"  events={len(replayer.filtered_events)}"
+        )
+        print()
+
+        use_color = not getattr(args, "no_color", False)
+
+        _TYPE_COLORS = {
+            "llm_call": "\033[36m",    # cyan
+            "tool_call": "\033[33m",   # yellow
+            "error": "\033[31m",       # red
+            "decision": "\033[35m",    # magenta
+            "guardrail": "\033[32m",   # green
+        }
+        _RESET = "\033[0m"
+
+        for frame in replayer.play():
+            # Sleep for the wall delay to simulate real-time playback
+            if frame.wall_delay_ms > 0 and frame.index > 0:
+                _time.sleep(frame.wall_delay_ms / 1000.0)
+
+            e = frame.event
+            # Build display line
+            idx_str = f"[{frame.index + 1:>3}/{frame.total}]"
+            pct_str = f"{frame.progress_pct:5.1f}%"
+
+            type_str = e.event_type
+            if use_color:
+                color = _TYPE_COLORS.get(e.event_type, "\033[37m")
+                type_str = f"{color}{e.event_type}{_RESET}"
+
+            parts = [idx_str, type_str]
+            if e.model:
+                parts.append(f"model={e.model}")
+            if e.tool_call:
+                parts.append(f"tool={e.tool_call.tool_name}")
+            if e.duration_ms is not None:
+                parts.append(f"dur={e.duration_ms:.0f}ms")
+            if e.tokens_in or e.tokens_out:
+                parts.append(f"tok={e.tokens_in}→{e.tokens_out}")
+            if frame.is_breakpoint:
+                bp_marker = "\033[31;1m⏸ BREAK\033[0m" if use_color else "⏸ BREAK"
+                parts.append(bp_marker)
+
+            # Progress bar
+            bar_width = 20
+            filled = int(frame.progress * bar_width)
+            bar = "█" * filled + "░" * (bar_width - filled)
+            parts.append(f"[{bar}] {pct_str}")
+
+            print(" | ".join(parts))
+
+        print()
+        print(replayer.stats.summary())
+    else:
+        # Static text dump
+        output = replayer.to_text()
+        if args.output:
+            with open(args.output, "w", encoding="utf-8") as f:
+                f.write(output)
+            print(f"✅ Text replay written to {args.output}")
+        else:
+            print(output)
+
+
 # ── Main ─────────────────────────────────────────────────────────────
 
 
@@ -1367,6 +1554,17 @@ def main() -> None:
     p.add_argument("--weeks", type=int, default=12, help="Number of weeks to include (default: 12)")
     p.add_argument("--limit", type=int, default=500, help="Max sessions to fetch (default: 500)")
 
+    # replay
+    p = sub.add_parser("replay", help="Replay a session event-by-event in the terminal")
+    p.add_argument("session_id", help="Session ID to replay")
+    p.add_argument("--speed", type=float, default=1.0, help="Playback speed multiplier (default: 1.0, e.g. 2.0 = 2x faster)")
+    p.add_argument("--type", help="Include only these event types (comma-separated, e.g. llm_call,tool_call)")
+    p.add_argument("--exclude", help="Exclude these event types (comma-separated)")
+    p.add_argument("--format", choices=["text", "json", "markdown"], default="text", help="Output format (default: text)")
+    p.add_argument("--live", action="store_true", help="Stream frames in real-time with delays and progress bar")
+    p.add_argument("--no-color", action="store_true", help="Disable colored output in live mode")
+    p.add_argument("--output", "-o", help="Write replay to file instead of stdout")
+
     # status
     sub.add_parser("status", help="Check backend connectivity")
 
@@ -1390,6 +1588,7 @@ def main() -> None:
         "dashboard": cmd_dashboard,
         "trace": cmd_trace,
         "heatmap": cmd_heatmap,
+        "replay": cmd_replay,
         "status": cmd_status,
     }
     commands[args.command](args)
