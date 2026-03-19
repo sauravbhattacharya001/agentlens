@@ -340,6 +340,7 @@ class LatencyProfiler:
         """
         self._sessions: dict[str, ProfilingSession] = {}
         self._session_order: list[str] = []  # insertion order
+        self._session_set: set[str] = set()  # O(1) membership check
         self.baseline_window = baseline_window
 
     def start_session(self, session_id: str | None = None, label: str = "") -> ProfilingSession:
@@ -356,6 +357,7 @@ class LatencyProfiler:
         session = ProfilingSession(session_id=sid, label=label)
         self._sessions[sid] = session
         self._session_order.append(sid)
+        self._session_set.add(sid)
         return session
 
     def get_session(self, session_id: str) -> ProfilingSession | None:
@@ -366,10 +368,9 @@ class LatencyProfiler:
         """Remove a session. Returns True if it existed."""
         if session_id in self._sessions:
             del self._sessions[session_id]
-            try:
-                self._session_order.remove(session_id)
-            except ValueError:
-                pass
+            self._session_set.discard(session_id)
+            # Don't scan _session_order (O(n)); just mark as removed.
+            # Iteration methods already skip missing sessions via _sessions.get().
             return True
         return False
 

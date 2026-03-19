@@ -4,6 +4,7 @@ from __future__ import annotations
 
 import logging
 import threading
+from collections import deque
 from typing import Any
 
 import httpx
@@ -40,7 +41,7 @@ class Transport:
         self.flush_interval = flush_interval
         self.max_retries = max_retries
 
-        self._buffer: list[dict[str, Any]] = []
+        self._buffer: deque[dict[str, Any]] = deque(maxlen=_MAX_BUFFER_SIZE)
         self._consecutive_failures: int = 0
         self._lock = threading.Lock()
         self._client = httpx.Client(timeout=10.0)
@@ -69,19 +70,14 @@ class Transport:
         )
 
     def send_events(self, events: list[dict[str, Any]]) -> None:
-        """Add events to the buffer. Flushes when batch_size is reached."""
+        """Add events to the buffer. Flushes when batch_size is reached.
+
+        Uses a deque with maxlen so overflow is handled automatically
+        (oldest events are silently dropped) — no manual size check needed.
+        """
         batch_to_send: list[dict[str, Any]] | None = None
         with self._lock:
             self._buffer.extend(events)
-            # Drop oldest events if the buffer grows beyond the hard cap
-            if len(self._buffer) > _MAX_BUFFER_SIZE:
-                dropped = len(self._buffer) - _MAX_BUFFER_SIZE
-                self._buffer = self._buffer[dropped:]
-                logger.warning(
-                    "Event buffer exceeded %d entries; dropped %d oldest events",
-                    _MAX_BUFFER_SIZE,
-                    dropped,
-                )
             if len(self._buffer) >= self.batch_size:
                 batch_to_send = self._drain_buffer()
 
@@ -96,8 +92,11 @@ class Transport:
             self._send_batch(batch)
 
     def _drain_buffer(self) -> list[dict[str, Any]]:
-        """Drain and return buffer contents.  Must be called with lock held."""
-        events = self._buffer[:]
+        """Drain and return buffer contents.  Must be called with lock held.
+
+        Converts the deque to a list and clears it in one pass.
+        """
+        events = list(self._buffer)
         self._buffer.clear()
         return events
 
@@ -146,8 +145,10 @@ class Transport:
             self._consecutive_failures += 1
 
             if self._consecutive_failures <= self.max_retries:
-                # Prepend failed events *before* anything new that arrived
-                self._buffer[0:0] = events
+                # Prepend failed events before anything new that arrived.
+                # With deque, extendleft in reverse order is O(k) for k events.
+                for evt in reversed(events):
+                    self._buffer.appendleft(evt)
                 logger.info(
                     "Queued %d events for retry (attempt %d/%d)",
                     len(events),

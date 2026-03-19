@@ -17,7 +17,7 @@ class TestSendEventsEdgeCases:
             with patch.object(t, "_send_batch") as mock_send:
                 t.send_events([{"type": "a"}])
                 mock_send.assert_not_called()
-                assert t._buffer == [{"type": "a"}]
+                assert list(t._buffer) == [{"type": "a"}]
         finally:
             t._running = False
 
@@ -48,7 +48,7 @@ class TestSendEventsEdgeCases:
             with patch.object(t, "_send_batch") as mock_send:
                 t.send_events([])
                 mock_send.assert_not_called()
-                assert t._buffer == []
+                assert list(t._buffer) == []
         finally:
             t._running = False
 
@@ -108,7 +108,8 @@ class TestSendBatchRetryLogic:
         t = Transport(endpoint="http://test:3000", max_retries=3)
         try:
             # Pre-populate buffer with a new event that arrived during the HTTP call
-            t._buffer = [{"type": "new"}]
+            from collections import deque
+            t._buffer = deque([{"type": "new"}], maxlen=5000)
             mock_resp = MagicMock()
             mock_resp.status_code = 500
             mock_resp.text = "Error"
