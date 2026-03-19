@@ -8,30 +8,6 @@ const {
   createIngestLimiter,
   createApiKeyAuth,
 } = require("./middleware");
-const eventsRouter = require("./routes/events");
-const sessionsRouter = require("./routes/sessions");
-const tagsRouter = require("./routes/tags");
-const analyticsRouter = require("./routes/analytics");
-const pricingRouter = require("./routes/pricing");
-const alertsRouter = require("./routes/alerts");
-const annotationsRouter = require("./routes/annotations");
-const retentionRouter = require("./routes/retention");
-const leaderboardRouter = require("./routes/leaderboard");
-const errorsRouter = require("./routes/errors");
-const webhooksRouter = require("./routes/webhooks");
-const dependenciesRouter = require("./routes/dependencies");
-const correlationsRouter = require("./routes/correlations");
-const correlationSchedulerRouter = require("./routes/correlation-scheduler");
-const postmortemRouter = require("./routes/postmortem");
-const bookmarksRouter = require("./routes/bookmarks");
-const baselinesRouter = require("./routes/baselines");
-const budgetsRouter = require("./routes/budgets");
-const slaRouter = require("./routes/sla");
-const anomaliesRouter = require("./routes/anomalies");
-const replayRouter = require("./routes/replay");
-const forecastRouter = require("./routes/forecast");
-const scorecardsRouter = require("./routes/scorecards");
-const diffRouter = require("./routes/diff");
 
 const app = express();
 const PORT = process.env.PORT || 3000;
@@ -40,89 +16,70 @@ const PORT = process.env.PORT || 3000;
 app.use(createHelmetMiddleware());
 app.use(createCorsMiddleware());
 
-// ── Rate limiting ───────────────────────────────────────────────────
-app.use("/sessions", createApiLimiter());
-app.use("/events", createIngestLimiter());
-app.use("/analytics", createApiLimiter());
-app.use("/pricing", createApiLimiter());
-app.use("/alerts", createApiLimiter());
-app.use("/annotations", createApiLimiter());
-app.use("/retention", createApiLimiter());
-app.use("/leaderboard", createApiLimiter());
-app.use("/errors", createApiLimiter());
-app.use("/webhooks", createApiLimiter());
-app.use("/dependencies", createApiLimiter());
-app.use("/postmortem", createApiLimiter());
-app.use("/bookmarks", createApiLimiter());
-app.use("/baselines", createApiLimiter());
-app.use("/correlations", createApiLimiter());
-app.use("/budgets", createApiLimiter());
-app.use("/sla", createApiLimiter());
-app.use("/anomalies", createApiLimiter());
-app.use("/replay", createApiLimiter());
-app.use("/forecast", createApiLimiter());
-app.use("/scorecards", createApiLimiter());
-app.use("/diff", createApiLimiter());
-
-// ── API key authentication ──────────────────────────────────────────
+// ── Rate limiting & authentication ──────────────────────────────────
+const apiLimiter = createApiLimiter();
+const ingestLimiter = createIngestLimiter();
 const { authenticateApiKey, hasApiKey } = createApiKeyAuth();
-app.use("/events", authenticateApiKey);
-app.use("/sessions", authenticateApiKey);
-app.use("/analytics", authenticateApiKey);
-app.use("/pricing", authenticateApiKey);
-app.use("/alerts", authenticateApiKey);
-app.use("/annotations", authenticateApiKey);
-app.use("/retention", authenticateApiKey);
-app.use("/leaderboard", authenticateApiKey);
-app.use("/errors", authenticateApiKey);
-app.use("/webhooks", authenticateApiKey);
-app.use("/dependencies", authenticateApiKey);
-app.use("/bookmarks", authenticateApiKey);
-app.use("/postmortem", authenticateApiKey);
-app.use("/baselines", authenticateApiKey);
-app.use("/correlations", authenticateApiKey);
-app.use("/budgets", authenticateApiKey);
-app.use("/sla", authenticateApiKey);
-app.use("/anomalies", authenticateApiKey);
-app.use("/replay", authenticateApiKey);
-app.use("/forecast", authenticateApiKey);
-app.use("/scorecards", authenticateApiKey);
-app.use("/diff", authenticateApiKey);
 
-// Body parser with size limit
+// ── Route definitions ───────────────────────────────────────────────
+// Each entry: [mountPath, routerModule, options?]
+//   options.limiter  — override the default apiLimiter (e.g. ingestLimiter)
+//   options.noAuth   — skip API-key auth for this mount
+//   options.mount    — override the Express mount path (when different from URL prefix)
+const routeDefs = [
+  ["/events",       "./routes/events",                { limiter: ingestLimiter }],
+  // Tag routes must be mounted before sessions to avoid /:id catching "tags" / "by-tag"
+  ["/sessions",     "./routes/tags"],
+  ["/sessions",     "./routes/sessions"],
+  ["/analytics",    "./routes/analytics"],
+  ["/pricing",      "./routes/pricing"],
+  ["/alerts",       "./routes/alerts"],
+  ["/annotations",  "./routes/annotations"],
+  ["/retention",    "./routes/retention"],
+  ["/leaderboard",  "./routes/leaderboard"],
+  ["/errors",       "./routes/errors"],
+  ["/webhooks",     "./routes/webhooks"],
+  ["/dependencies", "./routes/dependencies"],
+  ["/correlations", "./routes/correlations"],
+  ["/correlations", "./routes/correlation-scheduler"],
+  ["/postmortem",   "./routes/postmortem"],
+  ["/bookmarks",    "./routes/bookmarks"],
+  ["/baselines",    "./routes/baselines"],
+  ["/budgets",      "./routes/budgets"],
+  ["/sla",          "./routes/sla"],
+  ["/anomalies",    "./routes/anomalies"],
+  ["/replay",       "./routes/replay"],
+  ["/forecast",     "./routes/forecast"],
+  ["/scorecards",   "./routes/scorecards"],
+  ["/diff",         "./routes/diff"],
+  // Session-scoped annotation routes
+  ["/sessions",     "./routes/annotations"],
+];
+
+// Deduplicate mount paths for middleware registration (rate-limit + auth
+// only need to be applied once per path prefix).
+const registeredPaths = new Set();
+
+for (const [mountPath, modulePath, opts = {}] of routeDefs) {
+  if (!registeredPaths.has(mountPath)) {
+    app.use(mountPath, opts.limiter || apiLimiter);
+    if (!opts.noAuth) {
+      app.use(mountPath, authenticateApiKey);
+    }
+    registeredPaths.add(mountPath);
+  }
+}
+
+// Body parser with size limit (after rate-limit/auth, before route handlers)
 app.use(express.json({ limit: "10mb" }));
 
 // Serve dashboard static files
 app.use(express.static(path.join(__dirname, "..", "dashboard")));
 
-// API routes
-app.use("/events", eventsRouter);
-// Tag routes must be mounted before sessions to avoid /:id catching "tags" / "by-tag"
-app.use("/sessions", tagsRouter);
-app.use("/sessions", sessionsRouter);
-app.use("/analytics", analyticsRouter);
-app.use("/pricing", pricingRouter);
-app.use("/alerts", alertsRouter);
-app.use("/annotations", annotationsRouter);
-app.use("/retention", retentionRouter);
-app.use("/leaderboard", leaderboardRouter);
-app.use("/errors", errorsRouter);
-app.use("/webhooks", webhooksRouter);
-app.use("/dependencies", dependenciesRouter);
-app.use("/correlations", correlationsRouter);
-app.use("/correlations", correlationSchedulerRouter);
-app.use("/postmortem", postmortemRouter);
-app.use("/bookmarks", bookmarksRouter);
-app.use("/baselines", baselinesRouter);
-app.use("/budgets", budgetsRouter);
-app.use("/sla", slaRouter);
-app.use("/anomalies", anomaliesRouter);
-app.use("/replay", replayRouter);
-app.use("/forecast", forecastRouter);
-app.use("/scorecards", scorecardsRouter);
-app.use("/diff", diffRouter);
-// Mount session-scoped annotation routes on /sessions
-app.use("/sessions", annotationsRouter);
+// Mount all route handlers
+for (const [mountPath, modulePath] of routeDefs) {
+  app.use(mountPath, require(modulePath));
+}
 
 // Health check (no auth required)
 app.get("/health", (req, res) => {
