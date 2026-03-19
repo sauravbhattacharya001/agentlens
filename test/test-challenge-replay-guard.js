@@ -437,12 +437,18 @@ console.log("\nEdge Cases:");
 test("handles special characters in challengeId", function () {
   var guard = createChallengeReplayGuard();
   var t = guard.issueToken("ch|with|pipes");
-  // The pipe chars are part of the payload format, but since we split on |
-  // this actually tests the robustness. The challengeId is the first segment.
   var result = guard.consume(t.token);
-  // Due to pipe-splitting, the challengeId may be truncated.
-  // This is expected behavior - IDs should not contain pipes.
-  assert.ok(result.valid !== undefined);
+  // JSON-encoded payload preserves the full challengeId including pipes
+  assert.strictEqual(result.valid, true);
+  assert.strictEqual(result.challengeId, "ch|with|pipes");
+});
+
+test("handles challengeId with JSON-special characters", function () {
+  var guard = createChallengeReplayGuard();
+  var t = guard.issueToken('ch"with\\quotes');
+  var result = guard.consume(t.token);
+  assert.strictEqual(result.valid, true);
+  assert.strictEqual(result.challengeId, 'ch"with\\quotes');
 });
 
 test("high-volume issuance", function () {

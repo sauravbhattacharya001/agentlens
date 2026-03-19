@@ -142,9 +142,18 @@ function createChallengeReplayGuard(options) {
     var issuedAt = Date.now();
     var expiresAt = issuedAt + ttlMs;
 
-    // Payload: challengeId|nonce|issuedAt|expiresAt|meta
-    var metaStr = meta ? JSON.stringify(meta) : "";
-    var payload = [challengeId, nonce, issuedAt, expiresAt, metaStr].join("|");
+    // Payload: JSON-encoded to prevent delimiter injection (CVE-safe).
+    // Previously used pipe-delimited format which was vulnerable to
+    // challengeId containing pipes, causing field misalignment during parsing.
+    var metaObj = meta || null;
+    var payloadObj = {
+      c: challengeId,
+      n: nonce,
+      i: issuedAt,
+      e: expiresAt,
+      m: metaObj
+    };
+    var payload = JSON.stringify(payloadObj);
     var signature = _sign(payload);
 
     // Token format: base64(payload).signature
@@ -211,16 +220,22 @@ function createChallengeReplayGuard(options) {
       return { valid: false, error: "invalid_signature" };
     }
 
-    var parts = payload.split("|");
-    if (parts.length < 4) {
+    var payloadObj;
+    try {
+      payloadObj = JSON.parse(payload);
+    } catch (e) {
       return { valid: false, error: "invalid_format" };
     }
 
-    var challengeId = parts[0];
-    var nonce = parts[1];
-    var issuedAt = parseInt(parts[2], 10);
-    var expiresAt = parseInt(parts[3], 10);
-    var meta = parts[4] ? JSON.parse(parts[4]) : null;
+    if (!payloadObj || !payloadObj.c || !payloadObj.n || !payloadObj.i || !payloadObj.e) {
+      return { valid: false, error: "invalid_format" };
+    }
+
+    var challengeId = payloadObj.c;
+    var nonce = payloadObj.n;
+    var issuedAt = payloadObj.i;
+    var expiresAt = payloadObj.e;
+    var meta = payloadObj.m || null;
 
     var now = Date.now();
     var expired = now > expiresAt;
@@ -281,18 +296,26 @@ function createChallengeReplayGuard(options) {
       return { valid: false, error: "invalid_signature" };
     }
 
-    var parts = payload.split("|");
-    if (parts.length < 4) {
+    var payloadObj;
+    try {
+      payloadObj = JSON.parse(payload);
+    } catch (e) {
       _stats.tokensRejected++;
       _stats.rejectionReasons.invalid_format++;
       return { valid: false, error: "invalid_format" };
     }
 
-    var challengeId = parts[0];
-    var nonce = parts[1];
-    var issuedAt = parseInt(parts[2], 10);
-    var expiresAt = parseInt(parts[3], 10);
-    var meta = parts[4] ? JSON.parse(parts[4]) : null;
+    if (!payloadObj || !payloadObj.c || !payloadObj.n || !payloadObj.i || !payloadObj.e) {
+      _stats.tokensRejected++;
+      _stats.rejectionReasons.invalid_format++;
+      return { valid: false, error: "invalid_format" };
+    }
+
+    var challengeId = payloadObj.c;
+    var nonce = payloadObj.n;
+    var issuedAt = payloadObj.i;
+    var expiresAt = payloadObj.e;
+    var meta = payloadObj.m || null;
 
     var now = Date.now();
 
