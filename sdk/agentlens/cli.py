@@ -18,6 +18,7 @@ Usage:
     agentlens-cli flamegraph <session_id> [--output FILE] [--open] [--stats] [--endpoint URL] [--api-key KEY]
     agentlens-cli dashboard [--limit N] [--output FILE] [--open] [--endpoint URL] [--api-key KEY]
     agentlens-cli trace <session_id> [--no-color] [--json] [--type TYPE] [--min-ms N] [--endpoint URL] [--api-key KEY]
+    agentlens-cli heatmap [--metric sessions|cost|tokens|events] [--weeks N] [--limit N] [--endpoint URL] [--api-key KEY]
     agentlens-cli status [--endpoint URL] [--api-key KEY]
 
 Environment variables:
@@ -935,6 +936,122 @@ def cmd_trace(args: argparse.Namespace) -> None:
     print()
 
 
+def cmd_heatmap(args: argparse.Namespace) -> None:
+    """GitHub-style terminal activity heatmap (day-of-week × hour)."""
+    from collections import defaultdict
+    from datetime import datetime, timedelta, timezone
+
+    client, endpoint = _get_client(args)
+    metric = getattr(args, "metric", "sessions") or "sessions"
+    weeks = getattr(args, "weeks", 12) or 12
+    limit = getattr(args, "limit", 500) or 500
+
+    print(f"📊 Fetching sessions from {endpoint} ...")
+    resp = client.get("/sessions", params={"limit": limit})
+    resp.raise_for_status()
+    raw = resp.json()
+    sessions = raw if isinstance(raw, list) else raw.get("sessions", [raw])
+
+    now = datetime.now(timezone.utc)
+    cutoff = now - timedelta(weeks=weeks)
+
+    # Aggregate into (weekday, hour) buckets
+    grid: dict[tuple[int, int], float] = defaultdict(float)  # (weekday 0=Mon, hour) -> value
+
+    for s in sessions:
+        created = s.get("created_at", "")
+        if not created:
+            continue
+        try:
+            # Handle various ISO formats
+            ts = created.replace("Z", "+00:00")
+            dt = datetime.fromisoformat(ts)
+        except (ValueError, TypeError):
+            continue
+        if dt < cutoff:
+            continue
+        key = (dt.weekday(), dt.hour)
+        if metric == "sessions":
+            grid[key] += 1
+        elif metric == "cost":
+            grid[key] += float(s.get("total_cost", 0) or 0)
+        elif metric == "tokens":
+            grid[key] += int(s.get("total_tokens", 0) or 0)
+        elif metric == "events":
+            grid[key] += int(s.get("event_count", 0) or 0)
+
+    if not grid:
+        print("⚠️  No session data found in the specified time range.")
+        return
+
+    max_val = max(grid.values()) if grid else 1
+    if max_val == 0:
+        max_val = 1
+
+    # Intensity blocks (5 levels)
+    blocks = [" ", "░", "▒", "▓", "█"]
+    day_names = ["Mon", "Tue", "Wed", "Thu", "Fri", "Sat", "Sun"]
+
+    # Color escapes (green shades via ANSI 256)
+    GREEN = "\033[32m"
+    BRIGHT_GREEN = "\033[92m"
+    DIM = "\033[2m"
+    RESET = "\033[0m"
+
+    metric_label = {"sessions": "Sessions", "cost": "Cost ($)", "tokens": "Tokens", "events": "Events"}[metric]
+    print(f"\n🗓  Activity Heatmap — {metric_label} (last {weeks} weeks)\n")
+
+    # Hour header
+    header = "      "
+    for h in range(24):
+        header += f"{h:>2} "
+    print(DIM + header + RESET)
+    print("      " + "───" * 24)
+
+    for day_idx in range(7):
+        row = f" {day_names[day_idx]:>3}  "
+        for hour in range(24):
+            val = grid.get((day_idx, hour), 0)
+            ratio = val / max_val
+            level = 0 if val == 0 else min(4, max(1, int(ratio * 4) + (1 if ratio > 0 else 0)))
+            block = blocks[level]
+            if level == 0:
+                row += DIM + " · " + RESET
+            elif level <= 2:
+                row += GREEN + f" {block} " + RESET
+            else:
+                row += BRIGHT_GREEN + f" {block} " + RESET
+        print(row)
+
+    print("      " + "───" * 24)
+
+    # Legend
+    print(f"\n  Legend: {DIM} · {RESET}= none ", end="")
+    for i, b in enumerate(blocks[1:], 1):
+        color = GREEN if i <= 2 else BRIGHT_GREEN
+        print(f" {color}{b}{RESET} ", end="")
+    print(f"= max ({max_val:,.1f} {metric})")
+
+    # Summary stats
+    total = sum(grid.values())
+    active_slots = sum(1 for v in grid.values() if v > 0)
+    peak_key = max(grid, key=grid.get)
+    peak_day, peak_hour = day_names[peak_key[0]], peak_key[1]
+    print(f"\n  Total: {total:,.1f} | Active slots: {active_slots}/168 | Peak: {peak_day} {peak_hour}:00 ({grid[peak_key]:,.1f})")
+
+    # Busiest day & hour aggregates
+    day_totals = defaultdict(float)
+    hour_totals = defaultdict(float)
+    for (d, h), v in grid.items():
+        day_totals[d] += v
+        hour_totals[h] += v
+
+    busiest_day = max(day_totals, key=day_totals.get) if day_totals else 0
+    busiest_hour = max(hour_totals, key=hour_totals.get) if hour_totals else 0
+    print(f"  Busiest day: {day_names[busiest_day]} ({day_totals[busiest_day]:,.1f}) | Busiest hour: {busiest_hour}:00 ({hour_totals[busiest_hour]:,.1f})")
+    print()
+
+
 def cmd_status(args: argparse.Namespace) -> None:
     client, endpoint = _get_client(args)
     try:
@@ -1244,6 +1361,12 @@ def main() -> None:
     p.add_argument("--type", help="Filter events by type (e.g. llm_call, tool_call, error)")
     p.add_argument("--min-ms", type=float, default=None, help="Only show events slower than N milliseconds")
 
+    # heatmap
+    p = sub.add_parser("heatmap", help="GitHub-style activity heatmap (day-of-week × hour)")
+    p.add_argument("--metric", choices=["sessions", "cost", "tokens", "events"], default="sessions", help="Metric to visualize (default: sessions)")
+    p.add_argument("--weeks", type=int, default=12, help="Number of weeks to include (default: 12)")
+    p.add_argument("--limit", type=int, default=500, help="Max sessions to fetch (default: 500)")
+
     # status
     sub.add_parser("status", help="Check backend connectivity")
 
@@ -1266,6 +1389,7 @@ def main() -> None:
         "flamegraph": cmd_flamegraph,
         "dashboard": cmd_dashboard,
         "trace": cmd_trace,
+        "heatmap": cmd_heatmap,
         "status": cmd_status,
     }
     commands[args.command](args)
