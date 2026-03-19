@@ -122,7 +122,9 @@ class ValidationResult:
         }
 
     def to_json(self, path: str) -> None:
-        with open(path, "w") as f:
+        from agentlens.exporter import _validate_output_path
+        safe = _validate_output_path(path)
+        with open(safe, "w") as f:
             json.dump(self.to_dict(), f, indent=2)
 
 
@@ -422,7 +424,9 @@ class SuiteReport:
         }
 
     def to_json(self, path: str) -> None:
-        with open(path, "w") as f:
+        from agentlens.exporter import _validate_output_path
+        safe = _validate_output_path(path)
+        with open(safe, "w") as f:
             json.dump(self.to_dict(), f, indent=2)
 
 

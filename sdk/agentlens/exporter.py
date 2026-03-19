@@ -36,7 +36,43 @@ import json
 from datetime import datetime, timezone
 from typing import Any
 
+from pathlib import Path
+
 from agentlens.models import Session, AgentEvent
+
+
+def _validate_output_path(path: str) -> Path:
+    """Validate that an output path is safe to write to.
+
+    Resolves the path to its canonical form and rejects any path that
+    escapes the current working directory or the system temp directory.
+    This prevents directory-traversal attacks (CWE-22) when callers
+    pass user-controlled file names.
+
+    Raises:
+        ValueError: if the resolved path is outside allowed directories.
+    """
+    resolved = Path(path).resolve()
+    cwd = Path.cwd().resolve()
+    import tempfile
+    tmp = Path(tempfile.gettempdir()).resolve()
+
+    if resolved == cwd or resolved == tmp:
+        raise ValueError(
+            f"Export path must be a file, not a directory: {resolved}"
+        )
+
+    for allowed in (cwd, tmp):
+        try:
+            resolved.relative_to(allowed)
+            return resolved
+        except ValueError:
+            continue
+
+    raise ValueError(
+        f"Export path must be within the working directory ({cwd}) "
+        f"or temp directory ({tmp}). Resolved path: {resolved}"
+    )
 
 
 def _iso(dt: datetime | None) -> str | None:
@@ -150,8 +186,12 @@ class SessionExporter:
         return json.dumps(payload, indent=indent, default=str)
 
     def to_json(self, path: str) -> None:
-        """Write session JSON to a file."""
-        with open(path, "w", encoding="utf-8") as f:
+        """Write session JSON to a file.
+
+        Raises ValueError if the path escapes the working/temp directory.
+        """
+        safe = _validate_output_path(path)
+        with open(safe, "w", encoding="utf-8") as f:
             f.write(self.as_json())
 
     # ── CSV ─────────────────────────────────────────────────────────
@@ -166,8 +206,12 @@ class SessionExporter:
         return buf.getvalue()
 
     def to_csv(self, path: str) -> None:
-        """Write event CSV to a file."""
-        with open(path, "w", encoding="utf-8", newline="") as f:
+        """Write event CSV to a file.
+
+        Raises ValueError if the path escapes the working/temp directory.
+        """
+        safe = _validate_output_path(path)
+        with open(safe, "w", encoding="utf-8", newline="") as f:
             f.write(self.as_csv())
 
     # ── HTML ────────────────────────────────────────────────────────
@@ -260,8 +304,12 @@ class SessionExporter:
 </html>"""
 
     def to_html(self, path: str) -> None:
-        """Write HTML report to a file."""
-        with open(path, "w", encoding="utf-8") as f:
+        """Write HTML report to a file.
+
+        Raises ValueError if the path escapes the working/temp directory.
+        """
+        safe = _validate_output_path(path)
+        with open(safe, "w", encoding="utf-8") as f:
             f.write(self.as_html())
 
     # ── HTML helpers ────────────────────────────────────────────────
