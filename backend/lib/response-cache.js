@@ -119,10 +119,16 @@ function createCache(options) {
    * @param {string} prefix
    */
   function invalidatePrefix(prefix) {
+    // Collect keys first to avoid mutating the Map during iteration,
+    // which can cause unpredictable behaviour across JS engines.
+    var toDelete = [];
     for (var key of store.keys()) {
       if (key.indexOf(prefix) === 0) {
-        store.delete(key);
+        toDelete.push(key);
       }
+    }
+    for (var i = 0; i < toDelete.length; i++) {
+      store.delete(toDelete[i]);
     }
   }
 

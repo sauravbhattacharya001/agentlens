@@ -77,6 +77,14 @@ router.post("/", wrapRoute("ingest events", (req, res) => {
     let processed = 0;
     let skipped = 0;
 
+    // ── Batch token accumulator ───────────────────────────────────
+    // Instead of issuing one UPDATE per event to increment session
+    // token counts, accumulate deltas per session and flush once at
+    // the end of the batch.  For a batch of N events across S
+    // sessions this reduces UPDATE calls from N to S — a significant
+    // win on large ingestion batches (typical: 50-500 events).
+    const sessionTokenDeltas = Object.create(null);
+
     for (const event of eventList) {
       const sessionId = validateSessionId(event.session_id);
       if (!sessionId) {
@@ -152,11 +160,25 @@ router.post("/", wrapRoute("ingest events", (req, res) => {
         durationMs
       );
 
-      // Update session token counts
-      updateSession.run(tokensIn, tokensOut, sessionId);
+      // Accumulate token deltas for batched session update
+      if (tokensIn > 0 || tokensOut > 0) {
+        if (!sessionTokenDeltas[sessionId]) {
+          sessionTokenDeltas[sessionId] = { tokensIn: 0, tokensOut: 0 };
+        }
+        sessionTokenDeltas[sessionId].tokensIn += tokensIn;
+        sessionTokenDeltas[sessionId].tokensOut += tokensOut;
+      }
 
       processed++;
     }
+
+    // ── Flush batched session token updates ───────────────────────
+    // One UPDATE per session instead of one per event.
+    for (const sid of Object.keys(sessionTokenDeltas)) {
+      const delta = sessionTokenDeltas[sid];
+      updateSession.run(delta.tokensIn, delta.tokensOut, sid);
+    }
+
     return { processed, skipped };
   });
 

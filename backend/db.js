@@ -57,6 +57,12 @@ function initSchema() {
     -- Composite index for session-scoped event ordering (used by session detail)
     CREATE INDEX IF NOT EXISTS idx_events_session_ts ON events(session_id, timestamp);
 
+    -- Composite index for performance analytics: covers the filtered JOIN on
+    -- events × sessions where duration_ms IS NOT NULL, enabling index-only
+    -- scans for the global/model/type aggregate queries.
+    CREATE INDEX IF NOT EXISTS idx_events_perf ON events(timestamp, duration_ms)
+      WHERE duration_ms IS NOT NULL AND duration_ms > 0;
+
     -- Model pricing for cost estimation
     CREATE TABLE IF NOT EXISTS model_pricing (
       model TEXT PRIMARY KEY,
