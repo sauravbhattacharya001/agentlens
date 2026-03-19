@@ -216,7 +216,13 @@ router.post("/rules", wrapRoute("create alert rule", (req, res) => {
     const ruleId = generateId();
     const now = new Date().toISOString();
     const windowMin = Number(window_minutes) || 60;
+    if (window_minutes !== undefined && (isNaN(Number(window_minutes)) || Number(window_minutes) < 1)) {
+      return res.status(400).json({ error: "window_minutes must be a positive number" });
+    }
     const cooldownMin = Number(cooldown_minutes) || 15;
+    if (cooldown_minutes !== undefined && (isNaN(Number(cooldown_minutes)) || Number(cooldown_minutes) < 0)) {
+      return res.status(400).json({ error: "cooldown_minutes must be a non-negative number" });
+    }
 
     db.prepare(`
       INSERT INTO alert_rules (rule_id, name, metric, operator, threshold, window_minutes, agent_filter, cooldown_minutes, created_at, updated_at)
@@ -242,7 +248,12 @@ router.put("/rules/:ruleId", wrapRoute("update alert rule", (req, res) => {
     const updates = {};
     const { name, metric, operator, threshold, window_minutes, agent_filter, enabled, cooldown_minutes } = req.body;
 
-    if (name !== undefined) updates.name = name.trim();
+    if (name !== undefined) {
+      if (typeof name !== "string" || name.trim().length === 0) {
+        return res.status(400).json({ error: "name must be a non-empty string" });
+      }
+      updates.name = name.trim();
+    }
     if (metric !== undefined) {
       if (!VALID_METRICS.includes(metric)) {
         return res.status(400).json({ error: `Invalid metric. Valid: ${VALID_METRICS.join(", ")}` });
@@ -255,11 +266,32 @@ router.put("/rules/:ruleId", wrapRoute("update alert rule", (req, res) => {
       }
       updates.operator = operator;
     }
-    if (threshold !== undefined) updates.threshold = threshold;
-    if (window_minutes !== undefined) updates.window_minutes = Number(window_minutes);
+    if (threshold !== undefined) {
+      if (typeof threshold !== "number" || isNaN(threshold)) {
+        return res.status(400).json({ error: "threshold must be a number" });
+      }
+      updates.threshold = threshold;
+    }
+    if (window_minutes !== undefined) {
+      const wm = Number(window_minutes);
+      if (isNaN(wm) || wm < 1) {
+        return res.status(400).json({ error: "window_minutes must be a positive number" });
+      }
+      updates.window_minutes = wm;
+    }
     if (agent_filter !== undefined) updates.agent_filter = agent_filter || null;
     if (enabled !== undefined) updates.enabled = enabled ? 1 : 0;
-    if (cooldown_minutes !== undefined) updates.cooldown_minutes = Number(cooldown_minutes);
+    if (cooldown_minutes !== undefined) {
+      const cm = Number(cooldown_minutes);
+      if (isNaN(cm) || cm < 0) {
+        return res.status(400).json({ error: "cooldown_minutes must be a non-negative number" });
+      }
+      updates.cooldown_minutes = cm;
+    }
+
+    if (Object.keys(updates).length === 0) {
+      return res.status(400).json({ error: "No valid fields to update" });
+    }
 
     const setClauses = Object.keys(updates).map(k => `${k} = ?`);
     setClauses.push("updated_at = ?");
