@@ -220,7 +220,12 @@ function createChallengeReplayGuard(options) {
     var nonce = parts[1];
     var issuedAt = parseInt(parts[2], 10);
     var expiresAt = parseInt(parts[3], 10);
-    var meta = parts[4] ? JSON.parse(parts[4]) : null;
+    var meta = null;
+    if (parts[4]) {
+      try { meta = JSON.parse(parts[4]); } catch (e) {
+        return { valid: false, error: "invalid_format" };
+      }
+    }
 
     var now = Date.now();
     var expired = now > expiresAt;
@@ -292,7 +297,14 @@ function createChallengeReplayGuard(options) {
     var nonce = parts[1];
     var issuedAt = parseInt(parts[2], 10);
     var expiresAt = parseInt(parts[3], 10);
-    var meta = parts[4] ? JSON.parse(parts[4]) : null;
+    var meta = null;
+    if (parts[4]) {
+      try { meta = JSON.parse(parts[4]); } catch (e) {
+        _stats.tokensRejected++;
+        _stats.rejectionReasons.invalid_format++;
+        return { valid: false, error: "invalid_format" };
+      }
+    }
 
     var now = Date.now();
 
