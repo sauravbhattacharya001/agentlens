@@ -193,6 +193,9 @@ agentlens flamegraph <session_id> -o profile.html --open
 
 # Print flamegraph statistics without generating HTML
 agentlens flamegraph <session_id> --stats
+
+# Generate self-contained HTML dashboard with interactive charts
+agentlens dashboard --limit 200 -o dashboard.html --open
 ```
 
 Configure via environment variables:
