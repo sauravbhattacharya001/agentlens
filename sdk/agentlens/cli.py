@@ -1,4 +1,4 @@
-"""AgentLens CLI — query your AgentLens backend from the command line.
+﻿"""AgentLens CLI â€” query your AgentLens backend from the command line.
 
 Usage:
     agentlens-cli sessions [--limit N] [--endpoint URL] [--api-key KEY]
@@ -37,6 +37,8 @@ import sys
 from typing import Any
 
 import httpx
+
+from agentlens.cli_analytics import cmd_report, cmd_outlier  # extracted
 
 
 def _get_client(args: argparse.Namespace) -> tuple[httpx.Client, str]:
@@ -80,7 +82,7 @@ def _print_table(rows: list[dict], columns: list[str], *, max_width: int = 40) -
         print(line)
 
 
-# ── Commands ─────────────────────────────────────────────────────────
+# â”€â”€ Commands â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€
 
 
 def cmd_sessions(args: argparse.Namespace) -> None:
@@ -253,17 +255,17 @@ def cmd_postmortem(args: argparse.Namespace) -> None:
     report = resp.json()
 
     if report.get("incident_id") == "INC-NONE":
-        print(f"✅ Session {args.session_id}: No incidents detected.")
+        print(f"âœ… Session {args.session_id}: No incidents detected.")
         print(f"   Events analysed: {report.get('event_count', 0)}")
         return
 
     # Pretty-print the postmortem
     severity = report.get("severity", "?")
-    sev_colors = {"SEV-1": "🔴", "SEV-2": "🟠", "SEV-3": "🟡", "SEV-4": "🟢"}
-    icon = sev_colors.get(severity, "⚪")
+    sev_colors = {"SEV-1": "ðŸ”´", "SEV-2": "ðŸŸ ", "SEV-3": "ðŸŸ¡", "SEV-4": "ðŸŸ¢"}
+    icon = sev_colors.get(severity, "âšª")
 
     print(f"\n{'='*60}")
-    print(f"  {icon} INCIDENT POSTMORTEM — {report.get('incident_id', '')}")
+    print(f"  {icon} INCIDENT POSTMORTEM â€” {report.get('incident_id', '')}")
     print(f"{'='*60}")
     print(f"\n  Title:    {report.get('title', '')}")
     print(f"  Severity: {severity}")
@@ -275,9 +277,9 @@ def cmd_postmortem(args: argparse.Namespace) -> None:
     # Impact
     impact = report.get("impact", {})
     if impact:
-        print(f"\n  {'─'*50}")
+        print(f"\n  {'â”€'*50}")
         print(f"  IMPACT")
-        print(f"  {'─'*50}")
+        print(f"  {'â”€'*50}")
         print(f"    Errors:        {impact.get('error_count', 0)} / {impact.get('total_events', 0)} events ({_pct(impact.get('error_rate', 0))})")
         print(f"    Tokens wasted: {impact.get('tokens_wasted', 0):,}")
         print(f"    Est. cost:     ${impact.get('estimated_cost_impact', 0):.4f}")
@@ -289,32 +291,32 @@ def cmd_postmortem(args: argparse.Namespace) -> None:
         if models:
             print(f"    Models:        {', '.join(models)}")
         if impact.get("user_facing"):
-            print(f"    ⚠ User-facing errors detected")
+            print(f"    âš  User-facing errors detected")
 
     # Root causes
     root_causes = report.get("root_causes", [])
     if root_causes:
-        print(f"\n  {'─'*50}")
+        print(f"\n  {'â”€'*50}")
         print(f"  ROOT CAUSES")
-        print(f"  {'─'*50}")
+        print(f"  {'â”€'*50}")
         for i, rc in enumerate(root_causes, 1):
             conf = rc.get("confidence", 0)
-            conf_bar = "█" * int(conf * 10) + "░" * (10 - int(conf * 10))
+            conf_bar = "â–ˆ" * int(conf * 10) + "â–‘" * (10 - int(conf * 10))
             print(f"    {i}. {rc.get('description', '')}")
             print(f"       Confidence: [{conf_bar}] {conf:.0%}")
             print(f"       Category:   {rc.get('category', '')}")
             print(f"       Affected:   {rc.get('affected_events', 0)} events")
             for ev in rc.get("evidence", []):
-                print(f"       • {ev}")
+                print(f"       â€¢ {ev}")
 
     # Timeline
     timeline = report.get("timeline", [])
     if timeline:
-        print(f"\n  {'─'*50}")
+        print(f"\n  {'â”€'*50}")
         print(f"  TIMELINE")
-        print(f"  {'─'*50}")
+        print(f"  {'â”€'*50}")
         for entry in timeline:
-            sev_icon = {"error": "❌", "warning": "⚠️", "info": "ℹ️"}.get(entry.get("severity", ""), "•")
+            sev_icon = {"error": "âŒ", "warning": "âš ï¸", "info": "â„¹ï¸"}.get(entry.get("severity", ""), "â€¢")
             elapsed = _format_duration(entry.get("elapsed_ms", 0))
             print(f"    {sev_icon} +{elapsed:<10} {entry.get('description', '')}")
 
@@ -324,7 +326,7 @@ def cmd_postmortem(args: argparse.Namespace) -> None:
 def _format_duration(ms: Any) -> str:
     """Format milliseconds into a human-readable duration string."""
     if ms is None:
-        return "—"
+        return "â€”"
     ms = float(ms)
     if ms < 1000:
         return f"{ms:.0f}ms"
@@ -370,14 +372,14 @@ def cmd_tail(args: argparse.Namespace) -> None:
             eid = ev.get("event_id") or ev.get("id") or ""
             if eid:
                 seen.add(eid)
-        print(f"🔍 Tailing events at {endpoint} (interval={interval}s, Ctrl+C to stop)")
+        print(f"ðŸ” Tailing events at {endpoint} (interval={interval}s, Ctrl+C to stop)")
         if session_filter:
             print(f"   Session filter: {session_filter}")
         if type_filter:
             print(f"   Type filter: {type_filter}")
         print(f"   Skipped {len(seen)} existing events\n")
     except httpx.HTTPError:
-        print(f"🔍 Tailing events at {endpoint} (interval={interval}s, Ctrl+C to stop)\n")
+        print(f"ðŸ” Tailing events at {endpoint} (interval={interval}s, Ctrl+C to stop)\n")
 
     def _format_event(ev: dict) -> str:
         ts = ev.get("timestamp", "")
@@ -390,11 +392,11 @@ def cmd_tail(args: argparse.Namespace) -> None:
 
         parts = [f"[{ts}]", f"{etype}"]
         if sid:
-            parts.append(f"sess={sid}…")
+            parts.append(f"sess={sid}â€¦")
         if model:
             parts.append(f"model={model}")
         if tok_in or tok_out:
-            parts.append(f"tokens={tok_in}→{tok_out}")
+            parts.append(f"tokens={tok_in}â†’{tok_out}")
         if dur is not None:
             parts.append(f"{dur}ms")
         return " ".join(parts)
@@ -416,13 +418,13 @@ def cmd_tail(args: argparse.Namespace) -> None:
                 for ev in new_events:
                     print(_format_event(ev))
             except httpx.HTTPError as exc:
-                print(f"⚠ poll error: {exc}", file=sys.stderr)
+                print(f"âš  poll error: {exc}", file=sys.stderr)
     except KeyboardInterrupt:
-        print("\n👋 Stopped tailing.")
+        print("\nðŸ‘‹ Stopped tailing.")
 
 
 def cmd_top(args: argparse.Namespace) -> None:
-    """Live leaderboard of sessions ranked by cost, tokens, or event count — like htop for agents."""
+    """Live leaderboard of sessions ranked by cost, tokens, or event count â€” like htop for agents."""
     import time as _time
 
     client, endpoint = _get_client(args)
@@ -442,14 +444,14 @@ def cmd_top(args: argparse.Namespace) -> None:
             return " " * width
         filled = int(round(value / max_val * width))
         filled = min(filled, width)
-        return "█" * filled + "░" * (width - filled)
+        return "â–ˆ" * filled + "â–‘" * (width - filled)
 
     def _fetch_and_display() -> None:
         try:
             resp = client.get("/sessions", params={"limit": limit * 2})
             resp.raise_for_status()
         except httpx.HTTPError as exc:
-            print(f"⚠ Error fetching sessions: {exc}", file=sys.stderr)
+            print(f"âš  Error fetching sessions: {exc}", file=sys.stderr)
             return
 
         data = resp.json()
@@ -476,7 +478,7 @@ def cmd_top(args: argparse.Namespace) -> None:
         if sys.stdout.isatty():
             print("\033[2J\033[H", end="")
 
-        print(f"⚡ AgentLens Top — sorted by {sort_key} | {endpoint} | Ctrl+C to stop")
+        print(f"âš¡ AgentLens Top â€” sorted by {sort_key} | {endpoint} | Ctrl+C to stop")
         print(f"   Refreshing every {interval}s\n")
 
         if not sessions:
@@ -487,7 +489,7 @@ def cmd_top(args: argparse.Namespace) -> None:
 
         # Header
         print(f"  {'#':<3} {'SESSION':<12} {'AGENT':<18} {'STATUS':<10} {'EVENTS':>7} {'TOKENS':>10} {'COST':>10}  {'':20}")
-        print(f"  {'─'*3} {'─'*12} {'─'*18} {'─'*10} {'─'*7} {'─'*10} {'─'*10}  {'─'*20}")
+        print(f"  {'â”€'*3} {'â”€'*12} {'â”€'*18} {'â”€'*10} {'â”€'*7} {'â”€'*10} {'â”€'*10}  {'â”€'*20}")
 
         for i, s in enumerate(sessions, 1):
             sid = str(s.get("id", ""))[:12]
@@ -499,224 +501,20 @@ def cmd_top(args: argparse.Namespace) -> None:
             val = s.get(sort_field, 0) or 0
             bar = _bar(val, max_val)
 
-            cost_str = f"${cost:.4f}" if cost > 0 else "—"
+            cost_str = f"${cost:.4f}" if cost > 0 else "â€”"
             print(f"  {i:<3} {sid:<12} {agent:<18} {status:<10} {events:>7} {tokens:>10} {cost_str:>10}  {bar}")
 
         print(f"\n  Showing {len(sessions)} sessions")
 
-    print(f"⚡ AgentLens Top — connecting to {endpoint}...")
+    print(f"âš¡ AgentLens Top â€” connecting to {endpoint}...")
     try:
         while True:
             _fetch_and_display()
             _time.sleep(interval)
     except KeyboardInterrupt:
-        print("\n👋 Stopped.")
+        print("\nðŸ‘‹ Stopped.")
 
 
-def cmd_report(args: argparse.Namespace) -> None:
-    """Generate a summary report for sessions over a time period."""
-    from datetime import datetime, timedelta, timezone
-
-    client, endpoint = _get_client(args)
-    period = getattr(args, "period", "day") or "day"
-    fmt = getattr(args, "format", "table") or "table"
-    output = getattr(args, "output", None)
-
-    # Calculate time range
-    now = datetime.now(timezone.utc)
-    period_days = {"day": 1, "week": 7, "month": 30}[period]
-    since = now - timedelta(days=period_days)
-    period_label = {"day": "Daily", "week": "Weekly", "month": "Monthly"}[period]
-
-    # Fetch all sessions
-    resp = client.get("/sessions", params={"limit": 500})
-    resp.raise_for_status()
-    data = resp.json()
-    all_sessions = data if isinstance(data, list) else data.get("sessions", [data])
-
-    # Filter to time range
-    sessions = []
-    for s in all_sessions:
-        created = s.get("created_at", "")
-        if created:
-            try:
-                ts = datetime.fromisoformat(str(created).replace("Z", "+00:00"))
-                if ts >= since:
-                    sessions.append(s)
-            except (ValueError, TypeError):
-                sessions.append(s)  # include if can't parse
-        else:
-            sessions.append(s)
-
-    # Aggregate stats
-    total_sessions = len(sessions)
-    total_events = sum(s.get("event_count", 0) or 0 for s in sessions)
-    total_tokens = sum(s.get("total_tokens", 0) or 0 for s in sessions)
-    total_errors = sum(s.get("error_count", 0) or 0 for s in sessions)
-
-    # Status breakdown
-    status_counts: dict[str, int] = {}
-    for s in sessions:
-        st = str(s.get("status", "unknown") or "unknown")
-        status_counts[st] = status_counts.get(st, 0) + 1
-
-    # Agent breakdown
-    agent_counts: dict[str, dict[str, Any]] = {}
-    for s in sessions:
-        agent = str(s.get("agent_name", "") or "unknown")
-        if agent not in agent_counts:
-            agent_counts[agent] = {"sessions": 0, "events": 0, "tokens": 0, "errors": 0}
-        agent_counts[agent]["sessions"] += 1
-        agent_counts[agent]["events"] += s.get("event_count", 0) or 0
-        agent_counts[agent]["tokens"] += s.get("total_tokens", 0) or 0
-        agent_counts[agent]["errors"] += s.get("error_count", 0) or 0
-
-    # Fetch cost data (sample up to 20 sessions)
-    total_cost = 0.0
-    model_costs: dict[str, float] = {}
-    cost_sessions = sessions[:20]
-    for s in cost_sessions:
-        sid = s.get("id", "")
-        if not sid:
-            continue
-        try:
-            cr = client.get(f"/sessions/{sid}/costs")
-            cr.raise_for_status()
-            cd = cr.json()
-            cost = cd.get("total_cost", 0) or 0
-            total_cost += cost
-            for model, mc in (cd.get("model_costs", {}) or {}).items():
-                c = mc.get("total", mc) if isinstance(mc, dict) else mc
-                model_costs[model] = model_costs.get(model, 0) + (c or 0)
-        except httpx.HTTPError:
-            pass
-
-    # Extrapolate cost if we sampled
-    if len(cost_sessions) < total_sessions and len(cost_sessions) > 0:
-        factor = total_sessions / len(cost_sessions)
-        total_cost *= factor
-        model_costs = {k: v * factor for k, v in model_costs.items()}
-
-    error_rate = (total_errors / total_events * 100) if total_events > 0 else 0
-
-    # Sort agents by sessions desc
-    top_agents = sorted(agent_counts.items(), key=lambda x: x[1]["sessions"], reverse=True)[:10]
-
-    # Build report
-    report: dict[str, Any] = {
-        "title": f"{period_label} Report",
-        "period": period,
-        "from": since.isoformat(),
-        "to": now.isoformat(),
-        "endpoint": endpoint,
-        "summary": {
-            "total_sessions": total_sessions,
-            "total_events": total_events,
-            "total_tokens": total_tokens,
-            "total_errors": total_errors,
-            "error_rate_pct": round(error_rate, 2),
-            "estimated_cost": round(total_cost, 4),
-        },
-        "status_breakdown": status_counts,
-        "model_costs": {k: round(v, 4) for k, v in sorted(model_costs.items(), key=lambda x: x[1], reverse=True)},
-        "top_agents": [
-            {"agent": a, **stats} for a, stats in top_agents
-        ],
-    }
-
-    if fmt == "json":
-        text = json.dumps(report, indent=2, default=str)
-    elif fmt == "markdown":
-        lines = [
-            f"# 📊 AgentLens {period_label} Report",
-            f"",
-            f"**Period:** {since.strftime('%Y-%m-%d %H:%M')} → {now.strftime('%Y-%m-%d %H:%M')} UTC",
-            f"**Endpoint:** {endpoint}",
-            f"",
-            f"## Summary",
-            f"",
-            f"| Metric | Value |",
-            f"|--------|-------|",
-            f"| Sessions | {total_sessions} |",
-            f"| Events | {total_events:,} |",
-            f"| Tokens | {total_tokens:,} |",
-            f"| Errors | {total_errors} |",
-            f"| Error Rate | {error_rate:.1f}% |",
-            f"| Est. Cost | ${total_cost:.4f} |",
-            f"",
-            f"## Status Breakdown",
-            f"",
-        ]
-        for st, cnt in sorted(status_counts.items(), key=lambda x: x[1], reverse=True):
-            lines.append(f"- **{st}**: {cnt}")
-        lines.append("")
-
-        if model_costs:
-            lines.append("## Cost by Model")
-            lines.append("")
-            lines.append("| Model | Cost |")
-            lines.append("|-------|------|")
-            for m, c in sorted(model_costs.items(), key=lambda x: x[1], reverse=True):
-                lines.append(f"| {m} | ${c:.4f} |")
-            lines.append("")
-
-        if top_agents:
-            lines.append("## Top Agents")
-            lines.append("")
-            lines.append("| Agent | Sessions | Events | Tokens | Errors |")
-            lines.append("|-------|----------|--------|--------|--------|")
-            for a, stats in top_agents:
-                lines.append(f"| {a} | {stats['sessions']} | {stats['events']} | {stats['tokens']:,} | {stats['errors']} |")
-            lines.append("")
-
-        text = "\n".join(lines)
-    else:
-        # table format
-        lines = [
-            f"╔══════════════════════════════════════════════════╗",
-            f"║  📊 AgentLens {period_label} Report{' ' * (34 - len(period_label))}║",
-            f"╠══════════════════════════════════════════════════╣",
-            f"║  Period: {since.strftime('%Y-%m-%d')} → {now.strftime('%Y-%m-%d')}{' ' * 17}║",
-            f"╚══════════════════════════════════════════════════╝",
-            f"",
-            f"  Sessions:    {total_sessions}",
-            f"  Events:      {total_events:,}",
-            f"  Tokens:      {total_tokens:,}",
-            f"  Errors:      {total_errors}  ({error_rate:.1f}%)",
-            f"  Est. Cost:   ${total_cost:.4f}",
-            f"",
-        ]
-
-        if status_counts:
-            lines.append("  Status Breakdown:")
-            for st, cnt in sorted(status_counts.items(), key=lambda x: x[1], reverse=True):
-                pct = cnt / total_sessions * 100 if total_sessions > 0 else 0
-                bar_len = int(pct / 5)
-                lines.append(f"    {st:<15} {cnt:>5}  {'█' * bar_len}{'░' * (20 - bar_len)} {pct:.0f}%")
-            lines.append("")
-
-        if model_costs:
-            lines.append("  Cost by Model:")
-            for m, c in sorted(model_costs.items(), key=lambda x: x[1], reverse=True):
-                lines.append(f"    {m:<30} ${c:.4f}")
-            lines.append("")
-
-        if top_agents:
-            lines.append("  Top Agents:")
-            lines.append(f"    {'AGENT':<20} {'SESS':>5} {'EVENTS':>7} {'TOKENS':>10} {'ERRORS':>6}")
-            lines.append(f"    {'─' * 20} {'─' * 5} {'─' * 7} {'─' * 10} {'─' * 6}")
-            for a, stats in top_agents:
-                lines.append(f"    {a:<20} {stats['sessions']:>5} {stats['events']:>7} {stats['tokens']:>10,} {stats['errors']:>6}")
-            lines.append("")
-
-        text = "\n".join(lines)
-
-    if output:
-        with open(output, "w", encoding="utf-8") as f:
-            f.write(text)
-        print(f"Report written to {output}")
-    else:
-        print(text)
 
 
 def cmd_flamegraph(args: argparse.Namespace) -> None:
@@ -743,7 +541,7 @@ def cmd_flamegraph(args: argparse.Namespace) -> None:
         raw_events = raw_events.get("events", [raw_events])
 
     if not raw_events:
-        print(f"⚠️  No events found for session {args.session_id}")
+        print(f"âš ï¸  No events found for session {args.session_id}")
         sys.exit(1)
 
     # Convert raw dicts to AgentEvent objects
@@ -755,13 +553,13 @@ def cmd_flamegraph(args: argparse.Namespace) -> None:
             # Skip malformed events
             continue
 
-    print(f"📊 Building flamegraph for session {args.session_id} ({len(events)} events)...")
+    print(f"ðŸ“Š Building flamegraph for session {args.session_id} ({len(events)} events)...")
 
     fg = Flamegraph(events=events, session_name=session_name)
 
     if args.stats:
         stats = fg.get_stats()
-        print(f"\n🔥 Flamegraph Statistics")
+        print(f"\nðŸ”¥ Flamegraph Statistics")
         print(f"   Total duration: {stats['total_ms']:.1f} ms")
         print(f"   Node count:     {stats['node_count']}")
         print(f"   Max depth:      {stats['max_depth']}")
@@ -773,17 +571,17 @@ def cmd_flamegraph(args: argparse.Namespace) -> None:
         if stats.get("slowest_events"):
             print(f"\n   Slowest events:")
             for i, ev in enumerate(stats["slowest_events"][:5], 1):
-                print(f"     {i}. {ev.get('name', 'unknown')} — {ev.get('duration', 0):.1f} ms")
+                print(f"     {i}. {ev.get('name', 'unknown')} â€” {ev.get('duration', 0):.1f} ms")
         return
 
     output = args.output or f"flamegraph-{args.session_id}.html"
     fg.save(output)
     abs_path = str(Path(output).resolve())
-    print(f"✅ Flamegraph saved to {abs_path}")
+    print(f"âœ… Flamegraph saved to {abs_path}")
 
     if args.open:
         _wb.open(f"file://{abs_path}")
-        print("🌐 Opened in browser")
+        print("ðŸŒ Opened in browser")
 
 
 def cmd_trace(args: argparse.Namespace) -> None:
@@ -865,9 +663,9 @@ def cmd_trace(args: argparse.Namespace) -> None:
     status = session_data.get("status", "?")
 
     # Header
-    print(f"\n{BOLD}🔎 Session Trace: {args.session_id}{RESET}")
+    print(f"\n{BOLD}ðŸ”Ž Session Trace: {args.session_id}{RESET}")
     print(f"   Agent: {agent}  Status: {status}  Events: {len(events)}")
-    print(f"   Total duration: {_format_duration(total_dur)}  Tokens: {total_tokens_in:,}→{total_tokens_out:,}", end="")
+    print(f"   Total duration: {_format_duration(total_dur)}  Tokens: {total_tokens_in:,}â†’{total_tokens_out:,}", end="")
     if error_count:
         err_color = type_colors.get("error", "")
         print(f"  {err_color}Errors: {error_count}{RESET}")
@@ -878,7 +676,7 @@ def cmd_trace(args: argparse.Namespace) -> None:
     # Column header
     BAR_WIDTH = 30
     print(f"   {'TYPE':<12} {'MODEL':<20} {'TOKENS':>12} {'DURATION':>10}  {'WATERFALL':<{BAR_WIDTH}}")
-    print(f"   {'─' * 12} {'─' * 20} {'─' * 12} {'─' * 10}  {'─' * BAR_WIDTH}")
+    print(f"   {'â”€' * 12} {'â”€' * 20} {'â”€' * 12} {'â”€' * 10}  {'â”€' * BAR_WIDTH}")
 
     # Render each event
     for i, ev in enumerate(events):
@@ -893,8 +691,8 @@ def cmd_trace(args: argparse.Namespace) -> None:
             tool_name = tool.get("tool_name", "")
 
         color = type_colors.get(etype, type_colors["generic"])
-        tokens_str = f"{tok_in}→{tok_out}" if tok_in or tok_out else "—"
-        dur_str = _format_duration(dur) if dur else "—"
+        tokens_str = f"{tok_in}â†’{tok_out}" if tok_in or tok_out else "â€”"
+        dur_str = _format_duration(dur) if dur else "â€”"
 
         # Model or tool name display
         name_display = model[:20] if model else tool_name[:20] if tool_name else ""
@@ -905,23 +703,23 @@ def cmd_trace(args: argparse.Namespace) -> None:
 
         # Color the bar based on event type
         if etype == "error":
-            bar_char = "▓"
+            bar_char = "â–“"
         elif etype == "llm_call":
-            bar_char = "█"
+            bar_char = "â–ˆ"
         elif etype == "tool_call":
-            bar_char = "▒"
+            bar_char = "â–’"
         else:
-            bar_char = "░"
+            bar_char = "â–‘"
 
         bar = bar_char * bar_len + " " * (BAR_WIDTH - bar_len)
 
         # Error indicator
-        err_mark = " ✗" if etype == "error" else ""
+        err_mark = " âœ—" if etype == "error" else ""
 
         print(f"   {color}{etype:<12}{RESET} {DIM}{name_display:<20}{RESET} {tokens_str:>12} {dur_str:>10}  {color}{bar}{RESET}{err_mark}")
 
     # Summary footer
-    print(f"\n   {'─' * (12 + 20 + 12 + 10 + BAR_WIDTH + 6)}")
+    print(f"\n   {'â”€' * (12 + 20 + 12 + 10 + BAR_WIDTH + 6)}")
     type_counts: dict[str, int] = {}
     type_durations: dict[str, float] = {}
     for ev in events:
@@ -939,7 +737,7 @@ def cmd_trace(args: argparse.Namespace) -> None:
 
 
 def cmd_heatmap(args: argparse.Namespace) -> None:
-    """GitHub-style terminal activity heatmap (day-of-week × hour)."""
+    """GitHub-style terminal activity heatmap (day-of-week Ã— hour)."""
     from collections import defaultdict
     from datetime import datetime, timedelta, timezone
 
@@ -948,7 +746,7 @@ def cmd_heatmap(args: argparse.Namespace) -> None:
     weeks = getattr(args, "weeks", 12) or 12
     limit = getattr(args, "limit", 500) or 500
 
-    print(f"📊 Fetching sessions from {endpoint} ...")
+    print(f"ðŸ“Š Fetching sessions from {endpoint} ...")
     resp = client.get("/sessions", params={"limit": limit})
     resp.raise_for_status()
     raw = resp.json()
@@ -983,7 +781,7 @@ def cmd_heatmap(args: argparse.Namespace) -> None:
             grid[key] += int(s.get("event_count", 0) or 0)
 
     if not grid:
-        print("⚠️  No session data found in the specified time range.")
+        print("âš ï¸  No session data found in the specified time range.")
         return
 
     max_val = max(grid.values()) if grid else 1
@@ -991,7 +789,7 @@ def cmd_heatmap(args: argparse.Namespace) -> None:
         max_val = 1
 
     # Intensity blocks (5 levels)
-    blocks = [" ", "░", "▒", "▓", "█"]
+    blocks = [" ", "â–‘", "â–’", "â–“", "â–ˆ"]
     day_names = ["Mon", "Tue", "Wed", "Thu", "Fri", "Sat", "Sun"]
 
     # Color escapes (green shades via ANSI 256)
@@ -1001,14 +799,14 @@ def cmd_heatmap(args: argparse.Namespace) -> None:
     RESET = "\033[0m"
 
     metric_label = {"sessions": "Sessions", "cost": "Cost ($)", "tokens": "Tokens", "events": "Events"}[metric]
-    print(f"\n🗓  Activity Heatmap — {metric_label} (last {weeks} weeks)\n")
+    print(f"\nðŸ—“  Activity Heatmap â€” {metric_label} (last {weeks} weeks)\n")
 
     # Hour header
     header = "      "
     for h in range(24):
         header += f"{h:>2} "
     print(DIM + header + RESET)
-    print("      " + "───" * 24)
+    print("      " + "â”€â”€â”€" * 24)
 
     for day_idx in range(7):
         row = f" {day_names[day_idx]:>3}  "
@@ -1018,17 +816,17 @@ def cmd_heatmap(args: argparse.Namespace) -> None:
             level = 0 if val == 0 else min(4, max(1, int(ratio * 4) + (1 if ratio > 0 else 0)))
             block = blocks[level]
             if level == 0:
-                row += DIM + " · " + RESET
+                row += DIM + " Â· " + RESET
             elif level <= 2:
                 row += GREEN + f" {block} " + RESET
             else:
                 row += BRIGHT_GREEN + f" {block} " + RESET
         print(row)
 
-    print("      " + "───" * 24)
+    print("      " + "â”€â”€â”€" * 24)
 
     # Legend
-    print(f"\n  Legend: {DIM} · {RESET}= none ", end="")
+    print(f"\n  Legend: {DIM} Â· {RESET}= none ", end="")
     for i, b in enumerate(blocks[1:], 1):
         color = GREEN if i <= 2 else BRIGHT_GREEN
         print(f" {color}{b}{RESET} ", end="")
@@ -1054,175 +852,6 @@ def cmd_heatmap(args: argparse.Namespace) -> None:
     print()
 
 
-def cmd_outlier(args: argparse.Namespace) -> None:
-    """Detect outlier sessions using IQR-based anomaly detection.
-
-    Fetches recent sessions and identifies statistical outliers by cost,
-    token usage, duration, or error count.  Useful for spotting runaway
-    agents, unexpectedly expensive sessions, or degraded performance.
-    """
-
-    import statistics
-    from datetime import datetime, timezone
-
-    client, _ = _get_client(args)
-    resp = client.get("/sessions", params={"limit": args.limit})
-    resp.raise_for_status()
-    data = resp.json()
-    sessions = data if isinstance(data, list) else data.get("sessions", [data])
-
-    if len(sessions) < 4:
-        print("⚠️  Need at least 4 sessions for outlier detection.")
-        return
-
-    # ── Extract metric values per session ────────────────────────────
-
-    def _dur(s: dict) -> float | None:
-        """Duration in seconds from started_at/ended_at or created_at/ended_at."""
-        start_raw = s.get("started_at") or s.get("created_at")
-        end_raw = s.get("ended_at")
-        if not start_raw or not end_raw:
-            return None
-        try:
-            fmt = "%Y-%m-%dT%H:%M:%S"
-            start_s = str(start_raw).replace("Z", "+00:00")
-            end_s = str(end_raw).replace("Z", "+00:00")
-            start = datetime.fromisoformat(start_s)
-            end = datetime.fromisoformat(end_s)
-            return max((end - start).total_seconds(), 0.0)
-        except (ValueError, TypeError):
-            return None
-
-    metric_extractors: dict[str, Any] = {
-        "cost": lambda s: s.get("total_cost") or s.get("cost") or 0.0,
-        "tokens": lambda s: (s.get("total_tokens_in", 0) or 0) + (s.get("total_tokens_out", 0) or 0) + (s.get("total_tokens", 0) or 0),
-        "duration": lambda s: _dur(s),
-        "errors": lambda s: s.get("error_count", 0) or len([e for e in s.get("events", []) if isinstance(e, dict) and e.get("event_type") == "error"]),
-    }
-
-    metrics_to_check = list(metric_extractors.keys()) if args.metric == "all" else [args.metric]
-
-    # ── IQR-based outlier detection ──────────────────────────────────
-
-    def _iqr_outliers(
-        values: list[tuple[dict, float]],
-        multiplier: float,
-    ) -> list[tuple[dict, float, str]]:
-        """Return (session, value, reason) tuples for outliers."""
-        nums = [v for _, v in values]
-        if len(nums) < 4:
-            return []
-        sorted_nums = sorted(nums)
-        n = len(sorted_nums)
-        q1 = sorted_nums[n // 4]
-        q3 = sorted_nums[(3 * n) // 4]
-        iqr = q3 - q1
-        lower = q1 - multiplier * iqr
-        upper = q3 + multiplier * iqr
-        mean = statistics.mean(nums)
-        results: list[tuple[dict, float, str]] = []
-        for sess, val in values:
-            if val > upper:
-                results.append((sess, val, f"above Q3+{multiplier}×IQR ({upper:.4f})"))
-            elif val < lower and lower > 0:
-                results.append((sess, val, f"below Q1-{multiplier}×IQR ({lower:.4f})"))
-        # Sort by value descending (worst first)
-        results.sort(key=lambda x: x[1], reverse=True)
-        return results[:args.top]
-
-    # ── Run detection ────────────────────────────────────────────────
-
-    all_outliers: dict[str, list[tuple[dict, float, str]]] = {}
-    summary_stats: dict[str, dict[str, float]] = {}
-
-    for metric in metrics_to_check:
-        extractor = metric_extractors[metric]
-        pairs: list[tuple[dict, float]] = []
-        for s in sessions:
-            val = extractor(s)
-            if val is not None:
-                pairs.append((s, float(val)))
-
-        if len(pairs) < 4:
-            continue
-
-        nums = [v for _, v in pairs]
-        summary_stats[metric] = {
-            "count": len(nums),
-            "mean": statistics.mean(nums),
-            "median": statistics.median(nums),
-            "stdev": statistics.stdev(nums) if len(nums) > 1 else 0.0,
-            "min": min(nums),
-            "max": max(nums),
-        }
-
-        outliers = _iqr_outliers(pairs, args.threshold)
-        if outliers:
-            all_outliers[metric] = outliers
-
-    # ── Output ───────────────────────────────────────────────────────
-
-    if args.format == "json":
-        output: dict[str, Any] = {
-            "threshold": args.threshold,
-            "sessions_analyzed": len(sessions),
-            "metrics": {},
-        }
-        for metric in metrics_to_check:
-            entry: dict[str, Any] = {"stats": summary_stats.get(metric, {})}
-            if metric in all_outliers:
-                entry["outliers"] = [
-                    {
-                        "session_id": s.get("session_id") or s.get("id", "?"),
-                        "agent": s.get("agent_name", ""),
-                        "value": val,
-                        "reason": reason,
-                    }
-                    for s, val, reason in all_outliers[metric]
-                ]
-            output["metrics"][metric] = entry
-        _print_json(output)
-        return
-
-    # Table output
-    total_outliers = sum(len(v) for v in all_outliers.values())
-    print(f"🔍 Outlier Detection — {len(sessions)} sessions, IQR×{args.threshold}")
-    print()
-
-    for metric in metrics_to_check:
-        stats = summary_stats.get(metric)
-        if not stats:
-            continue
-
-        unit = {"cost": "$", "tokens": " tok", "duration": "s", "errors": " err"}[metric]
-        fmt_v = (lambda v, u=unit: f"${v:.4f}" if u == "$" else f"{v:,.1f}{u}")
-
-        print(f"── {metric.upper()} ──")
-        print(f"   mean={fmt_v(stats['mean'])}  median={fmt_v(stats['median'])}  "
-              f"stdev={fmt_v(stats['stdev'])}  min={fmt_v(stats['min'])}  max={fmt_v(stats['max'])}")
-
-        outliers = all_outliers.get(metric, [])
-        if not outliers:
-            print("   ✅ No outliers detected\n")
-            continue
-
-        print(f"   ⚠️  {len(outliers)} outlier(s):")
-        for sess, val, reason in outliers:
-            sid = sess.get("session_id") or sess.get("id", "?")
-            agent = sess.get("agent_name", "")
-            label = f"{sid[:12]}"
-            if agent:
-                label += f" ({agent})"
-            print(f"   • {label}: {fmt_v(val)} — {reason}")
-        print()
-
-    if total_outliers == 0:
-        print("✅ No outliers detected across all metrics. Your agents look healthy!")
-    else:
-        print(f"⚠️  {total_outliers} total outlier(s) detected. Investigate high-value sessions with:")
-        print("   agentlens-cli session <session_id>")
-        print("   agentlens-cli costs <session_id>")
-        print("   agentlens-cli trace <session_id>")
 
 
 def cmd_status(args: argparse.Namespace) -> None:
@@ -1230,13 +859,13 @@ def cmd_status(args: argparse.Namespace) -> None:
     try:
         resp = client.get("/health")
         resp.raise_for_status()
-        print(f"✅ AgentLens backend is healthy at {endpoint}")
+        print(f"âœ… AgentLens backend is healthy at {endpoint}")
         data = resp.json()
         if isinstance(data, dict):
             for k, v in data.items():
                 print(f"  {k}: {v}")
     except httpx.HTTPError as e:
-        print(f"❌ Cannot reach AgentLens backend at {endpoint}")
+        print(f"âŒ Cannot reach AgentLens backend at {endpoint}")
         print(f"   Error: {e}")
         sys.exit(1)
 
@@ -1251,7 +880,7 @@ def cmd_dashboard(args: argparse.Namespace) -> None:
     output = getattr(args, "output", None)
 
     # Fetch data
-    print(f"📊 Fetching data from {endpoint} ...")
+    print(f"ðŸ“Š Fetching data from {endpoint} ...")
     resp = client.get("/sessions", params={"limit": limit})
     resp.raise_for_status()
     raw = resp.json()
@@ -1367,8 +996,8 @@ tr.error td{{color:#f87171}}
 </style>
 </head>
 <body>
-<h1>🔍 AgentLens Dashboard</h1>
-<p class="subtitle">Generated {now_str} · {len(sessions)} sessions from {endpoint}</p>
+<h1>ðŸ” AgentLens Dashboard</h1>
+<p class="subtitle">Generated {now_str} Â· {len(sessions)} sessions from {endpoint}</p>
 
 <div class="kpi-grid">
 <div class="kpi"><div class="value">{len(sessions)}</div><div class="label">Sessions</div></div>
@@ -1428,14 +1057,14 @@ new Chart(document.getElementById('topChart'),{{
     fname = output or "agentlens-dashboard.html"
     with open(fname, "w", encoding="utf-8") as f:
         f.write(html)
-    print(f"✅ Dashboard written to {fname}")
+    print(f"âœ… Dashboard written to {fname}")
 
     if getattr(args, "open", False):
         _webbrowser.open(fname)
-        print("🌐 Opened in browser")
+        print("ðŸŒ Opened in browser")
 
 
-# ── Replay ───────────────────────────────────────────────────────────
+# â”€â”€ Replay â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€
 
 
 def _build_session_from_api(session_data: dict, events_data: list[dict]) -> Any:
@@ -1537,7 +1166,7 @@ def cmd_replay(args: argparse.Namespace) -> None:
         if args.output:
             with open(args.output, "w", encoding="utf-8") as f:
                 f.write(output)
-            print(f"✅ JSON replay written to {args.output}")
+            print(f"âœ… JSON replay written to {args.output}")
         else:
             print(output)
         return
@@ -1547,15 +1176,15 @@ def cmd_replay(args: argparse.Namespace) -> None:
         if args.output:
             with open(args.output, "w", encoding="utf-8") as f:
                 f.write(output)
-            print(f"✅ Markdown replay written to {args.output}")
+            print(f"âœ… Markdown replay written to {args.output}")
         else:
             print(output)
         return
 
-    # Live text mode — stream frames to terminal with delays
+    # Live text mode â€” stream frames to terminal with delays
     if args.live:
         print(
-            f"▶ Replaying session {session.session_id}"
+            f"â–¶ Replaying session {session.session_id}"
             f"  agent={session.agent_name}  speed={args.speed}x"
             f"  events={len(replayer.filtered_events)}"
         )
@@ -1595,15 +1224,15 @@ def cmd_replay(args: argparse.Namespace) -> None:
             if e.duration_ms is not None:
                 parts.append(f"dur={e.duration_ms:.0f}ms")
             if e.tokens_in or e.tokens_out:
-                parts.append(f"tok={e.tokens_in}→{e.tokens_out}")
+                parts.append(f"tok={e.tokens_in}â†’{e.tokens_out}")
             if frame.is_breakpoint:
-                bp_marker = "\033[31;1m⏸ BREAK\033[0m" if use_color else "⏸ BREAK"
+                bp_marker = "\033[31;1mâ¸ BREAK\033[0m" if use_color else "â¸ BREAK"
                 parts.append(bp_marker)
 
             # Progress bar
             bar_width = 20
             filled = int(frame.progress * bar_width)
-            bar = "█" * filled + "░" * (bar_width - filled)
+            bar = "â–ˆ" * filled + "â–‘" * (bar_width - filled)
             parts.append(f"[{bar}] {pct_str}")
 
             print(" | ".join(parts))
@@ -1616,18 +1245,18 @@ def cmd_replay(args: argparse.Namespace) -> None:
         if args.output:
             with open(args.output, "w", encoding="utf-8") as f:
                 f.write(output)
-            print(f"✅ Text replay written to {args.output}")
+            print(f"âœ… Text replay written to {args.output}")
         else:
             print(output)
 
 
-# ── Main ─────────────────────────────────────────────────────────────
+# â”€â”€ Main â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€
 
 
 def main() -> None:
     parser = argparse.ArgumentParser(
         prog="agentlens",
-        description="AgentLens CLI — query your AgentLens backend from the command line.",
+        description="AgentLens CLI â€” query your AgentLens backend from the command line.",
     )
     parser.add_argument("--endpoint", help="Backend URL (or set AGENTLENS_ENDPOINT)")
     parser.add_argument("--api-key", help="API key (or set AGENTLENS_API_KEY)")
@@ -1721,7 +1350,7 @@ def main() -> None:
     p.add_argument("--min-ms", type=float, default=None, help="Only show events slower than N milliseconds")
 
     # heatmap
-    p = sub.add_parser("heatmap", help="GitHub-style activity heatmap (day-of-week × hour)")
+    p = sub.add_parser("heatmap", help="GitHub-style activity heatmap (day-of-week Ã— hour)")
     p.add_argument("--metric", choices=["sessions", "cost", "tokens", "events"], default="sessions", help="Metric to visualize (default: sessions)")
     p.add_argument("--weeks", type=int, default=12, help="Number of weeks to include (default: 12)")
     p.add_argument("--limit", type=int, default=500, help="Max sessions to fetch (default: 500)")
