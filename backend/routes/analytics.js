@@ -23,6 +23,84 @@ const analyticsCacheMw = isTest
 // reuse on every request, avoiding repeated SQL compilation overhead.
 let _analyticsStmts = null;
 
+// ── Cached prepared statements for /performance endpoint ────────────
+// The performance endpoint has 4 possible filter combinations (none,
+// agent-only, model-only, both). Instead of calling db.prepare() on
+// dynamically built SQL every request (re-compiling each time), we
+// pre-compile all 4 variants once and select the right one at runtime.
+let _perfStmts = null;
+
+function getPerfStatements() {
+  if (_perfStmts) return _perfStmts;
+  const db = getDb();
+
+  // Build all 4 WHERE clause variants
+  const baseWhere = "e.duration_ms IS NOT NULL AND e.duration_ms > 0 AND e.timestamp >= ?";
+  const variants = {
+    none:  baseWhere,
+    agent: baseWhere + " AND s.agent_name = ?",
+    model: baseWhere + " AND e.model = ?",
+    both:  baseWhere + " AND s.agent_name = ? AND e.model = ?",
+  };
+
+  function buildStmts(where) {
+    return {
+      global: db.prepare(`
+        SELECT
+          COUNT(*)                              AS cnt,
+          COALESCE(SUM(e.duration_ms), 0)       AS total_dur,
+          COALESCE(SUM(e.tokens_in), 0)         AS total_tok_in,
+          COALESCE(SUM(e.tokens_out), 0)        AS total_tok_out,
+          MIN(e.timestamp)                      AS min_ts,
+          MAX(e.timestamp)                      AS max_ts
+        FROM events e
+        INNER JOIN sessions s ON e.session_id = s.session_id
+        WHERE ${where}`),
+      modelAgg: db.prepare(`
+        SELECT
+          COALESCE(e.model, '(unknown)')       AS grp,
+          COUNT(*)                              AS cnt,
+          COALESCE(SUM(e.duration_ms), 0)       AS total_dur,
+          COALESCE(SUM(e.tokens_in), 0)         AS tok_in,
+          COALESCE(SUM(e.tokens_out), 0)        AS tok_out,
+          MIN(e.duration_ms)                    AS min_dur,
+          MAX(e.duration_ms)                    AS max_dur,
+          AVG(e.duration_ms)                    AS avg_dur
+        FROM events e
+        INNER JOIN sessions s ON e.session_id = s.session_id
+        WHERE ${where}
+        GROUP BY grp
+        ORDER BY total_dur DESC`),
+      groupedDur: db.prepare(`
+        SELECT COALESCE(e.model, '(unknown)') AS model_grp, e.event_type AS type_grp, e.duration_ms
+        FROM events e
+        INNER JOIN sessions s ON e.session_id = s.session_id
+        WHERE ${where}
+        ORDER BY e.duration_ms ASC`),
+      typeAgg: db.prepare(`
+        SELECT
+          e.event_type                          AS grp,
+          COUNT(*)                              AS cnt,
+          COALESCE(SUM(e.duration_ms), 0)       AS total_dur,
+          MIN(e.duration_ms)                    AS min_dur,
+          MAX(e.duration_ms)                    AS max_dur,
+          AVG(e.duration_ms)                    AS avg_dur
+        FROM events e
+        INNER JOIN sessions s ON e.session_id = s.session_id
+        WHERE ${where}
+        GROUP BY grp
+        ORDER BY cnt DESC`),
+    };
+  }
+
+  _perfStmts = {};
+  for (const [key, where] of Object.entries(variants)) {
+    _perfStmts[key] = buildStmts(where);
+  }
+
+  return _perfStmts;
+}
+
 function getAnalyticsStatements() {
   if (_analyticsStmts) return _analyticsStmts;
   const db = getDb();
@@ -204,7 +282,6 @@ router.get("/", analyticsCacheMw, wrapRoute("fetch analytics", (req, res) => {
 // from O(rows × 6 columns) to O(rows × 1 column) for the heavy path,
 // and eliminates JS-side reduce/map for totals and group stats entirely.
 router.get("/performance", isTest ? analyticsCacheMw : cacheMiddleware(analyticsCache, { ttlMs: 15000 }), wrapRoute("fetch performance analytics", (req, res) => {
-  const db = getDb();
   // Optional filters
   const agentName = req.query.agent;
   const model = req.query.model;
@@ -212,36 +289,24 @@ router.get("/performance", isTest ? analyticsCacheMw : cacheMiddleware(analytics
 
     const cutoff = new Date(Date.now() - days * 86400000).toISOString();
 
-    // ── Shared WHERE clause builder ──────────────────────────────
-    let whereExtra = "";
-    const params = [cutoff];
-    if (agentName) {
-      whereExtra += " AND s.agent_name = ?";
-      params.push(agentName);
-    }
-    if (model) {
-      whereExtra += " AND e.model = ?";
-      params.push(model);
-    }
+    // ── Select pre-compiled statement variant ────────────────────
+    // Instead of building SQL strings and calling db.prepare() on
+    // every request (which re-compiles the query each time), we use
+    // one of 4 pre-compiled variants based on which filters are active.
+    const allPerfStmts = getPerfStatements();
+    const variantKey = agentName && model ? "both"
+                     : agentName ? "agent"
+                     : model ? "model"
+                     : "none";
+    const stmts = allPerfStmts[variantKey];
 
-    const baseWhere =
-      `e.duration_ms IS NOT NULL AND e.duration_ms > 0 AND e.timestamp >= ?` +
-      whereExtra;
+    // Build params array matching the variant's placeholder order
+    const params = [cutoff];
+    if (agentName) params.push(agentName);
+    if (model) params.push(model);
 
     // ── 1. Global aggregates (single row) ────────────────────────
-    const globalSql = `
-      SELECT
-        COUNT(*)                              AS cnt,
-        COALESCE(SUM(e.duration_ms), 0)       AS total_dur,
-        COALESCE(SUM(e.tokens_in), 0)         AS total_tok_in,
-        COALESCE(SUM(e.tokens_out), 0)        AS total_tok_out,
-        MIN(e.timestamp)                      AS min_ts,
-        MAX(e.timestamp)                      AS max_ts
-      FROM events e
-      INNER JOIN sessions s ON e.session_id = s.session_id
-      WHERE ${baseWhere}`;
-
-    const g = db.prepare(globalSql).get(...params);
+    const g = stmts.global.get(...params);
 
     if (!g || g.cnt === 0) {
       return res.json({
@@ -256,39 +321,13 @@ router.get("/performance", isTest ? analyticsCacheMw : cacheMiddleware(analytics
       });
     }
 
-    // ── 2. Per-model aggregates (pushed to SQL) ──────────────────
-    const modelSql = `
-      SELECT
-        COALESCE(e.model, '(unknown)')       AS grp,
-        COUNT(*)                              AS cnt,
-        COALESCE(SUM(e.duration_ms), 0)       AS total_dur,
-        COALESCE(SUM(e.tokens_in), 0)         AS tok_in,
-        COALESCE(SUM(e.tokens_out), 0)        AS tok_out,
-        MIN(e.duration_ms)                    AS min_dur,
-        MAX(e.duration_ms)                    AS max_dur,
-        AVG(e.duration_ms)                    AS avg_dur
-      FROM events e
-      INNER JOIN sessions s ON e.session_id = s.session_id
-      WHERE ${baseWhere}
-      GROUP BY grp
-      ORDER BY total_dur DESC`;
-
-    const modelRows = db.prepare(modelSql).all(...params);
+    // ── 2. Per-model aggregates ──────────────────────────────────
+    const modelRows = stmts.modelAgg.all(...params);
 
     // ── 3. Single scan for global + per-group durations ──────────
-    // Merges the old separate "sorted durations" query and "grouped
-    // durations" query into one pass. Since the outer ORDER BY is
-    // duration_ms ASC, items appended to each per-group array are
-    // already sorted — no JS re-sort needed.  Eliminates a full
-    // table scan (was 2 scans of events, now 1).
-    const groupedDurSql = `
-      SELECT COALESCE(e.model, '(unknown)') AS model_grp, e.event_type AS type_grp, e.duration_ms
-      FROM events e
-      INNER JOIN sessions s ON e.session_id = s.session_id
-      WHERE ${baseWhere}
-      ORDER BY e.duration_ms ASC`;
-
-    const groupedDurRows = db.prepare(groupedDurSql).all(...params);
+    // Since the query is ORDER BY duration_ms ASC, items appended to
+    // each per-group array are already sorted — no JS re-sort needed.
+    const groupedDurRows = stmts.groupedDur.all(...params);
 
     // Build global durations array + per-group maps in one pass
     const durations = new Array(groupedDurRows.length);
@@ -322,24 +361,8 @@ router.get("/performance", isTest ? analyticsCacheMw : cacheMiddleware(analytics
       };
     }
 
-    // ── 4. Per-event-type aggregates (pushed to SQL) ───────────
-    const typeSql = `
-      SELECT
-        e.event_type                          AS grp,
-        COUNT(*)                              AS cnt,
-        COALESCE(SUM(e.duration_ms), 0)       AS total_dur,
-        MIN(e.duration_ms)                    AS min_dur,
-        MAX(e.duration_ms)                    AS max_dur,
-        AVG(e.duration_ms)                    AS avg_dur
-      FROM events e
-      INNER JOIN sessions s ON e.session_id = s.session_id
-      WHERE ${baseWhere}
-      GROUP BY grp
-      ORDER BY cnt DESC`;
-
-    const typeRows = db.prepare(typeSql).all(...params);
-
-    // typeDurMap already populated from the combined query above
+    // ── 4. Per-event-type aggregates ─────────────────────────────
+    const typeRows = stmts.typeAgg.all(...params);
 
     const byType = Object.create(null);
     for (const row of typeRows) {
