@@ -101,6 +101,48 @@ function getPerfStatements() {
   return _perfStmts;
 }
 
+// ── Cached prepared statements for /heatmap endpoint ────────────────
+// The heatmap endpoint has 3 metric variants (events, tokens, sessions).
+// Pre-compile all 3 instead of calling db.prepare() on every request.
+let _heatmapStmts = null;
+
+function getHeatmapStatements() {
+  if (_heatmapStmts) return _heatmapStmts;
+  const db = getDb();
+
+  _heatmapStmts = {
+    events: db.prepare(`
+      SELECT
+        CAST(strftime('%w', timestamp) AS INTEGER) as dow,
+        CAST(strftime('%H', timestamp) AS INTEGER) as hour,
+        COUNT(*) as value
+      FROM events
+      WHERE timestamp >= ?
+      GROUP BY dow, hour
+    `),
+    tokens: db.prepare(`
+      SELECT
+        CAST(strftime('%w', timestamp) AS INTEGER) as dow,
+        CAST(strftime('%H', timestamp) AS INTEGER) as hour,
+        COALESCE(SUM(tokens_in + tokens_out), 0) as value
+      FROM events
+      WHERE timestamp >= ?
+      GROUP BY dow, hour
+    `),
+    sessions: db.prepare(`
+      SELECT
+        CAST(strftime('%w', started_at) AS INTEGER) as dow,
+        CAST(strftime('%H', started_at) AS INTEGER) as hour,
+        COUNT(*) as value
+      FROM sessions
+      WHERE started_at >= ?
+      GROUP BY dow, hour
+    `),
+  };
+
+  return _heatmapStmts;
+}
+
 function getAnalyticsStatements() {
   if (_analyticsStmts) return _analyticsStmts;
   const db = getDb();
@@ -410,7 +452,6 @@ router.get("/performance", isTest ? analyticsCacheMw : cacheMiddleware(analytics
 
 // GET /analytics/heatmap — Day-of-week × hour-of-day activity matrix
 router.get("/heatmap", isTest ? analyticsCacheMw : cacheMiddleware(analyticsCache, { ttlMs: 60000 }), wrapRoute("fetch heatmap data", (req, res) => {
-  const db = getDb();
   const days = Math.min(Math.max(1, parseInt(req.query.days) || 30), 365);
     const metric = ["events", "tokens", "sessions"].includes(req.query.metric)
       ? req.query.metric
@@ -418,40 +459,7 @@ router.get("/heatmap", isTest ? analyticsCacheMw : cacheMiddleware(analyticsCach
 
     const cutoff = new Date(Date.now() - days * 86400000).toISOString();
 
-    let sql;
-    if (metric === "sessions") {
-      sql = `
-        SELECT
-          CAST(strftime('%w', started_at) AS INTEGER) as dow,
-          CAST(strftime('%H', started_at) AS INTEGER) as hour,
-          COUNT(*) as value
-        FROM sessions
-        WHERE started_at >= ?
-        GROUP BY dow, hour
-      `;
-    } else if (metric === "tokens") {
-      sql = `
-        SELECT
-          CAST(strftime('%w', timestamp) AS INTEGER) as dow,
-          CAST(strftime('%H', timestamp) AS INTEGER) as hour,
-          COALESCE(SUM(tokens_in + tokens_out), 0) as value
-        FROM events
-        WHERE timestamp >= ?
-        GROUP BY dow, hour
-      `;
-    } else {
-      sql = `
-        SELECT
-          CAST(strftime('%w', timestamp) AS INTEGER) as dow,
-          CAST(strftime('%H', timestamp) AS INTEGER) as hour,
-          COUNT(*) as value
-        FROM events
-        WHERE timestamp >= ?
-        GROUP BY dow, hour
-      `;
-    }
-
-    const rows = db.prepare(sql).all(cutoff);
+    const rows = getHeatmapStatements()[metric].all(cutoff);
 
     // Build 7×24 matrix (Sun=0 .. Sat=6, hours 0-23)
     const matrix = Array.from({ length: 7 }, () => Array(24).fill(0));
