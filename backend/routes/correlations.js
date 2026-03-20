@@ -174,16 +174,22 @@ function correlateByTimeWindow(events, config) {
   }
   if (filtered.length < minEvents) return [];
 
+  // Pre-parse all timestamps to avoid repeated Date construction in the
+  // inner loop (O(n) allocations → O(1) lookups per comparison).
+  var timestamps = new Array(filtered.length);
+  for (var t = 0; t < filtered.length; t++) {
+    timestamps[t] = new Date(filtered[t].timestamp).getTime();
+  }
+
   var groups = [];
   var i = 0;
   while (i < filtered.length) {
-    var windowStart = new Date(filtered[i].timestamp).getTime();
+    var windowStart = timestamps[i];
     var windowEnd = windowStart + windowMs;
     var group = [filtered[i]];
     var j = i + 1;
     while (j < filtered.length) {
-      var ts = new Date(filtered[j].timestamp).getTime();
-      if (ts <= windowEnd) { group.push(filtered[j]); j++; }
+      if (timestamps[j] <= windowEnd) { group.push(filtered[j]); j++; }
       else break;
     }
     if (group.length >= minEvents) {
@@ -216,9 +222,11 @@ function correlateByTimeWindow(events, config) {
 function correlateByErrorCascade(events, config) {
   var windowMs = (config.cascade_window_seconds || 30) * 1000;
   var errors = [];
+  var errorTimestamps = [];
   for (var e = 0; e < events.length; e++) {
     if (events[e].event_type === "error" || events[e].event_type === "agent_error" || events[e].event_type === "tool_error") {
       errors.push(events[e]);
+      errorTimestamps.push(new Date(events[e].timestamp).getTime());
     }
   }
   if (errors.length < 2) return [];
@@ -229,13 +237,12 @@ function correlateByErrorCascade(events, config) {
   for (var i = 0; i < errors.length; i++) {
     if (used[errors[i].event_id]) continue;
     var cascade = [errors[i]];
-    var startTs = new Date(errors[i].timestamp).getTime();
+    var startTs = errorTimestamps[i];
     var sourceAgent = errors[i].agent_name;
 
     for (var j = i + 1; j < errors.length; j++) {
       if (used[errors[j].event_id]) continue;
-      var ts = new Date(errors[j].timestamp).getTime();
-      if (ts - startTs > windowMs) break;
+      if (errorTimestamps[j] - startTs > windowMs) break;
       if (errors[j].agent_name !== sourceAgent) {
         cascade.push(errors[j]);
         used[errors[j].event_id] = true;
@@ -580,7 +587,14 @@ router.post("/rules/:ruleId/run", wrapRoute("run correlation rule", function(req
 router.get("/groups", wrapRoute("list correlation groups", function(req, res) {
   ensureCorrelationTables();
   var db = dbMod.getDb();
-  var query = "SELECT g.*, r.name as rule_name, r.match_type FROM correlation_groups g JOIN correlation_rules r ON g.rule_id = r.rule_id";
+  // Join member counts directly in the main query to eliminate N+1
+  // (previously ran a separate COUNT query per group — O(N) round-trips).
+  var query = "SELECT g.*, r.name as rule_name, r.match_type, " +
+    "COALESCE(mc.cnt, 0) as member_count " +
+    "FROM correlation_groups g " +
+    "JOIN correlation_rules r ON g.rule_id = r.rule_id " +
+    "LEFT JOIN (SELECT group_id, COUNT(*) as cnt FROM correlation_members GROUP BY group_id) mc " +
+    "ON g.group_id = mc.group_id";
   var params = [];
   if (req.query.rule_id) { query += " WHERE g.rule_id = ?"; params.push(req.query.rule_id); }
   query += " ORDER BY g.created_at DESC";
@@ -592,9 +606,6 @@ router.get("/groups", wrapRoute("list correlation groups", function(req, res) {
   var stmt = db.prepare(query);
   var groups = stmt.all.apply(stmt, params);
   for (var i = 0; i < groups.length; i++) { groups[i].metadata = parseConfig(groups[i].metadata); }
-
-  var countStmt = db.prepare("SELECT COUNT(*) as cnt FROM correlation_members WHERE group_id = ?");
-  for (var j = 0; j < groups.length; j++) { groups[j].member_count = countStmt.get(groups[j].group_id).cnt; }
 
   var totalQuery = "SELECT COUNT(*) as cnt FROM correlation_groups" + (req.query.rule_id ? " WHERE rule_id = ?" : "");
   var total;
