@@ -408,9 +408,48 @@ router.get("/performance", isTest ? analyticsCacheMw : cacheMiddleware(analytics
     });
 }));
 
+// ── Cached prepared statements for /heatmap endpoint ────────────────
+// Three metric variants (events, tokens, sessions) — pre-compiled once
+// to avoid db.prepare() re-compilation on every request.
+let _heatmapStmts = null;
+
+function getHeatmapStatements() {
+  if (_heatmapStmts) return _heatmapStmts;
+  const db = getDb();
+  _heatmapStmts = {
+    sessions: db.prepare(`
+      SELECT
+        CAST(strftime('%w', started_at) AS INTEGER) as dow,
+        CAST(strftime('%H', started_at) AS INTEGER) as hour,
+        COUNT(*) as value
+      FROM sessions
+      WHERE started_at >= ?
+      GROUP BY dow, hour
+    `),
+    tokens: db.prepare(`
+      SELECT
+        CAST(strftime('%w', timestamp) AS INTEGER) as dow,
+        CAST(strftime('%H', timestamp) AS INTEGER) as hour,
+        COALESCE(SUM(tokens_in + tokens_out), 0) as value
+      FROM events
+      WHERE timestamp >= ?
+      GROUP BY dow, hour
+    `),
+    events: db.prepare(`
+      SELECT
+        CAST(strftime('%w', timestamp) AS INTEGER) as dow,
+        CAST(strftime('%H', timestamp) AS INTEGER) as hour,
+        COUNT(*) as value
+      FROM events
+      WHERE timestamp >= ?
+      GROUP BY dow, hour
+    `),
+  };
+  return _heatmapStmts;
+}
+
 // GET /analytics/heatmap — Day-of-week × hour-of-day activity matrix
 router.get("/heatmap", isTest ? analyticsCacheMw : cacheMiddleware(analyticsCache, { ttlMs: 60000 }), wrapRoute("fetch heatmap data", (req, res) => {
-  const db = getDb();
   const days = Math.min(Math.max(1, parseInt(req.query.days) || 30), 365);
     const metric = ["events", "tokens", "sessions"].includes(req.query.metric)
       ? req.query.metric
@@ -418,40 +457,7 @@ router.get("/heatmap", isTest ? analyticsCacheMw : cacheMiddleware(analyticsCach
 
     const cutoff = new Date(Date.now() - days * 86400000).toISOString();
 
-    let sql;
-    if (metric === "sessions") {
-      sql = `
-        SELECT
-          CAST(strftime('%w', started_at) AS INTEGER) as dow,
-          CAST(strftime('%H', started_at) AS INTEGER) as hour,
-          COUNT(*) as value
-        FROM sessions
-        WHERE started_at >= ?
-        GROUP BY dow, hour
-      `;
-    } else if (metric === "tokens") {
-      sql = `
-        SELECT
-          CAST(strftime('%w', timestamp) AS INTEGER) as dow,
-          CAST(strftime('%H', timestamp) AS INTEGER) as hour,
-          COALESCE(SUM(tokens_in + tokens_out), 0) as value
-        FROM events
-        WHERE timestamp >= ?
-        GROUP BY dow, hour
-      `;
-    } else {
-      sql = `
-        SELECT
-          CAST(strftime('%w', timestamp) AS INTEGER) as dow,
-          CAST(strftime('%H', timestamp) AS INTEGER) as hour,
-          COUNT(*) as value
-        FROM events
-        WHERE timestamp >= ?
-        GROUP BY dow, hour
-      `;
-    }
-
-    const rows = db.prepare(sql).all(cutoff);
+    const rows = getHeatmapStatements()[metric].all(cutoff);
 
     // Build 7×24 matrix (Sun=0 .. Sat=6, hours 0-23)
     const matrix = Array.from({ length: 7 }, () => Array(24).fill(0));
@@ -526,26 +532,50 @@ router.get("/heatmap", isTest ? analyticsCacheMw : cacheMiddleware(analyticsCach
 // Joins event token data with model_pricing to compute estimated costs
 // across all sessions.  Returns per-model cost breakdown, daily cost
 // trend, and overall totals.  Optional ?days=N parameter (default 30).
-router.get("/costs", analyticsCacheMw, wrapRoute("fetch cost analytics", (req, res) => {
+// ── Cached prepared statements for /costs endpoint ──────────────────
+let _costStmts = null;
+
+function getCostStatements() {
+  if (_costStmts) return _costStmts;
   const db = getDb();
+  _costStmts = {
+    modelAgg: db.prepare(`
+      SELECT
+        model,
+        COUNT(*) as call_count,
+        COALESCE(SUM(tokens_in), 0) as total_tokens_in,
+        COALESCE(SUM(tokens_out), 0) as total_tokens_out
+      FROM events
+      WHERE model IS NOT NULL AND model != '' AND timestamp >= ?
+      GROUP BY model
+      ORDER BY (COALESCE(SUM(tokens_in), 0) + COALESCE(SUM(tokens_out), 0)) DESC
+    `),
+    dailyAgg: db.prepare(`
+      SELECT
+        DATE(timestamp) as day,
+        model,
+        COALESCE(SUM(tokens_in), 0) as tokens_in,
+        COALESCE(SUM(tokens_out), 0) as tokens_out
+      FROM events
+      WHERE model IS NOT NULL AND model != '' AND timestamp >= ?
+      GROUP BY DATE(timestamp), model
+      ORDER BY day ASC
+    `),
+  };
+  return _costStmts;
+}
+
+router.get("/costs", analyticsCacheMw, wrapRoute("fetch cost analytics", (req, res) => {
   const days = Math.min(Math.max(1, parseInt(req.query.days) || 30), 365);
   const cutoff = new Date(Date.now() - days * 86400000).toISOString();
 
   // Load merged pricing map (DB overrides + built-in defaults)
   const pricingMap = loadPricingMap();
 
+  const stmts = getCostStatements();
+
   // Aggregate by model
-  const modelRows = db.prepare(`
-    SELECT
-      model,
-      COUNT(*) as call_count,
-      COALESCE(SUM(tokens_in), 0) as total_tokens_in,
-      COALESCE(SUM(tokens_out), 0) as total_tokens_out
-    FROM events
-    WHERE model IS NOT NULL AND model != '' AND timestamp >= ?
-    GROUP BY model
-    ORDER BY (COALESCE(SUM(tokens_in), 0) + COALESCE(SUM(tokens_out), 0)) DESC
-  `).all(cutoff);
+  const modelRows = stmts.modelAgg.all(cutoff);
 
   let totalCost = 0;
   let totalInputCost = 0;
@@ -585,17 +615,7 @@ router.get("/costs", analyticsCacheMw, wrapRoute("fetch cost analytics", (req, r
   }
 
   // Daily cost trend
-  const dailyRows = db.prepare(`
-    SELECT
-      DATE(timestamp) as day,
-      model,
-      COALESCE(SUM(tokens_in), 0) as tokens_in,
-      COALESCE(SUM(tokens_out), 0) as tokens_out
-    FROM events
-    WHERE model IS NOT NULL AND model != '' AND timestamp >= ?
-    GROUP BY DATE(timestamp), model
-    ORDER BY day ASC
-  `).all(cutoff);
+  const dailyRows = stmts.dailyAgg.all(cutoff);
 
   const dailyCosts = {};
   for (const row of dailyRows) {
