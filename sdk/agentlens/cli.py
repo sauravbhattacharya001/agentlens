@@ -20,6 +20,7 @@ Usage:
     agentlens-cli trace <session_id> [--no-color] [--json] [--type TYPE] [--min-ms N] [--endpoint URL] [--api-key KEY]
     agentlens-cli heatmap [--metric sessions|cost|tokens|events] [--weeks N] [--limit N] [--endpoint URL] [--api-key KEY]
     agentlens-cli replay <session_id> [--speed N] [--type TYPES] [--exclude TYPES] [--format text|json|markdown] [--live] [--no-color] [--output FILE] [--endpoint URL] [--api-key KEY]
+    agentlens-cli outlier [--metric cost|tokens|duration|errors|all] [--limit N] [--threshold F] [--format table|json] [--top N] [--endpoint URL] [--api-key KEY]
     agentlens-cli status [--endpoint URL] [--api-key KEY]
 
 Environment variables:
@@ -1053,6 +1054,177 @@ def cmd_heatmap(args: argparse.Namespace) -> None:
     print()
 
 
+def cmd_outlier(args: argparse.Namespace) -> None:
+    """Detect outlier sessions using IQR-based anomaly detection.
+
+    Fetches recent sessions and identifies statistical outliers by cost,
+    token usage, duration, or error count.  Useful for spotting runaway
+    agents, unexpectedly expensive sessions, or degraded performance.
+    """
+
+    import statistics
+    from datetime import datetime, timezone
+
+    client, _ = _get_client(args)
+    resp = client.get("/sessions", params={"limit": args.limit})
+    resp.raise_for_status()
+    data = resp.json()
+    sessions = data if isinstance(data, list) else data.get("sessions", [data])
+
+    if len(sessions) < 4:
+        print("⚠️  Need at least 4 sessions for outlier detection.")
+        return
+
+    # ── Extract metric values per session ────────────────────────────
+
+    def _dur(s: dict) -> float | None:
+        """Duration in seconds from started_at/ended_at or created_at/ended_at."""
+        start_raw = s.get("started_at") or s.get("created_at")
+        end_raw = s.get("ended_at")
+        if not start_raw or not end_raw:
+            return None
+        try:
+            fmt = "%Y-%m-%dT%H:%M:%S"
+            start_s = str(start_raw).replace("Z", "+00:00")
+            end_s = str(end_raw).replace("Z", "+00:00")
+            start = datetime.fromisoformat(start_s)
+            end = datetime.fromisoformat(end_s)
+            return max((end - start).total_seconds(), 0.0)
+        except (ValueError, TypeError):
+            return None
+
+    metric_extractors: dict[str, Any] = {
+        "cost": lambda s: s.get("total_cost") or s.get("cost") or 0.0,
+        "tokens": lambda s: (s.get("total_tokens_in", 0) or 0) + (s.get("total_tokens_out", 0) or 0) + (s.get("total_tokens", 0) or 0),
+        "duration": lambda s: _dur(s),
+        "errors": lambda s: s.get("error_count", 0) or len([e for e in s.get("events", []) if isinstance(e, dict) and e.get("event_type") == "error"]),
+    }
+
+    metrics_to_check = list(metric_extractors.keys()) if args.metric == "all" else [args.metric]
+
+    # ── IQR-based outlier detection ──────────────────────────────────
+
+    def _iqr_outliers(
+        values: list[tuple[dict, float]],
+        multiplier: float,
+    ) -> list[tuple[dict, float, str]]:
+        """Return (session, value, reason) tuples for outliers."""
+        nums = [v for _, v in values]
+        if len(nums) < 4:
+            return []
+        sorted_nums = sorted(nums)
+        n = len(sorted_nums)
+        q1 = sorted_nums[n // 4]
+        q3 = sorted_nums[(3 * n) // 4]
+        iqr = q3 - q1
+        lower = q1 - multiplier * iqr
+        upper = q3 + multiplier * iqr
+        mean = statistics.mean(nums)
+        results: list[tuple[dict, float, str]] = []
+        for sess, val in values:
+            if val > upper:
+                results.append((sess, val, f"above Q3+{multiplier}×IQR ({upper:.4f})"))
+            elif val < lower and lower > 0:
+                results.append((sess, val, f"below Q1-{multiplier}×IQR ({lower:.4f})"))
+        # Sort by value descending (worst first)
+        results.sort(key=lambda x: x[1], reverse=True)
+        return results[:args.top]
+
+    # ── Run detection ────────────────────────────────────────────────
+
+    all_outliers: dict[str, list[tuple[dict, float, str]]] = {}
+    summary_stats: dict[str, dict[str, float]] = {}
+
+    for metric in metrics_to_check:
+        extractor = metric_extractors[metric]
+        pairs: list[tuple[dict, float]] = []
+        for s in sessions:
+            val = extractor(s)
+            if val is not None:
+                pairs.append((s, float(val)))
+
+        if len(pairs) < 4:
+            continue
+
+        nums = [v for _, v in pairs]
+        summary_stats[metric] = {
+            "count": len(nums),
+            "mean": statistics.mean(nums),
+            "median": statistics.median(nums),
+            "stdev": statistics.stdev(nums) if len(nums) > 1 else 0.0,
+            "min": min(nums),
+            "max": max(nums),
+        }
+
+        outliers = _iqr_outliers(pairs, args.threshold)
+        if outliers:
+            all_outliers[metric] = outliers
+
+    # ── Output ───────────────────────────────────────────────────────
+
+    if args.format == "json":
+        output: dict[str, Any] = {
+            "threshold": args.threshold,
+            "sessions_analyzed": len(sessions),
+            "metrics": {},
+        }
+        for metric in metrics_to_check:
+            entry: dict[str, Any] = {"stats": summary_stats.get(metric, {})}
+            if metric in all_outliers:
+                entry["outliers"] = [
+                    {
+                        "session_id": s.get("session_id") or s.get("id", "?"),
+                        "agent": s.get("agent_name", ""),
+                        "value": val,
+                        "reason": reason,
+                    }
+                    for s, val, reason in all_outliers[metric]
+                ]
+            output["metrics"][metric] = entry
+        _print_json(output)
+        return
+
+    # Table output
+    total_outliers = sum(len(v) for v in all_outliers.values())
+    print(f"🔍 Outlier Detection — {len(sessions)} sessions, IQR×{args.threshold}")
+    print()
+
+    for metric in metrics_to_check:
+        stats = summary_stats.get(metric)
+        if not stats:
+            continue
+
+        unit = {"cost": "$", "tokens": " tok", "duration": "s", "errors": " err"}[metric]
+        fmt_v = (lambda v, u=unit: f"${v:.4f}" if u == "$" else f"{v:,.1f}{u}")
+
+        print(f"── {metric.upper()} ──")
+        print(f"   mean={fmt_v(stats['mean'])}  median={fmt_v(stats['median'])}  "
+              f"stdev={fmt_v(stats['stdev'])}  min={fmt_v(stats['min'])}  max={fmt_v(stats['max'])}")
+
+        outliers = all_outliers.get(metric, [])
+        if not outliers:
+            print("   ✅ No outliers detected\n")
+            continue
+
+        print(f"   ⚠️  {len(outliers)} outlier(s):")
+        for sess, val, reason in outliers:
+            sid = sess.get("session_id") or sess.get("id", "?")
+            agent = sess.get("agent_name", "")
+            label = f"{sid[:12]}"
+            if agent:
+                label += f" ({agent})"
+            print(f"   • {label}: {fmt_v(val)} — {reason}")
+        print()
+
+    if total_outliers == 0:
+        print("✅ No outliers detected across all metrics. Your agents look healthy!")
+    else:
+        print(f"⚠️  {total_outliers} total outlier(s) detected. Investigate high-value sessions with:")
+        print("   agentlens-cli session <session_id>")
+        print("   agentlens-cli costs <session_id>")
+        print("   agentlens-cli trace <session_id>")
+
+
 def cmd_status(args: argparse.Namespace) -> None:
     client, endpoint = _get_client(args)
     try:
@@ -1565,6 +1737,14 @@ def main() -> None:
     p.add_argument("--no-color", action="store_true", help="Disable colored output in live mode")
     p.add_argument("--output", "-o", help="Write replay to file instead of stdout")
 
+    # outlier
+    p = sub.add_parser("outlier", help="Detect outlier sessions by cost, tokens, duration, or errors")
+    p.add_argument("--metric", choices=["cost", "tokens", "duration", "errors", "all"], default="all", help="Metric to check (default: all)")
+    p.add_argument("--limit", type=int, default=200, help="Max sessions to fetch (default: 200)")
+    p.add_argument("--threshold", type=float, default=1.5, help="IQR multiplier for outlier detection (default: 1.5)")
+    p.add_argument("--format", choices=["table", "json"], default="table", help="Output format (default: table)")
+    p.add_argument("--top", type=int, default=10, help="Max outliers to show per metric (default: 10)")
+
     # status
     sub.add_parser("status", help="Check backend connectivity")
 
@@ -1589,6 +1769,7 @@ def main() -> None:
         "trace": cmd_trace,
         "heatmap": cmd_heatmap,
         "replay": cmd_replay,
+        "outlier": cmd_outlier,
         "status": cmd_status,
     }
     commands[args.command](args)
