@@ -210,9 +210,14 @@ function validateWebhookUrl(url) {
     return { valid: false, error: "url must be a valid URL" };
   }
 
-  // Only allow http/https
+  // Enforce HTTPS in production to prevent leaking webhook secrets
+  // and HMAC signatures over plaintext HTTP connections.
+  // HTTP is allowed only in development (NODE_ENV !== "production").
   if (parsed.protocol !== "http:" && parsed.protocol !== "https:") {
     return { valid: false, error: "url must use http or https protocol" };
+  }
+  if (parsed.protocol === "http:" && process.env.NODE_ENV === "production") {
+    return { valid: false, error: "url must use https in production (webhook secrets and HMAC signatures must not be sent over plaintext)" };
   }
 
   const hostname = parsed.hostname.toLowerCase();
