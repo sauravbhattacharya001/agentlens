@@ -21,6 +21,7 @@ Usage:
     agentlens-cli heatmap [--metric sessions|cost|tokens|events] [--weeks N] [--limit N] [--endpoint URL] [--api-key KEY]
     agentlens-cli replay <session_id> [--speed N] [--type TYPES] [--exclude TYPES] [--format text|json|markdown] [--live] [--no-color] [--output FILE] [--endpoint URL] [--api-key KEY]
     agentlens-cli outlier [--metric cost|tokens|duration|errors|all] [--limit N] [--threshold F] [--format table|json] [--top N] [--endpoint URL] [--api-key KEY]
+    agentlens-cli digest [--period day|week|month] [--format text|markdown|html|json] [--output FILE] [--open] [--top N] [--endpoint URL] [--api-key KEY]
     agentlens-cli status [--endpoint URL] [--api-key KEY]
 
 Environment variables:
@@ -39,6 +40,7 @@ from typing import Any
 import httpx
 
 from agentlens.cli_analytics import cmd_report, cmd_outlier  # extracted
+from agentlens.cli_digest import cmd_digest  # periodic digest summaries
 
 
 def _get_client(args: argparse.Namespace) -> tuple[httpx.Client, str]:
@@ -1377,6 +1379,13 @@ def main() -> None:
     # status
     sub.add_parser("status", help="Check backend connectivity")
 
+    p = sub.add_parser("digest", help="Generate periodic digest summary (daily/weekly/monthly)")
+    p.add_argument("--period", choices=["day", "week", "month"], default="day")
+    p.add_argument("--format", choices=["text", "markdown", "html", "json"], default="text")
+    p.add_argument("--output", "-o")
+    p.add_argument("--open", action="store_true", help="Open HTML output in browser")
+    p.add_argument("--top", type=int, default=5, help="Number of top sessions to show")
+
     args = parser.parse_args()
 
     commands = {
@@ -1399,6 +1408,7 @@ def main() -> None:
         "heatmap": cmd_heatmap,
         "replay": cmd_replay,
         "outlier": cmd_outlier,
+        "digest": cmd_digest,
         "status": cmd_status,
     }
     commands[args.command](args)
