@@ -45,9 +45,46 @@ function classifySeverity(maxAbsZ) {
   return "low";
 }
 
+// ── Baseline cache ─────────────────────────────────────────────────
+// Baselines change slowly (new sessions trickle in) but are expensive
+// to recompute — they scan every session + join events. Cache them for
+// a short window to avoid redundant full-table scans on rapid polling
+// or multi-tab dashboards hitting /anomalies, /anomalies/stats, and
+// /anomalies/session/:id in quick succession.
+
+const BASELINE_CACHE_TTL_MS = 15000; // 15 seconds
+const _baselineCache = new Map(); // key: agentName||"__all__" → { baselines, rows, ts }
+
+function _baselineCacheKey(agentName) {
+  return agentName || "__all__";
+}
+
+function _getCachedBaselines(agentName) {
+  const key = _baselineCacheKey(agentName);
+  const entry = _baselineCache.get(key);
+  if (entry && Date.now() - entry.ts < BASELINE_CACHE_TTL_MS) {
+    return entry;
+  }
+  _baselineCache.delete(key);
+  return null;
+}
+
+function _setCachedBaselines(agentName, rows, baselines) {
+  const key = _baselineCacheKey(agentName);
+  // Cap cache size to prevent unbounded growth from many agent filters
+  if (_baselineCache.size >= 50) {
+    const oldest = _baselineCache.keys().next().value;
+    _baselineCache.delete(oldest);
+  }
+  _baselineCache.set(key, { rows, baselines, ts: Date.now() });
+}
+
 // ── Core detection ─────────────────────────────────────────────────
 
 function computeBaselines(db, agentName) {
+  // Return cached baselines if still fresh
+  const cached = _getCachedBaselines(agentName);
+  if (cached) return { rows: cached.rows, baselines: cached.baselines };
   const filter = agentName ? "WHERE s.agent_name = ?" : "";
   const params = agentName ? [agentName] : [];
 
@@ -82,6 +119,7 @@ function computeBaselines(db, agentName) {
     sampleSize: rows.length,
   };
 
+  _setCachedBaselines(agentName, rows, baselines);
   return { rows, baselines };
 }
 
@@ -206,6 +244,8 @@ router.post("/scan", (req, res) => {
     const db = getDb();
     const threshold = parseFloat(req.body?.threshold) || 2;
     const agentName = req.body?.agent || undefined;
+    // Explicit scan should bypass cache for fresh results
+    _baselineCache.delete(_baselineCacheKey(agentName));
     const limit = parseInt(req.body?.limit, 10) || 100;
 
     const result = detectAnomalies(db, { threshold, agentName, limit });
