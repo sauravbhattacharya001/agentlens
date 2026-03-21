@@ -25,23 +25,39 @@ jobs:
         working-directory: backend
         run: npm test
 
+      - name: Seed demo data for integration testing
+        working-directory: backend
+        run: node seed.js
+
       - name: Setup Python
         uses: actions/setup-python@v5
         with:
           python-version: '3.11'
+          cache: 'pip'
+          cache-dependency-path: sdk/pyproject.toml
 
-      - name: Install Python SDK
+      - name: Install Python SDK with dev dependencies
         working-directory: sdk
         run: pip install -e ".[dev]"
 
+      - name: Install linting tools
+        run: pip install ruff
+
+      - name: Lint Python SDK
+        working-directory: sdk
+        run: ruff check agentlens/ tests/ --no-fix || echo "Lint issues found - review above"
+
       - name: Run SDK tests with coverage
         working-directory: sdk
-        run: python -m pytest --tb=short --cov=agentlens --cov-report=term -q || echo "Tests incomplete — check test output above"
+        run: python -m pytest --tb=short --cov=agentlens --cov-report=term -q || echo "Tests incomplete - check test output above"
 
-      - name: Verify backend starts
+      - name: Verify backend starts and serves dashboard
         working-directory: backend
         run: |
           node server.js &
+          SERVER_PID=$!
           sleep 3
           curl -sf http://localhost:3000/health && echo "Backend healthy"
-          kill %1 2>/dev/null || true
+          curl -sf http://localhost:3000/ | head -c 200 && echo -e "\nDashboard accessible"
+          curl -sf http://localhost:3000/sessions | head -c 200 && echo -e "\nAPI responding"
+          kill $SERVER_PID 2>/dev/null || true
