@@ -34,10 +34,11 @@ Environment variables:
 from __future__ import annotations
 
 import argparse
+import contextlib
 import json
 import os
 import sys
-from typing import Any
+from typing import Any, Generator
 
 import httpx
 
@@ -48,6 +49,12 @@ from agentlens.cli_depmap import cmd_depmap  # dependency map visualization
 
 
 def _get_client(args: argparse.Namespace) -> tuple[httpx.Client, str]:
+    """Create an httpx client from CLI args.
+
+    .. deprecated::
+        Prefer :func:`_open_client` (context manager) to ensure the
+        underlying connection pool is always closed.
+    """
     endpoint = (
         getattr(args, "endpoint", None)
         or os.environ.get("AGENTLENS_ENDPOINT", "http://localhost:3000")
@@ -62,6 +69,45 @@ def _get_client(args: argparse.Namespace) -> tuple[httpx.Client, str]:
         timeout=15.0,
     )
     return client, endpoint
+
+
+@contextlib.contextmanager
+def _open_client(args: argparse.Namespace) -> Generator[tuple[httpx.Client, str], None, None]:
+    """Context-managed httpx client that closes its connection pool on exit.
+
+    Usage::
+
+        with _open_client(args) as (client, endpoint):
+            resp = client.get("/sessions")
+    """
+    client, endpoint = _get_client(args)
+    try:
+        yield client, endpoint
+    finally:
+        client.close()
+
+
+def _fetch_session_events(
+    client: httpx.Client,
+    session_id: str,
+    *,
+    event_limit: int = 5000,
+) -> tuple[dict, list[dict]]:
+    """Fetch session metadata and its events from the API.
+
+    Returns ``(session_data, events_list)``.  Raises on HTTP errors.
+    This consolidates the repeated fetch-session-then-events pattern used
+    by ``cmd_health``, ``cmd_flamegraph``, ``cmd_trace``, and ``cmd_replay``.
+    """
+    resp = client.get(f"/sessions/{session_id}")
+    resp.raise_for_status()
+    session_data = resp.json()
+
+    resp = client.get("/events", params={"session_id": session_id, "limit": event_limit})
+    resp.raise_for_status()
+    raw = resp.json()
+    events = raw if isinstance(raw, list) else raw.get("events", [raw])
+    return session_data, events
 
 
 def _print_json(data: Any) -> None:
@@ -184,11 +230,9 @@ def cmd_analytics(args: argparse.Namespace) -> None:
 
 
 def cmd_health(args: argparse.Namespace) -> None:
-    client, _ = _get_client(args)
-    resp = client.get(f"/sessions/{args.session_id}")
-    resp.raise_for_status()
-    session_data = resp.json()
-    events = session_data.get("events", [])
+    with _open_client(args) as (client, _):
+        session_data, raw_events = _fetch_session_events(client, args.session_id)
+    events = raw_events or session_data.get("events", [])
 
     # Use local health scorer
     from agentlens import HealthScorer
@@ -531,20 +575,9 @@ def cmd_flamegraph(args: argparse.Namespace) -> None:
     from agentlens.flamegraph import Flamegraph
     from agentlens.models import AgentEvent
 
-    client, _ = _get_client(args)
-
-    # Fetch session metadata
-    resp = client.get(f"/sessions/{args.session_id}")
-    resp.raise_for_status()
-    session_data = resp.json()
+    with _open_client(args) as (client, _):
+        session_data, raw_events = _fetch_session_events(client, args.session_id)
     session_name = session_data.get("agent_name", args.session_id)
-
-    # Fetch events for this session
-    resp = client.get("/events", params={"session_id": args.session_id, "limit": 5000})
-    resp.raise_for_status()
-    raw_events = resp.json()
-    if isinstance(raw_events, dict):
-        raw_events = raw_events.get("events", [raw_events])
 
     if not raw_events:
         print(f"âš ï¸  No events found for session {args.session_id}")
@@ -592,13 +625,12 @@ def cmd_flamegraph(args: argparse.Namespace) -> None:
 
 def cmd_trace(args: argparse.Namespace) -> None:
     """Render a session's events as a terminal waterfall/timeline with timing bars."""
-    client, endpoint = _get_client(args)
+    with _open_client(args) as (client, endpoint):
+        session_data, events = _fetch_session_events(client, args.session_id)
     use_color = not getattr(args, "no_color", False) and sys.stdout.isatty()
     output_json = getattr(args, "json", False)
     type_filter = getattr(args, "type", None)
     min_ms = getattr(args, "min_ms", None)
-
-    # ANSI helpers
     RESET = "\033[0m" if use_color else ""
     BOLD = "\033[1m" if use_color else ""
     DIM = "\033[2m" if use_color else ""
@@ -609,17 +641,6 @@ def cmd_trace(args: argparse.Namespace) -> None:
         "error": "\033[38;5;203m" if use_color else "",       # red
         "generic": "\033[38;5;145m" if use_color else "",     # grey
     }
-
-    # Fetch session
-    resp = client.get(f"/sessions/{args.session_id}")
-    resp.raise_for_status()
-    session_data = resp.json()
-
-    # Fetch events
-    resp = client.get("/events", params={"session_id": args.session_id, "limit": 5000})
-    resp.raise_for_status()
-    raw = resp.json()
-    events = raw if isinstance(raw, list) else raw.get("events", [raw])
 
     # Sort by timestamp
     events.sort(key=lambda e: e.get("timestamp", ""))
@@ -1138,19 +1159,8 @@ def cmd_replay(args: argparse.Namespace) -> None:
     import time as _time
     from agentlens.replayer import SessionReplayer
 
-    client, _ = _get_client(args)
-
-    # Fetch session metadata
-    resp = client.get(f"/sessions/{args.session_id}")
-    resp.raise_for_status()
-    session_data = resp.json()
-
-    # Fetch events
-    resp = client.get("/events", params={"session_id": args.session_id, "limit": 10000})
-    resp.raise_for_status()
-    events_raw = resp.json()
-    if isinstance(events_raw, dict):
-        events_raw = events_raw.get("events", [events_raw])
+    with _open_client(args) as (client, _):
+        session_data, events_raw = _fetch_session_events(client, args.session_id, event_limit=10000)
 
     if not events_raw:
         print(f"No events found for session {args.session_id}")
