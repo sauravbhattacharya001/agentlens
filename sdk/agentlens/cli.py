@@ -22,6 +22,7 @@ Usage:
     agentlens-cli replay <session_id> [--speed N] [--type TYPES] [--exclude TYPES] [--format text|json|markdown] [--live] [--no-color] [--output FILE] [--endpoint URL] [--api-key KEY]
     agentlens-cli outlier [--metric cost|tokens|duration|errors|all] [--limit N] [--threshold F] [--format table|json] [--top N] [--endpoint URL] [--api-key KEY]
     agentlens-cli digest [--period day|week|month] [--format text|markdown|html|json] [--output FILE] [--open] [--top N] [--endpoint URL] [--api-key KEY]
+    agentlens-cli funnel [--stages TYPES] [--limit N] [--format table|json|html] [--output FILE] [--open] [--endpoint URL] [--api-key KEY]
     agentlens-cli status [--endpoint URL] [--api-key KEY]
 
 Environment variables:
@@ -41,6 +42,7 @@ import httpx
 
 from agentlens.cli_analytics import cmd_report, cmd_outlier  # extracted
 from agentlens.cli_digest import cmd_digest  # periodic digest summaries
+from agentlens.cli_funnel import cmd_funnel  # workflow funnel analysis
 
 
 def _get_client(args: argparse.Namespace) -> tuple[httpx.Client, str]:
@@ -1379,6 +1381,14 @@ def main() -> None:
     # status
     sub.add_parser("status", help="Check backend connectivity")
 
+    # funnel
+    p = sub.add_parser("funnel", help="Analyse agent workflow funnels with drop-off between stages")
+    p.add_argument("--stages", default=None, help="Comma-separated event types for funnel stages (default: plan,tool_call,llm_call,result,error)")
+    p.add_argument("--limit", type=int, default=200, help="Max sessions to fetch (default: 200)")
+    p.add_argument("--format", choices=["table", "json", "html"], default="table", help="Output format (default: table)")
+    p.add_argument("--output", "-o", help="Write output to file")
+    p.add_argument("--open", action="store_true", help="Open HTML output in browser")
+
     p = sub.add_parser("digest", help="Generate periodic digest summary (daily/weekly/monthly)")
     p.add_argument("--period", choices=["day", "week", "month"], default="day")
     p.add_argument("--format", choices=["text", "markdown", "html", "json"], default="text")
@@ -1409,6 +1419,7 @@ def main() -> None:
         "replay": cmd_replay,
         "outlier": cmd_outlier,
         "digest": cmd_digest,
+        "funnel": cmd_funnel,
         "status": cmd_status,
     }
     commands[args.command](args)
