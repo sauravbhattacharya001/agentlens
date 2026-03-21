@@ -1,7 +1,7 @@
 # ── Stage 1: Build ────────────────────────────────────────────────────
 # Install all dependencies including devDependencies, then prune to
 # production-only for a smaller runtime image.
-FROM node:22-alpine AS builder
+FROM node:25-alpine AS builder
 
 WORKDIR /build
 
@@ -19,7 +19,7 @@ COPY dashboard/ ./dashboard/
 RUN cd backend && npm prune --production
 
 # ── Stage 2: Runtime ─────────────────────────────────────────────────
-FROM node:22-alpine
+FROM node:25-alpine
 
 # Security: add non-root user
 RUN addgroup -S agentlens && adduser -S agentlens -G agentlens
