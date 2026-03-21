@@ -78,6 +78,39 @@ class AgentTracker(AlertMixin, TagMixin, AnnotationMixin, RetentionMixin):
             )
         return sid
 
+    def _build_span_event(self, sp: Span, event_type: str) -> dict[str, Any]:
+        """Build a span lifecycle event dict for the backend.
+
+        Centralises the span event structure so ``span_start`` and
+        ``span_end`` payloads stay consistent without duplicating field
+        lists.
+
+        Args:
+            sp: The span instance.
+            event_type: Either ``"span_start"`` or ``"span_end"``.
+
+        Returns:
+            A dict ready to pass to :meth:`Transport.send_events`.
+        """
+        event: dict[str, Any] = {
+            "event_type": event_type,
+            "session_id": sp.session_id,
+            "span_id": sp.span_id,
+            "span_name": sp.name,
+            "parent_span_id": sp.parent_id,
+            "attributes": sp.attributes,
+        }
+        if event_type == "span_start":
+            event["timestamp"] = sp.started_at.isoformat()
+        else:
+            event["timestamp"] = sp.ended_at.isoformat() if sp.ended_at else None
+            event["duration_ms"] = round(sp.duration_ms, 2) if sp.duration_ms else None
+            event["status"] = sp.status
+            event["error"] = sp.error
+            event["event_count"] = sp.event_count
+            event["children"] = sp.children
+        return event
+
     @contextmanager
     def span(
         self,
@@ -124,16 +157,7 @@ class AgentTracker(AlertMixin, TagMixin, AnnotationMixin, RetentionMixin):
         if parent:
             parent.children.append(sp.span_id)
 
-        # Emit span_start event
-        self.transport.send_events([{
-            "event_type": "span_start",
-            "session_id": sid,
-            "span_id": sp.span_id,
-            "span_name": name,
-            "parent_span_id": sp.parent_id,
-            "timestamp": sp.started_at.isoformat(),
-            "attributes": sp.attributes,
-        }])
+        self.transport.send_events([self._build_span_event(sp, "span_start")])
 
         self._active_spans.append(sp)
         try:
@@ -150,21 +174,7 @@ class AgentTracker(AlertMixin, TagMixin, AnnotationMixin, RetentionMixin):
             sp.duration_ms = (time.monotonic() - sp._mono_start) * 1000
             self._active_spans.pop()
 
-            # Emit span_end event
-            self.transport.send_events([{
-                "event_type": "span_end",
-                "session_id": sid,
-                "span_id": sp.span_id,
-                "span_name": name,
-                "parent_span_id": sp.parent_id,
-                "timestamp": sp.ended_at.isoformat(),
-                "duration_ms": round(sp.duration_ms, 2),
-                "status": sp.status,
-                "error": sp.error,
-                "event_count": sp.event_count,
-                "children": sp.children,
-                "attributes": sp.attributes,
-            }])
+            self.transport.send_events([self._build_span_event(sp, "span_end")])
 
     def start_session(self, agent_name: str = "default-agent", metadata: dict | None = None) -> Session:
         """Create and register a new tracking session."""
@@ -417,17 +427,21 @@ class AgentTracker(AlertMixin, TagMixin, AnnotationMixin, RetentionMixin):
         return response.text
 
     def explain(self, session_id: str | None = None) -> str:
-        """Generate a human-readable explanation of the agent's behavior."""
-        try:
-            sid = self._resolve_session(session_id)
-        except RuntimeError:
-            if session_id:
-                return f"Session {session_id} not found."
-            return "No active session."
+        """Generate a human-readable explanation of the agent's behavior.
 
-        session = self.sessions.get(sid)
-        if not session:
-            return f"Session {sid} not found."
+        Args:
+            session_id: Session to explain. Defaults to the current session.
+
+        Returns:
+            A Markdown-formatted string describing the session timeline.
+
+        Raises:
+            RuntimeError: If the session is not found locally.
+        """
+        sid = self._resolve_session(
+            session_id, "No session to explain.", require_local=True,
+        )
+        session = self.sessions[sid]
 
         lines = [
             f"## Session Explanation: {session.agent_name}",
