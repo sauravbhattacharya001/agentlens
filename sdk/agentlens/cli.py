@@ -23,6 +23,7 @@ Usage:
     agentlens-cli outlier [--metric cost|tokens|duration|errors|all] [--limit N] [--threshold F] [--format table|json] [--top N] [--endpoint URL] [--api-key KEY]
     agentlens-cli digest [--period day|week|month] [--format text|markdown|html|json] [--output FILE] [--open] [--top N] [--endpoint URL] [--api-key KEY]
     agentlens-cli funnel [--stages TYPES] [--limit N] [--format table|json|html] [--output FILE] [--open] [--endpoint URL] [--api-key KEY]
+    agentlens-cli depmap [--limit N] [--format ascii|json|html] [--output FILE] [--open] [--endpoint URL] [--api-key KEY]
     agentlens-cli status [--endpoint URL] [--api-key KEY]
 
 Environment variables:
@@ -43,6 +44,7 @@ import httpx
 from agentlens.cli_analytics import cmd_report, cmd_outlier  # extracted
 from agentlens.cli_digest import cmd_digest  # periodic digest summaries
 from agentlens.cli_funnel import cmd_funnel  # workflow funnel analysis
+from agentlens.cli_depmap import cmd_depmap  # dependency map visualization
 
 
 def _get_client(args: argparse.Namespace) -> tuple[httpx.Client, str]:
@@ -1389,6 +1391,13 @@ def main() -> None:
     p.add_argument("--output", "-o", help="Write output to file")
     p.add_argument("--open", action="store_true", help="Open HTML output in browser")
 
+    # depmap
+    p = sub.add_parser("depmap", help="Visualise agent-to-tool dependency map across sessions")
+    p.add_argument("--limit", type=int, default=50, help="Max sessions to scan (default: 50)")
+    p.add_argument("--format", choices=["ascii", "json", "html"], default="ascii", help="Output format (default: ascii)")
+    p.add_argument("--output", "-o", help="Write output to file")
+    p.add_argument("--open", action="store_true", help="Open HTML output in browser")
+
     p = sub.add_parser("digest", help="Generate periodic digest summary (daily/weekly/monthly)")
     p.add_argument("--period", choices=["day", "week", "month"], default="day")
     p.add_argument("--format", choices=["text", "markdown", "html", "json"], default="text")
@@ -1420,6 +1429,7 @@ def main() -> None:
         "outlier": cmd_outlier,
         "digest": cmd_digest,
         "funnel": cmd_funnel,
+        "depmap": cmd_depmap,
         "status": cmd_status,
     }
     commands[args.command](args)
