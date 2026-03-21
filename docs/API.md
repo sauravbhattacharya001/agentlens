@@ -32,6 +32,9 @@ All endpoints require API key authentication via the `x-api-key` header unless o
 - [SLA Targets](#sla-targets)
 - [Retention](#retention)
 - [Health Check](#health-check)
+- [Session Diff](#session-diff)
+- [Cost Forecasting](#cost-forecasting)
+- [Agent Scorecards](#agent-scorecards)
 
 ---
 
@@ -971,3 +974,232 @@ All errors follow a consistent format:
 | `404` | Resource not found |
 | `429` | Rate limit exceeded |
 | `500` | Internal server error |
+
+---
+
+## Session Diff
+
+Compare two sessions side-by-side with event-level alignment using LCS (Longest Common Subsequence).
+
+### `GET /diff?baseline=ID&candidate=ID`
+
+Compute a structured diff between two sessions.
+
+**Query Parameters:**
+
+| Parameter | Type | Required | Description |
+|-----------|------|----------|-------------|
+| `baseline` | string | Yes | Session ID of the baseline session |
+| `candidate` | string | Yes | Session ID of the candidate session |
+
+**Response:**
+
+```json
+{
+  "baseline": {
+    "session_id": "abc123",
+    "agent_name": "my-agent",
+    "status": "completed",
+    "event_count": 12,
+    "tokens_in": 1500,
+    "tokens_out": 800,
+    "duration_ms": 4500
+  },
+  "candidate": {
+    "session_id": "def456",
+    "agent_name": "my-agent",
+    "status": "completed",
+    "event_count": 14,
+    "tokens_in": 1800,
+    "tokens_out": 900,
+    "duration_ms": 5200
+  },
+  "deltas": {
+    "tokens_in": 300,
+    "tokens_out": 100,
+    "tokens_total": 400,
+    "duration_ms": 700,
+    "event_count": 2
+  },
+  "tools": {
+    "added": ["new_tool"],
+    "removed": [],
+    "common": ["search", "calculator"],
+    "baseline_counts": { "search": 3, "calculator": 1 },
+    "candidate_counts": { "search": 4, "calculator": 1, "new_tool": 2 }
+  },
+  "models": {
+    "baseline": { "gpt-4": 8, "gpt-3.5-turbo": 4 },
+    "candidate": { "gpt-4": 10, "gpt-3.5-turbo": 4 }
+  },
+  "event_types": {
+    "added": [],
+    "removed": []
+  },
+  "alignment": [
+    {
+      "label": "llm_call",
+      "status": "matched",
+      "changes": {}
+    },
+    {
+      "label": "tool_call:search",
+      "status": "modified",
+      "changes": { "tokens_in": "120→150" }
+    },
+    {
+      "label": "tool_call:new_tool",
+      "status": "added",
+      "changes": {}
+    }
+  ],
+  "similarity": 0.85
+}
+```
+
+**Alignment status values:** `matched` (identical), `modified` (same type but metrics changed), `added` (only in candidate), `removed` (only in baseline).
+
+**Error Responses:**
+
+| Status | Condition |
+|--------|-----------|
+| `400` | Missing baseline/candidate, invalid ID format, or same ID for both |
+| `404` | Baseline or candidate session not found |
+
+---
+
+## Cost Forecasting
+
+Project future costs based on historical usage patterns.
+
+### `GET /forecast`
+
+Get cost and usage forecasts with trend analysis.
+
+**Query Parameters:**
+
+| Parameter | Type | Default | Description |
+|-----------|------|---------|-------------|
+| `days` | number | 30 | Historical lookback window (1-365) |
+| `forecastDays` | number | 7 | Number of days to forecast (1-90) |
+| `agent` | string | — | Filter by agent name |
+| `model` | string | — | Filter by model name |
+
+**Response:**
+
+```json
+{
+  "historical": [
+    { "date": "2024-01-15", "tokens_in": 50000, "tokens_out": 20000, "tokens_total": 70000, "event_count": 150, "session_count": 12, "cost": 1.85 }
+  ],
+  "forecast": [
+    { "date": "2024-02-15", "tokens_total": 72000, "cost": 1.92, "confidence": "medium" }
+  ],
+  "trend": {
+    "direction": "increasing",
+    "daily_avg_tokens": 68000,
+    "daily_avg_cost": 1.80
+  },
+  "meta": {
+    "lookback_days": 30,
+    "forecast_days": 7,
+    "agent": null,
+    "model": null
+  }
+}
+```
+
+### `GET /forecast/budget`
+
+Check current spending against budget limits.
+
+**Query Parameters:**
+
+| Parameter | Type | Default | Description |
+|-----------|------|---------|-------------|
+| `days` | number | 30 | Lookback window |
+| `agent` | string | — | Filter by agent |
+
+### `GET /forecast/spending-summary`
+
+Get a spending summary with model-level cost breakdowns.
+
+**Query Parameters:**
+
+| Parameter | Type | Default | Description |
+|-----------|------|---------|-------------|
+| `days` | number | 30 | Lookback window |
+| `agent` | string | — | Filter by agent |
+
+---
+
+## Agent Scorecards
+
+Per-agent performance grading with composite scores, letter grades, and trend sparklines.
+
+### `GET /scorecards`
+
+List scorecards for all agents.
+
+**Query Parameters:**
+
+| Parameter | Type | Default | Description |
+|-----------|------|---------|-------------|
+| `days` | number | 30 | Lookback window in days (1-365) |
+
+**Response:**
+
+```json
+{
+  "scorecards": [
+    {
+      "agent_name": "my-agent",
+      "composite_score": 87.5,
+      "grade": "A-",
+      "grade_color": "#22c55e",
+      "metrics": {
+        "total_sessions": 150,
+        "completed": 140,
+        "errors": 5,
+        "success_rate": 93.33,
+        "error_rate": 3.33,
+        "avg_tokens": 12500,
+        "total_tokens": 1875000,
+        "avg_latency_ms": 850.5,
+        "max_latency_ms": 4200.0
+      },
+      "first_seen": "2024-01-01T00:00:00.000Z",
+      "last_seen": "2024-01-31T23:59:00.000Z",
+      "trend": [
+        { "week": "2024-03", "sessions": 35, "errorRate": 2.86 },
+        { "week": "2024-04", "sessions": 42, "errorRate": 4.76 }
+      ]
+    }
+  ],
+  "meta": {
+    "days": 30,
+    "generated_at": "2024-02-01T00:00:00.000Z",
+    "agent_count": 5
+  }
+}
+```
+
+**Composite score formula:** 40% success rate + 30% latency efficiency + 30% volume (log scale). Grades: A+ (≥95) through F (<50).
+
+### `GET /scorecards/:agent`
+
+Detailed scorecard for a single agent, including model usage breakdown and tool usage stats.
+
+**Query Parameters:**
+
+| Parameter | Type | Default | Description |
+|-----------|------|---------|-------------|
+| `days` | number | 30 | Lookback window in days (1-365) |
+
+**Response:** Same structure as the list endpoint but for a single agent, with additional `models` and `tools` breakdowns.
+
+**Error Responses:**
+
+| Status | Condition |
+|--------|-----------|
+| `404` | No data for the specified agent in the given time range |
