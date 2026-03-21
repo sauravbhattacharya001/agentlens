@@ -168,45 +168,42 @@ class Transport:
         """Return headers with API key authentication."""
         return {"X-API-Key": self.api_key}
 
-    def get(self, path: str, **kwargs: Any) -> httpx.Response:
-        """Authenticated GET request to *endpoint/path*.
+    def _request(self, method: str, path: str, **kwargs: Any) -> httpx.Response:
+        """Send an authenticated HTTP request and raise on error.
 
-        All keyword arguments are forwarded to ``httpx.Client.get``.
-        The ``X-API-Key`` header is injected automatically.
+        All keyword arguments are forwarded to ``httpx.Client.request``.
+        The ``X-API-Key`` header is injected automatically and merged with
+        any caller-supplied headers.
+
+        Args:
+            method: HTTP method (GET, POST, PUT, DELETE, etc.).
+            path: URL path appended to the configured endpoint.
+
+        Returns:
+            The ``httpx.Response`` after raising for non-2xx status codes.
         """
         headers = {**self._auth_headers(), **kwargs.pop("headers", {})}
-        response = self._client.get(
-            f"{self.endpoint}{path}", headers=headers, **kwargs,
+        response = self._client.request(
+            method, f"{self.endpoint}{path}", headers=headers, **kwargs,
         )
         response.raise_for_status()
         return response
+
+    def get(self, path: str, **kwargs: Any) -> httpx.Response:
+        """Authenticated GET request to *endpoint/path*."""
+        return self._request("GET", path, **kwargs)
 
     def post(self, path: str, **kwargs: Any) -> httpx.Response:
         """Authenticated POST request to *endpoint/path*."""
-        headers = {**self._auth_headers(), **kwargs.pop("headers", {})}
-        response = self._client.post(
-            f"{self.endpoint}{path}", headers=headers, **kwargs,
-        )
-        response.raise_for_status()
-        return response
+        return self._request("POST", path, **kwargs)
 
     def put(self, path: str, **kwargs: Any) -> httpx.Response:
         """Authenticated PUT request to *endpoint/path*."""
-        headers = {**self._auth_headers(), **kwargs.pop("headers", {})}
-        response = self._client.put(
-            f"{self.endpoint}{path}", headers=headers, **kwargs,
-        )
-        response.raise_for_status()
-        return response
+        return self._request("PUT", path, **kwargs)
 
     def delete(self, path: str, **kwargs: Any) -> httpx.Response:
         """Authenticated DELETE request to *endpoint/path*."""
-        headers = {**self._auth_headers(), **kwargs.pop("headers", {})}
-        response = self._client.request(
-            "DELETE", f"{self.endpoint}{path}", headers=headers, **kwargs,
-        )
-        response.raise_for_status()
-        return response
+        return self._request("DELETE", path, **kwargs)
 
     def _flush_loop(self) -> None:
         """Background thread that periodically flushes the buffer."""
