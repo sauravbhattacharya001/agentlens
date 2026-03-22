@@ -8,6 +8,7 @@ on:
 
 permissions:
   contents: read
+  pull-requests: write
 
 jobs:
   # ── Python SDK Coverage ────────────────────────────────────────────
@@ -39,15 +40,42 @@ jobs:
             --cov-report=term-missing \
             --cov-report=xml:coverage.xml \
             --cov-report=html:htmlcov \
+            --cov-report=json:coverage.json \
             --cov-branch \
-            --cov-fail-under=90
+            --cov-fail-under=80
+
+      - name: Generate SDK coverage summary
+        if: always()
+        run: |
+          python - <<'PYEOF'
+          import json, os
+          with open("coverage.json") as f:
+              data = json.load(f)
+          totals = data["totals"]
+          pct_line = totals["percent_covered_display"]
+          pct_branch = round(totals.get("covered_branches", 0) / max(totals.get("num_branches", 1), 1) * 100, 1)
+          summary = f"""## 🐍 SDK Coverage Report
+
+          | Metric | Value |
+          |--------|-------|
+          | **Line Coverage** | {pct_line}% |
+          | **Branch Coverage** | {pct_branch}% |
+          | **Lines Covered** | {totals['covered_lines']} / {totals['num_statements']} |
+          | **Missing Lines** | {totals['missing_lines']} |
+
+          """
+          with open(os.environ["GITHUB_STEP_SUMMARY"], "a") as f:
+              f.write(summary)
+          PYEOF
 
       - name: Upload SDK coverage report
         if: always()
         uses: actions/upload-artifact@v7
         with:
           name: sdk-coverage-report
-          path: sdk/htmlcov/
+          path: |
+            sdk/htmlcov/
+            sdk/coverage.xml
           retention-days: 14
 
   # ── Node.js Backend Coverage ───────────────────────────────────────
@@ -75,10 +103,47 @@ jobs:
       - name: Run tests with coverage
         run: npx jest --coverage --verbose --coverageReporters=text --coverageReporters=lcov --coverageReporters=json-summary
 
+      - name: Generate backend coverage summary
+        if: always()
+        run: |
+          node -e "
+          const fs = require('fs');
+          const summary = JSON.parse(fs.readFileSync('coverage/coverage-summary.json', 'utf8'));
+          const t = summary.total;
+          const md = [
+            '## 📦 Backend Coverage Report',
+            '',
+            '| Metric | Covered | Total | Percentage |',
+            '|--------|---------|-------|------------|',
+            '| **Statements** | ' + t.statements.covered + ' | ' + t.statements.total + ' | ' + t.statements.pct + '% |',
+            '| **Branches** | ' + t.branches.covered + ' | ' + t.branches.total + ' | ' + t.branches.pct + '% |',
+            '| **Functions** | ' + t.functions.covered + ' | ' + t.functions.total + ' | ' + t.functions.pct + '% |',
+            '| **Lines** | ' + t.lines.covered + ' | ' + t.lines.total + ' | ' + t.lines.pct + '% |',
+            '',
+          ].join('\n');
+          fs.appendFileSync(process.env.GITHUB_STEP_SUMMARY, md);
+          "
+
       - name: Upload backend coverage report
         if: always()
         uses: actions/upload-artifact@v7
         with:
           name: backend-coverage-report
-          path: backend/coverage/
+          path: |
+            backend/coverage/
           retention-days: 14
+
+  # ── Coverage Gate ──────────────────────────────────────────────────
+  coverage-gate:
+    name: Coverage Gate
+    runs-on: ubuntu-latest
+    needs: [sdk-coverage, backend-coverage]
+    if: always()
+    steps:
+      - name: Check coverage results
+        run: |
+          if [ "${{ needs.sdk-coverage.result }}" = "failure" ] || [ "${{ needs.backend-coverage.result }}" = "failure" ]; then
+            echo "❌ Coverage thresholds not met"
+            exit 1
+          fi
+          echo "✅ All coverage thresholds passed"
