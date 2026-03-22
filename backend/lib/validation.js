@@ -235,6 +235,22 @@ function validateWebhookUrl(url) {
     return { valid: false, error: "url must not use IPv6-mapped IPv4 addresses" };
   }
 
+  // Block IPv6 private ranges (ULA fc00::/7, link-local fe80::/10)
+  // and non-canonical loopback forms like [0:0:0:0:0:0:0:1]
+  const bareIpv6 = bare.split("%")[0].toLowerCase(); // strip zone ID (e.g., %25eth0)
+  if (
+    bareIpv6.startsWith("fc") ||
+    bareIpv6.startsWith("fd") ||
+    bareIpv6.startsWith("fe80")
+  ) {
+    return { valid: false, error: "url must not point to a private IPv6 address" };
+  }
+  // Non-canonical IPv6 loopback (e.g., 0:0:0:0:0:0:0:1)
+  const collapsedIpv6 = bareIpv6.replace(/(^|:)0+(?=\d)/g, "$1").replace(/(:0)+:/, "::");
+  if (collapsedIpv6 === "::1" || collapsedIpv6 === "0:0:0:0:0:0:0:1") {
+    return { valid: false, error: "url must not point to a loopback address" };
+  }
+
   // Block non-standard IP representations that bypass regex checks:
   // decimal (2130706433 = 127.0.0.1), octal (0177.0.0.1), hex (0x7f.0.0.1)
   if (/^(0x[0-9a-f]+|0[0-7]+|\d{5,})$/i.test(hostname)) {
@@ -263,6 +279,10 @@ function validateWebhookUrl(url) {
       (a === 192 && b === 168)              // 192.168.0.0/16
     ) {
       return { valid: false, error: "url must not point to a private network address" };
+    }
+    // Block Carrier-Grade NAT (100.64.0.0/10)
+    if (a === 100 && b >= 64 && b <= 127) {
+      return { valid: false, error: "url must not point to a shared/private address" };
     }
   }
 
