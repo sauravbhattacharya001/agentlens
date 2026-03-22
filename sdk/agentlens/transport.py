@@ -4,11 +4,25 @@ from __future__ import annotations
 
 import logging
 import threading
+import warnings
 from typing import Any
+from urllib.parse import urlparse
 
 import httpx
 
 logger = logging.getLogger("agentlens.transport")
+
+_LOCALHOST_HOSTS = {"localhost", "127.0.0.1", "::1", "[::1]"}
+
+
+def _is_plaintext_remote(endpoint: str) -> bool:
+    """Return True if *endpoint* sends traffic over plaintext HTTP to a
+    non-localhost host, which would expose the API key on the network."""
+    parsed = urlparse(endpoint)
+    if parsed.scheme == "https":
+        return False
+    host = (parsed.hostname or "").lower()
+    return host not in _LOCALHOST_HOSTS
 
 # Hard cap to prevent unbounded memory growth if the backend is down
 _MAX_BUFFER_SIZE = 5000
@@ -36,6 +50,22 @@ class Transport:
     ) -> None:
         self.endpoint = endpoint.rstrip("/")
         self._api_key = api_key
+
+        # Warn when API credentials would be sent in cleartext over the
+        # network.  Localhost is exempt (dev/testing), but any remote
+        # endpoint should use HTTPS to protect the API key in transit.
+        if api_key != "default" and _is_plaintext_remote(self.endpoint):
+            warnings.warn(
+                f"AgentLens API key is being sent over plaintext HTTP to "
+                f"{self.endpoint}. This exposes your credentials on the "
+                f"network. Use HTTPS for non-localhost endpoints.",
+                stacklevel=2,
+            )
+            logger.warning(
+                "API key sent over plaintext HTTP to %s — use HTTPS",
+                self.endpoint,
+            )
+
         self.batch_size = batch_size
         self.flush_interval = flush_interval
         self.max_retries = max_retries
