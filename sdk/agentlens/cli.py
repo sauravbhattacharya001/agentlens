@@ -24,6 +24,10 @@ Usage:
     agentlens-cli digest [--period day|week|month] [--format text|markdown|html|json] [--output FILE] [--open] [--top N] [--endpoint URL] [--api-key KEY]
     agentlens-cli funnel [--stages TYPES] [--limit N] [--format table|json|html] [--output FILE] [--open] [--endpoint URL] [--api-key KEY]
     agentlens-cli depmap [--limit N] [--format ascii|json|html] [--output FILE] [--open] [--endpoint URL] [--api-key KEY]
+    agentlens-cli budget list [--json] [--endpoint URL] [--api-key KEY]
+    agentlens-cli budget set <scope> <period> <limit_usd> [--warn-pct N] [--endpoint URL] [--api-key KEY]
+    agentlens-cli budget check <session_id> [--json] [--endpoint URL] [--api-key KEY]
+    agentlens-cli budget delete <scope> [<period>] [--endpoint URL] [--api-key KEY]
     agentlens-cli status [--endpoint URL] [--api-key KEY]
 
 Environment variables:
@@ -45,6 +49,7 @@ from agentlens.cli_analytics import cmd_report, cmd_outlier  # extracted
 from agentlens.cli_digest import cmd_digest  # periodic digest summaries
 from agentlens.cli_funnel import cmd_funnel  # workflow funnel analysis
 from agentlens.cli_depmap import cmd_depmap  # dependency map visualization
+from agentlens.cli_budget import cmd_budget  # cost budget management
 
 
 def _get_client(args: argparse.Namespace) -> tuple[httpx.Client, str]:
@@ -1398,6 +1403,23 @@ def main() -> None:
     p.add_argument("--output", "-o", help="Write output to file")
     p.add_argument("--open", action="store_true", help="Open HTML output in browser")
 
+    # budget
+    p = sub.add_parser("budget", help="Manage and monitor cost budgets")
+    budget_sub = p.add_subparsers(dest="budget_action")
+    bp = budget_sub.add_parser("list", help="List all budgets with status")
+    bp.add_argument("--json", action="store_true", help="Output as JSON")
+    bp = budget_sub.add_parser("set", help="Create or update a budget")
+    bp.add_argument("scope", help='Budget scope: "global" or "agent:<name>"')
+    bp.add_argument("period", choices=["daily", "weekly", "monthly", "total"], help="Budget period")
+    bp.add_argument("limit_usd", type=float, help="Spending limit in USD")
+    bp.add_argument("--warn-pct", type=float, default=80, help="Warning threshold percentage (default: 80)")
+    bp = budget_sub.add_parser("check", help="Check budget status for a session")
+    bp.add_argument("session_id", help="Session ID to check")
+    bp.add_argument("--json", action="store_true", help="Output as JSON")
+    bp = budget_sub.add_parser("delete", help="Delete a budget")
+    bp.add_argument("scope", help='Budget scope to delete')
+    bp.add_argument("period", nargs="?", default=None, help="Period to delete (omit to delete all for scope)")
+
     p = sub.add_parser("digest", help="Generate periodic digest summary (daily/weekly/monthly)")
     p.add_argument("--period", choices=["day", "week", "month"], default="day")
     p.add_argument("--format", choices=["text", "markdown", "html", "json"], default="text")
@@ -1430,6 +1452,7 @@ def main() -> None:
         "digest": cmd_digest,
         "funnel": cmd_funnel,
         "depmap": cmd_depmap,
+        "budget": lambda args: cmd_budget(args, _get_client(args)[0]),
         "status": cmd_status,
     }
     commands[args.command](args)
