@@ -30,6 +30,13 @@ Usage:
     agentlens-cli budget delete <scope> [<period>] [--endpoint URL] [--api-key KEY]
     agentlens-cli snapshot [--label LABEL] [--output FILE] [--limit N] [--format json|table] [--endpoint URL] [--api-key KEY]
     agentlens-cli snapshot diff <file_a> <file_b> [--format table|json]
+    agentlens-cli alert history [--severity LEVEL] [--since HOURS] [--limit N] [--ack|--unack] [--format table|json]
+    agentlens-cli alert rules [--format table|json]
+    agentlens-cli alert test <rule_id> <session_id>
+    agentlens-cli alert ack <alert_id> [--note TEXT]
+    agentlens-cli alert silence <rule_id> [--duration MINUTES]
+    agentlens-cli alert unsilence <rule_id>
+    agentlens-cli alert stats [--period day|week|month] [--format table|json]
     agentlens-cli status [--endpoint URL] [--api-key KEY]
 
 Environment variables:
@@ -53,6 +60,7 @@ from agentlens.cli_funnel import cmd_funnel  # workflow funnel analysis
 from agentlens.cli_depmap import cmd_depmap  # dependency map visualization
 from agentlens.cli_budget import cmd_budget  # cost budget management
 from agentlens.cli_snapshot import cmd_snapshot  # point-in-time system snapshots
+from agentlens.cli_alert import cmd_alert, register_alert_parser  # alert management
 
 
 def _get_client(args: argparse.Namespace) -> tuple[httpx.Client, str]:
@@ -1442,6 +1450,9 @@ def main() -> None:
     dp.add_argument("file_b", help="Second snapshot JSON file")
     dp.add_argument("--format", choices=["table", "json"], default="table")
 
+    # -- alert (rich alert management) --
+    register_alert_parser(sub)
+
     args = parser.parse_args()
 
     commands = {
@@ -1469,6 +1480,7 @@ def main() -> None:
         "depmap": cmd_depmap,
         "budget": lambda args: cmd_budget(args, _get_client(args)[0]),
         "snapshot": cmd_snapshot,
+        "alert": lambda args: cmd_alert(_get_client(args)[0], args),
         "status": cmd_status,
     }
     commands[args.command](args)
