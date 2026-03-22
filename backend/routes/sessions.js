@@ -5,6 +5,7 @@ const { generateExplanation } = require("../lib/explain");
 const { computeSessionMetrics, pctDelta } = require("../lib/session-metrics");
 const { getTagStatements } = require("../lib/tag-statements");
 const { parsePagination, requireSessionId, wrapRoute } = require("../lib/request-helpers");
+const { toExportEvent, eventsToCsv, buildJsonExport, ndjsonSessionLine } = require("../lib/csv-export");
 
 const router = express.Router();
 
@@ -367,72 +368,25 @@ router.get("/:id/export", requireSessionId, wrapRoute("export session", (req, re
     const stmts = getSessionStatements();
     const events = stmts.eventsBySession.all(id);
 
-    // Builds on parseEventRow but selects explicit fields for export
-    const parseExportEvent = (e) => {
-      const parsed = parseEventRow(e);
-      return {
-        event_id: parsed.event_id,
-        event_type: parsed.event_type,
-        timestamp: parsed.timestamp,
-        model: parsed.model || "",
-        tokens_in: parsed.tokens_in || 0,
-        tokens_out: parsed.tokens_out || 0,
-        duration_ms: parsed.duration_ms || 0,
-        input_data: parsed.input_data,
-        output_data: parsed.output_data,
-        tool_call: parsed.tool_call,
-        decision_trace: parsed.decision_trace,
-      };
-    };
-
     if (format === "ndjson") {
       // Streaming NDJSON export — uses .iterate() to avoid loading all events into memory
       const filename = `agentlens-${sanitizeFilename(session.agent_name)}-${id.slice(0, 8)}.ndjson`;
       res.setHeader("Content-Disposition", `attachment; filename="${filename}"`);
       res.setHeader("Content-Type", "application/x-ndjson");
 
-      // Write session metadata as first line
-      res.write(JSON.stringify({
-        _type: "session",
-        session_id: session.session_id,
-        agent_name: session.agent_name,
-        status: session.status,
-        started_at: session.started_at,
-        ended_at: session.ended_at,
-        metadata: safeJsonParse(session.metadata),
-      }) + "\n");
+      res.write(ndjsonSessionLine(session) + "\n");
 
       const iter = db.prepare("SELECT * FROM events WHERE session_id = ? ORDER BY timestamp ASC").iterate(id);
       for (const row of iter) {
-        res.write(JSON.stringify({ _type: "event", ...parseExportEvent(row) }) + "\n");
+        res.write(JSON.stringify({ _type: "event", ...toExportEvent(row, parseEventRow) }) + "\n");
       }
       return res.end();
     }
 
-    const parsedEvents = events.map(parseExportEvent);
+    const parsedEvents = events.map(e => toExportEvent(e, parseEventRow));
 
     if (format === "json") {
-      const exportData = {
-        exported_at: new Date().toISOString(),
-        session: {
-          session_id: session.session_id,
-          agent_name: session.agent_name,
-          status: session.status,
-          started_at: session.started_at,
-          ended_at: session.ended_at,
-          total_tokens_in: session.total_tokens_in,
-          total_tokens_out: session.total_tokens_out,
-          metadata: safeJsonParse(session.metadata),
-        },
-        events: parsedEvents,
-        summary: {
-          total_events: parsedEvents.length,
-          total_tokens: session.total_tokens_in + session.total_tokens_out,
-          models_used: [...new Set(parsedEvents.filter(e => e.model).map(e => e.model))],
-          event_types: [...new Set(parsedEvents.map(e => e.event_type))],
-          total_duration_ms: parsedEvents.reduce((sum, e) => sum + (e.duration_ms || 0), 0),
-        },
-      };
+      const exportData = buildJsonExport(session, parsedEvents);
 
       const filename = `agentlens-${sanitizeFilename(session.agent_name)}-${id.slice(0, 8)}.json`;
       res.setHeader("Content-Disposition", `attachment; filename="${filename}"`);
@@ -441,63 +395,10 @@ router.get("/:id/export", requireSessionId, wrapRoute("export session", (req, re
     }
 
     // CSV format
-    const csvHeaders = [
-      "event_id", "event_type", "timestamp", "model",
-      "tokens_in", "tokens_out", "duration_ms",
-      "input_data", "output_data", "tool_name", "tool_input",
-      "tool_output", "reasoning",
-    ];
-
-    const csvEscape = (val) => {
-      if (val == null) return "";
-      let str = typeof val === "object" ? JSON.stringify(val) : String(val);
-      // Numeric values (including negatives like -5, +3.14) are safe data,
-      // not formula injections — skip the formula-trigger prefix for them.
-      if (str.length > 0 && isFinite(Number(str))) {
-        if (str.includes(",") || str.includes('"') || str.includes("\n")) {
-          return `"${str.replace(/"/g, '""')}"`;
-        }
-        return str;
-      }
-      // CSV formula injection defense (OWASP): prefix values that start
-      // with formula-trigger characters so spreadsheet applications
-      // (Excel, Google Sheets, LibreOffice) don't execute them as DDE
-      // commands, HYPERLINK injections, or arbitrary formulas.
-      const first = str.charAt(0);
-      if (first === "=" || first === "+" || first === "-" || first === "@") {
-        str = "'" + str;
-      } else if (first === "\t" || first === "\r") {
-        str = "'" + str;
-      }
-      if (str.includes(",") || str.includes('"') || str.includes("\n")) {
-        return `"${str.replace(/"/g, '""')}"`;
-      }
-      return str;
-    };
-
-    const csvRows = [csvHeaders.join(",")];
-    for (const e of parsedEvents) {
-      csvRows.push([
-        csvEscape(e.event_id),
-        csvEscape(e.event_type),
-        csvEscape(e.timestamp),
-        csvEscape(e.model),
-        csvEscape(e.tokens_in),
-        csvEscape(e.tokens_out),
-        csvEscape(e.duration_ms),
-        csvEscape(e.input_data),
-        csvEscape(e.output_data),
-        csvEscape(e.tool_call?.tool_name),
-        csvEscape(e.tool_call?.tool_input),
-        csvEscape(e.tool_call?.tool_output),
-        csvEscape(e.decision_trace?.reasoning),
-      ].join(","));
-    }
-
     const filename = `agentlens-${sanitizeFilename(session.agent_name)}-${id.slice(0, 8)}.csv`;
     res.setHeader("Content-Disposition", `attachment; filename="${filename}"`);
     res.setHeader("Content-Type", "text/csv");
-    return res.send(csvRows.join("\n"));
+    return res.send(eventsToCsv(parsedEvents));
 }));
 
 // GET /sessions/:id/events — Paginated events sub-route
