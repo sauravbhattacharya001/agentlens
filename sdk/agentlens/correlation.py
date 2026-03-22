@@ -536,63 +536,107 @@ class SessionCorrelator:
         return max_concurrent
 
     def detect_contention(self) -> List[ResourceContention]:
-        """Detect resource contention (multiple sessions competing)."""
-        contentions: List[ResourceContention] = []
+        """Detect resource contention (multiple sessions competing).
 
-        for session in self._sessions:
-            for e in getattr(session, "events", []):
-                # Check each resource usage point
-                for resource, rtype in self._event_resources(e):
-                    concurrent = self._concurrent_at(
-                        resource, rtype,
-                        getattr(e, "timestamp", datetime.now(timezone.utc)),
-                        getattr(e, "duration_ms", 100) or 100,
-                    )
-                    if concurrent["count"] >= self.contention_threshold:
-                        ts = getattr(e, "timestamp", datetime.now(timezone.utc))
-                        dur = getattr(e, "duration_ms", 100) or 100
-                        contentions.append(ResourceContention(
-                            resource_name=resource,
-                            resource_type=rtype,
-                            sessions_involved=sorted(concurrent["sessions"]),
-                            contention_window_start=ts,
-                            contention_window_end=ts + timedelta(milliseconds=dur),
-                            concurrent_count=concurrent["count"],
-                            severity=self._contention_severity(concurrent["count"]),
-                            estimated_delay_ms=concurrent["count"] * 50.0,
-                        ))
+        Uses a sweep-line algorithm per resource for O(n log n) performance
+        instead of the previous O(n²) per-event approach.
+        """
+        # Collect all usage intervals grouped by (resource, type)
+        resource_intervals: Dict[
+            Tuple[str, str], List[Tuple[datetime, datetime, str]]
+        ] = defaultdict(list)
 
-        # Deduplicate by (resource, window_start rounded to 100ms)
-        seen: set = set()
-        unique: List[ResourceContention] = []
-        for c in contentions:
-            key = (c.resource_name, round(c.contention_window_start.timestamp(), 1))
-            if key not in seen:
-                seen.add(key)
-                unique.append(c)
-
-        return sorted(unique, key=lambda c: -c.concurrent_count)
-
-    def _concurrent_at(
-        self, resource: str, rtype: str, at: datetime, duration_ms: float
-    ) -> Dict[str, Any]:
-        """Count how many sessions use a resource at a given time."""
-        end = at + timedelta(milliseconds=duration_ms)
-        count = 0
-        sessions: Set[str] = set()
         for session in self._sessions:
             sid = getattr(session, "session_id", "")
             for e in getattr(session, "events", []):
-                for res, rt in self._event_resources(e):
-                    if res == resource and rt == rtype:
-                        e_ts = getattr(e, "timestamp", datetime.now(timezone.utc))
-                        e_dur = getattr(e, "duration_ms", 100) or 100
-                        e_end = e_ts + timedelta(milliseconds=e_dur)
-                        if e_ts < end and e_end > at:
-                            count += 1
-                            sessions.add(sid)
-                            break
-        return {"count": count, "sessions": sessions}
+                ts = getattr(e, "timestamp", datetime.now(timezone.utc))
+                dur = getattr(e, "duration_ms", 100) or 100
+                end = ts + timedelta(milliseconds=dur)
+                for resource, rtype in self._event_resources(e):
+                    resource_intervals[(resource, rtype)].append((ts, end, sid))
+
+        contentions: List[ResourceContention] = []
+        seen: set = set()
+
+        for (resource, rtype), intervals in resource_intervals.items():
+            if len(intervals) < self.contention_threshold:
+                continue
+
+            # Build sweep-line events: +1 at start, -1 at end
+            sweep: List[Tuple[datetime, int, str]] = []
+            for start, end, sid in intervals:
+                sweep.append((start, 1, sid))
+                sweep.append((end, -1, sid))
+            sweep.sort(key=lambda x: (x[0], x[1]))
+
+            current = 0
+            active_sessions: Dict[str, int] = defaultdict(int)
+            window_start: Optional[datetime] = None
+
+            for ts, delta, sid in sweep:
+                if delta == 1:
+                    active_sessions[sid] += 1
+                    current += 1
+                    if current >= self.contention_threshold and window_start is None:
+                        window_start = ts
+                else:
+                    active_sessions[sid] -= 1
+                    if active_sessions[sid] == 0:
+                        del active_sessions[sid]
+
+                    if current >= self.contention_threshold and (current + delta) < self.contention_threshold:
+                        # Contention window closing — but we already decremented conceptually
+                        pass
+
+                    current -= 1
+
+                    # Emit contention when we drop below threshold
+                    if current < self.contention_threshold and window_start is not None:
+                        peak = current + 1  # count before this decrement
+                        key = (resource, round(window_start.timestamp(), 1))
+                        if key not in seen:
+                            seen.add(key)
+                            # Collect sessions that were active during peak
+                            # Re-scan intervals for sessions overlapping window
+                            window_end = ts
+                            involved: Set[str] = set()
+                            for s, e, s_sid in intervals:
+                                if s < window_end and e > window_start:
+                                    involved.add(s_sid)
+                            contentions.append(ResourceContention(
+                                resource_name=resource,
+                                resource_type=rtype,
+                                sessions_involved=sorted(involved),
+                                contention_window_start=window_start,
+                                contention_window_end=window_end,
+                                concurrent_count=len(involved),
+                                severity=self._contention_severity(len(involved)),
+                                estimated_delay_ms=len(involved) * 50.0,
+                            ))
+                        window_start = None
+
+            # Handle case where contention persists to the end
+            if window_start is not None:
+                key = (resource, round(window_start.timestamp(), 1))
+                if key not in seen:
+                    seen.add(key)
+                    involved_final: Set[str] = set()
+                    last_ts = sweep[-1][0] if sweep else window_start
+                    for s, e, s_sid in intervals:
+                        if s < last_ts and e > window_start:
+                            involved_final.add(s_sid)
+                    contentions.append(ResourceContention(
+                        resource_name=resource,
+                        resource_type=rtype,
+                        sessions_involved=sorted(involved_final),
+                        contention_window_start=window_start,
+                        contention_window_end=last_ts,
+                        concurrent_count=len(involved_final),
+                        severity=self._contention_severity(len(involved_final)),
+                        estimated_delay_ms=len(involved_final) * 50.0,
+                    ))
+
+        return sorted(contentions, key=lambda c: -c.concurrent_count)
 
     @staticmethod
     def _event_resources(event: Any) -> List[Tuple[str, str]]:
