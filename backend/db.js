@@ -104,4 +104,21 @@ function initSchema() {
   db.pragma("mmap_size = 268435456"); // 256 MB mmap for faster reads
 }
 
-module.exports = { getDb };
+/**
+ * Close the database connection gracefully.
+ * Checkpoints WAL journal and releases the file handle.
+ * Safe to call multiple times (no-op if already closed).
+ */
+function closeDb() {
+  if (db) {
+    try {
+      db.pragma("wal_checkpoint(TRUNCATE)");
+      db.close();
+    } catch (_) {
+      // Ignore errors during shutdown (db may already be closed)
+    }
+    db = null;
+  }
+}
+
+module.exports = { getDb, closeDb };

@@ -1,6 +1,6 @@
 const express = require("express");
 const path = require("path");
-const { getDb } = require("./db");
+const { getDb, closeDb } = require("./db");
 const {
   createHelmetMiddleware,
   createCorsMiddleware,
@@ -100,7 +100,7 @@ app.use((err, _req, res, _next) => {
 // Initialize DB on startup
 getDb();
 
-app.listen(PORT, () => {
+const server = app.listen(PORT, () => {
   console.log(`🔍 AgentLens backend running on http://localhost:${PORT}`);
   console.log(`📊 Dashboard available at http://localhost:${PORT}`);
   if (hasApiKey) {
@@ -109,3 +109,28 @@ app.listen(PORT, () => {
     console.log(`⚠️  No AGENTLENS_API_KEY set — running without auth (dev mode)`);
   }
 });
+
+// ── Graceful shutdown ───────────────────────────────────────────────
+// Ensures in-flight requests complete and the SQLite WAL journal is
+// checkpointed before the process exits. Without this, a SIGTERM from
+// Docker/systemd/PM2 could leave the database in an unclean state.
+
+function shutdown(signal) {
+  console.log(`\n🛑 Received ${signal}, shutting down gracefully...`);
+  server.close(() => {
+    console.log("✅ HTTP server closed");
+    closeDb();
+    console.log("✅ Database closed");
+    process.exit(0);
+  });
+
+  // Force exit after 10 seconds if connections don't drain
+  setTimeout(() => {
+    console.error("⚠️  Forcing shutdown after timeout");
+    closeDb();
+    process.exit(1);
+  }, 10000).unref();
+}
+
+process.on("SIGTERM", () => shutdown("SIGTERM"));
+process.on("SIGINT", () => shutdown("SIGINT"));
