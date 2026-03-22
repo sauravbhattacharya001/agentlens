@@ -28,6 +28,8 @@ Usage:
     agentlens-cli budget set <scope> <period> <limit_usd> [--warn-pct N] [--endpoint URL] [--api-key KEY]
     agentlens-cli budget check <session_id> [--json] [--endpoint URL] [--api-key KEY]
     agentlens-cli budget delete <scope> [<period>] [--endpoint URL] [--api-key KEY]
+    agentlens-cli snapshot [--label LABEL] [--output FILE] [--limit N] [--format json|table] [--endpoint URL] [--api-key KEY]
+    agentlens-cli snapshot diff <file_a> <file_b> [--format table|json]
     agentlens-cli status [--endpoint URL] [--api-key KEY]
 
 Environment variables:
@@ -50,6 +52,7 @@ from agentlens.cli_digest import cmd_digest  # periodic digest summaries
 from agentlens.cli_funnel import cmd_funnel  # workflow funnel analysis
 from agentlens.cli_depmap import cmd_depmap  # dependency map visualization
 from agentlens.cli_budget import cmd_budget  # cost budget management
+from agentlens.cli_snapshot import cmd_snapshot  # point-in-time system snapshots
 
 
 def _get_client(args: argparse.Namespace) -> tuple[httpx.Client, str]:
@@ -1427,6 +1430,18 @@ def main() -> None:
     p.add_argument("--open", action="store_true", help="Open HTML output in browser")
     p.add_argument("--top", type=int, default=5, help="Number of top sessions to show")
 
+    # -- snapshot --
+    p = sub.add_parser("snapshot", help="Capture point-in-time system snapshot for before/after comparisons")
+    snapshot_sub = p.add_subparsers(dest="snapshot_action")
+    p.add_argument("--label", help="Label this snapshot (e.g. 'pre-deploy')")
+    p.add_argument("--output", "-o", help="Save snapshot JSON to file")
+    p.add_argument("--limit", type=int, default=20, help="Number of sessions to include")
+    p.add_argument("--format", choices=["json", "table"], default="table")
+    dp = snapshot_sub.add_parser("diff", help="Compare two snapshot files")
+    dp.add_argument("file_a", help="First snapshot JSON file")
+    dp.add_argument("file_b", help="Second snapshot JSON file")
+    dp.add_argument("--format", choices=["table", "json"], default="table")
+
     args = parser.parse_args()
 
     commands = {
@@ -1453,6 +1468,7 @@ def main() -> None:
         "funnel": cmd_funnel,
         "depmap": cmd_depmap,
         "budget": lambda args: cmd_budget(args, _get_client(args)[0]),
+        "snapshot": cmd_snapshot,
         "status": cmd_status,
     }
     commands[args.command](args)
