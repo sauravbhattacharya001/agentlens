@@ -1,6 +1,7 @@
 const express = require("express");
 const { getDb } = require("../db");
 const { wrapRoute } = require("../lib/request-helpers");
+const { loadPricingMap, computeCost } = require("../lib/pricing");
 
 const router = express.Router();
 
@@ -23,44 +24,12 @@ function parseForecastDays(raw) {
 }
 
 /**
- * Load the pricing map from model_pricing table + sensible defaults.
- * Returns { modelNameLower: { input: costPer1M, output: costPer1M } }.
- */
-function loadPricingMap(db) {
-  const rows = db.prepare("SELECT * FROM model_pricing ORDER BY model ASC").all();
-  const map = {};
-  for (const row of rows) {
-    map[row.model.toLowerCase()] = {
-      input: row.input_cost_per_1m,
-      output: row.output_cost_per_1m,
-    };
-  }
-  // Defaults for common models
-  const defaults = {
-    "gpt-4": { input: 30, output: 60 },
-    "gpt-4o": { input: 2.5, output: 10 },
-    "gpt-4o-mini": { input: 0.15, output: 0.6 },
-    "gpt-3.5-turbo": { input: 0.5, output: 1.5 },
-    "claude-3-opus": { input: 15, output: 75 },
-    "claude-3-sonnet": { input: 3, output: 15 },
-    "claude-3-haiku": { input: 0.25, output: 1.25 },
-  };
-  for (const [model, prices] of Object.entries(defaults)) {
-    if (!map[model]) map[model] = prices;
-  }
-  return map;
-}
-
-/**
- * Estimate cost for a single event using the pricing map.
+ * Estimate cost for a single event using the shared pricing module.
+ * Wraps computeCost() to maintain the same interface used by callers.
  */
 function estimateCost(event, pricingMap) {
-  const model = (event.model || "").toLowerCase();
-  const pricing = pricingMap[model];
-  if (!pricing) return 0;
-  const inCost = (event.tokens_in || 0) * pricing.input / 1_000_000;
-  const outCost = (event.tokens_out || 0) * pricing.output / 1_000_000;
-  return inCost + outCost;
+  const result = computeCost(event.model, event.tokens_in || 0, event.tokens_out || 0, pricingMap);
+  return result ? result.totalCost : 0;
 }
 
 /**
@@ -275,7 +244,7 @@ router.get("/", wrapRoute("forecast usage", (req, res) => {
     return res.status(400).json({ error: "method must be 'linear', 'ema', 'average', or 'auto'" });
   }
 
-  const pricingMap = loadPricingMap(db);
+  const pricingMap = loadPricingMap();
   const dailyData = fetchDailyAggregates(db, days, agent, model, pricingMap);
 
   if (dailyData.length === 0) {
@@ -455,7 +424,7 @@ router.get("/budget", wrapRoute("forecast budget check", (req, res) => {
   const period = Math.min(Math.max(1, parseInt(req.query.period) || 30), 365);
   const agent = req.query.agent || null;
 
-  const pricingMap = loadPricingMap(db);
+  const pricingMap = loadPricingMap();
   const dailyData = fetchDailyAggregates(db, days, agent, null, pricingMap);
 
   if (dailyData.length === 0) {
@@ -528,7 +497,7 @@ router.get("/spending-summary", wrapRoute("forecast spending summary", (req, res
   const days = parseDays(req.query.days);
   const agent = req.query.agent || null;
 
-  const pricingMap = loadPricingMap(db);
+  const pricingMap = loadPricingMap();
 
   // Fetch per-model daily data for model breakdown
   let query = `

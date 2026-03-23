@@ -12,6 +12,7 @@
 const express = require("express");
 const { getDb } = require("../db");
 const { wrapRoute } = require("../lib/request-helpers");
+const { loadPricingMap, findPricing } = require("../lib/pricing");
 
 const router = express.Router();
 
@@ -57,33 +58,9 @@ function getPeriodRange(period) {
   return { start: start.toISOString(), end: now.toISOString() };
 }
 
-const DEFAULT_PRICING = {
-  "gpt-4": { input: 30.0, output: 60.0 },
-  "gpt-4-turbo": { input: 10.0, output: 30.0 },
-  "gpt-4o": { input: 2.5, output: 10.0 },
-  "gpt-4o-mini": { input: 0.15, output: 0.6 },
-  "gpt-3.5-turbo": { input: 0.5, output: 1.5 },
-  "claude-3-opus": { input: 15.0, output: 75.0 },
-  "claude-3-sonnet": { input: 3.0, output: 15.0 },
-  "claude-3-haiku": { input: 0.25, output: 1.25 },
-  "claude-3.5-sonnet": { input: 3.0, output: 15.0 },
-  "claude-4-opus": { input: 15.0, output: 75.0 },
-  "claude-4-sonnet": { input: 3.0, output: 15.0 },
-  "gemini-pro": { input: 0.5, output: 1.5 },
-  "gemini-1.5-pro": { input: 1.25, output: 5.0 },
-  "gemini-1.5-flash": { input: 0.075, output: 0.3 },
-};
-
 function calculateSpend(scope, startDate, endDate) {
   const db = getDb();
-  const pricingRows = db.prepare("SELECT * FROM model_pricing").all();
-  const pricingMap = {};
-  for (const row of pricingRows) {
-    pricingMap[row.model] = { input: row.input_cost_per_1m, output: row.output_cost_per_1m };
-  }
-  for (const [model, prices] of Object.entries(DEFAULT_PRICING)) {
-    if (!pricingMap[model]) pricingMap[model] = prices;
-  }
+  const pricingMap = loadPricingMap();
 
   let query, params;
   if (scope === "global") {
@@ -107,20 +84,7 @@ function calculateSpend(scope, startDate, endDate) {
   const breakdown = {};
 
   for (const row of rows) {
-    let pricing = pricingMap[row.model];
-    if (!pricing) {
-      const lm = row.model.toLowerCase();
-      const delims = new Set(["-", "_", ".", "/", " "]);
-      let bestKey = null, bestLen = 0;
-      for (const key of Object.keys(pricingMap)) {
-        const lk = key.toLowerCase();
-        if (lm.startsWith(lk) && lk.length > bestLen &&
-            (lk.length === lm.length || delims.has(lm[lk.length]))) {
-          bestKey = key; bestLen = lk.length;
-        }
-      }
-      if (bestKey) pricing = pricingMap[bestKey];
-    }
+    const pricing = findPricing(row.model, pricingMap);
     if (pricing) {
       const inputCost = ((row.total_in || 0) / 1_000_000) * pricing.input;
       const outputCost = ((row.total_out || 0) / 1_000_000) * pricing.output;
