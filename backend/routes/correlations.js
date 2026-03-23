@@ -11,23 +11,28 @@
  * - Track cause-effect chains: agent A output -> agent B input
  * ──────────────────────────────────────────────────────────────────── */
 
-var express = require("express");
-var crypto = require("crypto");
-var router = express.Router();
-var dbMod = require("../db");
-var { wrapRoute, parseLimit, parseOffset } = require("../lib/request-helpers");
-var { sanitizeString } = require("../lib/validation");
+const express = require("express");
+const crypto = require("crypto");
+const router = express.Router();
+const dbMod = require("../db");
+const { wrapRoute, parseLimit, parseOffset } = require("../lib/request-helpers");
+const { sanitizeString } = require("../lib/validation");
 
 // ── Input limits ────────────────────────────────────────────────────
-var MAX_NAME_LENGTH = 128;
-var MAX_DESCRIPTION_LENGTH = 1024;
-var MAX_CONFIG_SIZE = 8192; // 8 KB serialized config
-var MAX_AGENT_FILTER_LENGTH = 128;
+const MAX_NAME_LENGTH = 128;
+const MAX_DESCRIPTION_LENGTH = 1024;
+const MAX_CONFIG_SIZE = 8192; // 8 KB serialized config
+const MAX_AGENT_FILTER_LENGTH = 128;
+
+// ── Lazy schema initialization ──────────────────────────────────────
+let _tablesInitialized = false;
 
 // ── Schema ──────────────────────────────────────────────────────────
 
 function ensureCorrelationTables() {
-  var db = dbMod.getDb();
+  if (_tablesInitialized) return;
+  _tablesInitialized = true;
+  const db = dbMod.getDb();
   db.exec(
     "CREATE TABLE IF NOT EXISTS correlation_rules (" +
     "  rule_id TEXT PRIMARY KEY," +
@@ -82,17 +87,17 @@ function safeJSON(obj) { return JSON.stringify(obj || {}); }
 // ── Correlation engine ──────────────────────────────────────────────
 
 function runCorrelation(rule, lookbackMinutes) {
-  var db = dbMod.getDb();
-  var config = parseConfig(rule.config);
-  var lookback = lookbackMinutes || config.lookback_minutes || 60;
+  const db = dbMod.getDb();
+  const config = parseConfig(rule.config);
+  let lookback = lookbackMinutes || config.lookback_minutes || 60;
   // Cap lookback to prevent full-table scans (max 7 days = 10080 min)
-  var MAX_LOOKBACK_MINUTES = 10080;
+  const MAX_LOOKBACK_MINUTES = 10080;
   if (lookback > MAX_LOOKBACK_MINUTES) lookback = MAX_LOOKBACK_MINUTES;
-  var cutoff = new Date(Date.now() - lookback * 60000).toISOString();
+  const cutoff = new Date(Date.now() - lookback * 60000).toISOString();
 
   // Cap loaded events to prevent OOM on large datasets
-  var EVENT_CAP = 50000;
-  var events;
+  const EVENT_CAP = 50000;
+  let events;
   if (rule.agent_filter) {
     events = db.prepare(
       "SELECT e.*, s.agent_name FROM events e " +
@@ -123,31 +128,31 @@ function runCorrelation(rule, lookbackMinutes) {
 
 /** Group events that share the same value for a metadata key. */
 function correlateByMetadata(events, config) {
-  var key = config.key;
+  const key = config.key;
   if (!key) return [];
 
-  var groups = {};
-  for (var i = 0; i < events.length; i++) {
-    var evt = events[i];
-    var val = undefined;
-    var fields = ["input_data", "output_data", "decision_trace"];
-    for (var f = 0; f < fields.length; f++) {
+  const groups = {};
+  for (let i = 0; i < events.length; i++) {
+    const evt = events[i];
+    let val = undefined;
+    const fields = ["input_data", "output_data", "decision_trace"];
+    for (const f = 0; f < fields.length; f++) {
       if (val !== undefined) break;
       try {
-        var parsed = JSON.parse(evt[fields[f]] || "{}");
+        const parsed = JSON.parse(evt[fields[f]] || "{}");
         if (parsed[key] !== undefined) val = parsed[key];
       } catch (e) { /* ignore */ }
     }
     if (val !== undefined && val !== null && val !== "") {
-      var strVal = String(val);
+      const strVal = String(val);
       if (!groups[strVal]) groups[strVal] = [];
       groups[strVal].push(evt);
     }
   }
 
-  var result = [];
-  var keys = Object.keys(groups);
-  for (var k = 0; k < keys.length; k++) {
+  const result = [];
+  const keys = Object.keys(groups);
+  for (const k = 0; k < keys.length; k++) {
     if (groups[keys[k]].length >= 2) {
       result.push({
         label: key + "=" + keys[k],
@@ -161,35 +166,35 @@ function correlateByMetadata(events, config) {
 
 /** Group events occurring within a sliding time window. */
 function correlateByTimeWindow(events, config) {
-  var windowMs = (config.window_seconds || 10) * 1000;
-  var minEvents = config.min_events || 2;
-  var typeFilter = config.event_type_filter || null;
+  const windowMs = (config.window_seconds || 10) * 1000;
+  const minEvents = config.min_events || 2;
+  const typeFilter = config.event_type_filter || null;
 
-  var filtered = events;
+  let filtered = events;
   if (typeFilter) {
     filtered = [];
-    for (var f = 0; f < events.length; f++) {
+    for (const f = 0; f < events.length; f++) {
       if (events[f].event_type === typeFilter) filtered.push(events[f]);
     }
   }
   if (filtered.length < minEvents) return [];
 
-  var groups = [];
-  var i = 0;
+  const groups = [];
+  let i = 0;
   while (i < filtered.length) {
-    var windowStart = new Date(filtered[i].timestamp).getTime();
-    var windowEnd = windowStart + windowMs;
-    var group = [filtered[i]];
-    var j = i + 1;
+    const windowStart = new Date(filtered[i].timestamp).getTime();
+    const windowEnd = windowStart + windowMs;
+    const group = [filtered[i]];
+    let j = i + 1;
     while (j < filtered.length) {
-      var ts = new Date(filtered[j].timestamp).getTime();
+      const ts = new Date(filtered[j].timestamp).getTime();
       if (ts <= windowEnd) { group.push(filtered[j]); j++; }
       else break;
     }
     if (group.length >= minEvents) {
-      var sessionSet = {};
-      var sessionCount = 0;
-      for (var s = 0; s < group.length; s++) {
+      const sessionSet = {};
+      const sessionCount = 0;
+      for (const s = 0; s < group.length; s++) {
         if (!sessionSet[group[s].session_id]) {
           sessionSet[group[s].session_id] = true;
           sessionCount++;
@@ -214,27 +219,27 @@ function correlateByTimeWindow(events, config) {
 
 /** Find error cascades: errors in one agent followed by errors in another. */
 function correlateByErrorCascade(events, config) {
-  var windowMs = (config.cascade_window_seconds || 30) * 1000;
-  var errors = [];
-  for (var e = 0; e < events.length; e++) {
+  const windowMs = (config.cascade_window_seconds || 30) * 1000;
+  const errors = [];
+  for (const e = 0; e < events.length; e++) {
     if (events[e].event_type === "error" || events[e].event_type === "agent_error" || events[e].event_type === "tool_error") {
       errors.push(events[e]);
     }
   }
   if (errors.length < 2) return [];
 
-  var groups = [];
-  var used = {};
+  const groups = [];
+  const used = {};
 
-  for (var i = 0; i < errors.length; i++) {
+  for (let i = 0; i < errors.length; i++) {
     if (used[errors[i].event_id]) continue;
-    var cascade = [errors[i]];
-    var startTs = new Date(errors[i].timestamp).getTime();
-    var sourceAgent = errors[i].agent_name;
+    const cascade = [errors[i]];
+    const startTs = new Date(errors[i].timestamp).getTime();
+    const sourceAgent = errors[i].agent_name;
 
-    for (var j = i + 1; j < errors.length; j++) {
+    for (let j = i + 1; j < errors.length; j++) {
       if (used[errors[j].event_id]) continue;
-      var ts = new Date(errors[j].timestamp).getTime();
+      const ts = new Date(errors[j].timestamp).getTime();
       if (ts - startTs > windowMs) break;
       if (errors[j].agent_name !== sourceAgent) {
         cascade.push(errors[j]);
@@ -243,16 +248,16 @@ function correlateByErrorCascade(events, config) {
     }
     if (cascade.length >= 2) {
       used[errors[i].event_id] = true;
-      var agentsSeen = {};
-      var agents = [];
-      for (var a = 0; a < cascade.length; a++) {
+      const agentsSeen = {};
+      const agents = [];
+      for (const a = 0; a < cascade.length; a++) {
         if (!agentsSeen[cascade[a].agent_name]) {
           agentsSeen[cascade[a].agent_name] = true;
           agents.push(cascade[a].agent_name);
         }
       }
-      var affected = [];
-      for (var af = 0; af < agents.length; af++) {
+      const affected = [];
+      for (const af = 0; af < agents.length; af++) {
         if (agents[af] !== sourceAgent) affected.push(agents[af]);
       }
       groups.push({
@@ -271,26 +276,26 @@ function correlateByErrorCascade(events, config) {
 
 /** Find causal chains: output of one event matches input of another. */
 function correlateByCausalChain(events, config) {
-  var maxGapMs = (config.max_gap_seconds || 60) * 1000;
-  var matchFields = config.match_fields || ["output_data"];
-  var groups = [];
+  const maxGapMs = (config.max_gap_seconds || 60) * 1000;
+  const matchFields = config.match_fields || ["output_data"];
+  const groups = [];
 
-  for (var i = 0; i < events.length; i++) {
-    var chain = [events[i]];
-    var outputData = events[i].output_data || "";
+  for (let i = 0; i < events.length; i++) {
+    const chain = [events[i]];
+    const outputData = events[i].output_data || "";
     if (!outputData) continue;
 
-    var ts1 = new Date(events[i].timestamp).getTime();
+    const ts1 = new Date(events[i].timestamp).getTime();
 
-    for (var j = i + 1; j < events.length; j++) {
-      var ts2 = new Date(events[j].timestamp).getTime();
+    for (let j = i + 1; j < events.length; j++) {
+      const ts2 = new Date(events[j].timestamp).getTime();
       if (ts2 - ts1 > maxGapMs) break;
       if (events[j].session_id === events[i].session_id) continue;
 
-      var matched = false;
-      for (var k = 0; k < matchFields.length; k++) {
-        var val1 = events[i][matchFields[k]] || "";
-        var val2 = events[j].input_data || "";
+      let matched = false;
+      for (const k = 0; k < matchFields.length; k++) {
+        const val1 = events[i][matchFields[k]] || "";
+        const val2 = events[j].input_data || "";
         if (val1 && val2 && val2.indexOf(val1) >= 0) { matched = true; break; }
       }
       if (matched) chain.push(events[j]);
@@ -309,28 +314,28 @@ function correlateByCausalChain(events, config) {
 
 /** Custom correlation by event_type and metadata pattern match. */
 function correlateByCustom(events, config) {
-  var types = config.event_types || [];
-  var groupBy = config.group_by;
+  const types = config.event_types || [];
+  const groupBy = config.group_by;
 
-  var filtered = events;
+  let filtered = events;
   if (types.length > 0) {
     filtered = [];
-    for (var i = 0; i < events.length; i++) {
+    for (let i = 0; i < events.length; i++) {
       if (types.indexOf(events[i].event_type) >= 0) filtered.push(events[i]);
     }
   }
   if (filtered.length < 2) return [];
 
   if (groupBy) {
-    var buckets = {};
-    for (var b = 0; b < filtered.length; b++) {
-      var val = filtered[b][groupBy] || "unknown";
+    const buckets = {};
+    for (const b = 0; b < filtered.length; b++) {
+      let val = filtered[b][groupBy] || "unknown";
       if (!buckets[val]) buckets[val] = [];
       buckets[val].push(filtered[b]);
     }
-    var result = [];
-    var bkeys = Object.keys(buckets);
-    for (var bk = 0; bk < bkeys.length; bk++) {
+    const result = [];
+    const bkeys = Object.keys(buckets);
+    for (const bk = 0; bk < bkeys.length; bk++) {
       if (buckets[bkeys[bk]].length >= 2) {
         result.push({
           label: groupBy + "=" + bkeys[bk],
@@ -352,25 +357,25 @@ function correlateByCustom(events, config) {
 // ── Persist correlation results ─────────────────────────────────────
 
 function persistGroups(rule, groups) {
-  var db = dbMod.getDb();
-  var insertGroup = db.prepare(
+  const db = dbMod.getDb();
+  const insertGroup = db.prepare(
     "INSERT OR IGNORE INTO correlation_groups (group_id, rule_id, label, created_at, metadata) " +
     "VALUES (?, ?, ?, ?, ?)"
   );
-  var insertMember = db.prepare(
+  const insertMember = db.prepare(
     "INSERT OR IGNORE INTO correlation_members (group_id, event_id, session_id, role, added_at) " +
     "VALUES (?, ?, ?, ?, ?)"
   );
 
-  var timestamp = now();
-  var persisted = [];
+  const timestamp = now();
+  const persisted = [];
 
-  var txn = db.transaction(function() {
-    for (var g = 0; g < groups.length; g++) {
-      var groupId = uid();
+  const txn = db.transaction(function() {
+    for (const g = 0; g < groups.length; g++) {
+      const groupId = uid();
       insertGroup.run(groupId, rule.rule_id, groups[g].label, timestamp, safeJSON(groups[g].metadata));
-      for (var m = 0; m < groups[g].events.length; m++) {
-        var evt = groups[g].events[m];
+      for (const m = 0; m < groups[g].events.length; m++) {
+        const evt = groups[g].events[m];
         insertMember.run(groupId, evt.event_id, evt.session_id, m === 0 ? "origin" : "member", timestamp);
       }
       persisted.push({ group_id: groupId, label: groups[g].label, member_count: groups[g].events.length });
@@ -381,15 +386,20 @@ function persistGroups(rule, groups) {
   return persisted;
 }
 
+// ── Lazy-init middleware ─────────────────────────────────────────────
+router.use(function(_req, _res, next) {
+  ensureCorrelationTables();
+  next();
+});
+
 // ── Routes ──────────────────────────────────────────────────────────
 
-var VALID_TYPES = ["metadata_key", "time_window", "error_cascade", "causal_chain", "custom"];
+const VALID_TYPES = ["metadata_key", "time_window", "error_cascade", "causal_chain", "custom"];
 
 /** POST /rules — Create a correlation rule */
 router.post("/rules", wrapRoute("create correlation rule", function(req, res) {
-  ensureCorrelationTables();
-  var db = dbMod.getDb();
-  var body = req.body;
+  const db = dbMod.getDb();
+  const body = req.body;
 
   if (!body.name || typeof body.name !== "string" || !body.name.trim()) {
     return res.status(400).json({ error: "name is required and must be a non-empty string" });
@@ -401,28 +411,28 @@ router.post("/rules", wrapRoute("create correlation rule", function(req, res) {
     return res.status(400).json({ error: "match_type must be one of: " + VALID_TYPES.join(", ") });
   }
 
-  var safeName = sanitizeString(body.name, MAX_NAME_LENGTH) || "unnamed";
-  var safeDesc = sanitizeString(body.description || "", MAX_DESCRIPTION_LENGTH) || "";
-  var safeAgentFilter = body.agent_filter
+  const safeName = sanitizeString(body.name, MAX_NAME_LENGTH) || "unnamed";
+  const safeDesc = sanitizeString(body.description || "", MAX_DESCRIPTION_LENGTH) || "";
+  const safeAgentFilter = body.agent_filter
     ? sanitizeString(body.agent_filter, MAX_AGENT_FILTER_LENGTH)
     : null;
 
   // Validate config size to prevent resource exhaustion
-  var configStr = safeJSON(body.config);
+  const configStr = safeJSON(body.config);
   if (configStr.length > MAX_CONFIG_SIZE) {
     return res.status(400).json({ error: "config is too large (max " + MAX_CONFIG_SIZE + " bytes)" });
   }
 
   // Validate priority is a bounded integer
-  var priority = 0;
+  let priority = 0;
   if (body.priority !== undefined) {
     priority = parseInt(body.priority);
     if (!Number.isFinite(priority)) priority = 0;
     priority = Math.max(-100, Math.min(100, priority));
   }
 
-  var ruleId = uid();
-  var timestamp = now();
+  const ruleId = uid();
+  const timestamp = now();
   db.prepare(
     "INSERT INTO correlation_rules (rule_id, name, description, match_type, config, agent_filter, priority, created_at, updated_at) " +
     "VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?)"
@@ -433,43 +443,40 @@ router.post("/rules", wrapRoute("create correlation rule", function(req, res) {
 
 /** GET /rules — List all correlation rules */
 router.get("/rules", wrapRoute("list correlation rules", function(req, res) {
-  ensureCorrelationTables();
-  var db = dbMod.getDb();
-  var query = "SELECT * FROM correlation_rules";
-  var params = [];
+  const db = dbMod.getDb();
+  let query = "SELECT * FROM correlation_rules";
+  const params = [];
   if (req.query.enabled !== undefined) {
     query += " WHERE enabled = ?";
     params.push(req.query.enabled === "true" ? 1 : 0);
   }
   query += " ORDER BY priority DESC, created_at DESC";
 
-  var stmt = db.prepare(query);
-  var rules = params.length > 0 ? stmt.all(params[0]) : stmt.all();
-  for (var i = 0; i < rules.length; i++) { rules[i].config = parseConfig(rules[i].config); }
+  const stmt = db.prepare(query);
+  const rules = params.length > 0 ? stmt.all(params[0]) : stmt.all();
+  for (let i = 0; i < rules.length; i++) { rules[i].config = parseConfig(rules[i].config); }
   res.json({ rules: rules, total: rules.length });
 }));
 
 /** GET /rules/:ruleId — Get a specific rule */
 router.get("/rules/:ruleId", wrapRoute("get correlation rule", function(req, res) {
-  ensureCorrelationTables();
-  var db = dbMod.getDb();
-  var rule = db.prepare("SELECT * FROM correlation_rules WHERE rule_id = ?").get(req.params.ruleId);
+  const db = dbMod.getDb();
+  const rule = db.prepare("SELECT * FROM correlation_rules WHERE rule_id = ?").get(req.params.ruleId);
   if (!rule) return res.status(404).json({ error: "Rule not found" });
   rule.config = parseConfig(rule.config);
-  var stats = db.prepare("SELECT COUNT(*) as group_count FROM correlation_groups WHERE rule_id = ?").get(rule.rule_id);
+  const stats = db.prepare("SELECT COUNT(*) as group_count FROM correlation_groups WHERE rule_id = ?").get(rule.rule_id);
   rule.group_count = stats.group_count;
   res.json(rule);
 }));
 
 /** PATCH /rules/:ruleId — Update a rule */
 router.patch("/rules/:ruleId", wrapRoute("update correlation rule", function(req, res) {
-  ensureCorrelationTables();
-  var db = dbMod.getDb();
-  var rule = db.prepare("SELECT * FROM correlation_rules WHERE rule_id = ?").get(req.params.ruleId);
+  const db = dbMod.getDb();
+  const rule = db.prepare("SELECT * FROM correlation_rules WHERE rule_id = ?").get(req.params.ruleId);
   if (!rule) return res.status(404).json({ error: "Rule not found" });
 
-  var fields = [];
-  var values = [];
+  const fields = [];
+  const values = [];
 
   // Validate and sanitize each allowed field
   if (req.body.name !== undefined) {
@@ -491,7 +498,7 @@ router.patch("/rules/:ruleId", wrapRoute("update correlation rule", function(req
     values.push(req.body.match_type);
   }
   if (req.body.config !== undefined) {
-    var configStr = safeJSON(req.body.config);
+    const configStr = safeJSON(req.body.config);
     if (configStr.length > MAX_CONFIG_SIZE) {
       return res.status(400).json({ error: "config is too large (max " + MAX_CONFIG_SIZE + " bytes)" });
     }
@@ -509,7 +516,7 @@ router.patch("/rules/:ruleId", wrapRoute("update correlation rule", function(req
     values.push(req.body.enabled ? 1 : 0);
   }
   if (req.body.priority !== undefined) {
-    var priority = parseInt(req.body.priority);
+    let priority = parseInt(req.body.priority);
     if (!Number.isFinite(priority)) {
       return res.status(400).json({ error: "priority must be an integer" });
     }
@@ -522,29 +529,27 @@ router.patch("/rules/:ruleId", wrapRoute("update correlation rule", function(req
   fields.push("updated_at = ?");
   values.push(now());
   values.push(req.params.ruleId);
-  var updateStmt = db.prepare("UPDATE correlation_rules SET " + fields.join(", ") + " WHERE rule_id = ?");
+  const updateStmt = db.prepare("UPDATE correlation_rules SET " + fields.join(", ") + " WHERE rule_id = ?");
   updateStmt.run.apply(updateStmt, values);
   res.json({ updated: true, rule_id: req.params.ruleId });
 }));
 
 /** DELETE /rules/:ruleId — Delete a rule (cascades groups) */
 router.delete("/rules/:ruleId", wrapRoute("delete correlation rule", function(req, res) {
-  ensureCorrelationTables();
-  var db = dbMod.getDb();
-  var result = db.prepare("DELETE FROM correlation_rules WHERE rule_id = ?").run(req.params.ruleId);
+  const db = dbMod.getDb();
+  const result = db.prepare("DELETE FROM correlation_rules WHERE rule_id = ?").run(req.params.ruleId);
   if (result.changes === 0) return res.status(404).json({ error: "Rule not found" });
   res.json({ deleted: true, rule_id: req.params.ruleId });
 }));
 
 /** POST /rules/:ruleId/run — Execute a correlation rule */
 router.post("/rules/:ruleId/run", wrapRoute("run correlation rule", function(req, res) {
-  ensureCorrelationTables();
-  var db = dbMod.getDb();
-  var rule = db.prepare("SELECT * FROM correlation_rules WHERE rule_id = ?").get(req.params.ruleId);
+  const db = dbMod.getDb();
+  const rule = db.prepare("SELECT * FROM correlation_rules WHERE rule_id = ?").get(req.params.ruleId);
   if (!rule) return res.status(404).json({ error: "Rule not found" });
 
   // Validate lookback_minutes if provided
-  var lookback = null;
+  let lookback = null;
   if (req.body.lookback_minutes !== undefined) {
     lookback = parseInt(req.body.lookback_minutes);
     if (!Number.isFinite(lookback) || lookback < 1 || lookback > 10080) {
@@ -552,19 +557,19 @@ router.post("/rules/:ruleId/run", wrapRoute("run correlation rule", function(req
     }
   }
 
-  var groups = runCorrelation(rule, lookback);
-  var persisted = [];
+  const groups = runCorrelation(rule, lookback);
+  const persisted = [];
   if (req.body.persist !== false) persisted = persistGroups(rule, groups);
 
-  var totalEvts = 0;
-  for (var g = 0; g < groups.length; g++) totalEvts += groups[g].events.length;
+  const totalEvts = 0;
+  for (const g = 0; g < groups.length; g++) totalEvts += groups[g].events.length;
 
-  var outGroups;
+  let outGroups;
   if (persisted.length > 0) {
     outGroups = persisted;
   } else {
     outGroups = [];
-    for (var g2 = 0; g2 < groups.length; g2++) {
+    for (const g2 = 0; g2 < groups.length; g2++) {
       outGroups.push({ label: groups[g2].label, member_count: groups[g2].events.length, metadata: groups[g2].metadata });
     }
   }
@@ -578,26 +583,25 @@ router.post("/rules/:ruleId/run", wrapRoute("run correlation rule", function(req
 
 /** GET /groups — List correlation groups */
 router.get("/groups", wrapRoute("list correlation groups", function(req, res) {
-  ensureCorrelationTables();
-  var db = dbMod.getDb();
-  var query = "SELECT g.*, r.name as rule_name, r.match_type FROM correlation_groups g JOIN correlation_rules r ON g.rule_id = r.rule_id";
-  var params = [];
+  const db = dbMod.getDb();
+  let query = "SELECT g.*, r.name as rule_name, r.match_type FROM correlation_groups g JOIN correlation_rules r ON g.rule_id = r.rule_id";
+  const params = [];
   if (req.query.rule_id) { query += " WHERE g.rule_id = ?"; params.push(req.query.rule_id); }
   query += " ORDER BY g.created_at DESC";
-  var limit = parseLimit(req.query.limit, 50, 200);
-  var offset = parseOffset(req.query.offset);
+  const limit = parseLimit(req.query.limit, 50, 200);
+  const offset = parseOffset(req.query.offset);
   query += " LIMIT ? OFFSET ?";
   params.push(limit, offset);
 
-  var stmt = db.prepare(query);
-  var groups = stmt.all.apply(stmt, params);
-  for (var i = 0; i < groups.length; i++) { groups[i].metadata = parseConfig(groups[i].metadata); }
+  const stmt = db.prepare(query);
+  const groups = stmt.all.apply(stmt, params);
+  for (let i = 0; i < groups.length; i++) { groups[i].metadata = parseConfig(groups[i].metadata); }
 
-  var countStmt = db.prepare("SELECT COUNT(*) as cnt FROM correlation_members WHERE group_id = ?");
-  for (var j = 0; j < groups.length; j++) { groups[j].member_count = countStmt.get(groups[j].group_id).cnt; }
+  const countStmt = db.prepare("SELECT COUNT(*) as cnt FROM correlation_members WHERE group_id = ?");
+  for (let j = 0; j < groups.length; j++) { groups[j].member_count = countStmt.get(groups[j].group_id).cnt; }
 
-  var totalQuery = "SELECT COUNT(*) as cnt FROM correlation_groups" + (req.query.rule_id ? " WHERE rule_id = ?" : "");
-  var total;
+  const totalQuery = "SELECT COUNT(*) as cnt FROM correlation_groups" + (req.query.rule_id ? " WHERE rule_id = ?" : "");
+  let total;
   if (req.query.rule_id) { total = db.prepare(totalQuery).get(req.query.rule_id).cnt; }
   else { total = db.prepare(totalQuery).get().cnt; }
 
@@ -606,16 +610,15 @@ router.get("/groups", wrapRoute("list correlation groups", function(req, res) {
 
 /** GET /groups/:groupId — Get group details with members */
 router.get("/groups/:groupId", wrapRoute("get correlation group", function(req, res) {
-  ensureCorrelationTables();
-  var db = dbMod.getDb();
-  var group = db.prepare(
+  const db = dbMod.getDb();
+  const group = db.prepare(
     "SELECT g.*, r.name as rule_name, r.match_type FROM correlation_groups g " +
     "JOIN correlation_rules r ON g.rule_id = r.rule_id WHERE g.group_id = ?"
   ).get(req.params.groupId);
   if (!group) return res.status(404).json({ error: "Group not found" });
   group.metadata = parseConfig(group.metadata);
 
-  var members = db.prepare(
+  const members = db.prepare(
     "SELECT m.*, e.event_type, e.timestamp, e.model, e.duration_ms, s.agent_name " +
     "FROM correlation_members m " +
     "JOIN events e ON m.event_id = e.event_id " +
@@ -630,23 +633,21 @@ router.get("/groups/:groupId", wrapRoute("get correlation group", function(req, 
 
 /** DELETE /groups/:groupId — Delete a correlation group */
 router.delete("/groups/:groupId", wrapRoute("delete correlation group", function(req, res) {
-  ensureCorrelationTables();
-  var db = dbMod.getDb();
-  var result = db.prepare("DELETE FROM correlation_groups WHERE group_id = ?").run(req.params.groupId);
+  const db = dbMod.getDb();
+  const result = db.prepare("DELETE FROM correlation_groups WHERE group_id = ?").run(req.params.groupId);
   if (result.changes === 0) return res.status(404).json({ error: "Group not found" });
   res.json({ deleted: true, group_id: req.params.groupId });
 }));
 
 /** GET /stats — Correlation statistics */
 router.get("/stats", wrapRoute("correlation stats", function(req, res) {
-  ensureCorrelationTables();
-  var db = dbMod.getDb();
-  var ruleCount = db.prepare("SELECT COUNT(*) as cnt FROM correlation_rules").get().cnt;
-  var enabledCount = db.prepare("SELECT COUNT(*) as cnt FROM correlation_rules WHERE enabled = 1").get().cnt;
-  var groupCount = db.prepare("SELECT COUNT(*) as cnt FROM correlation_groups").get().cnt;
-  var memberCount = db.prepare("SELECT COUNT(*) as cnt FROM correlation_members").get().cnt;
+  const db = dbMod.getDb();
+  const ruleCount = db.prepare("SELECT COUNT(*) as cnt FROM correlation_rules").get().cnt;
+  const enabledCount = db.prepare("SELECT COUNT(*) as cnt FROM correlation_rules WHERE enabled = 1").get().cnt;
+  const groupCount = db.prepare("SELECT COUNT(*) as cnt FROM correlation_groups").get().cnt;
+  const memberCount = db.prepare("SELECT COUNT(*) as cnt FROM correlation_members").get().cnt;
 
-  var byType = db.prepare(
+  const byType = db.prepare(
     "SELECT r.match_type, COUNT(g.group_id) as groups FROM correlation_rules r " +
     "LEFT JOIN correlation_groups g ON r.rule_id = g.rule_id GROUP BY r.match_type"
   ).all();
@@ -660,14 +661,13 @@ router.get("/stats", wrapRoute("correlation stats", function(req, res) {
 
 /** GET /event/:eventId — Find all correlations for an event */
 router.get("/event/:eventId", wrapRoute("find event correlations", function(req, res) {
-  ensureCorrelationTables();
-  var db = dbMod.getDb();
-  var memberships = db.prepare(
+  const db = dbMod.getDb();
+  const memberships = db.prepare(
     "SELECT m.group_id, m.role, g.label, g.created_at, g.metadata, r.name as rule_name, r.match_type " +
     "FROM correlation_members m JOIN correlation_groups g ON m.group_id = g.group_id " +
     "JOIN correlation_rules r ON g.rule_id = r.rule_id WHERE m.event_id = ? ORDER BY g.created_at DESC"
   ).all(req.params.eventId);
-  for (var i = 0; i < memberships.length; i++) { memberships[i].metadata = parseConfig(memberships[i].metadata); }
+  for (let i = 0; i < memberships.length; i++) { memberships[i].metadata = parseConfig(memberships[i].metadata); }
   res.json({ event_id: req.params.eventId, correlations: memberships, total: memberships.length });
 }));
 
