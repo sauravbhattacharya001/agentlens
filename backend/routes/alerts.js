@@ -62,6 +62,7 @@ const MAX_WINDOW_MINUTES = 10080;   // 7 days max — prevents expensive full-ta
 const MAX_COOLDOWN_MINUTES = 10080; // 7 days max
 const MAX_NAME_LENGTH = 128;
 const MAX_AGENT_FILTER_LENGTH = 256;
+const MAX_ALERT_RULES = 100;          // prevent DoS via unbounded rule creation
 
 // ── Helper: generate unique ID ──────────────────────────────────────
 
@@ -212,6 +213,13 @@ router.post("/rules", wrapRoute("create alert rule", (req, res) => {
     if (!VALID_METRICS.includes(metric)) {
       return res.status(400).json({ error: `Invalid metric. Valid metrics: ${VALID_METRICS.join(", ")}` });
     }
+
+    // Enforce max alert rules to prevent DoS via evaluate endpoint
+    const ruleCount = db.prepare("SELECT COUNT(*) AS c FROM alert_rules").get().c;
+    if (ruleCount >= MAX_ALERT_RULES) {
+      return res.status(429).json({ error: `Maximum alert rules reached (${MAX_ALERT_RULES}). Delete unused rules before creating new ones.` });
+    }
+
     if (!VALID_OPERATORS.includes(operator)) {
       return res.status(400).json({ error: `Invalid operator. Valid operators: ${VALID_OPERATORS.join(", ")}` });
     }
