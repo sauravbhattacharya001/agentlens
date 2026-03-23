@@ -25,8 +25,20 @@ function parseForecastDays(raw) {
 /**
  * Load the pricing map from model_pricing table + sensible defaults.
  * Returns { modelNameLower: { input: costPer1M, output: costPer1M } }.
+ *
+ * Results are cached for 60 seconds since model_pricing rarely changes,
+ * avoiding a db.prepare() + .all() on every forecast/budget/spending request.
  */
+let _pricingCache = null;
+let _pricingCacheExpiry = 0;
+const PRICING_CACHE_TTL_MS = 60000; // 60 seconds
+
 function loadPricingMap(db) {
+  const now = Date.now();
+  if (_pricingCache && now < _pricingCacheExpiry) {
+    return _pricingCache;
+  }
+
   const rows = db.prepare("SELECT * FROM model_pricing ORDER BY model ASC").all();
   const map = {};
   for (const row of rows) {
@@ -48,6 +60,9 @@ function loadPricingMap(db) {
   for (const [model, prices] of Object.entries(defaults)) {
     if (!map[model]) map[model] = prices;
   }
+
+  _pricingCache = map;
+  _pricingCacheExpiry = now + PRICING_CACHE_TTL_MS;
   return map;
 }
 
