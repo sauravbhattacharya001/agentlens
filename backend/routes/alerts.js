@@ -57,6 +57,12 @@ const VALID_METRICS = [
 
 const VALID_OPERATORS = ["<", ">", "<=", ">=", "==", "!="];
 
+// ── Security limits ─────────────────────────────────────────────────
+const MAX_WINDOW_MINUTES = 10080;   // 7 days max — prevents expensive full-table scans
+const MAX_COOLDOWN_MINUTES = 10080; // 7 days max
+const MAX_NAME_LENGTH = 128;
+const MAX_AGENT_FILTER_LENGTH = 256;
+
 // ── Helper: generate unique ID ──────────────────────────────────────
 
 function generateId() {
@@ -213,15 +219,20 @@ router.post("/rules", wrapRoute("create alert rule", (req, res) => {
       return res.status(400).json({ error: "threshold must be a number" });
     }
 
+    // Validate agent_filter length
+    if (agent_filter && (typeof agent_filter !== "string" || agent_filter.length > MAX_AGENT_FILTER_LENGTH)) {
+      return res.status(400).json({ error: `agent_filter cannot exceed ${MAX_AGENT_FILTER_LENGTH} characters` });
+    }
+
     const ruleId = generateId();
     const now = new Date().toISOString();
-    const windowMin = Number(window_minutes) || 60;
-    const cooldownMin = Number(cooldown_minutes) || 15;
+    const windowMin = Math.min(Math.max(1, Number(window_minutes) || 60), MAX_WINDOW_MINUTES);
+    const cooldownMin = Math.min(Math.max(0, Number(cooldown_minutes) || 15), MAX_COOLDOWN_MINUTES);
 
     db.prepare(`
       INSERT INTO alert_rules (rule_id, name, metric, operator, threshold, window_minutes, agent_filter, cooldown_minutes, created_at, updated_at)
       VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?)
-    `).run(ruleId, name.trim(), metric, operator, threshold, windowMin, agent_filter || null, cooldownMin, now, now);
+    `).run(ruleId, name.trim().slice(0, MAX_NAME_LENGTH), metric, operator, threshold, windowMin, agent_filter || null, cooldownMin, now, now);
 
     const rule = db.prepare("SELECT * FROM alert_rules WHERE rule_id = ?").get(ruleId);
     res.status(201).json({ rule: { ...rule, enabled: !!rule.enabled } });
@@ -242,7 +253,7 @@ router.put("/rules/:ruleId", wrapRoute("update alert rule", (req, res) => {
     const updates = {};
     const { name, metric, operator, threshold, window_minutes, agent_filter, enabled, cooldown_minutes } = req.body;
 
-    if (name !== undefined) updates.name = name.trim();
+    if (name !== undefined) updates.name = name.trim().slice(0, MAX_NAME_LENGTH);
     if (metric !== undefined) {
       if (!VALID_METRICS.includes(metric)) {
         return res.status(400).json({ error: `Invalid metric. Valid: ${VALID_METRICS.join(", ")}` });
@@ -256,10 +267,15 @@ router.put("/rules/:ruleId", wrapRoute("update alert rule", (req, res) => {
       updates.operator = operator;
     }
     if (threshold !== undefined) updates.threshold = threshold;
-    if (window_minutes !== undefined) updates.window_minutes = Number(window_minutes);
-    if (agent_filter !== undefined) updates.agent_filter = agent_filter || null;
+    if (window_minutes !== undefined) updates.window_minutes = Math.min(Math.max(1, Number(window_minutes)), MAX_WINDOW_MINUTES);
+    if (agent_filter !== undefined) {
+      if (agent_filter && (typeof agent_filter !== "string" || agent_filter.length > MAX_AGENT_FILTER_LENGTH)) {
+        return res.status(400).json({ error: `agent_filter cannot exceed ${MAX_AGENT_FILTER_LENGTH} characters` });
+      }
+      updates.agent_filter = agent_filter || null;
+    }
     if (enabled !== undefined) updates.enabled = enabled ? 1 : 0;
-    if (cooldown_minutes !== undefined) updates.cooldown_minutes = Number(cooldown_minutes);
+    if (cooldown_minutes !== undefined) updates.cooldown_minutes = Math.min(Math.max(0, Number(cooldown_minutes)), MAX_COOLDOWN_MINUTES);
 
     const setClauses = Object.keys(updates).map(k => `${k} = ?`);
     setClauses.push("updated_at = ?");
