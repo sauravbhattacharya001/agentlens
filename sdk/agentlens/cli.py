@@ -37,6 +37,7 @@ Usage:
     agentlens-cli alert silence <rule_id> [--duration MINUTES]
     agentlens-cli alert unsilence <rule_id>
     agentlens-cli alert stats [--period day|week|month] [--format table|json]
+    agentlens-cli forecast [--days N] [--metric cost|tokens|sessions] [--model MODEL] [--format table|json|chart] [--output FILE] [--endpoint URL] [--api-key KEY]
     agentlens-cli status [--endpoint URL] [--api-key KEY]
 
 Environment variables:
@@ -61,6 +62,7 @@ from agentlens.cli_depmap import cmd_depmap  # dependency map visualization
 from agentlens.cli_budget import cmd_budget  # cost budget management
 from agentlens.cli_snapshot import cmd_snapshot  # point-in-time system snapshots
 from agentlens.cli_alert import cmd_alert, register_alert_parser  # alert management
+from agentlens.cli_forecast import cmd_forecast  # cost/usage forecasting
 
 
 def _get_client(args: argparse.Namespace) -> tuple[httpx.Client, str]:
@@ -1453,6 +1455,14 @@ def main() -> None:
     # -- alert (rich alert management) --
     register_alert_parser(sub)
 
+    # -- forecast --
+    p = sub.add_parser("forecast", help="Predict future costs/usage from historical trends")
+    p.add_argument("--days", type=int, default=7, help="Number of days to forecast (default: 7)")
+    p.add_argument("--metric", choices=["cost", "tokens", "sessions"], default="cost", help="Metric to forecast")
+    p.add_argument("--model", help="Filter by model name")
+    p.add_argument("--format", choices=["table", "json", "chart"], default="table", help="Output format")
+    p.add_argument("--output", "-o", help="Write output to file")
+
     args = parser.parse_args()
 
     commands = {
@@ -1481,6 +1491,7 @@ def main() -> None:
         "budget": lambda args: cmd_budget(args, _get_client(args)[0]),
         "snapshot": cmd_snapshot,
         "alert": lambda args: cmd_alert(_get_client(args)[0], args),
+        "forecast": cmd_forecast,
         "status": cmd_status,
     }
     commands[args.command](args)
