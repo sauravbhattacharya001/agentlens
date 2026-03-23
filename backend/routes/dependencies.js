@@ -1,6 +1,6 @@
 const express = require("express");
 const { getDb } = require("../db");
-const { wrapRoute } = require("../lib/request-helpers");
+const { wrapRoute, parseDays, daysAgoCutoff } = require("../lib/request-helpers");
 const {
   buildDependencyMap,
   computeServiceStats,
@@ -12,12 +12,7 @@ const {
 
 const router = express.Router();
 
-/**
- * Parse and clamp the `days` query parameter (1-365, default 30).
- */
-function parseDays(raw) {
-  return Math.min(Math.max(1, parseInt(raw) || 30), 365);
-}
+// Use shared parseDays from request-helpers
 
 /**
  * Fetch events with tool_call data for dependency analysis.
@@ -27,7 +22,7 @@ function parseDays(raw) {
  */
 function fetchToolEvents(days, agent) {
   const db = getDb();
-  const cutoff = new Date(Date.now() - days * 86400000).toISOString();
+  const cutoff = daysAgoCutoff(days);
 
   let sql = `
     SELECT e.event_id, e.session_id, e.event_type, e.timestamp,

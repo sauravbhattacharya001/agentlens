@@ -1,19 +1,13 @@
 const express = require("express");
 const { getDb } = require("../db");
-const { wrapRoute } = require("../lib/request-helpers");
+const { wrapRoute, parseDays, daysAgoCutoff } = require("../lib/request-helpers");
 const { loadPricingMap, computeCost } = require("../lib/pricing");
 
 const router = express.Router();
 
 // ── Helpers ─────────────────────────────────────────────────────
 
-/**
- * Parse and clamp days query parameter (1-365, default 30).
- */
-function parseDays(raw) {
-  const n = parseInt(raw) || 30;
-  return Math.min(Math.max(1, n), 365);
-}
+// parseDays now imported from request-helpers
 
 /**
  * Parse and clamp forecastDays query parameter (1-90, default 7).

@@ -106,10 +106,39 @@ function wrapRoute(label, fn) {
   };
 }
 
+// ── Date helpers ────────────────────────────────────────────────────
+
+/**
+ * Parse and clamp a `days` query parameter (1–365, default 30).
+ *
+ * @param {string|number} raw – the raw query value (req.query.days)
+ * @param {number}        [def=30]  – default when missing/NaN
+ * @param {number}        [max=365] – hard upper bound
+ * @returns {number} clamped integer
+ */
+function parseDays(raw, def, max) {
+  if (def === undefined) def = 30;
+  if (max === undefined) max = 365;
+  return Math.min(Math.max(1, parseInt(raw) || def), max);
+}
+
+/**
+ * Return an ISO-8601 timestamp representing `days` days ago from now.
+ * Convenience for the common `new Date(Date.now() - days * 86400000).toISOString()` pattern.
+ *
+ * @param {number} days – number of days to look back
+ * @returns {string} ISO timestamp
+ */
+function daysAgoCutoff(days) {
+  return new Date(Date.now() - days * 86400000).toISOString();
+}
+
 module.exports = {
   parseLimit,
   parseOffset,
   parsePagination,
+  parseDays,
+  daysAgoCutoff,
   requireSessionId,
   wrapRoute,
 };

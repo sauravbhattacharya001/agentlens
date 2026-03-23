@@ -1,6 +1,6 @@
 const express = require("express");
 const { getDb } = require("../db");
-const { wrapRoute } = require("../lib/request-helpers");
+const { wrapRoute, parseDays, daysAgoCutoff } = require("../lib/request-helpers");
 const { createCache, cacheMiddleware } = require("../lib/response-cache");
 
 const router = express.Router();
@@ -31,10 +31,10 @@ router.get("/", leaderboardCacheMw, wrapRoute("build agent leaderboard", (req, r
     });
   }
 
-  const days = Math.min(Math.max(1, parseInt(req.query.days) || 30), 365);
+  const days = parseDays(req.query.days);
   const limit = Math.min(Math.max(1, parseInt(req.query.limit) || 20), 100);
   const minSessions = Math.max(1, parseInt(req.query.min_sessions) || 2);
-  const cutoff = new Date(Date.now() - days * 86400000).toISOString();
+  const cutoff = daysAgoCutoff(days);
 
   const defaultOrders = {
     efficiency: "desc",

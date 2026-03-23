@@ -1,6 +1,6 @@
 const express = require("express");
 const { getDb } = require("../db");
-const { wrapRoute } = require("../lib/request-helpers");
+const { wrapRoute, parseDays, daysAgoCutoff } = require("../lib/request-helpers");
 
 const router = express.Router();
 
@@ -37,8 +37,8 @@ function round2(v) { return Math.round(v * 100) / 100; }
 
 router.get("/", wrapRoute("list scorecards", async (req, res) => {
   const db = getDb();
-  const days = Math.min(Math.max(parseInt(req.query.days) || 30, 1), 365);
-  const cutoff = new Date(Date.now() - days * 86400000).toISOString();
+  const days = parseDays(req.query.days);
+  const cutoff = daysAgoCutoff(days);
 
   // Aggregate per-agent stats
   const agents = db.prepare(`
@@ -85,7 +85,7 @@ router.get("/", wrapRoute("list scorecards", async (req, res) => {
     WHERE started_at >= ?
     GROUP BY agent_name, week
     ORDER BY agent_name, week
-  `).all(new Date(Date.now() - 56 * 86400000).toISOString());
+  `).all(daysAgoCutoff(56));
 
   const trendMap = {};
   for (const r of trendRows) {
@@ -153,8 +153,8 @@ router.get("/", wrapRoute("list scorecards", async (req, res) => {
 router.get("/:agent", wrapRoute("get agent scorecard", async (req, res) => {
   const db = getDb();
   const agent = req.params.agent;
-  const days = Math.min(Math.max(parseInt(req.query.days) || 30, 1), 365);
-  const cutoff = new Date(Date.now() - days * 86400000).toISOString();
+  const days = parseDays(req.query.days);
+  const cutoff = daysAgoCutoff(days);
 
   const stats = db.prepare(`
     SELECT

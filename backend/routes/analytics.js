@@ -1,7 +1,7 @@
 const express = require("express");
 const { getDb } = require("../db");
 const { latencyStats, round2 } = require("../lib/stats");
-const { wrapRoute } = require("../lib/request-helpers");
+const { wrapRoute, parseDays, daysAgoCutoff } = require("../lib/request-helpers");
 const { createCache, cacheMiddleware } = require("../lib/response-cache");
 const { loadPricingMap, findPricing } = require("../lib/pricing");
 
@@ -285,9 +285,9 @@ router.get("/performance", isTest ? analyticsCacheMw : cacheMiddleware(analytics
   // Optional filters
   const agentName = req.query.agent;
   const model = req.query.model;
-  const days = Math.min(Math.max(1, parseInt(req.query.days) || 30), 365);
+  const days = parseDays(req.query.days);
 
-    const cutoff = new Date(Date.now() - days * 86400000).toISOString();
+    const cutoff = daysAgoCutoff(days);
 
     // ── Select pre-compiled statement variant ────────────────────
     // Instead of building SQL strings and calling db.prepare() on
@@ -450,12 +450,12 @@ function getHeatmapStatements() {
 
 // GET /analytics/heatmap — Day-of-week × hour-of-day activity matrix
 router.get("/heatmap", isTest ? analyticsCacheMw : cacheMiddleware(analyticsCache, { ttlMs: 60000 }), wrapRoute("fetch heatmap data", (req, res) => {
-  const days = Math.min(Math.max(1, parseInt(req.query.days) || 30), 365);
+  const days = parseDays(req.query.days);
     const metric = ["events", "tokens", "sessions"].includes(req.query.metric)
       ? req.query.metric
       : "events";
 
-    const cutoff = new Date(Date.now() - days * 86400000).toISOString();
+    const cutoff = daysAgoCutoff(days);
 
     const rows = getHeatmapStatements()[metric].all(cutoff);
 
@@ -566,8 +566,8 @@ function getCostStatements() {
 }
 
 router.get("/costs", analyticsCacheMw, wrapRoute("fetch cost analytics", (req, res) => {
-  const days = Math.min(Math.max(1, parseInt(req.query.days) || 30), 365);
-  const cutoff = new Date(Date.now() - days * 86400000).toISOString();
+  const days = parseDays(req.query.days);
+  const cutoff = daysAgoCutoff(days);
 
   // Load merged pricing map (DB overrides + built-in defaults)
   const pricingMap = loadPricingMap();
