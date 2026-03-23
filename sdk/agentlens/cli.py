@@ -38,6 +38,7 @@ Usage:
     agentlens-cli alert unsilence <rule_id>
     agentlens-cli alert stats [--period day|week|month] [--format table|json]
     agentlens-cli forecast [--days N] [--metric cost|tokens|sessions] [--model MODEL] [--format table|json|chart] [--output FILE] [--endpoint URL] [--api-key KEY]
+    agentlens-cli leaderboard [--sort efficiency|speed|reliability|cost|volume] [--days N] [--limit N] [--min-sessions N] [--order asc|desc] [--json] [--endpoint URL] [--api-key KEY]
     agentlens-cli status [--endpoint URL] [--api-key KEY]
 
 Environment variables:
@@ -1398,6 +1399,15 @@ def main() -> None:
     p.add_argument("--format", choices=["table", "json"], default="table", help="Output format (default: table)")
     p.add_argument("--top", type=int, default=10, help="Max outliers to show per metric (default: 10)")
 
+    # leaderboard
+    p = sub.add_parser("leaderboard", help="Rank agents by performance metrics")
+    p.add_argument("--sort", choices=["efficiency", "speed", "reliability", "cost", "volume"], default="efficiency", help="Ranking metric (default: efficiency)")
+    p.add_argument("--days", type=int, default=30, help="Lookback window in days (default: 30)")
+    p.add_argument("--limit", type=int, default=20, help="Max agents to show (default: 20)")
+    p.add_argument("--min-sessions", type=int, default=2, help="Min sessions to qualify (default: 2)")
+    p.add_argument("--order", choices=["asc", "desc"], default=None, help="Sort order (default depends on metric)")
+    p.add_argument("--json", dest="json_output", action="store_true", help="Output as JSON")
+
     # status
     sub.add_parser("status", help="Check backend connectivity")
 
@@ -1492,6 +1502,7 @@ def main() -> None:
         "snapshot": cmd_snapshot,
         "alert": lambda args: cmd_alert(_get_client(args)[0], args),
         "forecast": cmd_forecast,
+        "leaderboard": lambda args: __import__("agentlens.cli_leaderboard", fromlist=["cmd_leaderboard"]).cmd_leaderboard(args),
         "status": cmd_status,
     }
     commands[args.command](args)
