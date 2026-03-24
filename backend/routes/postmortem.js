@@ -1,5 +1,6 @@
 const express = require("express");
 const { getDb } = require("../db");
+const { isValidSessionId } = require("../lib/validation");
 const { wrapRoute } = require("../lib/request-helpers");
 
 const router = express.Router();
@@ -198,6 +199,11 @@ router.post(
   "/:sessionId",
   wrapRoute("generate postmortem", async (req, res) => {
     const { sessionId } = req.params;
+
+    if (!isValidSessionId(sessionId)) {
+      return res.status(400).json({ error: "Invalid session ID format" });
+    }
+
     const stmts = getStatements();
     const rows = stmts.sessionEvents.all(sessionId);
 
@@ -276,7 +282,7 @@ router.post(
 router.get(
   "/candidates",
   wrapRoute("list postmortem candidates", async (req, res) => {
-    const minErrors = parseInt(req.query.min_errors) || 2;
+    const minErrors = Math.max(1, Math.min(100, parseInt(req.query.min_errors) || 2));
     const limit = Math.min(parseInt(req.query.limit) || 20, 100);
     const stmts = getStatements();
     const rows = stmts.recentErrorSessions.all(minErrors, limit);
