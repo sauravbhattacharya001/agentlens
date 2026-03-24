@@ -245,6 +245,9 @@ async function deliverWebhook(webhook, alertData) {
 
   // DNS rebinding protection: resolve the hostname and validate IPs
   // at delivery time, not just at URL registration time.
+  // IMPORTANT: if DNS resolution fails for ANY reason, block the delivery
+  // rather than proceeding without the SSRF check — a permissive catch
+  // here would allow DNS rebinding attacks to bypass the protection.
   try {
     const parsed = new URL(webhook.url);
     const dnsCheck = await validateResolvedIps(parsed.hostname);
@@ -256,7 +259,16 @@ async function deliverWebhook(webhook, alertData) {
       `).run(deliveryId, webhook.webhook_id, alertData.alert_id || null, body, errorMsg, new Date().toISOString());
       return { delivery_id: deliveryId, status: "failed", error: errorMsg, attempts: 0 };
     }
-  } catch { /* URL already validated at creation */ }
+  } catch (dnsErr) {
+    // Block delivery when DNS validation itself fails — proceeding without
+    // the check would allow SSRF via DNS rebinding or transient resolution errors.
+    const errorMsg = `SSRF check failed: ${dnsErr.message || "DNS validation error"}`;
+    db.prepare(`
+      INSERT INTO webhook_deliveries (delivery_id, webhook_id, alert_id, status, status_code, request_body, response_body, error, attempts, delivered_at)
+      VALUES (?, ?, ?, 'failed', NULL, ?, NULL, ?, 0, ?)
+    `).run(deliveryId, webhook.webhook_id, alertData.alert_id || null, body, errorMsg, new Date().toISOString());
+    return { delivery_id: deliveryId, status: "failed", error: errorMsg, attempts: 0 };
+  }
 
   let lastError = null;
   let statusCode = null;
