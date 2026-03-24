@@ -96,9 +96,13 @@ class Transport:
             self._send_batch(batch)
 
     def _drain_buffer(self) -> list[dict[str, Any]]:
-        """Drain and return buffer contents.  Must be called with lock held."""
-        events = self._buffer[:]
-        self._buffer.clear()
+        """Drain and return buffer contents.  Must be called with lock held.
+
+        Uses a swap instead of copy+clear to avoid allocating a second list
+        and copying every element reference — O(1) instead of O(n).
+        """
+        events = self._buffer
+        self._buffer = []
         return events
 
     def _send_batch(self, events: list[dict[str, Any]]) -> None:
@@ -127,9 +131,10 @@ class Transport:
                 },
             )
             if response.status_code == 200:
-                # Success — reset consecutive failure counter
-                with self._lock:
-                    self._consecutive_failures = 0
+                # Success — reset consecutive failure counter only if needed
+                if self._consecutive_failures:
+                    with self._lock:
+                        self._consecutive_failures = 0
                 return
 
             logger.warning(
