@@ -40,6 +40,7 @@ Usage:
     agentlens-cli forecast [--days N] [--metric cost|tokens|sessions] [--model MODEL] [--format table|json|chart] [--output FILE] [--endpoint URL] [--api-key KEY]
     agentlens-cli leaderboard [--sort efficiency|speed|reliability|cost|volume] [--days N] [--limit N] [--min-sessions N] [--order asc|desc] [--json] [--endpoint URL] [--api-key KEY]
     agentlens-cli gantt <session_id> [--output FILE] [--open] [--format html|json|ascii] [--endpoint URL] [--api-key KEY]
+    agentlens-cli audit [ENTRY_ID] [--agent NAME] [--action TYPE] [--severity LEVEL] [--model MODEL] [--session ID] [--since HOURS] [--limit N] [--format table|csv|json] [--output FILE] [--stats] [--no-color] [--endpoint URL] [--api-key KEY]
     agentlens-cli status [--endpoint URL] [--api-key KEY]
 
 Environment variables:
@@ -66,6 +67,7 @@ from agentlens.cli_snapshot import cmd_snapshot  # point-in-time system snapshot
 from agentlens.cli_alert import cmd_alert, register_alert_parser  # alert management
 from agentlens.cli_forecast import cmd_forecast  # cost/usage forecasting
 from agentlens.cli_gantt import cmd_gantt  # interactive Gantt chart
+from agentlens.cli_audit import cmd_audit, register_audit_parser  # audit trail
 
 
 def _get_client(args: argparse.Namespace) -> tuple[httpx.Client, str]:
@@ -1474,6 +1476,9 @@ def main() -> None:
     # -- alert (rich alert management) --
     register_alert_parser(sub)
 
+    # -- audit (action audit trail) --
+    register_audit_parser(sub)
+
     # -- forecast --
     p = sub.add_parser("forecast", help="Predict future costs/usage from historical trends")
     p.add_argument("--days", type=int, default=7, help="Number of days to forecast (default: 7)")
@@ -1512,6 +1517,7 @@ def main() -> None:
         "alert": lambda args: cmd_alert(_get_client(args)[0], args),
         "forecast": cmd_forecast,
         "gantt": cmd_gantt,
+        "audit": cmd_audit,
         "leaderboard": lambda args: __import__("agentlens.cli_leaderboard", fromlist=["cmd_leaderboard"]).cmd_leaderboard(args),
         "status": cmd_status,
     }
