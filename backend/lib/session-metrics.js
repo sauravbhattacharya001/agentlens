@@ -25,44 +25,54 @@ function computeSessionMetrics(session, events) {
   const totalDuration = events.reduce((sum, e) => sum + (e.duration_ms || 0), 0);
   const avgDuration = eventCount > 0 ? totalDuration / eventCount : 0;
 
-  // Models used
+  // Single-pass aggregation: models, event types, tools, error count
   const models = {};
-  events.forEach((e) => {
-    if (e.model) {
-      if (!models[e.model]) models[e.model] = { calls: 0, tokens_in: 0, tokens_out: 0 };
-      models[e.model].calls++;
-      models[e.model].tokens_in += e.tokens_in || 0;
-      models[e.model].tokens_out += e.tokens_out || 0;
-    }
-  });
-
-  // Event type breakdown
   const eventTypes = {};
-  events.forEach((e) => {
-    eventTypes[e.event_type] = (eventTypes[e.event_type] || 0) + 1;
-  });
-
-  // Tool usage
   const tools = {};
-  events.forEach((e) => {
-    if (e.tool_call && e.tool_call.tool_name) {
-      const name = e.tool_call.tool_name;
-      if (!tools[name]) tools[name] = { calls: 0, total_duration: 0 };
-      tools[name].calls++;
-      tools[name].total_duration += e.duration_ms || 0;
+  let errorCount = 0;
+
+  for (let i = 0; i < eventCount; i++) {
+    const e = events[i];
+
+    // Models used
+    if (e.model) {
+      let m = models[e.model];
+      if (!m) {
+        m = { calls: 0, tokens_in: 0, tokens_out: 0 };
+        models[e.model] = m;
+      }
+      m.calls++;
+      m.tokens_in += e.tokens_in || 0;
+      m.tokens_out += e.tokens_out || 0;
     }
-  });
+
+    // Event type breakdown
+    eventTypes[e.event_type] = (eventTypes[e.event_type] || 0) + 1;
+
+    // Tool usage
+    const tc = e.tool_call;
+    if (tc && tc.tool_name) {
+      let t = tools[tc.tool_name];
+      if (!t) {
+        t = { calls: 0, total_duration: 0 };
+        tools[tc.tool_name] = t;
+      }
+      t.calls++;
+      t.total_duration += e.duration_ms || 0;
+    }
+
+    // Error count
+    const et = e.event_type;
+    if (et === "error" || et === "agent_error" || et === "tool_error") {
+      errorCount++;
+    }
+  }
 
   // Session duration (wall clock)
   let sessionDurationMs = null;
   if (session.started_at && session.ended_at) {
     sessionDurationMs = new Date(session.ended_at) - new Date(session.started_at);
   }
-
-  // Error count
-  const errorCount = events.filter((e) =>
-    e.event_type === "error" || e.event_type === "agent_error" || e.event_type === "tool_error"
-  ).length;
 
   return {
     session_id: session.session_id,
