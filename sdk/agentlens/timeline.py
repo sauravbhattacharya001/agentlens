@@ -574,7 +574,13 @@ class TimelineRenderer:
             path: File path to write.
             format: One of ``"text"``, ``"md"``, ``"html"``, or ``"auto"``
                 (detect from extension).
+
+        Raises:
+            ValueError: if the path escapes the working/temp directory.
         """
+        from agentlens.exporter import _validate_output_path
+        safe = _validate_output_path(path)
+
         if format == "auto":
             ext = os.path.splitext(path)[1].lower()
             fmt_map = {".html": "html", ".htm": "html", ".md": "md", ".txt": "text"}
@@ -587,7 +593,7 @@ class TimelineRenderer:
         else:
             content = self.render_text()
 
-        with open(path, "w", encoding="utf-8") as f:
+        with open(safe, "w", encoding="utf-8") as f:
             f.write(content)
 
     # -- helpers -------------------------------------------------------------

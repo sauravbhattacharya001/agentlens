@@ -237,8 +237,13 @@ class DiffReport:
         }
 
     def to_json(self, path: str) -> None:
-        """Write report to a JSON file."""
-        with open(path, "w") as f:
+        """Write report to a JSON file.
+
+        Raises ValueError if the path escapes the working/temp directory.
+        """
+        from agentlens.exporter import _validate_output_path
+        safe = _validate_output_path(path)
+        with open(safe, "w") as f:
             json.dump(self.to_dict(), f, indent=2)
 
 

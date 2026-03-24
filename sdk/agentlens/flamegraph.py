@@ -330,9 +330,14 @@ class Flamegraph:
         return _HTML_TEMPLATE.replace("/* __DATA__ */", f"const DATA = {data_json};")
 
     def save(self, path: str) -> None:
-        """Write flamegraph HTML to a file."""
+        """Write flamegraph HTML to a file.
+
+        Raises ValueError if the path escapes the working/temp directory.
+        """
+        from agentlens.exporter import _validate_output_path
+        safe = _validate_output_path(path)
         html = self.render_html()
-        with open(path, "w", encoding="utf-8") as f:
+        with open(safe, "w", encoding="utf-8") as f:
             f.write(html)
 
     def get_stats(self) -> dict[str, Any]:

@@ -377,8 +377,13 @@ renderStats();renderHeatmap();renderModels();
 </html>"""
 
     def save(self, path: str) -> str:
-        """Render and write HTML to *path*. Returns the path."""
+        """Render and write HTML to *path*. Returns the path.
+
+        Raises ValueError if the path escapes the working/temp directory.
+        """
+        from agentlens.exporter import _validate_output_path
+        safe = _validate_output_path(path)
         content = self.render()
-        with open(path, "w", encoding="utf-8") as fh:
+        with open(safe, "w", encoding="utf-8") as fh:
             fh.write(content)
         return path
