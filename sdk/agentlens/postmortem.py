@@ -262,6 +262,27 @@ class PostmortemGenerator:
         self.config = config or PostmortemConfig()
 
     def generate(self, events: list[dict[str, Any]], session_id: str = "") -> PostmortemReport:
+        """Produce a :class:`PostmortemReport` from a list of session events.
+
+        The events are sorted by timestamp, filtered for errors, and then
+        analysed through several stages: timeline construction, root-cause
+        identification, impact assessment, remediation generation, and
+        lesson extraction.
+
+        Args:
+            events: Session event dicts.  Each event should contain at
+                least ``event_type`` and ``timestamp``; optional keys
+                include ``duration_ms``, ``tokens_in``, ``tokens_out``,
+                ``tool_call``, ``model``, ``error_message``, and
+                ``output_data``.
+            session_id: An optional session identifier embedded in the
+                report for traceability.
+
+        Returns:
+            A fully populated :class:`PostmortemReport`.  If fewer than
+            ``config.min_events`` events are provided or no errors are
+            found, an empty "no incident" report is returned.
+        """
         if len(events) < self.config.min_events:
             return self._empty_report(session_id)
         sorted_events = sorted(events, key=lambda e: str(e.get("timestamp", "")))
@@ -300,6 +321,12 @@ class PostmortemGenerator:
         )
 
     def _build_timeline(self, events: list[dict], errors: list[dict]) -> list[TimelineEntry]:
+        """Build a filtered timeline of significant events.
+
+        Only events that are errors, abnormally slow, or the first/last
+        event in the session are included.  Each entry is annotated with
+        elapsed time from the first event, severity, and incident phase.
+        """
         timeline: list[TimelineEntry] = []
         first_ts = self._parse_ts(events[0].get("timestamp", ""))
         error_ids = {id(e) for e in errors}
@@ -325,6 +352,8 @@ class PostmortemGenerator:
         return timeline
 
     def _classify_phase(self, event: dict, all_events: list[dict], errors: list[dict]) -> IncidentPhase:
+        """Assign an :class:`IncidentPhase` to *event* based on its
+        temporal position relative to the error window."""
         if not errors:
             return IncidentPhase.POST_INCIDENT
         first_error_ts = self._parse_ts(errors[0].get("timestamp", ""))
@@ -349,6 +378,7 @@ class PostmortemGenerator:
             return IncidentPhase.MITIGATION
 
     def _describe_event(self, event: dict) -> str:
+        """Return a concise human-readable description of *event*."""
         etype = event.get("event_type", "unknown")
         parts: list[str] = []
         if etype in ("error", "tool_error", "agent_error"):
@@ -374,6 +404,14 @@ class PostmortemGenerator:
         return " ".join(parts)
 
     def _identify_root_causes(self, events: list[dict], errors: list[dict]) -> list[RootCause]:
+        """Correlate errors to identify probable root causes.
+
+        Analyses error events across several dimensions — failing tools,
+        failing models, error-interval acceleration (cascading failures),
+        timeouts, rate limits, and repeated error messages — and returns
+        a list of :class:`RootCause` entries sorted by confidence
+        (highest first).
+        """
         causes: list[RootCause] = []
         error_tools: Counter[str] = Counter()
         error_models: Counter[str] = Counter()
@@ -469,6 +507,8 @@ class PostmortemGenerator:
         return causes
 
     def _assess_impact(self, events: list[dict], errors: list[dict]) -> ImpactAssessment:
+        """Quantify the blast radius: severity, error rate, affected
+        tools/models, downtime, wasted tokens, and estimated cost."""
         total = len(events)
         error_count = len(errors)
         error_rate = error_count / max(total, 1)
@@ -508,6 +548,8 @@ class PostmortemGenerator:
         )
 
     def _generate_remediations(self, causes: list[RootCause], impact: ImpactAssessment) -> list[Remediation]:
+        """Produce prioritised remediation actions based on root causes
+        and overall impact severity."""
         remediations: list[Remediation] = []
         priority = 1
         for cause in causes:
@@ -589,6 +631,7 @@ class PostmortemGenerator:
         return remediations
 
     def _extract_lessons(self, causes: list[RootCause], impact: ImpactAssessment) -> list[LessonLearned]:
+        """Derive lessons learned from root causes and impact severity."""
         lessons: list[LessonLearned] = []
         for cause in causes:
             if cause.category == "tool_failure":
@@ -624,6 +667,9 @@ class PostmortemGenerator:
         return lessons
 
     def _find_contributing_factors(self, events: list[dict], errors: list[dict]) -> list[str]:
+        """Identify environmental or behavioural factors that may have
+        amplified the incident (high error density, slow precursors,
+        missing retries, high token usage)."""
         factors: list[str] = []
         if len(errors) > len(events) * 0.3:
             factors.append(
@@ -650,6 +696,8 @@ class PostmortemGenerator:
         return factors
 
     def _find_what_went_well(self, events: list[dict], errors: list[dict]) -> list[str]:
+        """Highlight positive aspects of the session: successful events,
+        error isolation, recovery, and early detection."""
         went_well: list[str] = []
         successes = len(events) - len(errors)
         if successes > 0:
@@ -666,6 +714,8 @@ class PostmortemGenerator:
         return went_well
 
     def _generate_summary(self, impact: ImpactAssessment, causes: list[RootCause], duration_ms: float) -> str:
+        """Compose a one-paragraph incident summary suitable for the
+        report header."""
         parts: list[str] = []
         parts.append(
             f"A {impact.severity.value} incident occurred with "
@@ -687,9 +737,15 @@ class PostmortemGenerator:
         return " ".join(parts)
 
     def _is_error(self, event: dict) -> bool:
+        """Return ``True`` if *event*'s type is in the configured error types."""
         return event.get("event_type", "") in self.config.error_types
 
     def _parse_ts(self, ts: Any) -> datetime | None:
+        """Parse a timestamp value into a timezone-aware ``datetime``.
+
+        Accepts ``datetime`` objects, ISO-8601 strings (with or without
+        a trailing ``Z``), and returns ``None`` for unparseable values.
+        """
         if ts is None:
             return None
         if isinstance(ts, datetime):
@@ -703,6 +759,7 @@ class PostmortemGenerator:
             return None
 
     def _empty_report(self, session_id: str) -> PostmortemReport:
+        """Return a clean "no incident" report when there are no errors."""
         return PostmortemReport(
             incident_id="INC-NONE", title="No incident detected",
             severity=Severity.SEV4,
