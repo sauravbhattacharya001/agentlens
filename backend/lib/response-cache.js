@@ -119,11 +119,33 @@ function createCache(options) {
    * @param {string} prefix
    */
   function invalidatePrefix(prefix) {
-    for (var key of store.keys()) {
+    for (var key of Array.from(store.keys())) {
       if (key.indexOf(prefix) === 0) {
         store.delete(key);
       }
     }
+  }
+
+  /**
+   * Remove all expired entries from the cache.
+   *
+   * Normally TTL is checked lazily on `get()`, which means expired
+   * entries that are never re-requested can accumulate and hold memory
+   * indefinitely.  Call `prune()` periodically (e.g. on a timer or
+   * after invalidation bursts) to reclaim that memory.
+   *
+   * @returns {number} Number of entries removed.
+   */
+  function prune() {
+    var now = Date.now();
+    var removed = 0;
+    for (var entry of Array.from(store.entries())) {
+      if (now > entry[1].expiresAt) {
+        store.delete(entry[0]);
+        removed++;
+      }
+    }
+    return removed;
   }
 
   /**
@@ -151,6 +173,15 @@ function createCache(options) {
     };
   }
 
+  // ── Automatic pruning ─────────────────────────────────────────
+  // Run prune() every 2× the TTL so expired entries don't linger
+  // longer than one extra TTL cycle. The interval is unref'd so it
+  // doesn't prevent process exit.
+  var pruneInterval = setInterval(prune, ttlMs * 2);
+  if (pruneInterval && typeof pruneInterval.unref === "function") {
+    pruneInterval.unref();
+  }
+
   return {
     get: get,
     set: set,
@@ -158,6 +189,7 @@ function createCache(options) {
     invalidate: invalidate,
     invalidatePrefix: invalidatePrefix,
     invalidateAll: invalidateAll,
+    prune: prune,
     stats: stats,
     get size() { return store.size; },
   };
