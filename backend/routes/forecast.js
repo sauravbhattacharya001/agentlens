@@ -2,8 +2,19 @@ const express = require("express");
 const { getDb } = require("../db");
 const { wrapRoute, parseDays, daysAgoCutoff } = require("../lib/request-helpers");
 const { loadPricingMap, computeCost } = require("../lib/pricing");
+const { createCache, cacheMiddleware } = require("../lib/response-cache");
 
 const router = express.Router();
+
+// ── Response cache for forecast endpoints ───────────────────────────
+// Forecast queries aggregate across all events — moderately expensive.
+// A 20-second TTL keeps data fresh while avoiding redundant recomputation
+// on rapid dashboard refreshes. Disabled in test environment.
+const forecastCache = createCache({ ttlMs: 20000, maxEntries: 50 });
+const isTest = process.env.NODE_ENV === "test";
+const forecastCacheMw = isTest
+  ? function (_req, _res, next) { next(); }
+  : cacheMiddleware(forecastCache);
 
 // ── Helpers ─────────────────────────────────────────────────────
 
@@ -226,7 +237,7 @@ function round(val, decimals) {
  * @query {string} [method=auto]      - Forecast method: "linear", "ema", "average", "auto"
  * @returns {object} Forecast with daily predictions, summary, trend
  */
-router.get("/", wrapRoute("forecast usage", (req, res) => {
+router.get("/", forecastCacheMw, wrapRoute("forecast usage", (req, res) => {
   const db = getDb();
   const days = parseDays(req.query.days);
   const forecastDays = parseForecastDays(req.query.forecastDays);
@@ -407,7 +418,7 @@ router.get("/", wrapRoute("forecast usage", (req, res) => {
  * @query {string} [agent]       - Filter by agent name
  * @returns {object} Budget alert with severity and projection
  */
-router.get("/budget", wrapRoute("forecast budget check", (req, res) => {
+router.get("/budget", forecastCacheMw, wrapRoute("forecast budget check", (req, res) => {
   const db = getDb();
   const budget = parseFloat(req.query.budget);
   if (!Number.isFinite(budget) || budget <= 0) {
@@ -486,7 +497,7 @@ router.get("/budget", wrapRoute("forecast budget check", (req, res) => {
  * @query {string} [agent]   - Optional agent filter
  * @returns {object} Spending summary
  */
-router.get("/spending-summary", wrapRoute("forecast spending summary", (req, res) => {
+router.get("/spending-summary", forecastCacheMw, wrapRoute("forecast spending summary", (req, res) => {
   const db = getDb();
   const days = parseDays(req.query.days);
   const agent = req.query.agent || null;
@@ -594,3 +605,4 @@ router._testExports = {
 };
 
 module.exports = router;
+module.exports.forecastCache = forecastCache;
