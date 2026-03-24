@@ -41,6 +41,7 @@ Usage:
     agentlens-cli leaderboard [--sort efficiency|speed|reliability|cost|volume] [--days N] [--limit N] [--min-sessions N] [--order asc|desc] [--json] [--endpoint URL] [--api-key KEY]
     agentlens-cli gantt <session_id> [--output FILE] [--open] [--format html|json|ascii] [--endpoint URL] [--api-key KEY]
     agentlens-cli audit [ENTRY_ID] [--agent NAME] [--action TYPE] [--severity LEVEL] [--model MODEL] [--session ID] [--since HOURS] [--limit N] [--format table|csv|json] [--output FILE] [--stats] [--no-color] [--endpoint URL] [--api-key KEY]
+    agentlens-cli trends [--period day|week|month] [--metric METRIC|all] [--agent NAME] [--limit N] [--json] [--endpoint URL] [--api-key KEY]
     agentlens-cli status [--endpoint URL] [--api-key KEY]
 
 Environment variables:
@@ -68,6 +69,7 @@ from agentlens.cli_alert import cmd_alert, register_alert_parser  # alert manage
 from agentlens.cli_forecast import cmd_forecast  # cost/usage forecasting
 from agentlens.cli_gantt import cmd_gantt  # interactive Gantt chart
 from agentlens.cli_audit import cmd_audit, register_audit_parser  # audit trail
+from agentlens.cli_trends import cmd_trends  # period-over-period trends
 
 
 def _get_client(args: argparse.Namespace) -> tuple[httpx.Client, str]:
@@ -1419,6 +1421,14 @@ def main() -> None:
     p.add_argument("--open", action="store_true", help="Open HTML output in browser")
     p.add_argument("--format", choices=["html", "json", "ascii"], default="html", help="Output format (default: html)")
 
+    # trends
+    p = sub.add_parser("trends", help="Show metric trends with sparklines and period-over-period comparison")
+    p.add_argument("--period", choices=["day", "week", "month"], default="week", help="Comparison period (default: week)")
+    p.add_argument("--metric", choices=["sessions", "cost", "tokens", "events", "errors", "error_rate", "avg_cost", "avg_tokens", "all"], default="all", help="Metric to show (default: all)")
+    p.add_argument("--agent", help="Filter by agent name (substring match)")
+    p.add_argument("--limit", type=int, default=500, help="Max sessions to fetch (default: 500)")
+    p.add_argument("--json", dest="json_output", action="store_true", help="Output as JSON")
+
     # status
     sub.add_parser("status", help="Check backend connectivity")
 
@@ -1519,6 +1529,7 @@ def main() -> None:
         "gantt": cmd_gantt,
         "audit": cmd_audit,
         "leaderboard": lambda args: __import__("agentlens.cli_leaderboard", fromlist=["cmd_leaderboard"]).cmd_leaderboard(args),
+        "trends": cmd_trends,
         "status": cmd_status,
     }
     commands[args.command](args)
