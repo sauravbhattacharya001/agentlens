@@ -7,6 +7,28 @@ const { getDb } = require("../db");
 const { fireWebhooks } = require("./webhooks");
 const { wrapRoute, parseLimit } = require("../lib/request-helpers");
 
+// Validate rule/alert ID format: alphanumeric + hyphens, max 64 chars
+const ID_RE = /^[a-zA-Z0-9][a-zA-Z0-9-]{0,63}$/;
+
+function isValidId(id) {
+  return typeof id === "string" && ID_RE.test(id);
+}
+
+// Middleware: reject invalid rule IDs early
+router.param("ruleId", (req, res, next, val) => {
+  if (!isValidId(val)) {
+    return res.status(400).json({ error: "Invalid rule ID format" });
+  }
+  next();
+});
+
+router.param("alertId", (req, res, next, val) => {
+  if (!isValidId(val)) {
+    return res.status(400).json({ error: "Invalid alert ID format" });
+  }
+  next();
+});
+
 // ── Schema initialisation ───────────────────────────────────────────
 
 function ensureAlertsTable() {

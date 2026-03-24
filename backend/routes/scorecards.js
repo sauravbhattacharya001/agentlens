@@ -1,5 +1,6 @@
 const express = require("express");
 const { getDb } = require("../db");
+const { sanitizeString } = require("../lib/validation");
 const { wrapRoute, parseDays, daysAgoCutoff } = require("../lib/request-helpers");
 
 const router = express.Router();
@@ -152,7 +153,10 @@ router.get("/", wrapRoute("list scorecards", async (req, res) => {
 
 router.get("/:agent", wrapRoute("get agent scorecard", async (req, res) => {
   const db = getDb();
-  const agent = req.params.agent;
+  const agent = sanitizeString(req.params.agent, 256);
+  if (!agent) {
+    return res.status(400).json({ error: "Invalid agent name" });
+  }
   const days = parseDays(req.query.days);
   const cutoff = daysAgoCutoff(days);
 
