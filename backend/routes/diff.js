@@ -5,6 +5,13 @@ const { wrapRoute } = require("../lib/request-helpers");
 
 const router = express.Router();
 
+// Cap events per session in diff to prevent DoS via O(n*m) LCS algorithm.
+// Two sessions at MAX_DIFF_EVENTS each produce at most a 2500*2500 = 6.25M
+// cell DP table, which is manageable. Without this cap, an attacker could
+// trigger multi-GB allocations by diffing sessions with tens of thousands
+// of events.
+const MAX_DIFF_EVENTS = 2500;
+
 /**
  * Parse raw event rows into objects with parsed JSON fields.
  */
@@ -31,8 +38,8 @@ function loadSession(db, sessionId) {
   const session = db.prepare("SELECT * FROM sessions WHERE session_id = ?").get(sessionId);
   if (!session) return null;
   const events = db.prepare(
-    "SELECT * FROM events WHERE session_id = ? ORDER BY timestamp ASC"
-  ).all(sessionId);
+    "SELECT * FROM events WHERE session_id = ? ORDER BY timestamp ASC LIMIT ?"
+  ).all(sessionId, MAX_DIFF_EVENTS);
   return {
     ...session,
     events: events.map(parseEventRow),
@@ -264,6 +271,7 @@ router.get(
         candidate_duration: p.candidate ? p.candidate.duration_ms : null,
       })),
       similarity,
+      truncated: bEvents.length >= MAX_DIFF_EVENTS || cEvents.length >= MAX_DIFF_EVENTS,
     });
   })
 );
