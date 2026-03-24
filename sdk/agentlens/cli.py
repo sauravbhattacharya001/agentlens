@@ -39,6 +39,7 @@ Usage:
     agentlens-cli alert stats [--period day|week|month] [--format table|json]
     agentlens-cli forecast [--days N] [--metric cost|tokens|sessions] [--model MODEL] [--format table|json|chart] [--output FILE] [--endpoint URL] [--api-key KEY]
     agentlens-cli leaderboard [--sort efficiency|speed|reliability|cost|volume] [--days N] [--limit N] [--min-sessions N] [--order asc|desc] [--json] [--endpoint URL] [--api-key KEY]
+    agentlens-cli gantt <session_id> [--output FILE] [--open] [--format html|json|ascii] [--endpoint URL] [--api-key KEY]
     agentlens-cli status [--endpoint URL] [--api-key KEY]
 
 Environment variables:
@@ -64,6 +65,7 @@ from agentlens.cli_budget import cmd_budget  # cost budget management
 from agentlens.cli_snapshot import cmd_snapshot  # point-in-time system snapshots
 from agentlens.cli_alert import cmd_alert, register_alert_parser  # alert management
 from agentlens.cli_forecast import cmd_forecast  # cost/usage forecasting
+from agentlens.cli_gantt import cmd_gantt  # interactive Gantt chart
 
 
 def _get_client(args: argparse.Namespace) -> tuple[httpx.Client, str]:
@@ -1408,6 +1410,13 @@ def main() -> None:
     p.add_argument("--order", choices=["asc", "desc"], default=None, help="Sort order (default depends on metric)")
     p.add_argument("--json", dest="json_output", action="store_true", help="Output as JSON")
 
+    # gantt
+    p = sub.add_parser("gantt", help="Generate interactive HTML Gantt chart for a session")
+    p.add_argument("session_id", help="Session ID to visualise")
+    p.add_argument("--output", "-o", help="Write output to file")
+    p.add_argument("--open", action="store_true", help="Open HTML output in browser")
+    p.add_argument("--format", choices=["html", "json", "ascii"], default="html", help="Output format (default: html)")
+
     # status
     sub.add_parser("status", help="Check backend connectivity")
 
@@ -1502,6 +1511,7 @@ def main() -> None:
         "snapshot": cmd_snapshot,
         "alert": lambda args: cmd_alert(_get_client(args)[0], args),
         "forecast": cmd_forecast,
+        "gantt": cmd_gantt,
         "leaderboard": lambda args: __import__("agentlens.cli_leaderboard", fromlist=["cmd_leaderboard"]).cmd_leaderboard(args),
         "status": cmd_status,
     }
