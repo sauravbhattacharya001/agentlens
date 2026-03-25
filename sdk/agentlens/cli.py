@@ -43,6 +43,7 @@ Usage:
     agentlens-cli audit [ENTRY_ID] [--agent NAME] [--action TYPE] [--severity LEVEL] [--model MODEL] [--session ID] [--since HOURS] [--limit N] [--format table|csv|json] [--output FILE] [--stats] [--no-color] [--endpoint URL] [--api-key KEY]
     agentlens-cli trends [--period day|week|month] [--metric METRIC|all] [--agent NAME] [--limit N] [--json] [--endpoint URL] [--api-key KEY]
     agentlens-cli sla [--policy production|development] [--latency MS] [--error-rate PCT] [--token-budget N] [--slo PCT] [--agent NAME] [--limit N] [--verbose] [--json] [--endpoint URL] [--api-key KEY]
+    agentlens-cli diff <session_a> <session_b> [--label-a LABEL] [--label-b LABEL] [--no-color] [--json] [--endpoint URL] [--api-key KEY]
     agentlens-cli status [--endpoint URL] [--api-key KEY]
 
 Environment variables:
@@ -73,6 +74,7 @@ from agentlens.cli_gantt import cmd_gantt  # interactive Gantt chart
 from agentlens.cli_audit import cmd_audit, register_audit_parser  # audit trail
 from agentlens.cli_trends import cmd_trends  # period-over-period trends
 from agentlens.cli_sla import cmd_sla  # SLA compliance evaluation
+from agentlens.cli_diff import cmd_diff  # side-by-side session diff
 
 
 def _print_table(rows: list[dict], columns: list[str], *, max_width: int = 40) -> None:
@@ -1423,6 +1425,15 @@ def main() -> None:
     p.add_argument("--verbose", "-v", action="store_true", help="Show violating session IDs and stats")
     p.add_argument("--json", dest="json_output", action="store_true", help="Output as JSON")
 
+    # diff
+    p = sub.add_parser("diff", help="Side-by-side comparison of two sessions with metric deltas")
+    p.add_argument("session_a", help="First session ID")
+    p.add_argument("session_b", help="Second session ID")
+    p.add_argument("--label-a", dest="label_a", help="Label for session A (default: truncated ID)")
+    p.add_argument("--label-b", dest="label_b", help="Label for session B (default: truncated ID)")
+    p.add_argument("--no-color", action="store_true", help="Disable colored output")
+    p.add_argument("--json", dest="json_output", action="store_true", help="Output as JSON")
+
     # status
     sub.add_parser("status", help="Check backend connectivity")
 
@@ -1525,6 +1536,7 @@ def main() -> None:
         "leaderboard": lambda args: __import__("agentlens.cli_leaderboard", fromlist=["cmd_leaderboard"]).cmd_leaderboard(args),
         "trends": cmd_trends,
         "sla": cmd_sla,
+        "diff": cmd_diff,
         "status": cmd_status,
     }
     commands[args.command](args)
