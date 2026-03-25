@@ -12,21 +12,7 @@ from typing import Any
 
 import httpx
 
-
-def _get_client(args: argparse.Namespace) -> httpx.Client:
-    endpoint = (
-        getattr(args, "endpoint", None)
-        or os.environ.get("AGENTLENS_ENDPOINT", "http://localhost:3000")
-    ).rstrip("/")
-    api_key = (
-        getattr(args, "api_key", None)
-        or os.environ.get("AGENTLENS_API_KEY", "default")
-    )
-    return httpx.Client(
-        base_url=endpoint,
-        headers={"x-api-key": api_key},
-        timeout=15.0,
-    )
+from agentlens.cli_common import get_client_only as _get_client
 
 
 def _sparkline(values: list[float]) -> str:

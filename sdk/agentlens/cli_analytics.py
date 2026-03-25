@@ -13,30 +13,7 @@ from typing import Any
 
 import httpx
 
-
-def _get_client(args: argparse.Namespace) -> tuple[httpx.Client, str]:
-    """Shared client factory — duplicated from cli.py to keep this module
-    importable independently.  A future refactor should move this to a
-    shared ``cli_common`` module."""
-    import os
-    endpoint = (
-        getattr(args, "endpoint", None)
-        or os.environ.get("AGENTLENS_ENDPOINT", "http://localhost:3000")
-    ).rstrip("/")
-    api_key = (
-        getattr(args, "api_key", None)
-        or os.environ.get("AGENTLENS_API_KEY", "default")
-    )
-    client = httpx.Client(
-        base_url=endpoint,
-        headers={"x-api-key": api_key},
-        timeout=15.0,
-    )
-    return client, endpoint
-
-
-def _print_json(data: Any) -> None:
-    print(json.dumps(data, indent=2, default=str))
+from agentlens.cli_common import get_client as _get_client, print_json as _print_json
 
 
 # ── cmd_report ───────────────────────────────────────────────────────

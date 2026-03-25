@@ -60,6 +60,7 @@ from typing import Any
 import httpx
 
 from agentlens.cli_analytics import cmd_report, cmd_outlier  # extracted
+from agentlens.cli_common import get_client as _get_client, print_json as _print_json  # shared helpers
 from agentlens.cli_digest import cmd_digest  # periodic digest summaries
 from agentlens.cli_funnel import cmd_funnel  # workflow funnel analysis
 from agentlens.cli_depmap import cmd_depmap  # dependency map visualization
@@ -70,27 +71,6 @@ from agentlens.cli_forecast import cmd_forecast  # cost/usage forecasting
 from agentlens.cli_gantt import cmd_gantt  # interactive Gantt chart
 from agentlens.cli_audit import cmd_audit, register_audit_parser  # audit trail
 from agentlens.cli_trends import cmd_trends  # period-over-period trends
-
-
-def _get_client(args: argparse.Namespace) -> tuple[httpx.Client, str]:
-    endpoint = (
-        getattr(args, "endpoint", None)
-        or os.environ.get("AGENTLENS_ENDPOINT", "http://localhost:3000")
-    ).rstrip("/")
-    api_key = (
-        getattr(args, "api_key", None)
-        or os.environ.get("AGENTLENS_API_KEY", "default")
-    )
-    client = httpx.Client(
-        base_url=endpoint,
-        headers={"x-api-key": api_key},
-        timeout=15.0,
-    )
-    return client, endpoint
-
-
-def _print_json(data: Any) -> None:
-    print(json.dumps(data, indent=2, default=str))
 
 
 def _print_table(rows: list[dict], columns: list[str], *, max_width: int = 40) -> None:

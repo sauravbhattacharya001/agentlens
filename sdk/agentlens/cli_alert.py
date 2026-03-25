@@ -22,6 +22,8 @@ import sys
 from datetime import datetime, timezone, timedelta
 from typing import Any
 
+from agentlens.cli_common import print_json as _print_json
+
 
 # ── Severity helpers ───────────────────────────────────────────────────
 
@@ -40,9 +42,6 @@ def _colorize(text: str, severity: str) -> str:
 
 
 # ── Table / JSON output helpers ────────────────────────────────────────
-
-def _print_json(data: Any) -> None:
-    print(json.dumps(data, indent=2, default=str))
 
 
 def _print_table(rows: list[dict], columns: list[str], *, max_width: int = 50) -> None:

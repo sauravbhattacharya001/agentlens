@@ -220,9 +220,9 @@ def _render_html(bars: list[dict], session_id: str) -> str:
 
 def cmd_gantt(args: argparse.Namespace) -> None:
     """Execute the gantt command."""
-    from agentlens.cli import _get_client
+    from agentlens.cli_common import get_client
 
-    client, _ = _get_client(args)
+    client, _ = get_client(args)
     session_id: str = args.session_id
     fmt: str = getattr(args, "format", "html")
     output: str | None = getattr(args, "output", None)

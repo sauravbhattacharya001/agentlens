@@ -164,11 +164,18 @@ def _summary_stats(entries: list[dict]) -> str:
 
 def cmd_audit(args: Any) -> None:
     """Fetch and display the agent action audit trail."""
-    from agentlens.cli import _get_client
-
-    base_url, headers = _get_client(args)
-
+    import os
     import urllib.request
+
+    endpoint = (
+        getattr(args, "endpoint", None)
+        or os.environ.get("AGENTLENS_ENDPOINT", "http://localhost:3000")
+    ).rstrip("/")
+    api_key = (
+        getattr(args, "api_key", None)
+        or os.environ.get("AGENTLENS_API_KEY", "default")
+    )
+    headers = {"x-api-key": api_key}
 
     params = []
     if getattr(args, "agent", None):
@@ -187,7 +194,7 @@ def cmd_audit(args: Any) -> None:
         params.append(f"limit={args.limit}")
 
     qs = ("?" + "&".join(params)) if params else ""
-    url = f"{base_url}/audit{qs}"
+    url = f"{endpoint}/audit{qs}"
 
     req = urllib.request.Request(url, headers=headers)
     with urllib.request.urlopen(req, timeout=30) as resp:

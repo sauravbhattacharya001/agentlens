@@ -23,29 +23,16 @@ from typing import Any
 
 import httpx
 
+from agentlens.cli_common import get_client_only as _get_client
+
 DEFAULT_STAGES = ["plan", "tool_call", "llm_call", "result", "error"]
-
-
-def _get_client(args: argparse.Namespace) -> httpx.Client:
-    endpoint = (
-        getattr(args, "endpoint", None)
-        or os.environ.get("AGENTLENS_ENDPOINT", "http://localhost:3000")
-    ).rstrip("/")
-    api_key = (
-        getattr(args, "api_key", None)
-        or os.environ.get("AGENTLENS_API_KEY", "default")
-    )
-    return httpx.Client(
-        base_url=endpoint,
-        headers={"x-api-key": api_key},
-        timeout=15.0,
-    )
 
 
 # ── Data helpers ─────────────────────────────────────────────────────────
 
 
 def _fetch_sessions(client: httpx.Client, limit: int) -> list[dict]:
+    """Fetch sessions — uses /sessions (not /api/sessions) for funnel data."""
     resp = client.get("/sessions", params={"limit": limit})
     resp.raise_for_status()
     data = resp.json()

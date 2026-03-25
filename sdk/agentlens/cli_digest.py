@@ -21,29 +21,7 @@ from typing import Any
 
 import httpx
 
-
-def _get_client(args: argparse.Namespace) -> tuple[httpx.Client, str]:
-    endpoint = (
-        getattr(args, "endpoint", None)
-        or os.environ.get("AGENTLENS_ENDPOINT", "http://localhost:3000")
-    ).rstrip("/")
-    api_key = (
-        getattr(args, "api_key", None)
-        or os.environ.get("AGENTLENS_API_KEY", "default")
-    )
-    client = httpx.Client(
-        base_url=endpoint,
-        headers={"x-api-key": api_key},
-        timeout=15.0,
-    )
-    return client, endpoint
-
-
-def _fetch_sessions(client: httpx.Client, limit: int = 200) -> list[dict]:
-    resp = client.get("/api/sessions", params={"limit": limit})
-    resp.raise_for_status()
-    data = resp.json()
-    return data if isinstance(data, list) else data.get("sessions", [])
+from agentlens.cli_common import get_client as _get_client, fetch_sessions as _fetch_sessions
 
 
 def _fetch_alerts(client: httpx.Client) -> list[dict]:
