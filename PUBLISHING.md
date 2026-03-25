@@ -61,7 +61,23 @@ Update the version in `backend/package.json` before releasing:
 cd backend && npm version patch  # or minor/major
 ```
 
-## Release Checklist
+## Automated Releases with Release Please
+
+This repo uses [Release Please](https://github.com/googleapis/release-please) to automate versioning and releases.
+
+### How it works
+
+1. **Use conventional commits** on `main`:
+   - `feat: ...` → minor version bump
+   - `fix: ...` → patch version bump
+   - `feat!: ...` or `BREAKING CHANGE:` → major version bump
+2. **Release Please** automatically opens a "Release PR" that:
+   - Bumps versions in `sdk/pyproject.toml`, `sdk/agentlens/__init__.py`, and `backend/package.json`
+   - Updates `CHANGELOG.md` from commit messages
+3. **Merge the Release PR** → a GitHub Release is created automatically
+4. The release triggers both `publish-pypi.yml` and `publish-npm.yml`
+
+### Manual Release Checklist (if not using Release Please)
 
 1. Update version numbers (see above)
 2. Update `CHANGELOG.md` with new entries
