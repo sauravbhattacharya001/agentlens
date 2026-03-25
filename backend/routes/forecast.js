@@ -5,6 +5,46 @@ const { loadPricingMap, computeCost } = require("../lib/pricing");
 
 const router = express.Router();
 
+// ── Cached prepared statements for forecast queries ─────────────
+// Pre-compile all 4 filter variants (none, agent-only, model-only, both)
+// once per process lifetime, avoiding repeated SQL compilation on every
+// request — same pattern used by analytics.js getPerfStatements().
+let _forecastStmts = null;
+
+function getForecastStatements() {
+  if (_forecastStmts) return _forecastStmts;
+  const db = getDb();
+
+  const baseSelect = `
+    SELECT
+      DATE(e.timestamp) AS date,
+      SUM(e.tokens_in) AS tokens_in,
+      SUM(e.tokens_out) AS tokens_out,
+      SUM(e.tokens_in + e.tokens_out) AS tokens_total,
+      COUNT(*) AS event_count,
+      COUNT(DISTINCT e.session_id) AS session_count,
+      e.model
+    FROM events e
+    JOIN sessions s ON e.session_id = s.session_id`;
+  const baseWhere = "e.timestamp >= datetime('now', '-' || ? || ' days')";
+  const groupOrder = " GROUP BY DATE(e.timestamp), e.model ORDER BY date ASC";
+
+  _forecastStmts = {
+    dailyAgg: {
+      none:  db.prepare(`${baseSelect} WHERE ${baseWhere}${groupOrder}`),
+      agent: db.prepare(`${baseSelect} WHERE ${baseWhere} AND s.agent_name = ?${groupOrder}`),
+      model: db.prepare(`${baseSelect} WHERE ${baseWhere} AND LOWER(e.model) = LOWER(?)${groupOrder}`),
+      both:  db.prepare(`${baseSelect} WHERE ${baseWhere} AND s.agent_name = ? AND LOWER(e.model) = LOWER(?)${groupOrder}`),
+    },
+    modelBreakdown: {
+      none:  db.prepare(`SELECT e.model, SUM(e.tokens_in) AS tokens_in, SUM(e.tokens_out) AS tokens_out, COUNT(*) AS event_count, COUNT(DISTINCT e.session_id) AS session_count FROM events e JOIN sessions s ON e.session_id = s.session_id WHERE e.timestamp >= datetime('now', '-' || ? || ' days') GROUP BY e.model ORDER BY tokens_in + tokens_out DESC`),
+      agent: db.prepare(`SELECT e.model, SUM(e.tokens_in) AS tokens_in, SUM(e.tokens_out) AS tokens_out, COUNT(*) AS event_count, COUNT(DISTINCT e.session_id) AS session_count FROM events e JOIN sessions s ON e.session_id = s.session_id WHERE e.timestamp >= datetime('now', '-' || ? || ' days') AND s.agent_name = ? GROUP BY e.model ORDER BY tokens_in + tokens_out DESC`),
+    },
+  };
+
+  return _forecastStmts;
+}
+
 // ── Helpers ─────────────────────────────────────────────────────
 
 // parseDays now imported from request-helpers
@@ -28,6 +68,7 @@ function estimateCost(event, pricingMap) {
 
 /**
  * Fetch daily aggregated usage from the events table.
+ * Uses pre-compiled prepared statements to avoid SQL recompilation per request.
  *
  * @param {object} db    - Database connection
  * @param {number} days  - Lookback window in days
@@ -36,33 +77,15 @@ function estimateCost(event, pricingMap) {
  * @returns {Array<{date,tokens_in,tokens_out,tokens_total,event_count,session_count,cost}>}
  */
 function fetchDailyAggregates(db, days, agent, model, pricingMap) {
-  let query = `
-    SELECT
-      DATE(e.timestamp) AS date,
-      SUM(e.tokens_in) AS tokens_in,
-      SUM(e.tokens_out) AS tokens_out,
-      SUM(e.tokens_in + e.tokens_out) AS tokens_total,
-      COUNT(*) AS event_count,
-      COUNT(DISTINCT e.session_id) AS session_count,
-      e.model
-    FROM events e
-    JOIN sessions s ON e.session_id = s.session_id
-    WHERE e.timestamp >= datetime('now', '-' || ? || ' days')
-  `;
+  const stmts = getForecastStatements();
+  const variant = agent && model ? "both" : agent ? "agent" : model ? "model" : "none";
+  const stmt = stmts.dailyAgg[variant];
+
   const params = [days];
+  if (agent) params.push(agent);
+  if (model) params.push(model);
 
-  if (agent) {
-    query += " AND s.agent_name = ?";
-    params.push(agent);
-  }
-  if (model) {
-    query += " AND LOWER(e.model) = LOWER(?)";
-    params.push(model);
-  }
-
-  query += " GROUP BY DATE(e.timestamp), e.model ORDER BY date ASC";
-
-  const rows = db.prepare(query).all(...params);
+  const rows = stmt.all(...params);
 
   // Aggregate per day (across models), computing cost per row
   const dailyMap = {};
@@ -493,26 +516,12 @@ router.get("/spending-summary", wrapRoute("forecast spending summary", (req, res
 
   const pricingMap = loadPricingMap();
 
-  // Fetch per-model daily data for model breakdown
-  let query = `
-    SELECT
-      e.model,
-      SUM(e.tokens_in) AS tokens_in,
-      SUM(e.tokens_out) AS tokens_out,
-      COUNT(*) AS event_count,
-      COUNT(DISTINCT e.session_id) AS session_count
-    FROM events e
-    JOIN sessions s ON e.session_id = s.session_id
-    WHERE e.timestamp >= datetime('now', '-' || ? || ' days')
-  `;
-  const params = [days];
-  if (agent) {
-    query += " AND s.agent_name = ?";
-    params.push(agent);
-  }
-  query += " GROUP BY e.model ORDER BY tokens_in + tokens_out DESC";
-
-  const modelRows = db.prepare(query).all(...params);
+  // Fetch per-model daily data for model breakdown (using cached statements)
+  const stmts = getForecastStatements();
+  const variant = agent ? "agent" : "none";
+  const modelStmt = stmts.modelBreakdown[variant];
+  const params = agent ? [days, agent] : [days];
+  const modelRows = modelStmt.all(...params);
 
   const modelBreakdown = {};
   let totalCost = 0, totalTokensIn = 0, totalTokensOut = 0, totalEvents = 0;
