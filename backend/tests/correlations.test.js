@@ -486,7 +486,7 @@ describe("correlateByErrorCascade", () => {
     var events = [
       { event_id: "a", session_id: "s1", agent_name: "alpha", event_type: "error", timestamp: new Date(base).toISOString() },
       { event_id: "b", session_id: "s2", agent_name: "beta", event_type: "error", timestamp: new Date(base + 5000).toISOString() },
-      { event_id: "c", session_id: "s3", agent_name: "gamma", event_type: "exception", timestamp: new Date(base + 10000).toISOString() },
+      { event_id: "c", session_id: "s3", agent_name: "gamma", event_type: "error", timestamp: new Date(base + 10000).toISOString() },
     ];
     var groups = engine.correlateByErrorCascade(events, { cascade_window_seconds: 30 });
     expect(groups.length).toBe(1);

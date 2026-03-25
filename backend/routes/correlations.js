@@ -111,6 +111,11 @@ function runCorrelation(rule, lookbackMinutes) {
 
   if (events.length === 0) return [];
 
+  // Pre-compute timestamps once to avoid repeated Date parsing in hot loops
+  for (var p = 0; p < events.length; p++) {
+    events[p]._ts = new Date(events[p].timestamp).getTime();
+  }
+
   switch (rule.match_type) {
     case "metadata_key":   return correlateByMetadata(events, config);
     case "time_window":    return correlateByTimeWindow(events, config);
@@ -174,16 +179,20 @@ function correlateByTimeWindow(events, config) {
   }
   if (filtered.length < minEvents) return [];
 
+  // Ensure _ts is populated
+  for (var t = 0; t < filtered.length; t++) {
+    if (filtered[t]._ts === undefined) filtered[t]._ts = new Date(filtered[t].timestamp).getTime();
+  }
+
   var groups = [];
   var i = 0;
   while (i < filtered.length) {
-    var windowStart = new Date(filtered[i].timestamp).getTime();
+    var windowStart = filtered[i]._ts;
     var windowEnd = windowStart + windowMs;
     var group = [filtered[i]];
     var j = i + 1;
     while (j < filtered.length) {
-      var ts = new Date(filtered[j].timestamp).getTime();
-      if (ts <= windowEnd) { group.push(filtered[j]); j++; }
+      if (filtered[j]._ts <= windowEnd) { group.push(filtered[j]); j++; }
       else break;
     }
     if (group.length >= minEvents) {
@@ -217,6 +226,7 @@ function correlateByErrorCascade(events, config) {
   var windowMs = (config.cascade_window_seconds || 30) * 1000;
   var errors = [];
   for (var e = 0; e < events.length; e++) {
+    if (events[e]._ts === undefined) events[e]._ts = new Date(events[e].timestamp).getTime();
     if (events[e].event_type === "error" || events[e].event_type === "agent_error" || events[e].event_type === "tool_error") {
       errors.push(events[e]);
     }
@@ -229,13 +239,12 @@ function correlateByErrorCascade(events, config) {
   for (var i = 0; i < errors.length; i++) {
     if (used[errors[i].event_id]) continue;
     var cascade = [errors[i]];
-    var startTs = new Date(errors[i].timestamp).getTime();
+    var startTs = errors[i]._ts;
     var sourceAgent = errors[i].agent_name;
 
     for (var j = i + 1; j < errors.length; j++) {
       if (used[errors[j].event_id]) continue;
-      var ts = new Date(errors[j].timestamp).getTime();
-      if (ts - startTs > windowMs) break;
+      if (errors[j]._ts - startTs > windowMs) break;
       if (errors[j].agent_name !== sourceAgent) {
         cascade.push(errors[j]);
         used[errors[j].event_id] = true;
@@ -261,7 +270,7 @@ function correlateByErrorCascade(events, config) {
         metadata: {
           source_agent: sourceAgent,
           affected_agents: affected,
-          cascade_duration_ms: new Date(cascade[cascade.length - 1].timestamp).getTime() - startTs,
+          cascade_duration_ms: cascade[cascade.length - 1]._ts - startTs,
         },
       });
     }
@@ -269,31 +278,56 @@ function correlateByErrorCascade(events, config) {
   return groups;
 }
 
-/** Find causal chains: output of one event matches input of another. */
+/** Find causal chains: output of one event matches input of another.
+ *  Optimized: build an inverted index from input_data tokens to avoid O(n²) string scans. */
 function correlateByCausalChain(events, config) {
   var maxGapMs = (config.max_gap_seconds || 60) * 1000;
   var matchFields = config.match_fields || ["output_data"];
   var groups = [];
 
+  // Build index: for each event with input_data, map its value to the event
+  // for fast lookup instead of scanning all subsequent events
+  var inputIndex = {}; // input_data string -> [{ evt, idx }]
+  for (var idx = 0; idx < events.length; idx++) {
+    var inputVal = events[idx].input_data;
+    if (inputVal) {
+      if (!inputIndex[inputVal]) inputIndex[inputVal] = [];
+      inputIndex[inputVal].push({ evt: events[idx], idx: idx });
+    }
+  }
+
   for (var i = 0; i < events.length; i++) {
     var chain = [events[i]];
-    var outputData = events[i].output_data || "";
-    if (!outputData) continue;
+    var ts1 = events[i]._ts;
 
-    var ts1 = new Date(events[i].timestamp).getTime();
+    // For each match field, check if any later event's input_data contains this value
+    for (var k = 0; k < matchFields.length; k++) {
+      var val1 = events[i][matchFields[k]] || "";
+      if (!val1) continue;
 
-    for (var j = i + 1; j < events.length; j++) {
-      var ts2 = new Date(events[j].timestamp).getTime();
-      if (ts2 - ts1 > maxGapMs) break;
-      if (events[j].session_id === events[i].session_id) continue;
-
-      var matched = false;
-      for (var k = 0; k < matchFields.length; k++) {
-        var val1 = events[i][matchFields[k]] || "";
-        var val2 = events[j].input_data || "";
-        if (val1 && val2 && val2.indexOf(val1) >= 0) { matched = true; break; }
+      // Fast path: exact match via index
+      var candidates = inputIndex[val1];
+      if (candidates) {
+        for (var c = 0; c < candidates.length; c++) {
+          var cand = candidates[c];
+          if (cand.idx <= i) continue;
+          if (cand.evt._ts - ts1 > maxGapMs) continue;
+          if (cand.evt.session_id === events[i].session_id) continue;
+          chain.push(cand.evt);
+        }
       }
-      if (matched) chain.push(events[j]);
+
+      // Slow path for substring matches (only if no exact matches found)
+      if (chain.length < 2) {
+        for (var j = i + 1; j < events.length; j++) {
+          if (events[j]._ts - ts1 > maxGapMs) break;
+          if (events[j].session_id === events[i].session_id) continue;
+          var val2 = events[j].input_data || "";
+          if (val2 && val2 !== val1 && val2.indexOf(val1) >= 0) {
+            chain.push(events[j]);
+          }
+        }
+      }
     }
 
     if (chain.length >= 2) {
