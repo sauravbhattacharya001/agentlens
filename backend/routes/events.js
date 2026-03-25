@@ -77,6 +77,10 @@ router.post("/", wrapRoute("ingest events", (req, res) => {
     let processed = 0;
     let skipped = 0;
 
+    // Accumulate token deltas per session to batch-update at the end,
+    // avoiding one UPDATE per event (N UPDATEs → 1 per session).
+    const sessionTokenDeltas = Object.create(null);
+
     for (const event of eventList) {
       const sessionId = validateSessionId(event.session_id);
       if (!sessionId) {
@@ -152,11 +156,24 @@ router.post("/", wrapRoute("ingest events", (req, res) => {
         durationMs
       );
 
-      // Update session token counts
-      updateSession.run(tokensIn, tokensOut, sessionId);
+      // Accumulate token counts per session instead of updating each time
+      if (tokensIn > 0 || tokensOut > 0) {
+        if (!sessionTokenDeltas[sessionId]) {
+          sessionTokenDeltas[sessionId] = { tokensIn: 0, tokensOut: 0 };
+        }
+        sessionTokenDeltas[sessionId].tokensIn += tokensIn;
+        sessionTokenDeltas[sessionId].tokensOut += tokensOut;
+      }
 
       processed++;
     }
+
+    // Batch-update session token counts: one UPDATE per session instead of per event
+    for (const sid in sessionTokenDeltas) {
+      const delta = sessionTokenDeltas[sid];
+      updateSession.run(delta.tokensIn, delta.tokensOut, sid);
+    }
+
     return { processed, skipped };
   });
 
