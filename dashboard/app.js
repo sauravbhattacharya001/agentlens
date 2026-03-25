@@ -2215,7 +2215,11 @@ function escHtml(str) {
   if (!str) return "";
   const el = document.createElement("span");
   el.textContent = String(str);
-  return el.innerHTML;
+  // innerHTML escapes <, >, &, " but NOT single quotes.
+  // We must also escape ' because escHtml output is interpolated into
+  // onclick="fn('${escHtml(...)}')" attribute contexts where a single
+  // quote breaks out of the JS string literal, enabling XSS.
+  return el.innerHTML.replace(/'/g, "&#39;");
 }
 
 function formatTime(iso) {
