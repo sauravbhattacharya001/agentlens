@@ -68,8 +68,37 @@ class Transport:
             f"batch_size={self.batch_size}, buffer={len(self._buffer)})"
         )
 
+    def send_event(self, event: dict[str, Any]) -> None:
+        """Add a single event to the buffer. Flushes when batch_size is reached.
+
+        This is more efficient than ``send_events([event])`` as it avoids
+        creating and unpacking a single-element list.
+        """
+        batch_to_send: list[dict[str, Any]] | None = None
+        with self._lock:
+            self._buffer.append(event)
+            if len(self._buffer) > _MAX_BUFFER_SIZE:
+                dropped = len(self._buffer) - _MAX_BUFFER_SIZE
+                self._buffer = self._buffer[dropped:]
+                logger.warning(
+                    "Event buffer exceeded %d entries; dropped %d oldest events",
+                    _MAX_BUFFER_SIZE,
+                    dropped,
+                )
+            if len(self._buffer) >= self.batch_size:
+                batch_to_send = self._drain_buffer()
+
+        if batch_to_send is not None:
+            self._send_batch(batch_to_send)
+
     def send_events(self, events: list[dict[str, Any]]) -> None:
         """Add events to the buffer. Flushes when batch_size is reached."""
+        if not events:
+            return
+        # Fast path for single-event lists (common case from tracker)
+        if len(events) == 1:
+            self.send_event(events[0])
+            return
         batch_to_send: list[dict[str, Any]] | None = None
         with self._lock:
             self._buffer.extend(events)
@@ -96,9 +125,13 @@ class Transport:
             self._send_batch(batch)
 
     def _drain_buffer(self) -> list[dict[str, Any]]:
-        """Drain and return buffer contents.  Must be called with lock held."""
-        events = self._buffer[:]
-        self._buffer.clear()
+        """Drain and return buffer contents.  Must be called with lock held.
+
+        Uses reference swap instead of copy+clear for O(1) drain regardless
+        of buffer size.
+        """
+        events = self._buffer
+        self._buffer = []
         return events
 
     def _send_batch(self, events: list[dict[str, Any]]) -> None:
