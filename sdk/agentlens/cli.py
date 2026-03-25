@@ -42,6 +42,7 @@ Usage:
     agentlens-cli gantt <session_id> [--output FILE] [--open] [--format html|json|ascii] [--endpoint URL] [--api-key KEY]
     agentlens-cli audit [ENTRY_ID] [--agent NAME] [--action TYPE] [--severity LEVEL] [--model MODEL] [--session ID] [--since HOURS] [--limit N] [--format table|csv|json] [--output FILE] [--stats] [--no-color] [--endpoint URL] [--api-key KEY]
     agentlens-cli trends [--period day|week|month] [--metric METRIC|all] [--agent NAME] [--limit N] [--json] [--endpoint URL] [--api-key KEY]
+    agentlens-cli sla [--policy production|development] [--latency MS] [--error-rate PCT] [--token-budget N] [--slo PCT] [--agent NAME] [--limit N] [--verbose] [--json] [--endpoint URL] [--api-key KEY]
     agentlens-cli status [--endpoint URL] [--api-key KEY]
 
 Environment variables:
@@ -71,6 +72,7 @@ from agentlens.cli_forecast import cmd_forecast  # cost/usage forecasting
 from agentlens.cli_gantt import cmd_gantt  # interactive Gantt chart
 from agentlens.cli_audit import cmd_audit, register_audit_parser  # audit trail
 from agentlens.cli_trends import cmd_trends  # period-over-period trends
+from agentlens.cli_sla import cmd_sla  # SLA compliance evaluation
 
 
 def _print_table(rows: list[dict], columns: list[str], *, max_width: int = 40) -> None:
@@ -1409,6 +1411,18 @@ def main() -> None:
     p.add_argument("--limit", type=int, default=500, help="Max sessions to fetch (default: 500)")
     p.add_argument("--json", dest="json_output", action="store_true", help="Output as JSON")
 
+    # sla
+    p = sub.add_parser("sla", help="Evaluate sessions against SLA policies and show compliance")
+    p.add_argument("--policy", choices=["production", "development"], default="production", help="Preset SLA policy (default: production)")
+    p.add_argument("--latency", type=float, default=None, help="Custom P95 latency target (ms)")
+    p.add_argument("--error-rate", dest="error_rate_target", type=float, default=None, help="Custom max error rate target (%%)")
+    p.add_argument("--token-budget", type=int, default=None, help="Custom token budget per session")
+    p.add_argument("--slo", type=float, default=99.0, help="SLO percentage for custom targets (default: 99)")
+    p.add_argument("--agent", help="Filter by agent name (substring match)")
+    p.add_argument("--limit", type=int, default=100, help="Max sessions to evaluate (default: 100)")
+    p.add_argument("--verbose", "-v", action="store_true", help="Show violating session IDs and stats")
+    p.add_argument("--json", dest="json_output", action="store_true", help="Output as JSON")
+
     # status
     sub.add_parser("status", help="Check backend connectivity")
 
@@ -1510,6 +1524,7 @@ def main() -> None:
         "audit": cmd_audit,
         "leaderboard": lambda args: __import__("agentlens.cli_leaderboard", fromlist=["cmd_leaderboard"]).cmd_leaderboard(args),
         "trends": cmd_trends,
+        "sla": cmd_sla,
         "status": cmd_status,
     }
     commands[args.command](args)

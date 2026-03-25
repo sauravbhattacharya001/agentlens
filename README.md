@@ -196,6 +196,15 @@ agentlens flamegraph <session_id> --stats
 
 # Generate self-contained HTML dashboard with interactive charts
 agentlens dashboard --limit 200 -o dashboard.html --open
+
+# Evaluate sessions against SLA policies
+agentlens sla --policy production --limit 100
+
+# Custom SLA targets with verbose output
+agentlens sla --latency 2000 --error-rate 5 --token-budget 8000 --slo 95 --verbose
+
+# SLA compliance as JSON for CI/CD pipelines
+agentlens sla --policy production --json
 ```
 
 Configure via environment variables:
