@@ -9,6 +9,39 @@ const { toExportEvent, eventsToCsv, buildJsonExport, ndjsonSessionLine } = requi
 
 const router = express.Router();
 
+// ── LRU prepared-statement cache for dynamic SQL queries ────────────
+// The event-search and session-search endpoints build SQL dynamically
+// based on filter combinations.  Calling db.prepare() re-compiles the
+// SQL every time, which adds ~0.1-0.5ms per call.  Since the number of
+// distinct filter combos is small (users repeat the same searches), we
+// cache the last N compiled statements keyed by their SQL string.
+const STMT_CACHE_MAX = 64;
+const _stmtCache = new Map();
+
+/**
+ * Get or compile a prepared statement, with LRU caching.
+ * @param {string} sql - The SQL string to prepare.
+ * @returns {import("better-sqlite3").Statement} Compiled statement.
+ */
+function cachedPrepare(sql) {
+  let stmt = _stmtCache.get(sql);
+  if (stmt) {
+    // Move to end for LRU freshness
+    _stmtCache.delete(sql);
+    _stmtCache.set(sql, stmt);
+    return stmt;
+  }
+  const db = getDb();
+  stmt = db.prepare(sql);
+  if (_stmtCache.size >= STMT_CACHE_MAX) {
+    // Evict oldest entry
+    const oldest = _stmtCache.keys().next().value;
+    _stmtCache.delete(oldest);
+  }
+  _stmtCache.set(sql, stmt);
+  return stmt;
+}
+
 // Sanitize a string for use in Content-Disposition filenames.
 // Strips characters that could cause header injection ("  \r  \n),
 // path traversal (/ \), or shell issues, and caps length.
@@ -91,6 +124,10 @@ function getSessionStatements() {
     countEventsBySession: db.prepare("SELECT COUNT(*) as total FROM events WHERE session_id = ?"),
     // Capped events query for diff endpoint — hard limit to prevent OOM
     eventsBySessionCapped: db.prepare("SELECT * FROM events WHERE session_id = ? ORDER BY timestamp ASC LIMIT ?"),
+    // Streaming iterator for NDJSON export — avoids loading all events into memory
+    iterateEventsBySession: db.prepare("SELECT * FROM events WHERE session_id = ? ORDER BY timestamp ASC"),
+    // Total event count for a session (used by event search)
+    totalEventsBySession: db.prepare("SELECT COUNT(*) as total FROM events WHERE session_id = ?"),
   };
 
   return _sessionStmts;
@@ -249,18 +286,18 @@ router.get("/search", wrapRoute("search sessions", (req, res) => {
 
     // Count query
     const countSql = `SELECT COUNT(*) as count FROM sessions s ${tagJoin} ${whereClause}`;
-    const total = db.prepare(countSql).get(...params).count;
+    const total = cachedPrepare(countSql).get(...params).count;
 
     // Data query
     const dataSql = `SELECT s.* FROM sessions s ${tagJoin} ${whereClause} ORDER BY ${sortColumn} ${sortOrder} LIMIT ? OFFSET ?`;
-    const sessions = db.prepare(dataSql).all(...params, limit, offset);
+    const sessions = cachedPrepare(dataSql).all(...params, limit, offset);
 
     // Batch-fetch tags for returned sessions
     const sessionIds = sessions.map(s => s.session_id);
     const tagMap = {};
     if (sessionIds.length > 0) {
       const placeholders = sessionIds.map(() => "?").join(",");
-      const tagRows = db.prepare(
+      const tagRows = cachedPrepare(
         `SELECT session_id, tag FROM session_tags WHERE session_id IN (${placeholders}) ORDER BY created_at ASC`
       ).all(...sessionIds);
       for (const row of tagRows) {
@@ -376,7 +413,8 @@ router.get("/:id/export", requireSessionId, wrapRoute("export session", (req, re
 
       res.write(ndjsonSessionLine(session) + "\n");
 
-      const iter = db.prepare("SELECT * FROM events WHERE session_id = ? ORDER BY timestamp ASC").iterate(id);
+      const stmts = getSessionStatements();
+      const iter = stmts.iterateEventsBySession.iterate(id);
       for (const row of iter) {
         res.write(JSON.stringify({ _type: "event", ...toExportEvent(row, parseEventRow) }) + "\n");
       }
@@ -668,9 +706,9 @@ router.get("/:id/events/search", requireSessionId, wrapRoute("search events", (r
     const sqlCount = `SELECT COUNT(*) as total FROM events WHERE ${whereClause}`;
     const sqlData = `SELECT * FROM events WHERE ${whereClause} ORDER BY timestamp ASC LIMIT ? OFFSET ?`;
 
-    const totalEvents = db.prepare(`SELECT COUNT(*) as total FROM events WHERE session_id = ?`).get(id).total;
-    const matched = db.prepare(sqlCount).get(...params).total;
-    const dbResults = db.prepare(sqlData).all(...params, limit, offset);
+    const totalEvents = getSessionStatements().totalEventsBySession.get(id).total;
+    const matched = cachedPrepare(sqlCount).get(...params).total;
+    const dbResults = cachedPrepare(sqlData).all(...params, limit, offset);
 
     // Parse JSON columns
     const parsed = dbResults.map(parseEventRow);
