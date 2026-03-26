@@ -55,6 +55,11 @@ class ModelTier(str, Enum):
     FLAGSHIP = "flagship"
 
 
+# Pre-computed tier ordering for fast index lookups (avoids repeated list(ModelTier) calls).
+_TIER_ORDER: list[ModelTier] = list(ModelTier)
+_TIER_INDEX: dict[ModelTier, int] = {t: i for i, t in enumerate(_TIER_ORDER)}
+
+
 @dataclass
 class ModelInfo:
     name: str
@@ -131,8 +136,7 @@ class Recommendation:
 
     @property
     def is_downgrade(self) -> bool:
-        tiers = list(ModelTier)
-        return tiers.index(self.recommended_tier) < tiers.index(self.current_tier)
+        return _TIER_INDEX[self.recommended_tier] < _TIER_INDEX[self.current_tier]
 
 
 @dataclass
@@ -211,18 +215,18 @@ class ComplexityAnalyzer:
         return f"{level.value} complexity driven by {' and '.join(d.replace('_', ' ') for d in drivers)}"
 
 
+def _compute_cost(tokens_in: int, tokens_out: int, model_info: ModelInfo) -> float:
+    """Calculate cost for a given token count and model pricing."""
+    return (tokens_in / 1_000_000) * model_info.input_cost_per_1m + \
+           (tokens_out / 1_000_000) * model_info.output_cost_per_1m
+
+
 def _event_cost(event: AgentEvent, model_info: ModelInfo | None = None) -> float:
     if model_info is None and event.model:
         model_info = MODEL_REGISTRY.get(event.model)
     if model_info is None:
         return 0.0
-    return (event.tokens_in / 1_000_000) * model_info.input_cost_per_1m + \
-           (event.tokens_out / 1_000_000) * model_info.output_cost_per_1m
-
-
-def _hypothetical_cost(event: AgentEvent, model_info: ModelInfo) -> float:
-    return (event.tokens_in / 1_000_000) * model_info.input_cost_per_1m + \
-           (event.tokens_out / 1_000_000) * model_info.output_cost_per_1m
+    return _compute_cost(event.tokens_in, event.tokens_out, model_info)
 
 
 class CostOptimizer:
@@ -265,8 +269,7 @@ class CostOptimizer:
                 continue
 
             assessment = self._analyzer.assess(event)
-            tiers = list(ModelTier)
-            if tiers.index(mi.tier) <= tiers.index(assessment.recommended_tier):
+            if _TIER_INDEX[mi.tier] <= _TIER_INDEX[assessment.recommended_tier]:
                 optimized_total += cost
                 continue
 
@@ -275,7 +278,7 @@ class CostOptimizer:
                 optimized_total += cost
                 continue
 
-            new_cost = _hypothetical_cost(event, candidate)
+            new_cost = _compute_cost(event.tokens_in, event.tokens_out, candidate)
             savings = cost - new_cost
             savings_pct = (savings / cost * 100) if cost > 0 else 0
             if savings_pct < self.min_savings_pct:
@@ -326,11 +329,10 @@ class CostOptimizer:
             cost = _event_cost(event, mi)
             current_cost += cost
             assessment = self._analyzer.assess(event)
-            tiers = list(ModelTier)
-            if tiers.index(mi.tier) > tiers.index(assessment.recommended_tier):
+            if _TIER_INDEX[mi.tier] > _TIER_INDEX[assessment.recommended_tier]:
                 c = self._find_best_candidate(event, mi, assessment.recommended_tier)
                 if c:
-                    s = cost - _hypothetical_cost(event, c)
+                    s = cost - _compute_cost(event.tokens_in, event.tokens_out, c)
                     if s > 0:
                         potential_savings += s
                         overprovisioned += 1
@@ -345,17 +347,15 @@ class CostOptimizer:
         if mi is None:
             return None
         assessment = self._analyzer.assess(event)
-        tiers = list(ModelTier)
-        if tiers.index(mi.tier) <= tiers.index(assessment.recommended_tier):
+        if _TIER_INDEX[mi.tier] <= _TIER_INDEX[assessment.recommended_tier]:
             return None
         c = self._find_best_candidate(event, mi, assessment.recommended_tier)
         return c.name if c else None
 
     def _find_best_candidate(self, event: AgentEvent, current: ModelInfo, target_tier: ModelTier) -> ModelInfo | None:
-        tiers = list(ModelTier)
-        idx = tiers.index(target_tier)
+        idx = _TIER_INDEX[target_tier]
         candidates = [m for m in self.models.values()
-                      if tiers.index(m.tier) <= idx and m.name != current.name
+                      if _TIER_INDEX[m.tier] <= idx and m.name != current.name
                       and m.max_context >= (event.tokens_in + event.tokens_out)]
         if not candidates:
             return None
@@ -366,7 +366,7 @@ class CostOptimizer:
         return pool[0]
 
     def _assess_confidence(self, a: ComplexityAssessment, cur: ModelInfo, cand: ModelInfo) -> Confidence:
-        gap = list(ModelTier).index(cur.tier) - list(ModelTier).index(cand.tier)
+        gap = _TIER_INDEX[cur.tier] - _TIER_INDEX[cand.tier]
         if a.score < 0.30 and gap <= 1:
             return Confidence.HIGH
         if a.score < 0.30 and gap == 2:
@@ -381,7 +381,7 @@ class CostOptimizer:
                 f"{cand.name} ({cand.tier.value} tier) can handle this workload.")
 
     def _risk(self, a: ComplexityAssessment, cur: ModelInfo, cand: ModelInfo) -> str:
-        gap = list(ModelTier).index(cur.tier) - list(ModelTier).index(cand.tier)
+        gap = _TIER_INDEX[cur.tier] - _TIER_INDEX[cand.tier]
         if gap <= 1 and a.score < 0.25:
             return "Very low risk — task well within cheaper model's capabilities"
         if gap <= 1:
