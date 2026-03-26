@@ -44,6 +44,7 @@ Usage:
     agentlens-cli trends [--period day|week|month] [--metric METRIC|all] [--agent NAME] [--limit N] [--json] [--endpoint URL] [--api-key KEY]
     agentlens-cli sla [--policy production|development] [--latency MS] [--error-rate PCT] [--token-budget N] [--slo PCT] [--agent NAME] [--limit N] [--verbose] [--json] [--endpoint URL] [--api-key KEY]
     agentlens-cli diff <session_a> <session_b> [--label-a LABEL] [--label-b LABEL] [--no-color] [--json] [--endpoint URL] [--api-key KEY]
+    agentlens-cli profile <agent_name> [--days N] [--json] [--endpoint URL] [--api-key KEY]
     agentlens-cli status [--endpoint URL] [--api-key KEY]
 
 Environment variables:
@@ -75,6 +76,7 @@ from agentlens.cli_audit import cmd_audit, register_audit_parser  # audit trail
 from agentlens.cli_trends import cmd_trends  # period-over-period trends
 from agentlens.cli_sla import cmd_sla  # SLA compliance evaluation
 from agentlens.cli_diff import cmd_diff  # side-by-side session diff
+from agentlens.cli_profile import cmd_profile, register_profile_parser  # agent performance profiler
 
 
 def _print_table(rows: list[dict], columns: list[str], *, max_width: int = 40) -> None:
@@ -1434,6 +1436,9 @@ def main() -> None:
     p.add_argument("--no-color", action="store_true", help="Disable colored output")
     p.add_argument("--json", dest="json_output", action="store_true", help="Output as JSON")
 
+    # profile
+    register_profile_parser(sub)
+
     # status
     sub.add_parser("status", help="Check backend connectivity")
 
@@ -1537,6 +1542,7 @@ def main() -> None:
         "trends": cmd_trends,
         "sla": cmd_sla,
         "diff": cmd_diff,
+        "profile": cmd_profile,
         "status": cmd_status,
     }
     commands[args.command](args)
