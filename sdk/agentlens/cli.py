@@ -45,6 +45,7 @@ Usage:
     agentlens-cli sla [--policy production|development] [--latency MS] [--error-rate PCT] [--token-budget N] [--slo PCT] [--agent NAME] [--limit N] [--verbose] [--json] [--endpoint URL] [--api-key KEY]
     agentlens-cli diff <session_a> <session_b> [--label-a LABEL] [--label-b LABEL] [--no-color] [--json] [--endpoint URL] [--api-key KEY]
     agentlens-cli profile <agent_name> [--days N] [--json] [--endpoint URL] [--api-key KEY]
+    agentlens-cli correlate [--metrics METRICS] [--limit N] [--min-sessions N] [--format table|json|csv] [--output FILE] [--endpoint URL] [--api-key KEY]
     agentlens-cli status [--endpoint URL] [--api-key KEY]
 
 Environment variables:
@@ -77,6 +78,7 @@ from agentlens.cli_trends import cmd_trends  # period-over-period trends
 from agentlens.cli_sla import cmd_sla  # SLA compliance evaluation
 from agentlens.cli_diff import cmd_diff  # side-by-side session diff
 from agentlens.cli_profile import cmd_profile, register_profile_parser  # agent performance profiler
+from agentlens.cli_correlate import run as cmd_correlate, setup_parser as register_correlate_parser  # metric correlations
 
 
 def _print_table(rows: list[dict], columns: list[str], *, max_width: int = 40) -> None:
@@ -1439,6 +1441,9 @@ def main() -> None:
     # profile
     register_profile_parser(sub)
 
+    # correlate
+    register_correlate_parser(sub)
+
     # status
     sub.add_parser("status", help="Check backend connectivity")
 
@@ -1543,6 +1548,7 @@ def main() -> None:
         "sla": cmd_sla,
         "diff": cmd_diff,
         "profile": cmd_profile,
+        "correlate": cmd_correlate,
         "status": cmd_status,
     }
     commands[args.command](args)
