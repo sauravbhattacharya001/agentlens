@@ -70,6 +70,16 @@ for (const [mountPath, modulePath, opts = {}] of routeDefs) {
   }
 }
 
+// Prevent browsers and proxies from caching sensitive API responses.
+// The in-memory cache handles server-side caching; downstream layers
+// must never store token counts, costs, or session data.
+app.use((req, res, next) => {
+  res.set("Cache-Control", "no-store, no-cache, must-revalidate, private");
+  res.set("Pragma", "no-cache");
+  res.set("Expires", "0");
+  next();
+});
+
 // Body parser with size limit (after rate-limit/auth, before route handlers)
 app.use(express.json({ limit: "10mb" }));
 

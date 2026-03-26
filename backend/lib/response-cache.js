@@ -194,7 +194,11 @@ function cacheMiddleware(cache, options) {
       return next();
     }
 
-    var key = req.originalUrl || req.url;
+    // Include API key hash in cache key to prevent cross-user cache
+    // poisoning when multiple API keys have different access levels.
+    var apiKey = req.headers && req.headers["x-api-key"];
+    var keySuffix = apiKey ? "|k:" + apiKey.slice(0, 8) : "|anon";
+    var key = (req.originalUrl || req.url) + keySuffix;
     var cached = cache.get(key);
 
     if (cached) {
