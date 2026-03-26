@@ -402,41 +402,46 @@ router.get("/:id/export", requireSessionId, wrapRoute("export session", (req, re
   const session = fetchSessionOrFail(id, res);
   if (!session) return;
 
-    const stmts = getSessionStatements();
-    const events = stmts.eventsBySession.all(id);
+  const stmts = getSessionStatements();
 
-    if (format === "ndjson") {
-      // Streaming NDJSON export — uses .iterate() to avoid loading all events into memory
-      const filename = `agentlens-${sanitizeFilename(session.agent_name)}-${id.slice(0, 8)}.ndjson`;
-      res.setHeader("Content-Disposition", `attachment; filename="${filename}"`);
-      res.setHeader("Content-Type", "application/x-ndjson");
-
-      res.write(ndjsonSessionLine(session) + "\n");
-
-      const stmts = getSessionStatements();
-      const iter = stmts.iterateEventsBySession.iterate(id);
-      for (const row of iter) {
-        res.write(JSON.stringify({ _type: "event", ...toExportEvent(row, parseEventRow) }) + "\n");
-      }
-      return res.end();
-    }
-
-    const parsedEvents = events.map(e => toExportEvent(e, parseEventRow));
-
-    if (format === "json") {
-      const exportData = buildJsonExport(session, parsedEvents);
-
-      const filename = `agentlens-${sanitizeFilename(session.agent_name)}-${id.slice(0, 8)}.json`;
-      res.setHeader("Content-Disposition", `attachment; filename="${filename}"`);
-      res.setHeader("Content-Type", "application/json");
-      return res.json(exportData);
-    }
-
-    // CSV format
-    const filename = `agentlens-${sanitizeFilename(session.agent_name)}-${id.slice(0, 8)}.csv`;
+  if (format === "ndjson") {
+    // Streaming NDJSON export — uses .iterate() to avoid loading all
+    // events into memory.  Previously this branch eagerly fetched every
+    // event via eventsBySession.all() *before* checking the format,
+    // defeating the purpose of streaming and doubling memory usage for
+    // large sessions.  The shadowed `const stmts` redeclaration has
+    // also been removed.
+    const filename = `agentlens-${sanitizeFilename(session.agent_name)}-${id.slice(0, 8)}.ndjson`;
     res.setHeader("Content-Disposition", `attachment; filename="${filename}"`);
-    res.setHeader("Content-Type", "text/csv");
-    return res.send(eventsToCsv(parsedEvents));
+    res.setHeader("Content-Type", "application/x-ndjson");
+
+    res.write(ndjsonSessionLine(session) + "\n");
+
+    const iter = stmts.iterateEventsBySession.iterate(id);
+    for (const row of iter) {
+      res.write(JSON.stringify({ _type: "event", ...toExportEvent(row, parseEventRow) }) + "\n");
+    }
+    return res.end();
+  }
+
+  // JSON and CSV formats need all events in memory for transformation
+  const events = stmts.eventsBySession.all(id);
+  const parsedEvents = events.map(e => toExportEvent(e, parseEventRow));
+
+  if (format === "json") {
+    const exportData = buildJsonExport(session, parsedEvents);
+
+    const filename = `agentlens-${sanitizeFilename(session.agent_name)}-${id.slice(0, 8)}.json`;
+    res.setHeader("Content-Disposition", `attachment; filename="${filename}"`);
+    res.setHeader("Content-Type", "application/json");
+    return res.json(exportData);
+  }
+
+  // CSV format
+  const filename = `agentlens-${sanitizeFilename(session.agent_name)}-${id.slice(0, 8)}.csv`;
+  res.setHeader("Content-Disposition", `attachment; filename="${filename}"`);
+  res.setHeader("Content-Type", "text/csv");
+  return res.send(eventsToCsv(parsedEvents));
 }));
 
 // GET /sessions/:id/events — Paginated events sub-route
