@@ -33,6 +33,11 @@ class AgentTracker(AlertMixin, TagMixin, AnnotationMixin, RetentionMixin):
             f"current={self._current_session_id!r})"
         )
 
+    def _emit(self, event_type: str, **fields: Any) -> None:
+        """Send a single event dict to the transport."""
+        payload = {"event_type": event_type, **fields}
+        self.transport.send_events([payload])
+
     @property
     def current_session(self) -> Session | None:
         if self._current_session_id and self._current_session_id in self.sessions:
@@ -125,15 +130,15 @@ class AgentTracker(AlertMixin, TagMixin, AnnotationMixin, RetentionMixin):
             parent.children.append(sp.span_id)
 
         # Emit span_start event
-        self.transport.send_events([{
-            "event_type": "span_start",
-            "session_id": sid,
-            "span_id": sp.span_id,
-            "span_name": name,
-            "parent_span_id": sp.parent_id,
-            "timestamp": sp.started_at.isoformat(),
-            "attributes": sp.attributes,
-        }])
+        self._emit(
+            "span_start",
+            session_id=sid,
+            span_id=sp.span_id,
+            span_name=name,
+            parent_span_id=sp.parent_id,
+            timestamp=sp.started_at.isoformat(),
+            attributes=sp.attributes,
+        )
 
         self._active_spans.append(sp)
         try:
@@ -151,20 +156,20 @@ class AgentTracker(AlertMixin, TagMixin, AnnotationMixin, RetentionMixin):
             self._active_spans.pop()
 
             # Emit span_end event
-            self.transport.send_events([{
-                "event_type": "span_end",
-                "session_id": sid,
-                "span_id": sp.span_id,
-                "span_name": name,
-                "parent_span_id": sp.parent_id,
-                "timestamp": sp.ended_at.isoformat(),
-                "duration_ms": round(sp.duration_ms, 2),
-                "status": sp.status,
-                "error": sp.error,
-                "event_count": sp.event_count,
-                "children": sp.children,
-                "attributes": sp.attributes,
-            }])
+            self._emit(
+                "span_end",
+                session_id=sid,
+                span_id=sp.span_id,
+                span_name=name,
+                parent_span_id=sp.parent_id,
+                timestamp=sp.ended_at.isoformat(),
+                duration_ms=round(sp.duration_ms, 2),
+                status=sp.status,
+                error=sp.error,
+                event_count=sp.event_count,
+                children=sp.children,
+                attributes=sp.attributes,
+            )
 
     def start_session(self, agent_name: str = "default-agent", metadata: dict | None = None) -> Session:
         """Create and register a new tracking session."""
@@ -173,13 +178,13 @@ class AgentTracker(AlertMixin, TagMixin, AnnotationMixin, RetentionMixin):
         self._current_session_id = session.session_id
 
         # Send session start event
-        self.transport.send_events([{
-            "event_type": "session_start",
-            "session_id": session.session_id,
-            "agent_name": agent_name,
-            "metadata": metadata or {},
-            "timestamp": session.started_at.isoformat(),
-        }])
+        self._emit(
+            "session_start",
+            session_id=session.session_id,
+            agent_name=agent_name,
+            metadata=metadata or {},
+            timestamp=session.started_at.isoformat(),
+        )
 
         return session
 
@@ -189,14 +194,14 @@ class AgentTracker(AlertMixin, TagMixin, AnnotationMixin, RetentionMixin):
         if sid and sid in self.sessions:
             session = self.sessions[sid]
             session.end()
-            self.transport.send_events([{
-                "event_type": "session_end",
-                "session_id": sid,
-                "ended_at": session.ended_at.isoformat() if session.ended_at else None,
-                "total_tokens_in": session.total_tokens_in,
-                "total_tokens_out": session.total_tokens_out,
-                "status": "completed",
-            }])
+            self._emit(
+                "session_end",
+                session_id=sid,
+                ended_at=session.ended_at.isoformat() if session.ended_at else None,
+                total_tokens_in=session.total_tokens_in,
+                total_tokens_out=session.total_tokens_out,
+                status="completed",
+            )
             self.transport.flush()
             if sid == self._current_session_id:
                 self._current_session_id = None
@@ -419,15 +424,13 @@ class AgentTracker(AlertMixin, TagMixin, AnnotationMixin, RetentionMixin):
     def explain(self, session_id: str | None = None) -> str:
         """Generate a human-readable explanation of the agent's behavior."""
         try:
-            sid = self._resolve_session(session_id)
+            sid = self._resolve_session(session_id, require_local=True)
         except RuntimeError:
             if session_id:
                 return f"Session {session_id} not found."
             return "No active session."
 
-        session = self.sessions.get(sid)
-        if not session:
-            return f"Session {sid} not found."
+        session = self.sessions[sid]
 
         lines = [
             f"## Session Explanation: {session.agent_name}",
