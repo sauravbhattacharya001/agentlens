@@ -131,7 +131,7 @@ class Recommendation:
 
     @property
     def is_downgrade(self) -> bool:
-        tiers = list(ModelTier)
+        tiers = _TIER_ORDER
         return tiers.index(self.recommended_tier) < tiers.index(self.current_tier)
 
 
@@ -211,7 +211,13 @@ class ComplexityAnalyzer:
         return f"{level.value} complexity driven by {' and '.join(d.replace('_', ' ') for d in drivers)}"
 
 
-def _event_cost(event: AgentEvent, model_info: ModelInfo | None = None) -> float:
+def _compute_cost(event: AgentEvent, model_info: ModelInfo | None = None) -> float:
+    """Calculate the token cost for an event using the given (or auto-resolved) model pricing.
+
+    When *model_info* is ``None`` the function falls back to
+    ``MODEL_REGISTRY`` using ``event.model``.  Returns ``0.0`` when no
+    pricing information is available.
+    """
     if model_info is None and event.model:
         model_info = MODEL_REGISTRY.get(event.model)
     if model_info is None:
@@ -220,9 +226,12 @@ def _event_cost(event: AgentEvent, model_info: ModelInfo | None = None) -> float
            (event.tokens_out / 1_000_000) * model_info.output_cost_per_1m
 
 
-def _hypothetical_cost(event: AgentEvent, model_info: ModelInfo) -> float:
-    return (event.tokens_in / 1_000_000) * model_info.input_cost_per_1m + \
-           (event.tokens_out / 1_000_000) * model_info.output_cost_per_1m
+# Backwards-compatible aliases
+_event_cost = _compute_cost
+_hypothetical_cost = _compute_cost
+
+# Pre-computed tier ordering — avoids rebuilding this list on every call.
+_TIER_ORDER: list[ModelTier] = list(ModelTier)
 
 
 class CostOptimizer:
@@ -265,7 +274,7 @@ class CostOptimizer:
                 continue
 
             assessment = self._analyzer.assess(event)
-            tiers = list(ModelTier)
+            tiers = _TIER_ORDER
             if tiers.index(mi.tier) <= tiers.index(assessment.recommended_tier):
                 optimized_total += cost
                 continue
@@ -326,7 +335,7 @@ class CostOptimizer:
             cost = _event_cost(event, mi)
             current_cost += cost
             assessment = self._analyzer.assess(event)
-            tiers = list(ModelTier)
+            tiers = _TIER_ORDER
             if tiers.index(mi.tier) > tiers.index(assessment.recommended_tier):
                 c = self._find_best_candidate(event, mi, assessment.recommended_tier)
                 if c:
@@ -345,14 +354,14 @@ class CostOptimizer:
         if mi is None:
             return None
         assessment = self._analyzer.assess(event)
-        tiers = list(ModelTier)
+        tiers = _TIER_ORDER
         if tiers.index(mi.tier) <= tiers.index(assessment.recommended_tier):
             return None
         c = self._find_best_candidate(event, mi, assessment.recommended_tier)
         return c.name if c else None
 
     def _find_best_candidate(self, event: AgentEvent, current: ModelInfo, target_tier: ModelTier) -> ModelInfo | None:
-        tiers = list(ModelTier)
+        tiers = _TIER_ORDER
         idx = tiers.index(target_tier)
         candidates = [m for m in self.models.values()
                       if tiers.index(m.tier) <= idx and m.name != current.name
@@ -366,7 +375,7 @@ class CostOptimizer:
         return pool[0]
 
     def _assess_confidence(self, a: ComplexityAssessment, cur: ModelInfo, cand: ModelInfo) -> Confidence:
-        gap = list(ModelTier).index(cur.tier) - list(ModelTier).index(cand.tier)
+        gap = _TIER_ORDER.index(cur.tier) - _TIER_ORDER.index(cand.tier)
         if a.score < 0.30 and gap <= 1:
             return Confidence.HIGH
         if a.score < 0.30 and gap == 2:
@@ -381,7 +390,7 @@ class CostOptimizer:
                 f"{cand.name} ({cand.tier.value} tier) can handle this workload.")
 
     def _risk(self, a: ComplexityAssessment, cur: ModelInfo, cand: ModelInfo) -> str:
-        gap = list(ModelTier).index(cur.tier) - list(ModelTier).index(cand.tier)
+        gap = _TIER_ORDER.index(cur.tier) - _TIER_ORDER.index(cand.tier)
         if gap <= 1 and a.score < 0.25:
             return "Very low risk — task well within cheaper model's capabilities"
         if gap <= 1:
