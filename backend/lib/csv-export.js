@@ -163,10 +163,36 @@ function ndjsonSessionLine(session) {
   });
 }
 
+/**
+ * Convert a single export-ready event to a CSV row string.
+ * Used for streaming CSV export to avoid buffering all rows in memory.
+ *
+ * @param {Object} e - Export-ready event object from toExportEvent().
+ * @returns {string} Single CSV row (no trailing newline).
+ */
+function eventToCsvRow(e) {
+  return [
+    csvEscape(e.event_id),
+    csvEscape(e.event_type),
+    csvEscape(e.timestamp),
+    csvEscape(e.model),
+    csvEscape(e.tokens_in),
+    csvEscape(e.tokens_out),
+    csvEscape(e.duration_ms),
+    csvEscape(e.input_data),
+    csvEscape(e.output_data),
+    csvEscape(e.tool_call?.tool_name),
+    csvEscape(e.tool_call?.tool_input),
+    csvEscape(e.tool_call?.tool_output),
+    csvEscape(e.decision_trace?.reasoning),
+  ].join(",");
+}
+
 module.exports = {
   toExportEvent,
   csvEscape,
   eventsToCsv,
+  eventToCsvRow,
   buildJsonExport,
   ndjsonSessionLine,
   CSV_HEADERS,

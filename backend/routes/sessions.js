@@ -5,7 +5,7 @@ const { generateExplanation } = require("../lib/explain");
 const { computeSessionMetrics, pctDelta } = require("../lib/session-metrics");
 const { getTagStatements } = require("../lib/tag-statements");
 const { parsePagination, requireSessionId, wrapRoute } = require("../lib/request-helpers");
-const { toExportEvent, eventsToCsv, buildJsonExport, ndjsonSessionLine } = require("../lib/csv-export");
+const { toExportEvent, eventsToCsv, eventToCsvRow, buildJsonExport, ndjsonSessionLine, CSV_HEADERS } = require("../lib/csv-export");
 
 const router = express.Router();
 
@@ -424,7 +424,24 @@ router.get("/:id/export", requireSessionId, wrapRoute("export session", (req, re
     return res.end();
   }
 
-  // JSON and CSV formats need all events in memory for transformation
+  // JSON and CSV formats — JSON needs all events in memory; CSV can stream
+  if (format === "csv") {
+    // Streaming CSV export — uses .iterate() to avoid loading all events
+    // into memory, matching the NDJSON streaming approach.
+    const filename = `agentlens-${sanitizeFilename(session.agent_name)}-${id.slice(0, 8)}.csv`;
+    res.setHeader("Content-Disposition", `attachment; filename="${filename}"`);
+    res.setHeader("Content-Type", "text/csv");
+
+    res.write(CSV_HEADERS.join(",") + "\n");
+
+    const iter = stmts.iterateEventsBySession.iterate(id);
+    for (const row of iter) {
+      res.write(eventToCsvRow(toExportEvent(row, parseEventRow)) + "\n");
+    }
+    return res.end();
+  }
+
+  // JSON format needs all events in memory for transformation
   const events = stmts.eventsBySession.all(id);
   const parsedEvents = events.map(e => toExportEvent(e, parseEventRow));
 
@@ -436,12 +453,6 @@ router.get("/:id/export", requireSessionId, wrapRoute("export session", (req, re
     res.setHeader("Content-Type", "application/json");
     return res.json(exportData);
   }
-
-  // CSV format
-  const filename = `agentlens-${sanitizeFilename(session.agent_name)}-${id.slice(0, 8)}.csv`;
-  res.setHeader("Content-Disposition", `attachment; filename="${filename}"`);
-  res.setHeader("Content-Type", "text/csv");
-  return res.send(eventsToCsv(parsedEvents));
 }));
 
 // GET /sessions/:id/events — Paginated events sub-route
@@ -711,9 +722,15 @@ router.get("/:id/events/search", requireSessionId, wrapRoute("search events", (r
     const sqlCount = `SELECT COUNT(*) as total FROM events WHERE ${whereClause}`;
     const sqlData = `SELECT * FROM events WHERE ${whereClause} ORDER BY timestamp ASC LIMIT ? OFFSET ?`;
 
-    const totalEvents = getSessionStatements().totalEventsBySession.get(id).total;
     const matched = cachedPrepare(sqlCount).get(...params).total;
     const dbResults = cachedPrepare(sqlData).all(...params, limit, offset);
+
+    // Only run the separate total-events count if filters are active;
+    // when there are no filters beyond session_id, matched IS the total.
+    const hasFilters = conditions.length > 1;
+    const totalEvents = hasFilters
+      ? getSessionStatements().totalEventsBySession.get(id).total
+      : matched;
 
     // Parse JSON columns
     const parsed = dbResults.map(parseEventRow);
