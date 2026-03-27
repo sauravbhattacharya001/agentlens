@@ -77,6 +77,17 @@ router.post("/", wrapRoute("ingest events", (req, res) => {
     let processed = 0;
     let skipped = 0;
 
+    // Track sessions already ensured within this batch to avoid
+    // redundant INSERT OR IGNORE calls. In a 500-event batch with
+    // 5 distinct sessions, this eliminates ~495 unnecessary writes.
+    const ensuredSessions = new Set();
+    // Accumulate token counts per session to batch UPDATE calls.
+    // Instead of N updates (one per event), we do M updates (one per session).
+    const sessionTokens = new Map();
+    // Hoist timestamp generation outside the loop — Date construction
+    // and ISO serialization are surprisingly expensive at high throughput.
+    const nowIso = new Date().toISOString();
+
     for (const event of eventList) {
       const sessionId = validateSessionId(event.session_id);
       if (!sessionId) {
@@ -99,10 +110,11 @@ router.post("/", wrapRoute("ingest events", (req, res) => {
         insertSession.run(
           sessionId,
           sanitizeString(event.agent_name || "default-agent", 256),
-          sanitizeString(event.timestamp || new Date().toISOString(), 64),
+          sanitizeString(event.timestamp || nowIso, 64),
           safeJsonStringify(event.metadata || {}),
           "active"
         );
+        ensuredSessions.add(sessionId);
         processed++;
         continue;
       }
@@ -111,7 +123,7 @@ router.post("/", wrapRoute("ingest events", (req, res) => {
         const totalTokIn = clampNonNegInt(event.total_tokens_in);
         const totalTokOut = clampNonNegInt(event.total_tokens_out);
         endSession.run(
-          sanitizeString(event.ended_at || new Date().toISOString(), 64),
+          sanitizeString(event.ended_at || nowIso, 64),
           sanitizeString(event.status || "completed", 32),
           totalTokIn,
           totalTokIn,
@@ -128,20 +140,25 @@ router.post("/", wrapRoute("ingest events", (req, res) => {
         sanitizeString(event.event_id, 64) ||
         uuidv4().replace(/-/g, "").slice(0, 16);
 
-      // Ensure session exists
-      insertSession.run(
-        sessionId,
-        "default-agent",
-        sanitizeString(event.timestamp || new Date().toISOString(), 64),
-        "{}",
-        "active"
-      );
+      // Ensure session exists (only once per session per batch)
+      if (!ensuredSessions.has(sessionId)) {
+        insertSession.run(
+          sessionId,
+          "default-agent",
+          sanitizeString(event.timestamp || nowIso, 64),
+          "{}",
+          "active"
+        );
+        ensuredSessions.add(sessionId);
+      }
+
+      const eventTs = sanitizeString(event.timestamp || nowIso, 64);
 
       insertEvent.run(
         eventId,
         sessionId,
         eventType,
-        sanitizeString(event.timestamp || new Date().toISOString(), 64),
+        eventTs,
         safeJsonStringify(event.input_data),
         safeJsonStringify(event.output_data),
         sanitizeString(event.model, 128),
@@ -152,11 +169,25 @@ router.post("/", wrapRoute("ingest events", (req, res) => {
         durationMs
       );
 
-      // Update session token counts
-      updateSession.run(tokensIn, tokensOut, sessionId);
+      // Accumulate session token counts (batched update below)
+      let acc = sessionTokens.get(sessionId);
+      if (!acc) {
+        acc = { tokIn: 0, tokOut: 0 };
+        sessionTokens.set(sessionId, acc);
+      }
+      acc.tokIn += tokensIn;
+      acc.tokOut += tokensOut;
 
       processed++;
     }
+
+    // Batch-update session token counts (one UPDATE per session, not per event)
+    for (const [sid, { tokIn, tokOut }] of sessionTokens) {
+      if (tokIn > 0 || tokOut > 0) {
+        updateSession.run(tokIn, tokOut, sid);
+      }
+    }
+
     return { processed, skipped };
   });
 
