@@ -4,10 +4,10 @@
  */
 
 const { getDb } = require("./db");
-const { v4: uuidv4 } = require("uuid");
+const crypto = require("crypto");
 
 function shortId() {
-  return uuidv4().replace(/-/g, "").slice(0, 16);
+  return crypto.randomUUID().replace(/-/g, "").slice(0, 16);
 }
 
 function isoDate(offsetMinutes = 0) {

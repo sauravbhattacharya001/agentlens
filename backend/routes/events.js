@@ -1,5 +1,5 @@
 const express = require("express");
-const { v4: uuidv4 } = require("uuid");
+const crypto = require("crypto");
 const { getDb } = require("../db");
 const {
   MAX_BATCH_SIZE,
@@ -138,7 +138,7 @@ router.post("/", wrapRoute("ingest events", (req, res) => {
       // Regular event
       const eventId =
         sanitizeString(event.event_id, 64) ||
-        uuidv4().replace(/-/g, "").slice(0, 16);
+        crypto.randomUUID().replace(/-/g, "").slice(0, 16);
 
       // Ensure session exists (only once per session per batch)
       if (!ensuredSessions.has(sessionId)) {
