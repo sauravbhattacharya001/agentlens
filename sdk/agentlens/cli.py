@@ -46,6 +46,7 @@ Usage:
     agentlens-cli diff <session_a> <session_b> [--label-a LABEL] [--label-b LABEL] [--no-color] [--json] [--endpoint URL] [--api-key KEY]
     agentlens-cli profile <agent_name> [--days N] [--json] [--endpoint URL] [--api-key KEY]
     agentlens-cli correlate [--metrics METRICS] [--limit N] [--min-sessions N] [--format table|json|csv] [--output FILE] [--endpoint URL] [--api-key KEY]
+    agentlens-cli watch [--interval SECS] [--metric METRIC] [--agent NAME] [--alert-threshold N] [--compact] [--no-spark] [--duration MINS] [--endpoint URL] [--api-key KEY]
     agentlens-cli status [--endpoint URL] [--api-key KEY]
 
 Environment variables:
@@ -1252,6 +1253,16 @@ def main() -> None:
     p.add_argument("--format", choices=["table", "json", "chart"], default="table", help="Output format")
     p.add_argument("--output", "-o", help="Write output to file")
 
+    # -- watch --
+    p = sub.add_parser("watch", help="Real-time streaming metric monitor with live dashboard")
+    p.add_argument("--interval", type=int, default=5, help="Refresh interval in seconds (default: 5)")
+    p.add_argument("--metric", choices=["sessions", "cost", "tokens", "errors"], help="Show only this metric")
+    p.add_argument("--agent", help="Filter by agent name")
+    p.add_argument("--alert-threshold", type=float, help="Cost threshold for alerts (USD)")
+    p.add_argument("--compact", action="store_true", help="Compact view (no per-agent/model breakdown)")
+    p.add_argument("--no-spark", action="store_true", help="Disable sparkline trends")
+    p.add_argument("--duration", type=int, help="Auto-stop after N minutes")
+
     args = parser.parse_args()
 
     commands = {
@@ -1291,6 +1302,7 @@ def main() -> None:
         "profile": cmd_profile,
         "correlate": cmd_correlate,
         "status": cmd_status,
+        "watch": lambda args: __import__("agentlens.cli_watch", fromlist=["cmd_watch"]).cmd_watch(args),
     }
     commands[args.command](args)
 
