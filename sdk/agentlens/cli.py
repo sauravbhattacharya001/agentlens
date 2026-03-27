@@ -81,6 +81,7 @@ from agentlens.cli_profile import cmd_profile, register_profile_parser  # agent 
 from agentlens.cli_trace import cmd_trace  # terminal waterfall timeline
 from agentlens.cli_heatmap import cmd_heatmap  # GitHub-style activity heatmap
 from agentlens.cli_correlate import run as cmd_correlate, setup_parser as register_correlate_parser  # metric correlations
+from agentlens.cli_capacity import cmd_capacity  # fleet capacity planning
 
 
 def _print_table(rows: list[dict], columns: list[str], *, max_width: int = 40) -> None:
@@ -1235,6 +1236,14 @@ def main() -> None:
     # -- audit (action audit trail) --
     register_audit_parser(sub)
 
+    # -- capacity --
+    p = sub.add_parser("capacity", help="Fleet capacity planning: bottlenecks, sizing, projections")
+    p.add_argument("--horizon", type=int, default=24, help="Projection horizon in hours (default: 24)")
+    p.add_argument("--target-rpm", type=float, help="Target requests per minute for sizing")
+    p.add_argument("--target-latency", type=float, help="Target P95 latency in ms for sizing")
+    p.add_argument("--format", choices=["table", "json", "chart"], default="table", help="Output format")
+    p.add_argument("--output", "-o", help="Write output to file")
+
     # -- forecast --
     p = sub.add_parser("forecast", help="Predict future costs/usage from historical trends")
     p.add_argument("--days", type=int, default=7, help="Number of days to forecast (default: 7)")
@@ -1272,6 +1281,7 @@ def main() -> None:
         "snapshot": cmd_snapshot,
         "alert": lambda args: cmd_alert(_get_client(args)[0], args),
         "forecast": cmd_forecast,
+        "capacity": cmd_capacity,
         "gantt": cmd_gantt,
         "audit": cmd_audit,
         "leaderboard": lambda args: __import__("agentlens.cli_leaderboard", fromlist=["cmd_leaderboard"]).cmd_leaderboard(args),
