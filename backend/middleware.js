@@ -87,24 +87,27 @@ function createIngestLimiter() {
 
 function createApiKeyAuth() {
   const API_KEY = process.env.AGENTLENS_API_KEY || null;
-  const API_KEY_BUF = API_KEY ? Buffer.from(API_KEY) : null;
+  // Pre-compute the SHA-256 hash of the expected key once at init time.
+  // Previously this was recomputed on every request, adding ~0.01-0.05ms
+  // of unnecessary crypto work per authenticated call. On high-throughput
+  // ingest paths handling hundreds of requests/second, this adds up.
+  const EXPECTED_HASH = API_KEY
+    ? crypto.createHash("sha256").update(Buffer.from(API_KEY)).digest()
+    : null;
 
   function authenticateApiKey(req, res, next) {
-    if (!API_KEY_BUF) return next(); // dev mode
+    if (!EXPECTED_HASH) return next(); // dev mode
     const providedKey = req.headers["x-api-key"];
     if (!providedKey) {
       return res.status(401).json({ error: "Unauthorized: invalid or missing API key" });
     }
-    const providedBuf = Buffer.from(String(providedKey));
     // Constant-time comparison to prevent timing attacks.
-    // timingSafeEqual requires equal-length buffers. To avoid leaking
-    // the expected key length through response time, we hash both
-    // values with SHA-256 (producing fixed-length digests) before
-    // comparing. This ensures the comparison always operates on
-    // 32-byte buffers regardless of input lengths.
-    const expectedHash = crypto.createHash("sha256").update(API_KEY_BUF).digest();
-    const providedHash = crypto.createHash("sha256").update(providedBuf).digest();
-    if (!crypto.timingSafeEqual(providedHash, expectedHash)) {
+    // timingSafeEqual requires equal-length buffers. We hash the
+    // provided key with SHA-256 (producing a fixed 32-byte digest)
+    // and compare against the pre-computed expected hash. This avoids
+    // leaking the expected key length through response time.
+    const providedHash = crypto.createHash("sha256").update(Buffer.from(String(providedKey))).digest();
+    if (!crypto.timingSafeEqual(providedHash, EXPECTED_HASH)) {
       return res.status(401).json({ error: "Unauthorized: invalid or missing API key" });
     }
     next();
