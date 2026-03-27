@@ -360,13 +360,21 @@ class SessionCorrelator:
         self.error_propagation_window_ms = error_propagation_window_ms
         self._sessions: list = []
         self._windows: List[SessionWindow] = []
+        self._session_resources: Dict[str, Set[str]] = {}  # sid -> resource names
 
     # -- Ingestion --------------------------------------------------------
 
     def add_session(self, session: Any) -> None:
         """Add a single session (agentlens.models.Session)."""
         self._sessions.append(session)
-        self._windows.append(self._build_window(session))
+        window = self._build_window(session)
+        self._windows.append(window)
+        # Pre-build resource index for fast shared-resource lookups
+        resources: Set[str] = set()
+        for e in getattr(session, "events", []):
+            for res, _ in self._event_resources(e):
+                resources.add(res)
+        self._session_resources[window.session_id] = resources
 
     def add_sessions(self, sessions: list) -> None:
         """Add multiple sessions."""
@@ -377,6 +385,7 @@ class SessionCorrelator:
         """Remove all sessions."""
         self._sessions.clear()
         self._windows.clear()
+        self._session_resources.clear()
 
     @staticmethod
     def _build_window(session: Any) -> SessionWindow:
@@ -706,19 +715,9 @@ class SessionCorrelator:
         return sorted(results, key=lambda p: -p.confidence)
 
     def _shared_resources_between(self, sid_a: str, sid_b: str) -> List[str]:
-        """Find resources shared between two sessions."""
-        a_resources: Set[str] = set()
-        b_resources: Set[str] = set()
-        for session in self._sessions:
-            sid = getattr(session, "session_id", "")
-            resources = set()
-            for e in getattr(session, "events", []):
-                for res, _ in self._event_resources(e):
-                    resources.add(res)
-            if sid == sid_a:
-                a_resources = resources
-            elif sid == sid_b:
-                b_resources = resources
+        """Find resources shared between two sessions using pre-built index."""
+        a_resources = self._session_resources.get(sid_a, set())
+        b_resources = self._session_resources.get(sid_b, set())
         return sorted(a_resources & b_resources)
 
     def find_sync_points(self) -> List[SyncPoint]:
