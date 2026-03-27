@@ -19,6 +19,7 @@ __all__ = [
     "get_client_only",
     "print_json",
     "fetch_sessions",
+    "format_duration",
 ]
 
 
@@ -55,6 +56,23 @@ def get_client_only(args: argparse.Namespace) -> httpx.Client:
 def print_json(data: Any) -> None:
     """Pretty-print *data* as indented JSON to stdout."""
     print(json.dumps(data, indent=2, default=str))
+
+
+def format_duration(ms: Any) -> str:
+    """Format milliseconds into a human-readable duration string."""
+    if ms is None:
+        return "\u2014"
+    ms = float(ms)
+    if ms < 1000:
+        return f"{ms:.0f}ms"
+    secs = ms / 1000
+    if secs < 60:
+        return f"{secs:.1f}s"
+    mins = secs / 60
+    if mins < 60:
+        return f"{mins:.1f}m"
+    hours = mins / 60
+    return f"{hours:.1f}h"
 
 
 def fetch_sessions(client: httpx.Client, limit: int = 200) -> list[dict]:
