@@ -21,6 +21,10 @@ const {
   clampNonNegFloat,
   isValidStatus,
   isValidEventType,
+  validateTag,
+  validateTags,
+  validateWebhookUrl,
+  escapeLikeWildcards,
 } = require("../lib/validation");
 
 /* ================================================================
@@ -382,5 +386,196 @@ describe("isValidEventType", () => {
     expect(isValidEventType("LLM_CALL")).toBe(false); // case-sensitive
     expect(isValidEventType("")).toBe(false);
     expect(isValidEventType("custom_event")).toBe(false);
+  });
+});
+
+/* ================================================================
+ * validateTag
+ * ================================================================ */
+describe("validateTag", () => {
+  test("returns null for non-string / empty input", () => {
+    expect(validateTag(null)).toBeNull();
+    expect(validateTag(undefined)).toBeNull();
+    expect(validateTag(42)).toBeNull();
+    expect(validateTag("")).toBeNull();
+    expect(validateTag("   ")).toBeNull(); // whitespace-only trims to empty
+  });
+
+  test("accepts valid tags", () => {
+    expect(validateTag("production")).toBe("production");
+    expect(validateTag("v1.2.3")).toBe("v1.2.3");
+    expect(validateTag("my-tag_01")).toBe("my-tag_01");
+    expect(validateTag("team:backend")).toBe("team:backend");
+    expect(validateTag("env/staging")).toBe("env/staging");
+    expect(validateTag("with spaces")).toBe("with spaces");
+  });
+
+  test("rejects tags with invalid characters", () => {
+    expect(validateTag("no@at")).toBeNull();
+    expect(validateTag("no#hash")).toBeNull();
+    expect(validateTag("no\ttab")).toBeNull();
+    expect(validateTag("emoji🎉")).toBeNull();
+    expect(validateTag("<script>")).toBeNull();
+  });
+
+  test("trims whitespace before validation", () => {
+    expect(validateTag("  trimmed  ")).toBe("trimmed");
+  });
+
+  test("truncates to 64 characters", () => {
+    const long = "a".repeat(100);
+    const result = validateTag(long);
+    expect(result).toBe("a".repeat(64));
+  });
+});
+
+/* ================================================================
+ * validateTags
+ * ================================================================ */
+describe("validateTags", () => {
+  test("returns null for non-array input", () => {
+    expect(validateTags("not-array")).toBeNull();
+    expect(validateTags(null)).toBeNull();
+    expect(validateTags(42)).toBeNull();
+  });
+
+  test("returns valid tags array", () => {
+    expect(validateTags(["a", "b", "c"])).toEqual(["a", "b", "c"]);
+  });
+
+  test("filters out invalid tags", () => {
+    expect(validateTags(["good", "bad@tag", "ok"])).toEqual(["good", "ok"]);
+  });
+
+  test("deduplicates tags", () => {
+    expect(validateTags(["a", "b", "a", "c", "b"])).toEqual(["a", "b", "c"]);
+  });
+
+  test("returns null when all tags are invalid", () => {
+    expect(validateTags(["@@@", "###"])).toBeNull();
+  });
+
+  test("returns null when empty array", () => {
+    expect(validateTags([])).toBeNull();
+  });
+
+  test("returns null when exceeding MAX_TAGS_PER_SESSION", () => {
+    const tags = Array.from({ length: 25 }, (_, i) => "tag" + i);
+    expect(validateTags(tags)).toBeNull();
+  });
+
+  test("accepts up to MAX_TAGS_PER_SESSION tags", () => {
+    const tags = Array.from({ length: 20 }, (_, i) => "tag" + i);
+    expect(validateTags(tags)).toHaveLength(20);
+  });
+});
+
+/* ================================================================
+ * validateWebhookUrl
+ * ================================================================ */
+describe("validateWebhookUrl", () => {
+  test("accepts valid public URLs", () => {
+    expect(validateWebhookUrl("https://example.com/webhook").valid).toBe(true);
+    expect(validateWebhookUrl("http://hooks.example.org:8080/api").valid).toBe(true);
+  });
+
+  test("rejects missing / non-string input", () => {
+    expect(validateWebhookUrl(null).valid).toBe(false);
+    expect(validateWebhookUrl("").valid).toBe(false);
+    expect(validateWebhookUrl(42).valid).toBe(false);
+  });
+
+  test("rejects invalid URLs", () => {
+    expect(validateWebhookUrl("not-a-url").valid).toBe(false);
+  });
+
+  test("rejects non-http(s) protocols", () => {
+    expect(validateWebhookUrl("ftp://example.com").valid).toBe(false);
+    expect(validateWebhookUrl("file:///etc/passwd").valid).toBe(false);
+  });
+
+  test("rejects embedded credentials", () => {
+    const r = validateWebhookUrl("https://user:pass@example.com");
+    expect(r.valid).toBe(false);
+    expect(r.error).toMatch(/credentials/);
+  });
+
+  test("rejects loopback addresses", () => {
+    expect(validateWebhookUrl("http://localhost/hook").valid).toBe(false);
+    expect(validateWebhookUrl("http://127.0.0.1/hook").valid).toBe(false);
+    expect(validateWebhookUrl("http://0.0.0.0/hook").valid).toBe(false);
+    expect(validateWebhookUrl("http://[::1]/hook").valid).toBe(false);
+  });
+
+  test("rejects private RFC-1918 addresses", () => {
+    expect(validateWebhookUrl("http://10.0.0.1/hook").valid).toBe(false);
+    expect(validateWebhookUrl("http://172.16.0.1/hook").valid).toBe(false);
+    expect(validateWebhookUrl("http://192.168.1.1/hook").valid).toBe(false);
+  });
+
+  test("rejects cloud metadata endpoints", () => {
+    expect(validateWebhookUrl("http://169.254.169.254/latest/meta-data").valid).toBe(false);
+  });
+
+  test("rejects internal service hostnames", () => {
+    expect(validateWebhookUrl("http://metadata.google.internal/").valid).toBe(false);
+    expect(validateWebhookUrl("http://kubernetes.default.svc/").valid).toBe(false);
+  });
+
+  test("rejects IPv6-mapped IPv4 addresses", () => {
+    expect(validateWebhookUrl("http://[::ffff:127.0.0.1]/hook").valid).toBe(false);
+  });
+
+  test("rejects private IPv6 ranges (ULA and link-local)", () => {
+    expect(validateWebhookUrl("http://[fd12::1]/hook").valid).toBe(false);
+    expect(validateWebhookUrl("http://[fe80::1]/hook").valid).toBe(false);
+  });
+
+  test("rejects non-standard IP notations (octal, hex, decimal)", () => {
+    expect(validateWebhookUrl("http://0x7f000001/hook").valid).toBe(false);
+    expect(validateWebhookUrl("http://2130706433/hook").valid).toBe(false);
+  });
+
+  test("rejects Carrier-Grade NAT range", () => {
+    expect(validateWebhookUrl("http://100.64.0.1/hook").valid).toBe(false);
+    expect(validateWebhookUrl("http://100.127.255.254/hook").valid).toBe(false);
+  });
+
+  test("accepts valid public IPs", () => {
+    expect(validateWebhookUrl("http://8.8.8.8/hook").valid).toBe(true);
+    expect(validateWebhookUrl("https://203.0.113.1/hook").valid).toBe(true);
+  });
+});
+
+/* ================================================================
+ * escapeLikeWildcards
+ * ================================================================ */
+describe("escapeLikeWildcards", () => {
+  test("returns empty string for non-string input", () => {
+    expect(escapeLikeWildcards(null)).toBe("");
+    expect(escapeLikeWildcards(42)).toBe("");
+    expect(escapeLikeWildcards(undefined)).toBe("");
+  });
+
+  test("passes through safe strings unchanged", () => {
+    expect(escapeLikeWildcards("hello world")).toBe("hello world");
+    expect(escapeLikeWildcards("test123")).toBe("test123");
+  });
+
+  test("escapes percent wildcard", () => {
+    expect(escapeLikeWildcards("100%")).toBe("100\\%");
+    expect(escapeLikeWildcards("%admin%")).toBe("\\%admin\\%");
+  });
+
+  test("escapes underscore wildcard", () => {
+    expect(escapeLikeWildcards("user_name")).toBe("user\\_name");
+  });
+
+  test("escapes backslashes", () => {
+    expect(escapeLikeWildcards("path\\to")).toBe("path\\\\to");
+  });
+
+  test("escapes multiple special characters together", () => {
+    expect(escapeLikeWildcards("a%b_c\\d")).toBe("a\\%b\\_c\\\\d");
   });
 });
