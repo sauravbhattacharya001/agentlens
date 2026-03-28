@@ -142,12 +142,19 @@ function createCache(options) {
   function evictExpired() {
     var now = Date.now();
     var evicted = 0;
+    // Collect keys first to avoid deleting during iteration,
+    // which can cause skipped entries in some Map implementations
+    // (same pattern as invalidatePrefix).
+    var toDelete = [];
     for (var key of store.keys()) {
       var entry = store.get(key);
       if (entry && now > entry.expiresAt) {
-        store.delete(key);
-        evicted++;
+        toDelete.push(key);
       }
+    }
+    for (var i = 0; i < toDelete.length; i++) {
+      store.delete(toDelete[i]);
+      evicted++;
     }
     return evicted;
   }
