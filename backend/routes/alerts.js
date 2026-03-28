@@ -62,6 +62,31 @@ const MAX_WINDOW_MINUTES = 10080;   // 7 days max — prevents expensive full-ta
 const MAX_COOLDOWN_MINUTES = 10080; // 7 days max
 const MAX_NAME_LENGTH = 128;
 const MAX_AGENT_FILTER_LENGTH = 256;
+const MAX_ALERT_RULES = 100;        // cap total rules to prevent DoS via evaluate endpoint
+
+// Validate ruleId / alertId: alphanumeric + hyphens, max 64 chars.
+// Matches the pattern used by generateId() and prevents log injection
+// or cache pollution from arbitrary-length / special-char params.
+const RESOURCE_ID_RE = /^[a-zA-Z0-9][a-zA-Z0-9-]{0,63}$/;
+
+function isValidResourceId(id) {
+  return typeof id === "string" && RESOURCE_ID_RE.test(id);
+}
+
+// Middleware: reject invalid ruleId early (mirrors webhooks.js pattern)
+router.param("ruleId", (req, res, next, val) => {
+  if (!isValidResourceId(val)) {
+    return res.status(400).json({ error: "Invalid rule ID format" });
+  }
+  next();
+});
+
+router.param("alertId", (req, res, next, val) => {
+  if (!isValidResourceId(val)) {
+    return res.status(400).json({ error: "Invalid alert ID format" });
+  }
+  next();
+});
 
 // ── Helper: generate unique ID ──────────────────────────────────────
 
@@ -217,6 +242,12 @@ router.post("/rules", wrapRoute("create alert rule", (req, res) => {
     }
     if (typeof threshold !== "number" || isNaN(threshold)) {
       return res.status(400).json({ error: "threshold must be a number" });
+    }
+
+    // Prevent unbounded rule creation — each rule is evaluated on POST /evaluate
+    const ruleCount = db.prepare("SELECT COUNT(*) AS cnt FROM alert_rules").get().cnt;
+    if (ruleCount >= MAX_ALERT_RULES) {
+      return res.status(409).json({ error: `Maximum of ${MAX_ALERT_RULES} alert rules reached. Delete unused rules first.` });
     }
 
     // Validate agent_filter length
