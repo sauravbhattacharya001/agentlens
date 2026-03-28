@@ -290,6 +290,7 @@ async function deliverWebhook(webhook, alertData) {
         headers,
         body,
         signal: controller.signal,
+        redirect: "error",  // Block redirects to prevent SSRF bypass via open redirect
       });
       clearTimeout(timer);
 
