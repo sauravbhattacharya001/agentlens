@@ -4,10 +4,23 @@ const express = require("express");
 const crypto = require("crypto");
 const dns = require("dns");
 const { promisify } = require("util");
+const rateLimit = require("express-rate-limit");
 const router = express.Router();
 const { getDb } = require("../db");
 const { validateWebhookUrl } = require("../lib/validation");
 const { parseLimit, wrapRoute } = require("../lib/request-helpers");
+
+// ── Stricter rate limit for outbound webhook requests ───────────────
+// The /test and fire endpoints trigger outbound HTTP requests to
+// user-supplied URLs. A tighter limit (10 req/min) prevents abuse
+// of the server as an HTTP request proxy, even within SSRF guards.
+const webhookOutboundLimiter = rateLimit({
+  windowMs: 60 * 1000,
+  max: 10,
+  standardHeaders: true,
+  legacyHeaders: false,
+  message: { error: "Too many webhook test requests, please try again later" },
+});
 
 const dnsResolve4 = promisify(dns.resolve4);
 const dnsResolve6 = promisify(dns.resolve6);
@@ -485,7 +498,7 @@ router.delete("/:webhookId", wrapRoute("delete webhook", (req, res) => {
 
 // ── POST /webhooks/:webhookId/test — send a test payload ────────────
 
-router.post("/:webhookId/test", wrapRoute("test webhook", async (req, res) => {
+router.post("/:webhookId/test", webhookOutboundLimiter, wrapRoute("test webhook", async (req, res) => {
   const db = getDb();
   const { webhookId } = req.params;
 
