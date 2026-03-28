@@ -159,6 +159,45 @@ Day-of-week × hour-of-day activity matrix for visualizing usage patterns.
 
 Cache statistics for monitoring backend performance.
 
+### `GET /analytics/costs`
+
+Aggregate cost breakdown by model and over time. Joins event token data with `model_pricing` to compute estimated costs across all sessions.
+
+**Query Parameters:**
+
+| Parameter | Type | Default | Description |
+|-----------|------|---------|-------------|
+| `days` | number | 30 | Look-back window in days (1–365) |
+
+**Response:**
+
+```json
+{
+  "model_costs": [
+    {
+      "model": "gpt-4",
+      "call_count": 120,
+      "total_tokens_in": 50000,
+      "total_tokens_out": 30000,
+      "input_cost": 0.25,
+      "output_cost": 0.45,
+      "total_cost": 0.70
+    }
+  ],
+  "daily_costs": [
+    { "day": "2026-03-20", "input_cost": 0.10, "output_cost": 0.15, "total": 0.25, "calls": 40 }
+  ],
+  "totals": {
+    "total_cost": 1.50,
+    "input_cost": 0.60,
+    "output_cost": 0.90,
+    "total_calls": 200
+  },
+  "unmatched_models": ["custom-model"],
+  "days": 30
+}
+```
+
 ---
 
 ## Pricing & Costs
@@ -871,11 +910,29 @@ Check SLA compliance for an agent over a time window.
 }
 ```
 
-### `POST /sla/snapshot`
+### `GET /sla/summary`
 
-Save a compliance snapshot for historical tracking.
+High-level SLA compliance summary across all agents. Returns each agent's target count and latest compliance check.
 
-**Body:** Same as `/sla/check`.
+**Response:**
+
+```json
+{
+  "agents": [
+    {
+      "agent_name": "my-agent",
+      "target_count": 3,
+      "latest_check": {
+        "compliance_pct": 100,
+        "violation_count": 0,
+        "checked_at": "2026-03-20T10:00:00.000Z",
+        "window_start": "2026-03-13T10:00:00.000Z",
+        "window_end": "2026-03-20T10:00:00.000Z"
+      }
+    }
+  ]
+}
+```
 
 ### `GET /sla/history`
 
