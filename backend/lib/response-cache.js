@@ -127,9 +127,47 @@ function createCache(options) {
   }
 
   /**
+   * Evict all expired entries from the cache.
+   * Called automatically at a configurable interval to prevent stale
+   * entries from consuming memory when they are never re-requested.
+   * Also available for manual use (e.g. after bulk invalidation).
+   * @returns {number} Number of entries evicted.
+   */
+  function evictExpired() {
+    var now = Date.now();
+    var evicted = 0;
+    for (var key of store.keys()) {
+      var entry = store.get(key);
+      if (entry && now > entry.expiresAt) {
+        store.delete(key);
+        evicted++;
+      }
+    }
+    return evicted;
+  }
+
+  // Passive eviction: sweep expired entries every 2× TTL to bound
+  // stale memory usage without adding per-request overhead.
+  var sweepInterval = setInterval(evictExpired, ttlMs * 2);
+  // Unref so the timer doesn't prevent Node.js process exit
+  if (sweepInterval && typeof sweepInterval.unref === "function") {
+    sweepInterval.unref();
+  }
+
+  /**
    * Clear the entire cache.
    */
   function invalidateAll() {
+    store.clear();
+    hits = 0;
+    misses = 0;
+  }
+
+  /**
+   * Stop the periodic eviction timer (for clean shutdown / tests).
+   */
+  function destroy() {
+    clearInterval(sweepInterval);
     store.clear();
     hits = 0;
     misses = 0;
@@ -158,6 +196,8 @@ function createCache(options) {
     invalidate: invalidate,
     invalidatePrefix: invalidatePrefix,
     invalidateAll: invalidateAll,
+    evictExpired: evictExpired,
+    destroy: destroy,
     stats: stats,
     get size() { return store.size; },
   };
