@@ -47,6 +47,11 @@ Usage:
     agentlens-cli profile <agent_name> [--days N] [--json] [--endpoint URL] [--api-key KEY]
     agentlens-cli correlate [--metrics METRICS] [--limit N] [--min-sessions N] [--format table|json|csv] [--output FILE] [--endpoint URL] [--api-key KEY]
     agentlens-cli watch [--interval SECS] [--metric METRIC] [--agent NAME] [--alert-threshold N] [--compact] [--no-spark] [--duration MINS] [--endpoint URL] [--api-key KEY]
+    agentlens-cli baseline list [--json] [--endpoint URL] [--api-key KEY]
+    agentlens-cli baseline show <agent_name> [--json] [--endpoint URL] [--api-key KEY]
+    agentlens-cli baseline record <session_id> [--endpoint URL] [--api-key KEY]
+    agentlens-cli baseline check <session_id> [--json] [--endpoint URL] [--api-key KEY]
+    agentlens-cli baseline delete <agent_name> [--endpoint URL] [--api-key KEY]
     agentlens-cli status [--endpoint URL] [--api-key KEY]
 
 Environment variables:
@@ -82,7 +87,8 @@ from agentlens.cli_profile import cmd_profile, register_profile_parser  # agent 
 from agentlens.cli_trace import cmd_trace  # terminal waterfall timeline
 from agentlens.cli_heatmap import cmd_heatmap  # GitHub-style activity heatmap
 from agentlens.cli_correlate import run as cmd_correlate, setup_parser as register_correlate_parser  # metric correlations
-from agentlens.cli_capacity import cmd_capacity  # fleet capacity planning
+from agentlens.cli_capacity import cmd_capacity
+from agentlens.cli_baseline import cmd_baseline, register_baseline_parser  # fleet capacity planning
 
 
 def _print_table(rows: list[dict], columns: list[str], *, max_width: int = 40) -> None:
@@ -1245,6 +1251,9 @@ def main() -> None:
     p.add_argument("--format", choices=["table", "json", "chart"], default="table", help="Output format")
     p.add_argument("--output", "-o", help="Write output to file")
 
+    # -- baseline --
+    register_baseline_parser(sub)
+
     # -- forecast --
     p = sub.add_parser("forecast", help="Predict future costs/usage from historical trends")
     p.add_argument("--days", type=int, default=7, help="Number of days to forecast (default: 7)")
@@ -1303,6 +1312,7 @@ def main() -> None:
         "correlate": cmd_correlate,
         "status": cmd_status,
         "watch": lambda args: __import__("agentlens.cli_watch", fromlist=["cmd_watch"]).cmd_watch(args),
+        "baseline": cmd_baseline,
     }
     commands[args.command](args)
 
