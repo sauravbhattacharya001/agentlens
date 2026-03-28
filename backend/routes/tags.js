@@ -6,7 +6,7 @@ const {
   validateTags,
   MAX_TAGS_PER_SESSION,
 } = require("../lib/validation");
-const { getTagStatements } = require("../lib/tag-statements");
+const { getTagStatements, batchGetTags } = require("../lib/tag-statements");
 const { parsePagination, requireSessionId, wrapRoute } = require("../lib/request-helpers");
 
 const router = express.Router();
@@ -47,23 +47,10 @@ router.get("/by-tag/:tag", wrapRoute("list sessions by tag", (req, res) => {
   const sessions = stmts.sessionsByTag.all(tag, limit, offset);
   const { count: total } = stmts.sessionsByTagCount.get(tag);
 
-  // Batch-fetch all tags for the returned sessions in one query
-  // instead of N separate getTagsForSession calls (N+1 → 2 queries)
+  // Batch-fetch all tags for the returned sessions using cached statements
+  // instead of building a dynamic IN (...) prepared statement per request
   const sessionIds = sessions.map((s) => s.session_id);
-  const tagMap = {};
-  if (sessionIds.length > 0) {
-    const placeholders = sessionIds.map(() => "?").join(", ");
-    const batchStmt = getDb().prepare(
-      `SELECT session_id, tag FROM session_tags
-       WHERE session_id IN (${placeholders})
-       ORDER BY created_at ASC`
-    );
-    const allTags = batchStmt.all(...sessionIds);
-    for (const row of allTags) {
-      if (!tagMap[row.session_id]) tagMap[row.session_id] = [];
-      tagMap[row.session_id].push(row.tag);
-    }
-  }
+  const tagMap = batchGetTags(sessionIds);
 
   const enriched = sessions.map((s) => ({
     ...s,
