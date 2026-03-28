@@ -91,3 +91,13 @@ cd sdk/examples && python mock_agent.py
 - **Add SDK functionality:** Update `tracker.py` for logic, `__init__.py` for public API
 - **Add a new data model:** Define in `models.py` with Pydantic BaseModel
 - **Update database schema:** Modify `initSchema()` in `db.js` (add migration for existing data)
+
+## Important Constraints
+
+- **Never break decorator safety:** `@track_agent` and `@track_tool_call` must silently no-op if `init()` hasn't been called. Always test this invariant.
+- **Thread safety in transport:** `transport.py` uses a background daemon thread. Any changes must be thread-safe (use locks where needed).
+- **SQLite WAL mode:** The backend relies on WAL for concurrent reads. Don't switch to other journal modes.
+- **Pydantic v2 only:** Don't use v1 patterns (`class Config`, `.dict()`, `validator`). Use `model_config`, `.model_dump()`, `field_validator`.
+- **Backend tests use Jest:** Test files go in `backend/tests/`. SDK tests use pytest in `sdk/tests/`.
+- **Seed data:** Run `node seed.js` in backend/ to populate demo sessions for manual testing.
+- **Dashboard has no build step:** `dashboard/` is plain HTML/CSS/JS served by Express static middleware. No npm/webpack needed.
