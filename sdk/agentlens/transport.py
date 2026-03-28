@@ -189,7 +189,7 @@ class Transport:
                     "X-API-Key": self.api_key,
                 },
             )
-            if response.status_code == 200:
+            if 200 <= response.status_code < 300:
                 # Success — reset consecutive failure counter
                 with self._lock:
                     self._consecutive_failures = 0
