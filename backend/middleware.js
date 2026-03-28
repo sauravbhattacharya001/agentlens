@@ -53,8 +53,29 @@ function createCorsMiddleware() {
     ? process.env.CORS_ORIGINS.split(",").map((o) => o.trim())
     : null;
 
+  // In production without explicit CORS_ORIGINS, deny all cross-origin
+  // requests instead of reflecting every origin.  Reflecting all origins
+  // lets any website make authenticated API calls using a stolen or
+  // guessed API key, exfiltrating observability data cross-origin.
+  // In development (no NODE_ENV or NODE_ENV !== "production"), allow
+  // localhost origins for convenience.
+  let origin;
+  if (ALLOWED_ORIGINS) {
+    origin = ALLOWED_ORIGINS;
+  } else if (process.env.NODE_ENV === "production") {
+    origin = false; // deny all cross-origin requests
+  } else {
+    // Dev mode: allow common local origins
+    origin = [
+      "http://localhost:3000",
+      "http://localhost:5173",
+      "http://127.0.0.1:3000",
+      "http://127.0.0.1:5173",
+    ];
+  }
+
   return cors({
-    origin: ALLOWED_ORIGINS || true,
+    origin,
     methods: ["GET", "POST", "PUT", "DELETE"],
     allowedHeaders: ["Content-Type", "X-API-Key"],
     maxAge: 86400,
