@@ -70,7 +70,9 @@ function ensureContentHashColumn() {
 
 // ── Scheduler tables ────────────────────────────────────────────────
 
+var _schedReady = false;
 function ensureSchedulerTables() {
+  if (_schedReady) return;
   var db = dbMod.getDb();
   db.exec(
     "CREATE TABLE IF NOT EXISTS correlation_schedules (" +
@@ -86,6 +88,7 @@ function ensureSchedulerTables() {
     ");" +
     "CREATE INDEX IF NOT EXISTS idx_corr_sched_next ON correlation_schedules(next_run_at);"
   );
+  _schedReady = true;
 }
 
 function now() { return new Date().toISOString(); }

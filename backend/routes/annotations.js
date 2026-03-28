@@ -8,7 +8,9 @@ const { parsePagination, wrapRoute } = require("../lib/request-helpers");
 
 // ── Schema initialisation ───────────────────────────────────────────
 
+let _annotationsReady = false;
 function ensureAnnotationsTable() {
+  if (_annotationsReady) return;
   const db = getDb();
   db.exec(`
     CREATE TABLE IF NOT EXISTS annotations (
@@ -31,6 +33,7 @@ function ensureAnnotationsTable() {
     CREATE INDEX IF NOT EXISTS idx_annotations_created
       ON annotations(created_at);
   `);
+  _annotationsReady = true;
 }
 
 const VALID_TYPES = ["note", "bug", "insight", "warning", "milestone"];

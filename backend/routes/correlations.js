@@ -26,7 +26,9 @@ var MAX_AGENT_FILTER_LENGTH = 128;
 
 // ── Schema ──────────────────────────────────────────────────────────
 
+var _corrReady = false;
 function ensureCorrelationTables() {
+  if (_corrReady) return;
   var db = dbMod.getDb();
   db.exec(
     "CREATE TABLE IF NOT EXISTS correlation_rules (" +
@@ -63,6 +65,7 @@ function ensureCorrelationTables() {
     "CREATE INDEX IF NOT EXISTS idx_corr_members_session ON correlation_members(session_id);" +
     "CREATE INDEX IF NOT EXISTS idx_corr_rules_enabled ON correlation_rules(enabled);"
   );
+  _corrReady = true;
 }
 
 // ── Helpers ─────────────────────────────────────────────────────────
