@@ -614,25 +614,43 @@ router.post("/rules/:ruleId/run", wrapRoute("run correlation rule", function(req
 }));
 
 /** GET /groups — List correlation groups */
+// Optimized: member counts are computed via a LEFT JOIN subquery in a
+// single SQL statement instead of issuing N separate COUNT(*) queries
+// (one per group). This eliminates the N+1 query problem that caused
+// O(N) round-trips to SQLite on every list request.
 router.get("/groups", wrapRoute("list correlation groups", function(req, res) {
   ensureCorrelationTables();
   var db = dbMod.getDb();
-  var query = "SELECT g.*, r.name as rule_name, r.match_type FROM correlation_groups g JOIN correlation_rules r ON g.rule_id = r.rule_id";
-  var params = [];
-  if (req.query.rule_id) { query += " WHERE g.rule_id = ?"; params.push(req.query.rule_id); }
-  query += " ORDER BY g.created_at DESC";
+
+  // Build WHERE clause
+  var whereClause = "";
+  var filterParams = [];
+  if (req.query.rule_id) {
+    whereClause = " WHERE g.rule_id = ?";
+    filterParams.push(req.query.rule_id);
+  }
+
   var limit = parseLimit(req.query.limit, 50, 200);
   var offset = parseOffset(req.query.offset);
-  query += " LIMIT ? OFFSET ?";
-  params.push(limit, offset);
 
+  // Single query: JOIN rule info + aggregate member counts via subquery
+  var query =
+    "SELECT g.*, r.name as rule_name, r.match_type, " +
+    "COALESCE(mc.member_count, 0) as member_count " +
+    "FROM correlation_groups g " +
+    "JOIN correlation_rules r ON g.rule_id = r.rule_id " +
+    "LEFT JOIN (" +
+    "  SELECT group_id, COUNT(*) as member_count FROM correlation_members GROUP BY group_id" +
+    ") mc ON g.group_id = mc.group_id" +
+    whereClause +
+    " ORDER BY g.created_at DESC LIMIT ? OFFSET ?";
+
+  var params = filterParams.concat([limit, offset]);
   var stmt = db.prepare(query);
   var groups = stmt.all.apply(stmt, params);
   for (var i = 0; i < groups.length; i++) { groups[i].metadata = parseConfig(groups[i].metadata); }
 
-  var countStmt = db.prepare("SELECT COUNT(*) as cnt FROM correlation_members WHERE group_id = ?");
-  for (var j = 0; j < groups.length; j++) { groups[j].member_count = countStmt.get(groups[j].group_id).cnt; }
-
+  // Total count for pagination
   var totalQuery = "SELECT COUNT(*) as cnt FROM correlation_groups" + (req.query.rule_id ? " WHERE rule_id = ?" : "");
   var total;
   if (req.query.rule_id) { total = db.prepare(totalQuery).get(req.query.rule_id).cnt; }
