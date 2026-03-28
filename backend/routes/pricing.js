@@ -9,6 +9,7 @@ const express = require("express");
 const { getDb } = require("../db");
 const { sanitizeString } = require("../lib/validation");
 const { requireSessionId, wrapRoute } = require("../lib/request-helpers");
+const { invalidatePricingCache } = require("../lib/pricing");
 
 const router = express.Router();
 
@@ -137,6 +138,10 @@ router.put("/", wrapRoute("update model pricing", (req, res) => {
     });
     updateAll();
 
+    // Invalidate the shared pricing cache so subsequent cost calculations
+    // pick up the new prices immediately instead of waiting for TTL expiry.
+    invalidatePricingCache();
+
     res.json({ status: "ok", updated });
 }));
 
@@ -153,6 +158,8 @@ router.delete("/:model", wrapRoute("delete model pricing", (req, res) => {
     if (result.changes === 0) {
       return res.status(404).json({ error: `Pricing for '${model}' not found` });
     }
+
+    invalidatePricingCache();
 
     res.json({ status: "ok", deleted: model });
 }));

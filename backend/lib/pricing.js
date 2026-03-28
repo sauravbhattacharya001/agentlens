@@ -40,9 +40,24 @@ const DEFAULT_PRICING = {
  * Build a merged pricing map from DB rows + built-in defaults.
  * DB entries take precedence over defaults.
  *
+ * Results are cached for 60 seconds to avoid redundant DB queries.
+ * The pricing table changes rarely (operator updates), but the map is
+ * read on every cost-computing request (analytics, forecast, budgets,
+ * SLA, export). Caching eliminates repeated SELECT * FROM model_pricing
+ * queries that were adding ~0.1-0.5ms per endpoint call.
+ *
  * @returns {Object.<string, {input: number, output: number, currency: string}>}
  */
+var _pricingCache = null;
+var _pricingCacheExpiry = 0;
+var PRICING_CACHE_TTL_MS = 60000; // 60 seconds
+
 function loadPricingMap() {
+  var now = Date.now();
+  if (_pricingCache && now < _pricingCacheExpiry) {
+    return _pricingCache;
+  }
+
   const db = getDb();
   const rows = db.prepare("SELECT * FROM model_pricing ORDER BY model ASC").all();
 
@@ -62,7 +77,20 @@ function loadPricingMap() {
     };
   }
 
+  _pricingCache = map;
+  _pricingCacheExpiry = now + PRICING_CACHE_TTL_MS;
+
   return map;
+}
+
+/**
+ * Invalidate the pricing map cache.
+ * Call after INSERT/UPDATE/DELETE on model_pricing to ensure
+ * subsequent reads pick up the new values immediately.
+ */
+function invalidatePricingCache() {
+  _pricingCache = null;
+  _pricingCacheExpiry = 0;
 }
 
 // Delimiter set for prefix matching boundary check
@@ -121,6 +149,7 @@ function computeCost(model, tokensIn, tokensOut, pricingMap) {
 module.exports = {
   DEFAULT_PRICING,
   loadPricingMap,
+  invalidatePricingCache,
   findPricing,
   computeCost,
 };
