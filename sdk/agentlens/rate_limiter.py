@@ -175,29 +175,38 @@ class RateLimitReport:
 
 
 class _SlidingWindow:
-    """Thread-safe sliding window counter."""
+    """Thread-safe sliding window counter.
+
+    Maintains a running total so that :meth:`total` is O(expired) rather
+    than O(n).  In the common case where nothing has expired the call is
+    O(1), which matters for high-throughput tracking loops that call
+    ``check`` before every LLM request.
+    """
 
     def __init__(self, window_seconds: float) -> None:
         self.window_seconds = window_seconds
         self._entries: deque[tuple[float, int]] = deque()
+        self._running_total: int = 0
         self._lock = threading.Lock()
 
     def _prune(self, now: float) -> None:
         cutoff = now - self.window_seconds
         while self._entries and self._entries[0][0] < cutoff:
-            self._entries.popleft()
+            _, amt = self._entries.popleft()
+            self._running_total -= amt
 
     def add(self, amount: int, now: float | None = None) -> None:
         now = now or time.monotonic()
         with self._lock:
             self._entries.append((now, amount))
+            self._running_total += amount
             self._prune(now)
 
     def total(self, now: float | None = None) -> int:
         now = now or time.monotonic()
         with self._lock:
             self._prune(now)
-            return sum(amt for _, amt in self._entries)
+            return self._running_total
 
     def oldest_age_ms(self, now: float | None = None) -> float:
         now = now or time.monotonic()
@@ -212,7 +221,7 @@ class _SlidingWindow:
         now = now or time.monotonic()
         with self._lock:
             self._prune(now)
-            current = sum(amt for _, amt in self._entries)
+            current = self._running_total
             if current + needed <= limit:
                 return 0
             # Walk entries oldest-first until enough would expire
