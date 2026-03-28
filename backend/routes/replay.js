@@ -8,7 +8,7 @@
  */
 const express = require("express");
 const { getDb } = require("../db");
-const { isValidSessionId } = require("../lib/validation");
+const { isValidSessionId, safeJsonParse: _sharedSafeJsonParse } = require("../lib/validation");
 const { wrapRoute } = require("../lib/request-helpers");
 
 const router = express.Router();
@@ -16,13 +16,11 @@ const router = express.Router();
 // Maximum events loaded for replay to prevent OOM on huge sessions
 const REPLAY_EVENT_CAP = 5000;
 
+// Thin wrapper around the shared safeJsonParse to preserve the replay
+// module's original default fallback of `null` (the shared version
+// defaults to `{}`).
 function safeJsonParse(str, fallback = null) {
-  if (!str) return fallback;
-  try {
-    return JSON.parse(str);
-  } catch {
-    return fallback;
-  }
+  return _sharedSafeJsonParse(str, fallback);
 }
 
 function msBetween(a, b) {

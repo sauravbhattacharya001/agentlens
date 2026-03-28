@@ -7,6 +7,22 @@ const { getDb } = require("../db");
 const { fireWebhooks } = require("./webhooks");
 const { wrapRoute, parseLimit } = require("../lib/request-helpers");
 
+// ── Path parameter validation ───────────────────────────────────────
+// IDs are generated via `Date.now().toString(36)-<12 hex chars>`, so
+// they only contain alphanumeric characters and hyphens.  Reject
+// anything else early to prevent SQL injection or parameter confusion.
+const SAFE_ID_RE = /^[a-zA-Z0-9][a-zA-Z0-9-]{0,63}$/;
+
+function validateIdParam(paramName) {
+  return (req, res, next) => {
+    const val = req.params[paramName];
+    if (!val || !SAFE_ID_RE.test(val)) {
+      return res.status(400).json({ error: `Invalid ${paramName} format` });
+    }
+    next();
+  };
+}
+
 // ── Schema initialisation ───────────────────────────────────────────
 
 function ensureAlertsTable() {
@@ -271,7 +287,7 @@ router.post("/rules", wrapRoute("create alert rule", (req, res) => {
 
 // ── PUT /alerts/rules/:ruleId — update an alert rule ────────────────
 
-router.put("/rules/:ruleId", wrapRoute("update alert rule", (req, res) => {
+router.put("/rules/:ruleId", validateIdParam("ruleId"), wrapRoute("update alert rule", (req, res) => {
     ensureAlertsTable();
     const db = getDb();
     const { ruleId } = req.params;
@@ -320,7 +336,7 @@ router.put("/rules/:ruleId", wrapRoute("update alert rule", (req, res) => {
 
 // ── DELETE /alerts/rules/:ruleId — delete a rule ────────────────────
 
-router.delete("/rules/:ruleId", wrapRoute("delete alert rule", (req, res) => {
+router.delete("/rules/:ruleId", validateIdParam("ruleId"), wrapRoute("delete alert rule", (req, res) => {
     ensureAlertsTable();
     const db = getDb();
     const { ruleId } = req.params;
@@ -443,7 +459,7 @@ router.get("/events", wrapRoute("list alert events", (req, res) => {
 
 // ── PUT /alerts/events/:alertId/acknowledge — ack an alert ──────────
 
-router.put("/events/:alertId/acknowledge", wrapRoute("acknowledge alert", (req, res) => {
+router.put("/events/:alertId/acknowledge", validateIdParam("alertId"), wrapRoute("acknowledge alert", (req, res) => {
     ensureAlertsTable();
     const db = getDb();
     const { alertId } = req.params;
