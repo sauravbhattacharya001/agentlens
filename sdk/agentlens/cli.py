@@ -55,6 +55,7 @@ Usage:
     agentlens-cli retention [--limit N] [--format table|json|chart] [--output FILE] [--open] [--endpoint URL] [--api-key KEY]
     agentlens-cli retention policy [--keep-days N] [--dry-run] [--json] [--endpoint URL] [--api-key KEY]
     agentlens-cli retention purge --older-than DAYS [--dry-run] [--yes] [--endpoint URL] [--api-key KEY]
+    agentlens-cli scatter [--x METRIC] [--y METRIC] [--limit N] [--width W] [--height H] [--agent NAME] [--no-trend] [--format ascii|json] [--output FILE] [--endpoint URL] [--api-key KEY]
     agentlens-cli status [--endpoint URL] [--api-key KEY]
 
 Environment variables:
@@ -93,6 +94,7 @@ from agentlens.cli_correlate import run as cmd_correlate, setup_parser as regist
 from agentlens.cli_capacity import cmd_capacity
 from agentlens.cli_baseline import cmd_baseline, register_baseline_parser  # fleet capacity planning
 from agentlens.cli_retention import cmd_retention, register_retention_parser  # data retention analysis
+from agentlens.cli_scatter import cmd_scatter, register_scatter_parser  # terminal scatter plots
 
 
 def _print_table(rows: list[dict], columns: list[str], *, max_width: int = 40) -> None:
@@ -1261,6 +1263,9 @@ def main() -> None:
     # -- retention --
     register_retention_parser(sub)
 
+    # -- scatter --
+    register_scatter_parser(sub)
+
     # -- forecast --
     p = sub.add_parser("forecast", help="Predict future costs/usage from historical trends")
     p.add_argument("--days", type=int, default=7, help="Number of days to forecast (default: 7)")
@@ -1321,6 +1326,7 @@ def main() -> None:
         "watch": lambda args: __import__("agentlens.cli_watch", fromlist=["cmd_watch"]).cmd_watch(args),
         "baseline": cmd_baseline,
         "retention": cmd_retention,
+        "scatter": cmd_scatter,
     }
     commands[args.command](args)
 
