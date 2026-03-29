@@ -52,6 +52,9 @@ Usage:
     agentlens-cli baseline record <session_id> [--endpoint URL] [--api-key KEY]
     agentlens-cli baseline check <session_id> [--json] [--endpoint URL] [--api-key KEY]
     agentlens-cli baseline delete <agent_name> [--endpoint URL] [--api-key KEY]
+    agentlens-cli retention [--limit N] [--format table|json|chart] [--output FILE] [--open] [--endpoint URL] [--api-key KEY]
+    agentlens-cli retention policy [--keep-days N] [--dry-run] [--json] [--endpoint URL] [--api-key KEY]
+    agentlens-cli retention purge --older-than DAYS [--dry-run] [--yes] [--endpoint URL] [--api-key KEY]
     agentlens-cli status [--endpoint URL] [--api-key KEY]
 
 Environment variables:
@@ -89,6 +92,7 @@ from agentlens.cli_heatmap import cmd_heatmap  # GitHub-style activity heatmap
 from agentlens.cli_correlate import run as cmd_correlate, setup_parser as register_correlate_parser  # metric correlations
 from agentlens.cli_capacity import cmd_capacity
 from agentlens.cli_baseline import cmd_baseline, register_baseline_parser  # fleet capacity planning
+from agentlens.cli_retention import cmd_retention, register_retention_parser  # data retention analysis
 
 
 def _print_table(rows: list[dict], columns: list[str], *, max_width: int = 40) -> None:
@@ -1254,6 +1258,9 @@ def main() -> None:
     # -- baseline --
     register_baseline_parser(sub)
 
+    # -- retention --
+    register_retention_parser(sub)
+
     # -- forecast --
     p = sub.add_parser("forecast", help="Predict future costs/usage from historical trends")
     p.add_argument("--days", type=int, default=7, help="Number of days to forecast (default: 7)")
@@ -1313,6 +1320,7 @@ def main() -> None:
         "status": cmd_status,
         "watch": lambda args: __import__("agentlens.cli_watch", fromlist=["cmd_watch"]).cmd_watch(args),
         "baseline": cmd_baseline,
+        "retention": cmd_retention,
     }
     commands[args.command](args)
 
