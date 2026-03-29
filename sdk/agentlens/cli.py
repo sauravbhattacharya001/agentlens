@@ -56,6 +56,11 @@ Usage:
     agentlens-cli retention policy [--keep-days N] [--dry-run] [--json] [--endpoint URL] [--api-key KEY]
     agentlens-cli retention purge --older-than DAYS [--dry-run] [--yes] [--endpoint URL] [--api-key KEY]
     agentlens-cli scatter [--x METRIC] [--y METRIC] [--limit N] [--width W] [--height H] [--agent NAME] [--no-trend] [--format ascii|json] [--output FILE] [--endpoint URL] [--api-key KEY]
+    agentlens-cli config show
+    agentlens-cli config set <key> <value>
+    agentlens-cli config unset <key>
+    agentlens-cli config reset
+    agentlens-cli config path
     agentlens-cli status [--endpoint URL] [--api-key KEY]
 
 Environment variables:
@@ -95,6 +100,7 @@ from agentlens.cli_capacity import cmd_capacity
 from agentlens.cli_baseline import cmd_baseline, register_baseline_parser  # fleet capacity planning
 from agentlens.cli_retention import cmd_retention, register_retention_parser  # data retention analysis
 from agentlens.cli_scatter import cmd_scatter, register_scatter_parser  # terminal scatter plots
+from agentlens.cli_config import cmd_config, register_config_parser, apply_config_defaults  # persistent config
 
 
 def _print_table(rows: list[dict], columns: list[str], *, max_width: int = 40) -> None:
@@ -1266,6 +1272,9 @@ def main() -> None:
     # -- scatter --
     register_scatter_parser(sub)
 
+    # -- config --
+    register_config_parser(sub)
+
     # -- forecast --
     p = sub.add_parser("forecast", help="Predict future costs/usage from historical trends")
     p.add_argument("--days", type=int, default=7, help="Number of days to forecast (default: 7)")
@@ -1285,6 +1294,10 @@ def main() -> None:
     p.add_argument("--duration", type=int, help="Auto-stop after N minutes")
 
     args = parser.parse_args()
+
+    # Apply persistent config defaults before dispatching
+    if args.command != "config":
+        apply_config_defaults(args)
 
     commands = {
         "sessions": cmd_sessions,
@@ -1327,6 +1340,7 @@ def main() -> None:
         "baseline": cmd_baseline,
         "retention": cmd_retention,
         "scatter": cmd_scatter,
+        "config": cmd_config,
     }
     commands[args.command](args)
 
