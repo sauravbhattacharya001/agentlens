@@ -143,72 +143,86 @@ class Guardrails:
         self.name = name
         self._rules: list[Callable[[Session], list[Violation]]] = []
 
+    # ── Internal helpers ─────────────────────────────────────────────
+
+    def _add_threshold_rule(
+        self,
+        rule_name: str,
+        extractor: Callable[[Session], float | int | None],
+        limit: float | int,
+        label: str,
+        severity: Severity = Severity.ERROR,
+        *,
+        compare_min: bool = False,
+    ) -> Guardrails:
+        """Add a rule that compares an extracted metric against a threshold.
+
+        Centralises the pattern used by max_tokens_*, max_duration_ms,
+        max_events, min_events, and max_errors so each method is a
+        one-liner instead of a 10-line closure.
+
+        Args:
+            rule_name: Identifier for the rule (e.g. ``"max_tokens_in"``).
+            extractor: Callable that pulls the metric from a Session.
+                       Return ``None`` to skip validation (e.g. missing timestamps).
+            limit: The threshold value.
+            label: Human-readable metric name for the violation message.
+            severity: Violation severity.
+            compare_min: If ``True``, violate when ``actual < limit``
+                         (for minimum constraints). Default is ``actual > limit``.
+        """
+        def check(s: Session) -> list[Violation]:
+            actual = extractor(s)
+            if actual is None:
+                return []
+            violated = actual < limit if compare_min else actual > limit
+            if violated:
+                direction = "below minimum" if compare_min else "exceeds limit"
+                fmt = f"{actual:.0f}" if isinstance(actual, float) else str(actual)
+                lim_fmt = f"{limit:.0f}" if isinstance(limit, float) else str(limit)
+                return [Violation(
+                    rule=rule_name,
+                    message=f"{label} {fmt} {direction} {lim_fmt}",
+                    severity=severity,
+                    actual=actual,
+                    limit=limit,
+                )]
+            return []
+        self._rules.append(check)
+        return self
+
     # ── Token limits ─────────────────────────────────────────────────
 
     def max_tokens_in(self, limit: int, severity: Severity = Severity.ERROR) -> Guardrails:
         """Maximum input tokens allowed."""
-        def check(s: Session) -> list[Violation]:
-            if s.total_tokens_in > limit:
-                return [Violation(
-                    rule="max_tokens_in",
-                    message=f"Input tokens {s.total_tokens_in} exceed limit {limit}",
-                    severity=severity,
-                    actual=s.total_tokens_in,
-                    limit=limit,
-                )]
-            return []
-        self._rules.append(check)
-        return self
+        return self._add_threshold_rule(
+            "max_tokens_in", lambda s: s.total_tokens_in, limit, "Input tokens", severity,
+        )
 
     def max_tokens_out(self, limit: int, severity: Severity = Severity.ERROR) -> Guardrails:
         """Maximum output tokens allowed."""
-        def check(s: Session) -> list[Violation]:
-            if s.total_tokens_out > limit:
-                return [Violation(
-                    rule="max_tokens_out",
-                    message=f"Output tokens {s.total_tokens_out} exceed limit {limit}",
-                    severity=severity,
-                    actual=s.total_tokens_out,
-                    limit=limit,
-                )]
-            return []
-        self._rules.append(check)
-        return self
+        return self._add_threshold_rule(
+            "max_tokens_out", lambda s: s.total_tokens_out, limit, "Output tokens", severity,
+        )
 
     def max_total_tokens(self, limit: int, severity: Severity = Severity.ERROR) -> Guardrails:
         """Maximum total tokens (in + out)."""
-        def check(s: Session) -> list[Violation]:
-            total = s.total_tokens_in + s.total_tokens_out
-            if total > limit:
-                return [Violation(
-                    rule="max_total_tokens",
-                    message=f"Total tokens {total} exceed limit {limit}",
-                    severity=severity,
-                    actual=total,
-                    limit=limit,
-                )]
-            return []
-        self._rules.append(check)
-        return self
+        return self._add_threshold_rule(
+            "max_total_tokens",
+            lambda s: s.total_tokens_in + s.total_tokens_out,
+            limit, "Total tokens", severity,
+        )
 
     # ── Duration ─────────────────────────────────────────────────────
 
     def max_duration_ms(self, limit: float, severity: Severity = Severity.ERROR) -> Guardrails:
         """Maximum session duration in milliseconds."""
-        def check(s: Session) -> list[Violation]:
-            if s.ended_at and s.started_at:
-                dur = (s.ended_at - s.started_at).total_seconds() * 1000
-                if dur > limit:
-                    return [Violation(
-                        rule="max_duration_ms",
-                        message=f"Duration {dur:.0f}ms exceeds limit {limit:.0f}ms",
-                        severity=severity,
-                        actual=dur,
-                        limit=limit,
-                    )]
-            return []
-        self._rules.append(check)
-        return self
+        return self._add_threshold_rule(
+            "max_duration_ms",
+            lambda s: (s.ended_at - s.started_at).total_seconds() * 1000
+                       if s.ended_at and s.started_at else None,
+            limit, "Duration", severity,
+        )
 
     # ── Tool constraints ─────────────────────────────────────────────
 
@@ -291,51 +305,26 @@ class Guardrails:
 
     def max_events(self, limit: int, severity: Severity = Severity.ERROR) -> Guardrails:
         """Maximum number of events in a session."""
-        def check(s: Session) -> list[Violation]:
-            if len(s.events) > limit:
-                return [Violation(
-                    rule="max_events",
-                    message=f"Event count {len(s.events)} exceeds limit {limit}",
-                    severity=severity,
-                    actual=len(s.events),
-                    limit=limit,
-                )]
-            return []
-        self._rules.append(check)
-        return self
+        return self._add_threshold_rule(
+            "max_events", lambda s: len(s.events), limit, "Event count", severity,
+        )
 
     def min_events(self, limit: int, severity: Severity = Severity.ERROR) -> Guardrails:
         """Minimum number of events expected."""
-        def check(s: Session) -> list[Violation]:
-            if len(s.events) < limit:
-                return [Violation(
-                    rule="min_events",
-                    message=f"Event count {len(s.events)} below minimum {limit}",
-                    severity=severity,
-                    actual=len(s.events),
-                    limit=limit,
-                )]
-            return []
-        self._rules.append(check)
-        return self
+        return self._add_threshold_rule(
+            "min_events", lambda s: len(s.events), limit, "Event count", severity,
+            compare_min=True,
+        )
 
     # ── Error threshold ──────────────────────────────────────────────
 
     def max_errors(self, limit: int, severity: Severity = Severity.ERROR) -> Guardrails:
         """Maximum number of error events allowed."""
-        def check(s: Session) -> list[Violation]:
-            errors = sum(1 for e in s.events if e.event_type == "error")
-            if errors > limit:
-                return [Violation(
-                    rule="max_errors",
-                    message=f"Error count {errors} exceeds limit {limit}",
-                    severity=severity,
-                    actual=errors,
-                    limit=limit,
-                )]
-            return []
-        self._rules.append(check)
-        return self
+        return self._add_threshold_rule(
+            "max_errors",
+            lambda s: sum(1 for e in s.events if e.event_type == "error"),
+            limit, "Error count", severity,
+        )
 
     # ── Custom predicates ────────────────────────────────────────────
 
