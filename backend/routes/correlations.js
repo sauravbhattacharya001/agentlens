@@ -138,6 +138,8 @@ function correlateByMetadata(events, config) {
   var fields = ["input_data", "output_data", "decision_trace"];
   // Cache parsed JSON per event to avoid re-parsing the same blob
   // across multiple correlation runs in a single request.
+  // Capped to prevent memory exhaustion when events carry many unique blobs.
+  var PARSE_CACHE_MAX = 10000;
   var parseCache = new Map();
   for (var i = 0; i < events.length; i++) {
     var evt = events[i];
@@ -151,7 +153,9 @@ function correlateByMetadata(events, config) {
         parsed = parseCache.get(raw);
       } else {
         try { parsed = JSON.parse(raw); } catch (e) { parsed = null; }
-        parseCache.set(raw, parsed);
+        if (parseCache.size < PARSE_CACHE_MAX) {
+          parseCache.set(raw, parsed);
+        }
       }
       if (parsed && parsed[key] !== undefined) val = parsed[key];
     }
@@ -298,11 +302,14 @@ function correlateByCausalChain(events, config) {
   var groups = [];
 
   // Build index: for each event with input_data, map its value to the event
-  // for fast lookup instead of scanning all subsequent events
+  // for fast lookup instead of scanning all subsequent events.
+  // Only index input_data values up to 4 KB to prevent a single request
+  // from allocating hundreds of MB when events carry large payloads.
+  var INPUT_INDEX_MAX_VALUE_LEN = 4096;
   var inputIndex = {}; // input_data string -> [{ evt, idx }]
   for (var idx = 0; idx < events.length; idx++) {
     var inputVal = events[idx].input_data;
-    if (inputVal) {
+    if (inputVal && inputVal.length <= INPUT_INDEX_MAX_VALUE_LEN) {
       if (!inputIndex[inputVal]) inputIndex[inputVal] = [];
       inputIndex[inputVal].push({ evt: events[idx], idx: idx });
     }
@@ -599,6 +606,11 @@ router.post("/rules/:ruleId/run", wrapRoute("run correlation rule", function(req
   }
 
   var groups = runCorrelation(rule, lookback);
+  // Cap groups to prevent excessive memory/DB usage from a single run
+  var MAX_GROUPS_PER_RUN = 500;
+  if (groups.length > MAX_GROUPS_PER_RUN) {
+    groups = groups.slice(0, MAX_GROUPS_PER_RUN);
+  }
   var persisted = [];
   if (req.body.persist !== false) persisted = persistGroups(rule, groups);
 
