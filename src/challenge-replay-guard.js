@@ -180,19 +180,21 @@ function createChallengeReplayGuard(options) {
   }
 
   /**
-   * Decode a token without consuming it (introspection).
+   * Parse and verify a token string, returning its decoded fields or an error.
+   * Shared by introspect() and consume() to eliminate duplicated parsing logic.
    *
-   * @param {string} token - The token string
-   * @returns {{ valid: boolean, challengeId?: string, nonce?: string, issuedAt?: number, expiresAt?: number, meta?: Object, expired?: boolean, consumed?: boolean, error?: string }}
+   * @param {string} token - The raw token string
+   * @returns {{ error?: string, challengeId?: string, nonce?: string, issuedAt?: number, expiresAt?: number, meta?: Object }}
+   * @private
    */
-  function introspect(token) {
+  function _parseToken(token) {
     if (!token || typeof token !== "string") {
-      return { valid: false, error: "invalid_format" };
+      return { error: "invalid_format" };
     }
 
     var dotIndex = token.lastIndexOf(".");
     if (dotIndex === -1) {
-      return { valid: false, error: "invalid_format" };
+      return { error: "invalid_format" };
     }
 
     var encodedPayload = token.substring(0, dotIndex);
@@ -202,42 +204,59 @@ function createChallengeReplayGuard(options) {
     try {
       payload = Buffer.from(encodedPayload, "base64").toString("utf8");
     } catch (e) {
-      return { valid: false, error: "invalid_format" };
+      return { error: "invalid_format" };
     }
 
-    // Verify signature
+    // Verify HMAC signature (constant-time)
     var expectedSig = _sign(payload);
     if (!_safeEqual(signature, expectedSig)) {
-      return { valid: false, error: "invalid_signature" };
+      return { error: "invalid_signature" };
     }
 
     var parts = payload.split("|");
     if (parts.length < 4) {
-      return { valid: false, error: "invalid_format" };
+      return { error: "invalid_format" };
     }
 
-    var challengeId = parts[0];
-    var nonce = parts[1];
-    var issuedAt = parseInt(parts[2], 10);
-    var expiresAt = parseInt(parts[3], 10);
     var meta = null;
     if (parts[4]) {
       try { meta = JSON.parse(parts[4]); } catch (e) {
-        return { valid: false, error: "invalid_format" };
+        return { error: "invalid_format" };
       }
     }
 
+    return {
+      challengeId: parts[0],
+      nonce: parts[1],
+      issuedAt: parseInt(parts[2], 10),
+      expiresAt: parseInt(parts[3], 10),
+      meta: meta,
+    };
+  }
+
+  /**
+   * Decode a token without consuming it (introspection).
+   *
+   * @param {string} token - The token string
+   * @returns {{ valid: boolean, challengeId?: string, nonce?: string, issuedAt?: number, expiresAt?: number, meta?: Object, expired?: boolean, consumed?: boolean, error?: string }}
+   */
+  function introspect(token) {
+    var parsed = _parseToken(token);
+    if (parsed.error) {
+      return { valid: false, error: parsed.error };
+    }
+
     var now = Date.now();
-    var expired = now > expiresAt;
-    var consumed = _usedNonces.has(nonce);
+    var expired = now > parsed.expiresAt;
+    var consumed = _usedNonces.has(parsed.nonce);
 
     return {
       valid: !expired && !consumed,
-      challengeId: challengeId,
-      nonce: nonce,
-      issuedAt: issuedAt,
-      expiresAt: expiresAt,
-      meta: meta,
+      challengeId: parsed.challengeId,
+      nonce: parsed.nonce,
+      issuedAt: parsed.issuedAt,
+      expiresAt: parsed.expiresAt,
+      meta: parsed.meta,
       expired: expired,
       consumed: consumed,
     };
@@ -253,101 +272,55 @@ function createChallengeReplayGuard(options) {
    * @returns {{ valid: boolean, challengeId?: string, nonce?: string, meta?: Object, error?: string }}
    */
   function consume(token, expectedChallengeId) {
-    if (!token || typeof token !== "string") {
+    var parsed = _parseToken(token);
+    if (parsed.error) {
       _stats.tokensRejected++;
-      _stats.rejectionReasons.invalid_format++;
-      return { valid: false, error: "invalid_format" };
-    }
-
-    var dotIndex = token.lastIndexOf(".");
-    if (dotIndex === -1) {
-      _stats.tokensRejected++;
-      _stats.rejectionReasons.invalid_format++;
-      return { valid: false, error: "invalid_format" };
-    }
-
-    var encodedPayload = token.substring(0, dotIndex);
-    var signature = token.substring(dotIndex + 1);
-
-    var payload;
-    try {
-      payload = Buffer.from(encodedPayload, "base64").toString("utf8");
-    } catch (e) {
-      _stats.tokensRejected++;
-      _stats.rejectionReasons.invalid_format++;
-      return { valid: false, error: "invalid_format" };
-    }
-
-    // Verify HMAC signature (constant-time)
-    var expectedSig = _sign(payload);
-    if (!_safeEqual(signature, expectedSig)) {
-      _stats.tokensRejected++;
-      _stats.rejectionReasons.invalid_signature++;
-      return { valid: false, error: "invalid_signature" };
-    }
-
-    var parts = payload.split("|");
-    if (parts.length < 4) {
-      _stats.tokensRejected++;
-      _stats.rejectionReasons.invalid_format++;
-      return { valid: false, error: "invalid_format" };
-    }
-
-    var challengeId = parts[0];
-    var nonce = parts[1];
-    var issuedAt = parseInt(parts[2], 10);
-    var expiresAt = parseInt(parts[3], 10);
-    var meta = null;
-    if (parts[4]) {
-      try { meta = JSON.parse(parts[4]); } catch (e) {
-        _stats.tokensRejected++;
-        _stats.rejectionReasons.invalid_format++;
-        return { valid: false, error: "invalid_format" };
-      }
+      _stats.rejectionReasons[parsed.error] = (_stats.rejectionReasons[parsed.error] || 0) + 1;
+      return { valid: false, error: parsed.error };
     }
 
     var now = Date.now();
 
     // Check future timestamp
-    if (strictTiming && issuedAt > now + 5000) {
+    if (strictTiming && parsed.issuedAt > now + 5000) {
       _stats.tokensRejected++;
       _stats.rejectionReasons.future_timestamp++;
-      return { valid: false, error: "future_timestamp", challengeId: challengeId };
+      return { valid: false, error: "future_timestamp", challengeId: parsed.challengeId };
     }
 
     // Check expiry
-    if (now > expiresAt) {
+    if (now > parsed.expiresAt) {
       _stats.tokensRejected++;
       _stats.rejectionReasons.expired++;
-      return { valid: false, error: "expired", challengeId: challengeId };
+      return { valid: false, error: "expired", challengeId: parsed.challengeId };
     }
 
     // Check challenge ID match
-    if (expectedChallengeId && challengeId !== expectedChallengeId) {
+    if (expectedChallengeId && parsed.challengeId !== expectedChallengeId) {
       _stats.tokensRejected++;
       _stats.rejectionReasons.challenge_mismatch++;
-      return { valid: false, error: "challenge_mismatch", challengeId: challengeId };
+      return { valid: false, error: "challenge_mismatch", challengeId: parsed.challengeId };
     }
 
     // Check nonce reuse
-    if (_usedNonces.has(nonce)) {
+    if (_usedNonces.has(parsed.nonce)) {
       _stats.tokensRejected++;
       _stats.rejectionReasons.already_used++;
-      return { valid: false, error: "already_used", challengeId: challengeId };
+      return { valid: false, error: "already_used", challengeId: parsed.challengeId };
     }
 
     // Mark nonce as used
-    _usedNonces.set(nonce, now);
+    _usedNonces.set(parsed.nonce, now);
     _evictNonces();
     _stats.tokensConsumed++;
 
     return {
       valid: true,
-      challengeId: challengeId,
-      nonce: nonce,
-      issuedAt: issuedAt,
-      expiresAt: expiresAt,
-      meta: meta,
+      challengeId: parsed.challengeId,
+      nonce: parsed.nonce,
+      issuedAt: parsed.issuedAt,
+      expiresAt: parsed.expiresAt,
+      meta: parsed.meta,
     };
   }
 
