@@ -11,13 +11,14 @@ from __future__ import annotations
 import argparse
 import json
 import math
-import os
 import sys
 from collections import defaultdict
 from datetime import datetime, timedelta, timezone
 from typing import Any
 
 import httpx
+
+from agentlens.cli_common import get_client
 
 
 def _utcnow() -> datetime:
@@ -206,19 +207,7 @@ def _project_workload(
 
 def cmd_capacity(args: argparse.Namespace) -> None:
     """Execute the capacity CLI command."""
-    endpoint = (
-        getattr(args, "endpoint", None)
-        or os.environ.get("AGENTLENS_ENDPOINT", "http://localhost:3000")
-    ).rstrip("/")
-    api_key = (
-        getattr(args, "api_key", None)
-        or os.environ.get("AGENTLENS_API_KEY", "default")
-    )
-    client = httpx.Client(
-        base_url=endpoint,
-        headers={"x-api-key": api_key},
-        timeout=15.0,
-    )
+    client, _endpoint = get_client(args)
 
     horizon = getattr(args, "horizon", 24) or 24
     target_rpm = getattr(args, "target_rpm", None)
