@@ -11,7 +11,9 @@ const { wrapRoute } = require("../lib/request-helpers");
 
 // ── Schema initialisation ───────────────────────────────────────────
 
+let _retentionTableReady = false;
 function ensureRetentionTable() {
+  if (_retentionTableReady) return;
   const db = getDb();
   db.exec(`
     CREATE TABLE IF NOT EXISTS retention_config (
@@ -20,6 +22,7 @@ function ensureRetentionTable() {
       updated_at TEXT NOT NULL DEFAULT (datetime('now'))
     );
   `);
+  _retentionTableReady = true;
 }
 
 // ── Default config ──────────────────────────────────────────────────

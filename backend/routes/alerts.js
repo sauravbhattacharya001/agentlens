@@ -25,7 +25,9 @@ function validateIdParam(paramName) {
 
 // ── Schema initialisation ───────────────────────────────────────────
 
+let _alertsTableReady = false;
 function ensureAlertsTable() {
+  if (_alertsTableReady) return;
   const db = getDb();
   db.exec(`
     CREATE TABLE IF NOT EXISTS alert_rules (
@@ -57,6 +59,7 @@ function ensureAlertsTable() {
     CREATE INDEX IF NOT EXISTS idx_alert_events_triggered ON alert_events(triggered_at);
     CREATE INDEX IF NOT EXISTS idx_alert_events_ack ON alert_events(acknowledged);
   `);
+  _alertsTableReady = true;
 }
 
 // Valid metrics users can alert on
