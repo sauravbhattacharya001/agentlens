@@ -274,6 +274,8 @@ class AnomalyDetector:
     def __init__(self, config: AnomalyDetectorConfig | None = None):
         self.config = config or AnomalyDetectorConfig()
         self._samples: dict[str, list[float]] = {}  # metric_name -> list of values
+        self._baseline_cache: dict[str, MetricBaseline] = {}
+        self._sample_lengths: dict[str, int] = {}  # track lengths for cache invalidation
 
     @property
     def sample_count(self) -> int:
@@ -298,11 +300,15 @@ class AnomalyDetector:
         Args:
             metrics: dict mapping metric names to float values.
                      Unknown metrics are accepted (extensible).
+
+        Invalidates cached baselines for any metric that receives new data.
         """
         for name, value in metrics.items():
             if not isinstance(value, (int, float)):
                 continue
             self._samples.setdefault(name, []).append(float(value))
+            # Invalidate cache for this metric (length changed)
+            self._baseline_cache.pop(name, None)
 
     def add_session(self, session) -> None:
         """Extract metrics from a Session object and add to baseline.
@@ -314,11 +320,22 @@ class AnomalyDetector:
         self.add_sample(metrics)
 
     def get_baseline(self, metric_name: str) -> MetricBaseline | None:
-        """Get the statistical baseline for a specific metric."""
+        """Get the statistical baseline for a specific metric.
+
+        Uses a cache keyed by metric name, invalidated when new samples are
+        added via ``add_sample``. This avoids recomputing mean/std_dev on
+        every call — significant when analyzing many sessions against the
+        same baseline.
+        """
         values = self._samples.get(metric_name)
         if not values or len(values) < self.config.min_samples:
             return None
-        return self._compute_baseline(metric_name, values)
+        cached = self._baseline_cache.get(metric_name)
+        if cached is not None:
+            return cached
+        baseline = self._compute_baseline(metric_name, values)
+        self._baseline_cache[metric_name] = baseline
+        return baseline
 
     def get_all_baselines(self) -> dict[str, MetricBaseline]:
         """Get baselines for all tracked metrics."""
@@ -422,6 +439,7 @@ class AnomalyDetector:
     def reset(self) -> None:
         """Clear all baseline data."""
         self._samples.clear()
+        self._baseline_cache.clear()
 
     @staticmethod
     def extract_metrics(session) -> dict[str, float]:
