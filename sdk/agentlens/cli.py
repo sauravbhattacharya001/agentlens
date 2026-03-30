@@ -61,6 +61,7 @@ Usage:
     agentlens-cli config unset <key>
     agentlens-cli config reset
     agentlens-cli config path
+    agentlens-cli bottleneck [--by agent|model|type] [--metric latency|cost|errors] [--limit N] [--min-sessions N] [--format table|json] [--output FILE] [--endpoint URL] [--api-key KEY]
     agentlens-cli status [--endpoint URL] [--api-key KEY]
 
 Environment variables:
@@ -100,6 +101,7 @@ from agentlens.cli_capacity import cmd_capacity
 from agentlens.cli_baseline import cmd_baseline, register_baseline_parser  # fleet capacity planning
 from agentlens.cli_retention import cmd_retention, register_retention_parser  # data retention analysis
 from agentlens.cli_scatter import cmd_scatter, register_scatter_parser  # terminal scatter plots
+from agentlens.cli_bottleneck import cmd_bottleneck, register as register_bottleneck_parser  # bottleneck analysis
 from agentlens.cli_config import cmd_config, register_config_parser, apply_config_defaults  # persistent config
 
 
@@ -1275,6 +1277,9 @@ def main() -> None:
     # -- config --
     register_config_parser(sub)
 
+    # -- bottleneck --
+    register_bottleneck_parser(sub)
+
     # -- forecast --
     p = sub.add_parser("forecast", help="Predict future costs/usage from historical trends")
     p.add_argument("--days", type=int, default=7, help="Number of days to forecast (default: 7)")
@@ -1341,6 +1346,7 @@ def main() -> None:
         "retention": cmd_retention,
         "scatter": cmd_scatter,
         "config": cmd_config,
+        "bottleneck": cmd_bottleneck,
     }
     commands[args.command](args)
 
