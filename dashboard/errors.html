@@ -221,6 +221,7 @@
         <span class="tagline">Error Analytics</span>
       </div>
       <div class="header-right">
+        <button class="theme-toggle" onclick="toggleTheme()" title="Toggle theme" id="themeToggleBtn">🌙</button>
         <a href="index.html" class="btn btn-alert-header" style="text-decoration:none">📋 Sessions</a>
         <a href="diff.html" class="btn btn-alert-header" style="text-decoration:none">⚖️ Diff</a>
         <a href="scorecards.html" class="btn btn-alert-header" style="text-decoration:none">🏅 Scorecards</a>
@@ -325,6 +326,21 @@
     </main>
   </div>
 
+    <script>
+    (function() {
+      var saved = localStorage.getItem('agentlens-theme') || 'dark';
+      if (saved === 'light') document.documentElement.setAttribute('data-theme', 'light');
+    })();
+    function toggleTheme() {
+      var current = document.documentElement.getAttribute('data-theme');
+      var next = current === 'light' ? 'dark' : 'light';
+      if (next === 'light') document.documentElement.setAttribute('data-theme', 'light');
+      else document.documentElement.removeAttribute('data-theme');
+      localStorage.setItem('agentlens-theme', next);
+      var btn = document.getElementById('themeToggleBtn');
+      if (btn) btn.textContent = next === 'light' ? '☀️' : '🌙';
+    }
+  </script>
   <script>
     const API_BASE = window.location.origin;
 

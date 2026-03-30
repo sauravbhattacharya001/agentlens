@@ -24,6 +24,7 @@
         <button class="btn btn-alert-header" onclick="openAlertsModal()" id="alertsBtn">
           🔔 Alerts <span class="alert-badge" id="alertBadge" style="display:none">0</span>
         </button>
+        <button class="theme-toggle" onclick="toggleTheme()" title="Toggle light/dark theme" id="themeToggleBtn">🌙</button>
         <span class="status-dot"></span>
         <span id="connectionStatus">Connected</span>
       </div>
@@ -697,6 +698,29 @@
     </div>
   </div>
 
+  <script>
+    // Theme toggle — persists to localStorage
+    (function() {
+      const saved = localStorage.getItem('agentlens-theme') || 'dark';
+      if (saved === 'light') document.documentElement.setAttribute('data-theme', 'light');
+      document.addEventListener('DOMContentLoaded', function() {
+        var btn = document.getElementById('themeToggleBtn');
+        if (btn) btn.textContent = saved === 'light' ? '☀️' : '🌙';
+      });
+    })();
+    function toggleTheme() {
+      var current = document.documentElement.getAttribute('data-theme');
+      var next = current === 'light' ? 'dark' : 'light';
+      if (next === 'light') {
+        document.documentElement.setAttribute('data-theme', 'light');
+      } else {
+        document.documentElement.removeAttribute('data-theme');
+      }
+      localStorage.setItem('agentlens-theme', next);
+      var btn = document.getElementById('themeToggleBtn');
+      if (btn) btn.textContent = next === 'light' ? '☀️' : '🌙';
+    }
+  </script>
   <script src="app.js"></script>
 </body>
 </html>

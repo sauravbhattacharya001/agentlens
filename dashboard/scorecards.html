@@ -51,6 +51,7 @@
         <span class="tagline">Agent Scorecards</span>
       </div>
       <div class="header-right">
+        <button class="theme-toggle" onclick="toggleTheme()" title="Toggle theme" id="themeToggleBtn">🌙</button>
         <a href="index.html" class="btn btn-alert-header" style="text-decoration:none">📋 Dashboard</a>
         <a href="waterfall.html" class="btn btn-alert-header" style="text-decoration:none">📊 Waterfall</a>
       </div>
@@ -83,6 +84,21 @@
     </div>
   </div>
 
+    <script>
+    (function() {
+      var saved = localStorage.getItem('agentlens-theme') || 'dark';
+      if (saved === 'light') document.documentElement.setAttribute('data-theme', 'light');
+    })();
+    function toggleTheme() {
+      var current = document.documentElement.getAttribute('data-theme');
+      var next = current === 'light' ? 'dark' : 'light';
+      if (next === 'light') document.documentElement.setAttribute('data-theme', 'light');
+      else document.documentElement.removeAttribute('data-theme');
+      localStorage.setItem('agentlens-theme', next);
+      var btn = document.getElementById('themeToggleBtn');
+      if (btn) btn.textContent = next === 'light' ? '☀️' : '🌙';
+    }
+  </script>
   <script>
     const API = window.location.origin;
     let allCards = [];

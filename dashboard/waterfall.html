@@ -130,6 +130,7 @@
 <div class="header">
   <h1><a href="index.html">🔍 AgentLens</a> › Trace Waterfall</h1>
   <div class="header-right">
+        <button class="theme-toggle" onclick="toggleTheme()" title="Toggle theme" id="themeToggleBtn">🌙</button>
     <input type="text" id="sessionInput" placeholder="Enter session ID or paste JSON..."
            onkeydown="if(event.key==='Enter') loadSession()">
     <button class="btn btn-primary" onclick="loadSession()">Load</button>
@@ -201,7 +202,22 @@
   </div>
 </div>
 
-<script>
+  <script>
+    (function() {
+      var saved = localStorage.getItem('agentlens-theme') || 'dark';
+      if (saved === 'light') document.documentElement.setAttribute('data-theme', 'light');
+    })();
+    function toggleTheme() {
+      var current = document.documentElement.getAttribute('data-theme');
+      var next = current === 'light' ? 'dark' : 'light';
+      if (next === 'light') document.documentElement.setAttribute('data-theme', 'light');
+      else document.documentElement.removeAttribute('data-theme');
+      localStorage.setItem('agentlens-theme', next);
+      var btn = document.getElementById('themeToggleBtn');
+      if (btn) btn.textContent = next === 'light' ? '☀️' : '🌙';
+    }
+  </script>
+  <script>
 // ─── State ──────────────────────────────────────────────────────────
 let allEvents = [];
 let filteredEvents = [];
