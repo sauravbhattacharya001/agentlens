@@ -24,7 +24,7 @@ jobs:
     runs-on: ubuntu-latest
     steps:
       - name: Checkout
-        uses: actions/checkout@v6
+        uses: actions/checkout@v4
 
       - name: Build site
         run: |
@@ -39,6 +39,34 @@ jobs:
           cp -r dashboard/* _site/dashboard/
           # Add navigation redirects
           echo '<meta http-equiv="refresh" content="0;url=dashboard/">' > _site/app.html
+          # Add 404 page
+          cat > _site/404.html << 'EOF'
+          <!DOCTYPE html>
+          <html lang="en">
+          <head>
+            <meta charset="UTF-8">
+            <meta name="viewport" content="width=device-width, initial-scale=1.0">
+            <title>Page Not Found — AgentLens</title>
+            <style>
+              body { font-family: -apple-system, BlinkMacSystemFont, 'Segoe UI', sans-serif; display: flex; align-items: center; justify-content: center; min-height: 100vh; margin: 0; background: #0f172a; color: #e2e8f0; }
+              .container { text-align: center; max-width: 480px; padding: 2rem; }
+              h1 { font-size: 4rem; margin: 0; background: linear-gradient(135deg, #3b82f6, #8b5cf6); -webkit-background-clip: text; -webkit-text-fill-color: transparent; }
+              p { color: #94a3b8; line-height: 1.6; }
+              a { color: #3b82f6; text-decoration: none; }
+              a:hover { text-decoration: underline; }
+            </style>
+          </head>
+          <body>
+            <div class="container">
+              <h1>404</h1>
+              <p>🔍 AgentLens couldn't find that page.</p>
+              <p><a href="/">← Back to Documentation</a> · <a href="/demo/">Try the Demo</a> · <a href="/dashboard/">Dashboard</a></p>
+            </div>
+          </body>
+          </html>
+          EOF
+          # Add .nojekyll to skip Jekyll processing
+          touch _site/.nojekyll
 
       - name: Setup Pages
         uses: actions/configure-pages@v5
