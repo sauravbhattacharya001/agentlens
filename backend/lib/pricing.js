@@ -79,25 +79,37 @@ function loadPricingMap() {
 
   _pricingCache = map;
   _pricingCacheExpiry = now + PRICING_CACHE_TTL_MS;
+  // Clear findPricing lookup cache when pricing map is rebuilt
+  _findPricingCache = Object.create(null);
 
   return map;
 }
 
 /**
- * Invalidate the pricing map cache.
+ * Invalidate the pricing map cache (and the findPricing lookup cache).
  * Call after INSERT/UPDATE/DELETE on model_pricing to ensure
  * subsequent reads pick up the new values immediately.
  */
 function invalidatePricingCache() {
   _pricingCache = null;
   _pricingCacheExpiry = 0;
+  _findPricingCache = Object.create(null);
 }
 
 // Delimiter set for prefix matching boundary check
 const _delimiters = new Set(["-", "_", ".", "/", " "]);
 
+// Per-pricingMap lookup cache — avoids O(k) linear scan of all pricing
+// map keys on every findPricing() call.  In cost-heavy endpoints like
+// /forecast and /analytics/costs, the same model names appear hundreds
+// of times across event rows.  This cache turns repeated lookups from
+// O(k) to O(1) after the first miss.  Invalidated when pricing changes.
+var _findPricingCache = Object.create(null);
+
 /**
  * Find pricing for a model name, with fuzzy prefix fallback.
+ * Results are memoized per model name to avoid repeated O(k) prefix
+ * scans across the pricing map (k = number of known models).
  *
  * @param {string} model        - Model name (e.g. "gpt-4o-2024-05-13")
  * @param {Object} pricingMap   - Map from loadPricingMap()
@@ -107,8 +119,14 @@ function findPricing(model, pricingMap) {
   if (!model) return null;
   const lower = model.toLowerCase();
 
+  // Check memoization cache first
+  if (lower in _findPricingCache) return _findPricingCache[lower];
+
   // Exact match
-  if (pricingMap[lower]) return pricingMap[lower];
+  if (pricingMap[lower]) {
+    _findPricingCache[lower] = pricingMap[lower];
+    return pricingMap[lower];
+  }
 
   // Longest-prefix match at a word boundary
   var bestKey = null;
@@ -121,7 +139,9 @@ function findPricing(model, pricingMap) {
       }
     }
   }
-  return bestKey ? pricingMap[bestKey] : null;
+  var result = bestKey ? pricingMap[bestKey] : null;
+  _findPricingCache[lower] = result;
+  return result;
 }
 
 /**
