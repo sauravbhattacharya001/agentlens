@@ -1,46 +1,34 @@
 const express = require("express");
-const { getDb } = require("../db");
 const { requireSessionId, wrapRoute } = require("../lib/request-helpers");
+const { createLazyStatements } = require("../lib/lazy-statements");
 
 const router = express.Router();
 
 // ── Cached prepared statements ──────────────────────────────────────
-// Lazily initialized once per process lifetime. better-sqlite3 prepared
-// statements are reusable, so caching avoids SQL recompilation overhead
-// on every request — consistent with events.js, sessions.js, etc.
-let _bookmarkStmts = null;
-
-function getBookmarkStatements() {
-  if (_bookmarkStmts) return _bookmarkStmts;
-  const db = getDb();
-
-  _bookmarkStmts = {
-    listAll: db.prepare(
-      `SELECT b.session_id, b.note, b.created_at,
-              s.agent_name, s.started_at, s.status,
-              s.total_tokens_in, s.total_tokens_out
-       FROM session_bookmarks b
-       JOIN sessions s ON s.session_id = b.session_id
-       ORDER BY b.created_at DESC`
-    ),
-    getOne: db.prepare(
-      "SELECT session_id, note, created_at FROM session_bookmarks WHERE session_id = ?"
-    ),
-    checkSession: db.prepare(
-      "SELECT session_id FROM sessions WHERE session_id = ?"
-    ),
-    upsert: db.prepare(
-      `INSERT INTO session_bookmarks (session_id, note, created_at)
-       VALUES (?, ?, datetime('now'))
-       ON CONFLICT(session_id) DO UPDATE SET note = excluded.note`
-    ),
-    remove: db.prepare(
-      "DELETE FROM session_bookmarks WHERE session_id = ?"
-    ),
-  };
-
-  return _bookmarkStmts;
-}
+const getBookmarkStatements = createLazyStatements((db) => ({
+  listAll: db.prepare(
+    `SELECT b.session_id, b.note, b.created_at,
+            s.agent_name, s.started_at, s.status,
+            s.total_tokens_in, s.total_tokens_out
+     FROM session_bookmarks b
+     JOIN sessions s ON s.session_id = b.session_id
+     ORDER BY b.created_at DESC`
+  ),
+  getOne: db.prepare(
+    "SELECT session_id, note, created_at FROM session_bookmarks WHERE session_id = ?"
+  ),
+  checkSession: db.prepare(
+    "SELECT session_id FROM sessions WHERE session_id = ?"
+  ),
+  upsert: db.prepare(
+    `INSERT INTO session_bookmarks (session_id, note, created_at)
+     VALUES (?, ?, datetime('now'))
+     ON CONFLICT(session_id) DO UPDATE SET note = excluded.note`
+  ),
+  remove: db.prepare(
+    "DELETE FROM session_bookmarks WHERE session_id = ?"
+  ),
+}));
 
 // ── GET /bookmarks — list all bookmarked sessions ───────────────────
 router.get(

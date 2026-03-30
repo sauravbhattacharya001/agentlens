@@ -1,37 +1,30 @@
 const express = require("express");
-const { getDb } = require("../db");
 const { isValidSessionId } = require("../lib/validation");
 const { wrapRoute } = require("../lib/request-helpers");
+const { createLazyStatements } = require("../lib/lazy-statements");
 
 const router = express.Router();
 
-let _stmts = null;
-
-function getStatements() {
-  if (_stmts) return _stmts;
-  const db = getDb();
-  _stmts = {
-    sessionEvents: db.prepare(`
-      SELECT event_id, session_id, event_type, timestamp, duration_ms,
-             model, tokens_in, tokens_out, input_data, output_data, tool_call
-      FROM events
-      WHERE session_id = ?
-      ORDER BY timestamp ASC
-    `),
-    recentErrorSessions: db.prepare(`
-      SELECT DISTINCT e.session_id, s.agent_name, s.started_at,
-             COUNT(*) as error_count
-      FROM events e
-      JOIN sessions s ON e.session_id = s.session_id
-      WHERE e.event_type IN ('error', 'tool_error', 'agent_error', 'timeout', 'rate_limit')
-      GROUP BY e.session_id
-      HAVING error_count >= ?
-      ORDER BY s.started_at DESC
-      LIMIT ?
-    `),
-  };
-  return _stmts;
-}
+const getStatements = createLazyStatements((db) => ({
+  sessionEvents: db.prepare(`
+    SELECT event_id, session_id, event_type, timestamp, duration_ms,
+           model, tokens_in, tokens_out, input_data, output_data, tool_call
+    FROM events
+    WHERE session_id = ?
+    ORDER BY timestamp ASC
+  `),
+  recentErrorSessions: db.prepare(`
+    SELECT DISTINCT e.session_id, s.agent_name, s.started_at,
+           COUNT(*) as error_count
+    FROM events e
+    JOIN sessions s ON e.session_id = s.session_id
+    WHERE e.event_type IN ('error', 'tool_error', 'agent_error', 'timeout', 'rate_limit')
+    GROUP BY e.session_id
+    HAVING error_count >= ?
+    ORDER BY s.started_at DESC
+    LIMIT ?
+  `),
+}));
 
 // Default cost rates (per 1K tokens)
 const DEFAULT_COST_INPUT = 0.003;

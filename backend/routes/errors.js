@@ -1,7 +1,7 @@
 const express = require("express");
-const { getDb } = require("../db");
 const { safeJsonParse } = require("../lib/validation");
 const { parseLimit, wrapRoute } = require("../lib/request-helpers");
+const { createLazyStatements } = require("../lib/lazy-statements");
 
 const router = express.Router();
 
@@ -16,13 +16,7 @@ function toPercent(numerator, denominator) {
 }
 
 // ── Cached prepared statements ──────────────────────────────────────
-let _stmts = null;
-
-function getStatements() {
-  if (_stmts) return _stmts;
-  const db = getDb();
-
-  _stmts = {
+const getStatements = createLazyStatements((db) => ({
     // Overall error summary
     errorSummary: db.prepare(`
       SELECT
@@ -174,10 +168,7 @@ function getStatements() {
       WHERE event_type IN ('error', 'tool_error', 'agent_error')
       ORDER BY timestamp ASC
     `),
-  };
-
-  return _stmts;
-}
+}));
 
 // ── Helper: extract error message from output_data ──────────────────
 function extractErrorMessage(outputData, maxLen = 200) {
