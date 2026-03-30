@@ -3,7 +3,7 @@ const { getDb } = require("../db");
 const { latencyStats, round2 } = require("../lib/stats");
 const { wrapRoute, parseDays, daysAgoCutoff } = require("../lib/request-helpers");
 const { createCache, cacheMiddleware } = require("../lib/response-cache");
-const { loadPricingMap, findPricing } = require("../lib/pricing");
+const { loadPricingMap, computeCost } = require("../lib/pricing");
 
 const router = express.Router();
 
@@ -584,22 +584,19 @@ router.get("/costs", analyticsCacheMw, wrapRoute("fetch cost analytics", (req, r
   const unmatchedModels = [];
 
   for (const row of modelRows) {
-    const pricing = findPricing(row.model, pricingMap);
-    if (pricing) {
-      const inputCost = (row.total_tokens_in / 1_000_000) * pricing.input;
-      const outputCost = (row.total_tokens_out / 1_000_000) * pricing.output;
-      const cost = inputCost + outputCost;
-      totalCost += cost;
-      totalInputCost += inputCost;
-      totalOutputCost += outputCost;
+    const cost = computeCost(row.model, row.total_tokens_in, row.total_tokens_out, pricingMap);
+    if (cost) {
+      totalCost += cost.totalCost;
+      totalInputCost += cost.inputCost;
+      totalOutputCost += cost.outputCost;
       modelCosts.push({
         model: row.model,
         call_count: row.call_count,
         tokens_in: row.total_tokens_in,
         tokens_out: row.total_tokens_out,
-        input_cost: Math.round(inputCost * 10000) / 10000,
-        output_cost: Math.round(outputCost * 10000) / 10000,
-        total_cost: Math.round(cost * 10000) / 10000,
+        input_cost: Math.round(cost.inputCost * 10000) / 10000,
+        output_cost: Math.round(cost.outputCost * 10000) / 10000,
+        total_cost: Math.round(cost.totalCost * 10000) / 10000,
         percent: 0,  // filled below
       });
     } else {
@@ -619,16 +616,14 @@ router.get("/costs", analyticsCacheMw, wrapRoute("fetch cost analytics", (req, r
 
   const dailyCosts = {};
   for (const row of dailyRows) {
-    const pricing = findPricing(row.model, pricingMap);
-    if (!pricing) continue;
-    const cost = (row.tokens_in / 1_000_000) * pricing.input
-               + (row.tokens_out / 1_000_000) * pricing.output;
+    const cost = computeCost(row.model, row.tokens_in, row.tokens_out, pricingMap);
+    if (!cost) continue;
     if (!dailyCosts[row.day]) {
       dailyCosts[row.day] = { day: row.day, cost: 0, input_cost: 0, output_cost: 0 };
     }
-    dailyCosts[row.day].cost += cost;
-    dailyCosts[row.day].input_cost += (row.tokens_in / 1_000_000) * pricing.input;
-    dailyCosts[row.day].output_cost += (row.tokens_out / 1_000_000) * pricing.output;
+    dailyCosts[row.day].cost += cost.totalCost;
+    dailyCosts[row.day].input_cost += cost.inputCost;
+    dailyCosts[row.day].output_cost += cost.outputCost;
   }
 
   const dailyTrend = Object.values(dailyCosts).map(d => ({

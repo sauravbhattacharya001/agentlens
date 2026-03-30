@@ -12,7 +12,7 @@
 const express = require("express");
 const { getDb } = require("../db");
 const { wrapRoute } = require("../lib/request-helpers");
-const { loadPricingMap, findPricing } = require("../lib/pricing");
+const { loadPricingMap, computeCost } = require("../lib/pricing");
 
 const router = express.Router();
 
@@ -84,15 +84,12 @@ function calculateSpend(scope, startDate, endDate) {
   const breakdown = {};
 
   for (const row of rows) {
-    const pricing = findPricing(row.model, pricingMap);
-    if (pricing) {
-      const inputCost = ((row.total_in || 0) / 1_000_000) * pricing.input;
-      const outputCost = ((row.total_out || 0) / 1_000_000) * pricing.output;
-      const cost = inputCost + outputCost;
-      totalSpend += cost;
+    const cost = computeCost(row.model, row.total_in || 0, row.total_out || 0, pricingMap);
+    if (cost) {
+      totalSpend += cost.totalCost;
       breakdown[row.model] = {
         tokens_in: row.total_in || 0, tokens_out: row.total_out || 0,
-        cost: Math.round(cost * 1_000_000) / 1_000_000,
+        cost: Math.round(cost.totalCost * 1_000_000) / 1_000_000,
       };
     }
   }
