@@ -109,6 +109,7 @@ class ErrorOccurrence:
     timestamp: datetime
     stack_trace: str | None = None
     metadata: dict[str, Any] = field(default_factory=dict)
+    fingerprint_id: str = ""
 
 
 @dataclass
@@ -257,6 +258,7 @@ class ErrorFingerprinter:
         template = self._normalise_message(message)
         frame_sig = self._normalise_stack(stack_trace)
         fp_id = self._compute_fingerprint(error_type, template, frame_sig)
+        occ.fingerprint_id = fp_id
 
         if fp_id not in self._clusters:
             self._clusters[fp_id] = ErrorCluster(
@@ -566,11 +568,7 @@ class ErrorFingerprinter:
         }
 
         for occ in self._occurrences:
-            template = self._normalise_message(occ.message)
-            frame_sig = self._normalise_stack(occ.stack_trace)
-            fp_id = self._compute_fingerprint(
-                occ.error_type, template, frame_sig,
-            )
+            fp_id = occ.fingerprint_id
             if fp_id not in cluster_buckets:
                 continue
             bucket_idx = min(
