@@ -320,12 +320,13 @@ class AgentTracker(AlertMixin, TagMixin, AnnotationMixin, RetentionMixin):
         for sp in self._active_spans:
             sp.event_count += 1
 
-        # Send to backend
+        # Send to backend — use send_event() directly to skip the
+        # single-element list allocation and unpacking in send_events().
         api_dict = event.to_api_dict()
         # Attach span context so the backend can associate events with spans
         if self._active_spans:
             api_dict["span_id"] = self._active_spans[-1].span_id
-        self.transport.send_events([api_dict])
+        self.transport.send_event(api_dict)
 
         return event
 
