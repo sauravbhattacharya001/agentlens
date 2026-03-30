@@ -435,6 +435,10 @@ class AnomalyDetector:
         - error_rate: fraction of error events
         - event_count: number of events
         - tool_failure_rate: fraction of tool events that are errors
+
+        Uses a single pass over all events to collect durations, token
+        counts, error counts, and tool-failure counts simultaneously,
+        avoiding the previous 4+ separate iterations.
         """
         events = session.events if hasattr(session, "events") else []
         event_count = len(events)
@@ -452,12 +456,35 @@ class AnomalyDetector:
             metrics["tool_failure_rate"] = 0.0
             return metrics
 
-        # Latency
-        durations = [
-            e.duration_ms
-            for e in events
-            if hasattr(e, "duration_ms") and e.duration_ms is not None
-        ]
+        # Single-pass collection
+        durations: list[float] = []
+        total_tokens = 0
+        error_count = 0
+        tool_count = 0
+        tool_error_count = 0
+
+        for e in events:
+            # Latency
+            if hasattr(e, "duration_ms") and e.duration_ms is not None:
+                durations.append(e.duration_ms)
+
+            # Tokens
+            total_tokens += (getattr(e, "tokens_in", 0) or 0) + (getattr(e, "tokens_out", 0) or 0)
+
+            # Event type checks (errors + tool failures)
+            event_type = getattr(e, "event_type", None) or ""
+            event_type_lower = event_type.lower()
+            is_error = "error" in event_type_lower
+            is_tool = "tool" in event_type_lower
+
+            if is_error:
+                error_count += 1
+            if is_tool:
+                tool_count += 1
+                if is_error:
+                    tool_error_count += 1
+
+        # Latency metrics
         if durations:
             metrics["avg_latency_ms"] = sum(durations) / len(durations)
             sorted_d = sorted(durations)
@@ -467,37 +494,17 @@ class AnomalyDetector:
             metrics["avg_latency_ms"] = 0.0
             metrics["p95_latency_ms"] = 0.0
 
-        # Tokens
-        total_tokens = sum(
-            (getattr(e, "tokens_in", 0) or 0) + (getattr(e, "tokens_out", 0) or 0)
-            for e in events
-        )
+        # Token metrics
         metrics["total_tokens"] = float(total_tokens)
         metrics["tokens_per_event"] = total_tokens / event_count
 
-        # Errors
-        error_count = sum(
-            1
-            for e in events
-            if hasattr(e, "event_type")
-            and "error" in (e.event_type or "").lower()
-        )
+        # Error metrics
         metrics["error_rate"] = error_count / event_count
 
-        # Tool failures
-        tool_events = [
-            e
-            for e in events
-            if hasattr(e, "event_type")
-            and "tool" in (e.event_type or "").lower()
-        ]
-        if tool_events:
-            tool_errors = sum(
-                1 for e in tool_events if "error" in (e.event_type or "").lower()
-            )
-            metrics["tool_failure_rate"] = tool_errors / len(tool_events)
-        else:
-            metrics["tool_failure_rate"] = 0.0
+        # Tool failure metrics
+        metrics["tool_failure_rate"] = (
+            tool_error_count / tool_count if tool_count > 0 else 0.0
+        )
 
         return metrics
 
