@@ -145,7 +145,7 @@ function getMetricStatements() {
     error_rate: buildE(
       `SELECT
          COUNT(*) AS total,
-         SUM(CASE WHEN e.event_type = 'error' THEN 1 ELSE 0 END) AS errors
+         SUM(CASE WHEN e.event_type IN ('error', 'agent_error', 'tool_error') THEN 1 ELSE 0 END) AS errors
        FROM events e
        JOIN sessions s ON e.session_id = s.session_id
        WHERE e.timestamp >= ?`
