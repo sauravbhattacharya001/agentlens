@@ -1,0 +1,472 @@
+<!DOCTYPE html>
+<html lang="en">
+<head>
+  <meta charset="UTF-8">
+  <meta name="viewport" content="width=device-width, initial-scale=1.0">
+  <title>AgentLens — Dependency Graph</title>
+  <link rel="stylesheet" href="styles.css">
+  <style>
+    .dep-container { display: flex; height: calc(100vh - 80px); gap: 0; }
+    .dep-sidebar { width: 320px; min-width: 280px; background: var(--bg-secondary); border-right: 1px solid var(--border); overflow-y: auto; padding: 16px; }
+    .dep-main { flex: 1; position: relative; background: var(--bg-primary); }
+    .dep-canvas { width: 100%; height: 100%; display: block; cursor: grab; }
+    .dep-canvas.dragging { cursor: grabbing; }
+    .dep-controls { position: absolute; top: 16px; right: 16px; display: flex; flex-direction: column; gap: 8px; }
+    .dep-controls button { background: var(--bg-secondary); border: 1px solid var(--border); color: var(--text-primary); width: 36px; height: 36px; border-radius: var(--radius-sm); cursor: pointer; font-size: 16px; display: flex; align-items: center; justify-content: center; }
+    .dep-controls button:hover { background: var(--bg-hover); }
+    .dep-toolbar { position: absolute; top: 16px; left: 16px; display: flex; gap: 8px; align-items: center; }
+    .dep-toolbar select, .dep-toolbar input { background: var(--bg-secondary); border: 1px solid var(--border); color: var(--text-primary); padding: 6px 10px; border-radius: var(--radius-sm); font-size: 13px; }
+    .dep-toolbar label { color: var(--text-secondary); font-size: 13px; }
+    .dep-legend { position: absolute; bottom: 16px; left: 16px; background: var(--bg-secondary); border: 1px solid var(--border); border-radius: var(--radius); padding: 12px; font-size: 12px; }
+    .dep-legend-item { display: flex; align-items: center; gap: 8px; margin: 4px 0; color: var(--text-secondary); }
+    .dep-legend-dot { width: 10px; height: 10px; border-radius: 50%; }
+    .dep-info { position: absolute; bottom: 16px; right: 16px; background: var(--bg-secondary); border: 1px solid var(--border); border-radius: var(--radius); padding: 12px 16px; font-size: 12px; color: var(--text-secondary); }
+
+    /* Sidebar elements */
+    .dep-section { margin-bottom: 20px; }
+    .dep-section h3 { font-size: 13px; color: var(--text-secondary); text-transform: uppercase; letter-spacing: 0.5px; margin-bottom: 8px; }
+    .dep-stat { display: flex; justify-content: space-between; padding: 6px 0; border-bottom: 1px solid var(--border); font-size: 13px; }
+    .dep-stat-label { color: var(--text-secondary); }
+    .dep-stat-value { color: var(--text-primary); font-weight: 600; }
+    .dep-service-list { list-style: none; padding: 0; margin: 0; }
+    .dep-service-item { display: flex; align-items: center; gap: 8px; padding: 8px; border-radius: var(--radius-sm); cursor: pointer; font-size: 13px; color: var(--text-primary); }
+    .dep-service-item:hover { background: var(--bg-hover); }
+    .dep-service-item.selected { background: var(--bg-tertiary); border: 1px solid var(--accent); }
+    .dep-service-dot { width: 8px; height: 8px; border-radius: 50%; flex-shrink: 0; }
+    .dep-service-meta { color: var(--text-secondary); font-size: 11px; margin-left: auto; }
+    .dep-detail { background: var(--bg-tertiary); border-radius: var(--radius); padding: 12px; margin-top: 8px; font-size: 12px; }
+    .dep-detail-row { display: flex; justify-content: space-between; padding: 4px 0; }
+    .dep-detail-row .label { color: var(--text-secondary); }
+    .dep-detail-row .value { color: var(--text-primary); }
+    .dep-critical-badge { background: var(--red-dim); color: var(--red); padding: 2px 6px; border-radius: 3px; font-size: 10px; font-weight: 600; }
+    .dep-healthy-badge { background: var(--green-dim); color: var(--green); padding: 2px 6px; border-radius: 3px; font-size: 10px; font-weight: 600; }
+    .dep-empty { text-align: center; color: var(--text-muted); padding: 60px 20px; }
+    .dep-empty h2 { color: var(--text-secondary); margin-bottom: 8px; }
+
+    /* Co-occurrence pairs */
+    .dep-pair { display: flex; align-items: center; gap: 6px; padding: 6px 8px; border-radius: var(--radius-sm); font-size: 12px; color: var(--text-secondary); }
+    .dep-pair:hover { background: var(--bg-hover); }
+    .dep-pair-arrow { color: var(--accent); }
+    .dep-pair-count { margin-left: auto; color: var(--text-muted); }
+  </style>
+</head>
+<body>
+  <header class="header">
+    <div class="header-left">
+      <h1 class="logo">🔍 AgentLens</h1>
+      <span class="tagline">Dependency Graph</span>
+    </div>
+    <div class="header-right">
+      <a href="index.html" class="btn btn-alert-header" style="text-decoration:none">📋 Dashboard</a>
+      <a href="command-center.html" class="btn btn-alert-header" style="text-decoration:none">🎯 Command Center</a>
+      <a href="errors.html" class="btn btn-alert-header" style="text-decoration:none">🐛 Errors</a>
+      <a href="costs.html" class="btn btn-alert-header" style="text-decoration:none">💰 Costs</a>
+      <a href="sla.html" class="btn btn-alert-header" style="text-decoration:none">📏 SLA</a>
+      <button class="theme-toggle" onclick="toggleTheme()" title="Toggle theme" id="themeToggleBtn">🌙</button>
+    </div>
+  </header>
+
+  <div class="dep-container" id="depContainer">
+    <aside class="dep-sidebar" id="sidebar">
+      <div class="dep-section">
+        <h3>📊 Summary</h3>
+        <div id="summaryStats"></div>
+      </div>
+      <div class="dep-section">
+        <h3>🔴 Critical Services</h3>
+        <div id="criticalList"></div>
+      </div>
+      <div class="dep-section">
+        <h3>🔗 All Services</h3>
+        <ul class="dep-service-list" id="serviceList"></ul>
+      </div>
+      <div class="dep-section">
+        <h3>🤝 Co-occurrence Pairs</h3>
+        <div id="coOccurrence"></div>
+      </div>
+      <div class="dep-section" id="selectedDetail" style="display:none">
+        <h3>📌 Selected Service</h3>
+        <div id="detailContent" class="dep-detail"></div>
+      </div>
+    </aside>
+    <div class="dep-main">
+      <canvas id="graphCanvas" class="dep-canvas"></canvas>
+      <div class="dep-toolbar">
+        <label>Days:</label>
+        <select id="daysSelect">
+          <option value="1">1 day</option>
+          <option value="7" selected>7 days</option>
+          <option value="14">14 days</option>
+          <option value="30">30 days</option>
+          <option value="90">90 days</option>
+        </select>
+        <label>Agent:</label>
+        <input id="agentFilter" type="text" placeholder="All agents" style="width:120px">
+        <button class="btn btn-alert-header" onclick="refreshData()" style="font-size:13px">🔄 Refresh</button>
+      </div>
+      <div class="dep-controls">
+        <button onclick="zoomIn()" title="Zoom in">+</button>
+        <button onclick="zoomOut()" title="Zoom out">−</button>
+        <button onclick="resetView()" title="Reset view">⌂</button>
+        <button onclick="toggleLabels()" title="Toggle labels" id="labelBtn">T</button>
+        <button onclick="togglePhysics()" title="Pause/resume" id="physicsBtn">⏸</button>
+      </div>
+      <div class="dep-legend">
+        <div class="dep-legend-item"><div class="dep-legend-dot" style="background:#3fb950"></div> Healthy (&lt;5% errors)</div>
+        <div class="dep-legend-item"><div class="dep-legend-dot" style="background:#d29922"></div> Warning (5-15%)</div>
+        <div class="dep-legend-item"><div class="dep-legend-dot" style="background:#f85149"></div> Critical (&gt;15%)</div>
+        <div class="dep-legend-item"><div class="dep-legend-dot" style="background:#58a6ff"></div> No errors</div>
+        <div style="margin-top:6px;color:var(--text-muted)">Node size = call volume<br>Edge thickness = co-occurrence</div>
+      </div>
+      <div class="dep-info" id="hoverInfo" style="display:none"></div>
+    </div>
+  </div>
+
+<script>
+const API = window.AGENTLENS_API || '';
+let services = [], critical = [], coOccPairs = [], summary = {};
+let nodes = [], edges = [];
+let selectedService = null;
+let showLabels = true, physicsRunning = true;
+let zoom = 1, panX = 0, panY = 0;
+let dragNode = null, dragOffsetX = 0, dragOffsetY = 0;
+let isPanning = false, panStartX = 0, panStartY = 0;
+let animFrame = null;
+
+const canvas = document.getElementById('graphCanvas');
+const ctx = canvas.getContext('2d');
+
+function resizeCanvas() {
+  const r = canvas.parentElement.getBoundingClientRect();
+  canvas.width = r.width * devicePixelRatio;
+  canvas.height = r.height * devicePixelRatio;
+  canvas.style.width = r.width + 'px';
+  canvas.style.height = r.height + 'px';
+  ctx.setTransform(devicePixelRatio, 0, 0, devicePixelRatio, 0, 0);
+}
+window.addEventListener('resize', resizeCanvas);
+resizeCanvas();
+
+// Theme
+function toggleTheme() {
+  document.body.dataset.theme = document.body.dataset.theme === 'light' ? '' : 'light';
+  const btn = document.getElementById('themeToggleBtn');
+  btn.textContent = document.body.dataset.theme === 'light' ? '☀️' : '🌙';
+}
+
+// Data fetching
+async function fetchJSON(url) {
+  try { const r = await fetch(API + url); if (!r.ok) throw new Error(r.status); return await r.json(); }
+  catch(e) { console.warn('Fetch failed:', url, e); return null; }
+}
+
+async function refreshData() {
+  const days = document.getElementById('daysSelect').value;
+  const agent = document.getElementById('agentFilter').value.trim();
+  const agentQ = agent ? `&agent=${encodeURIComponent(agent)}` : '';
+
+  const [depData, critData, coData] = await Promise.all([
+    fetchJSON(`/dependencies?days=${days}${agentQ}`),
+    fetchJSON(`/dependencies/critical?days=${days}${agentQ}`),
+    fetchJSON(`/dependencies/co-occurrence?days=${days}&min_occurrence=1`),
+  ]);
+
+  if (depData) {
+    services = depData.services || [];
+    summary = depData.summary || {};
+  } else {
+    // Demo data for when backend isn't running
+    services = generateDemoServices();
+    summary = { totalServices: services.length, totalCalls: services.reduce((s,d)=>s+d.callCount,0), totalErrors: services.reduce((s,d)=>s+d.errorCount,0), overallErrorRate: 3.2 };
+  }
+
+  critical = critData ? (critData.critical || []) : services.filter(s => s.errorRate > 15);
+  coOccPairs = coData ? (coData.pairs || []) : generateDemoPairs(services);
+
+  buildGraph();
+  renderSidebar();
+}
+
+function generateDemoServices() {
+  const names = ['openai-gpt4', 'anthropic-claude', 'web-search', 'postgres-db', 'redis-cache', 'vector-store', 'auth-service', 'file-storage', 'email-sender', 'slack-notify'];
+  return names.map(name => ({
+    service: name,
+    callCount: Math.floor(Math.random() * 500) + 50,
+    errorCount: Math.floor(Math.random() * 30),
+    errorRate: Math.round(Math.random() * 20 * 100) / 100,
+    avgLatencyMs: Math.round(Math.random() * 3000 + 100),
+    p95LatencyMs: Math.round(Math.random() * 8000 + 500),
+    agents: ['agent-' + Math.ceil(Math.random()*3)],
+    callShare: Math.round(Math.random() * 30 * 100) / 100,
+  }));
+}
+
+function generateDemoPairs(svcs) {
+  const pairs = [];
+  for (let i = 0; i < svcs.length && pairs.length < 8; i++) {
+    for (let j = i+1; j < svcs.length && pairs.length < 8; j++) {
+      if (Math.random() > 0.5) pairs.push({ services: [svcs[i].service, svcs[j].service], count: Math.floor(Math.random()*50)+5, sessions: Math.floor(Math.random()*20)+2 });
+    }
+  }
+  return pairs;
+}
+
+// Graph building
+function buildGraph() {
+  const maxCalls = Math.max(...services.map(s => s.callCount), 1);
+  nodes = services.map((s, i) => ({
+    id: s.service,
+    x: canvas.width / devicePixelRatio / 2 + (Math.random() - 0.5) * 300,
+    y: canvas.height / devicePixelRatio / 2 + (Math.random() - 0.5) * 300,
+    vx: 0, vy: 0,
+    radius: 10 + (s.callCount / maxCalls) * 30,
+    color: getServiceColor(s),
+    data: s,
+  }));
+
+  const nodeMap = {};
+  nodes.forEach(n => nodeMap[n.id] = n);
+
+  const maxOcc = Math.max(...coOccPairs.map(p => p.count), 1);
+  edges = coOccPairs.map(p => ({
+    source: nodeMap[p.services[0]],
+    target: nodeMap[p.services[1]],
+    weight: p.count / maxOcc,
+    count: p.count,
+  })).filter(e => e.source && e.target);
+
+  resetView();
+  if (!animFrame) tick();
+}
+
+function getServiceColor(s) {
+  if (s.errorRate === 0 || s.errorCount === 0) return '#58a6ff';
+  if (s.errorRate > 15) return '#f85149';
+  if (s.errorRate > 5) return '#d29922';
+  return '#3fb950';
+}
+
+// Physics simulation
+function tick() {
+  if (physicsRunning) simulate();
+  draw();
+  animFrame = requestAnimationFrame(tick);
+}
+
+function simulate() {
+  const cx = canvas.width / devicePixelRatio / 2, cy = canvas.height / devicePixelRatio / 2;
+  // Repulsion
+  for (let i = 0; i < nodes.length; i++) {
+    for (let j = i+1; j < nodes.length; j++) {
+      let dx = nodes[j].x - nodes[i].x, dy = nodes[j].y - nodes[i].y;
+      let dist = Math.sqrt(dx*dx + dy*dy) || 1;
+      let force = 3000 / (dist * dist);
+      let fx = (dx / dist) * force, fy = (dy / dist) * force;
+      nodes[i].vx -= fx; nodes[i].vy -= fy;
+      nodes[j].vx += fx; nodes[j].vy += fy;
+    }
+  }
+  // Attraction (edges)
+  edges.forEach(e => {
+    let dx = e.target.x - e.source.x, dy = e.target.y - e.source.y;
+    let dist = Math.sqrt(dx*dx + dy*dy) || 1;
+    let force = (dist - 150) * 0.005 * (0.5 + e.weight);
+    let fx = (dx / dist) * force, fy = (dy / dist) * force;
+    e.source.vx += fx; e.source.vy += fy;
+    e.target.vx -= fx; e.target.vy -= fy;
+  });
+  // Center gravity
+  nodes.forEach(n => {
+    n.vx += (cx - n.x) * 0.001;
+    n.vy += (cy - n.y) * 0.001;
+    n.vx *= 0.9; n.vy *= 0.9;
+    if (n !== dragNode) { n.x += n.vx; n.y += n.vy; }
+  });
+}
+
+function draw() {
+  const w = canvas.width / devicePixelRatio, h = canvas.height / devicePixelRatio;
+  ctx.clearRect(0, 0, w, h);
+  ctx.save();
+  ctx.translate(panX, panY);
+  ctx.scale(zoom, zoom);
+
+  // Edges
+  edges.forEach(e => {
+    ctx.beginPath();
+    ctx.moveTo(e.source.x, e.source.y);
+    ctx.lineTo(e.target.x, e.target.y);
+    ctx.strokeStyle = selectedService && (e.source.id === selectedService || e.target.id === selectedService)
+      ? 'rgba(88,166,255,0.6)' : 'rgba(48,54,61,0.5)';
+    ctx.lineWidth = 1 + e.weight * 4;
+    ctx.stroke();
+  });
+
+  // Nodes
+  nodes.forEach(n => {
+    const isSelected = n.id === selectedService;
+    const dimmed = selectedService && !isSelected && !edges.some(e => (e.source.id === selectedService && e.target.id === n.id) || (e.target.id === selectedService && e.source.id === n.id));
+    ctx.globalAlpha = dimmed ? 0.3 : 1;
+
+    ctx.beginPath();
+    ctx.arc(n.x, n.y, n.radius, 0, Math.PI * 2);
+    ctx.fillStyle = n.color;
+    ctx.fill();
+    if (isSelected) { ctx.strokeStyle = '#fff'; ctx.lineWidth = 2; ctx.stroke(); }
+
+    if (showLabels) {
+      ctx.fillStyle = dimmed ? 'rgba(139,148,158,0.5)' : '#e6edf3';
+      ctx.font = `${Math.max(10, n.radius * 0.5)}px -apple-system, BlinkMacSystemFont, sans-serif`;
+      ctx.textAlign = 'center';
+      ctx.fillText(n.id, n.x, n.y + n.radius + 14);
+    }
+    ctx.globalAlpha = 1;
+  });
+
+  ctx.restore();
+}
+
+// Interaction
+function screenToWorld(sx, sy) {
+  return { x: (sx - panX) / zoom, y: (sy - panY) / zoom };
+}
+
+function findNode(sx, sy) {
+  const { x, y } = screenToWorld(sx, sy);
+  for (let i = nodes.length - 1; i >= 0; i--) {
+    const n = nodes[i];
+    const dx = x - n.x, dy = y - n.y;
+    if (dx*dx + dy*dy < n.radius * n.radius) return n;
+  }
+  return null;
+}
+
+canvas.addEventListener('mousedown', e => {
+  const rect = canvas.getBoundingClientRect();
+  const sx = e.clientX - rect.left, sy = e.clientY - rect.top;
+  const hit = findNode(sx, sy);
+  if (hit) {
+    dragNode = hit;
+    const w = screenToWorld(sx, sy);
+    dragOffsetX = w.x - hit.x; dragOffsetY = w.y - hit.y;
+    canvas.classList.add('dragging');
+  } else {
+    isPanning = true; panStartX = e.clientX - panX; panStartY = e.clientY - panY;
+    canvas.classList.add('dragging');
+  }
+});
+
+canvas.addEventListener('mousemove', e => {
+  const rect = canvas.getBoundingClientRect();
+  const sx = e.clientX - rect.left, sy = e.clientY - rect.top;
+  if (dragNode) {
+    const w = screenToWorld(sx, sy);
+    dragNode.x = w.x - dragOffsetX; dragNode.y = w.y - dragOffsetY;
+    dragNode.vx = 0; dragNode.vy = 0;
+  } else if (isPanning) {
+    panX = e.clientX - panStartX; panY = e.clientY - panStartY;
+  } else {
+    const hit = findNode(sx, sy);
+    const info = document.getElementById('hoverInfo');
+    if (hit) {
+      info.style.display = 'block';
+      info.innerHTML = `<strong>${hit.id}</strong><br>${hit.data.callCount} calls · ${hit.data.errorRate}% errors · ${hit.data.avgLatencyMs}ms avg`;
+    } else {
+      info.style.display = 'none';
+    }
+  }
+});
+
+canvas.addEventListener('mouseup', e => {
+  if (dragNode && Math.abs(dragNode.vx) < 1 && Math.abs(dragNode.vy) < 1) {
+    selectService(dragNode.id);
+  }
+  dragNode = null; isPanning = false;
+  canvas.classList.remove('dragging');
+});
+
+canvas.addEventListener('wheel', e => {
+  e.preventDefault();
+  const delta = e.deltaY > 0 ? 0.9 : 1.1;
+  const rect = canvas.getBoundingClientRect();
+  const mx = e.clientX - rect.left, my = e.clientY - rect.top;
+  panX = mx - (mx - panX) * delta;
+  panY = my - (my - panY) * delta;
+  zoom *= delta;
+}, { passive: false });
+
+function zoomIn() { zoom *= 1.2; }
+function zoomOut() { zoom *= 0.8; }
+function resetView() { zoom = 1; panX = 0; panY = 0; }
+function toggleLabels() { showLabels = !showLabels; document.getElementById('labelBtn').style.opacity = showLabels ? 1 : 0.5; }
+function togglePhysics() { physicsRunning = !physicsRunning; document.getElementById('physicsBtn').textContent = physicsRunning ? '⏸' : '▶'; }
+
+// Sidebar
+function renderSidebar() {
+  // Summary
+  document.getElementById('summaryStats').innerHTML = `
+    <div class="dep-stat"><span class="dep-stat-label">Services</span><span class="dep-stat-value">${summary.totalServices || 0}</span></div>
+    <div class="dep-stat"><span class="dep-stat-label">Total Calls</span><span class="dep-stat-value">${(summary.totalCalls || 0).toLocaleString()}</span></div>
+    <div class="dep-stat"><span class="dep-stat-label">Total Errors</span><span class="dep-stat-value">${(summary.totalErrors || 0).toLocaleString()}</span></div>
+    <div class="dep-stat"><span class="dep-stat-label">Error Rate</span><span class="dep-stat-value">${summary.overallErrorRate || 0}%</span></div>
+  `;
+
+  // Critical
+  document.getElementById('criticalList').innerHTML = critical.length === 0
+    ? '<div style="color:var(--text-muted);font-size:12px;padding:8px">✅ No critical dependencies</div>'
+    : critical.map(c => `<div class="dep-service-item" onclick="selectService('${c.service}')">
+        <div class="dep-service-dot" style="background:#f85149"></div>
+        ${c.service}
+        <span class="dep-critical-badge">${c.reasons ? c.reasons.join(', ') : 'critical'}</span>
+      </div>`).join('');
+
+  // Service list
+  document.getElementById('serviceList').innerHTML = services
+    .sort((a,b) => b.callCount - a.callCount)
+    .map(s => `<li class="dep-service-item${selectedService === s.service ? ' selected' : ''}" onclick="selectService('${s.service}')">
+      <div class="dep-service-dot" style="background:${getServiceColor(s)}"></div>
+      ${s.service}
+      <span class="dep-service-meta">${s.callCount}</span>
+    </li>`).join('');
+
+  // Co-occurrence
+  document.getElementById('coOccurrence').innerHTML = coOccPairs.length === 0
+    ? '<div style="color:var(--text-muted);font-size:12px;padding:8px">No co-occurrence data</div>'
+    : coOccPairs.slice(0, 10).map(p => `<div class="dep-pair">
+        ${p.services[0]} <span class="dep-pair-arrow">↔</span> ${p.services[1]}
+        <span class="dep-pair-count">${p.count}×</span>
+      </div>`).join('');
+}
+
+function selectService(id) {
+  selectedService = selectedService === id ? null : id;
+  const detail = document.getElementById('selectedDetail');
+  if (selectedService) {
+    const s = services.find(s => s.service === selectedService);
+    if (s) {
+      detail.style.display = 'block';
+      const neighbors = edges.filter(e => e.source.id === selectedService || e.target.id === selectedService)
+        .map(e => e.source.id === selectedService ? e.target.id : e.source.id);
+      document.getElementById('detailContent').innerHTML = `
+        <div class="dep-detail-row"><span class="label">Service</span><span class="value">${s.service}</span></div>
+        <div class="dep-detail-row"><span class="label">Calls</span><span class="value">${s.callCount.toLocaleString()}</span></div>
+        <div class="dep-detail-row"><span class="label">Errors</span><span class="value">${s.errorCount} (${s.errorRate}%)</span></div>
+        <div class="dep-detail-row"><span class="label">Avg Latency</span><span class="value">${s.avgLatencyMs}ms</span></div>
+        <div class="dep-detail-row"><span class="label">P95 Latency</span><span class="value">${s.p95LatencyMs || 'N/A'}ms</span></div>
+        <div class="dep-detail-row"><span class="label">Call Share</span><span class="value">${s.callShare || 'N/A'}%</span></div>
+        <div class="dep-detail-row"><span class="label">Neighbors</span><span class="value">${neighbors.length > 0 ? neighbors.join(', ') : 'None'}</span></div>
+        <div class="dep-detail-row"><span class="label">Status</span><span class="value">${s.errorRate > 15 ? '<span class="dep-critical-badge">CRITICAL</span>' : s.errorRate > 5 ? '<span style="color:var(--yellow)">WARNING</span>' : '<span class="dep-healthy-badge">HEALTHY</span>'}</span></div>
+      `;
+    }
+  } else {
+    detail.style.display = 'none';
+  }
+  renderSidebar();
+}
+
+// Init
+document.getElementById('daysSelect').addEventListener('change', refreshData);
+refreshData();
+</script>
+</body>
+</html>
