@@ -71,6 +71,7 @@ class Transport:
         self.max_retries = max_retries
 
         self._buffer: list[dict[str, Any]] = []
+        self._pending_batch: list[dict[str, Any]] | None = None
         self._consecutive_failures: int = 0
         self._lock = threading.Lock()
         self._client = httpx.Client(timeout=10.0)
@@ -98,25 +99,42 @@ class Transport:
             f"batch_size={self.batch_size}, buffer={len(self._buffer)})"
         )
 
+    def _buffer_and_maybe_flush(self) -> None:
+        """Check buffer limits and flush if ready.  Must be called with lock held.
+
+        Drops oldest events when the buffer exceeds ``_MAX_BUFFER_SIZE``
+        and returns a batch to send if ``batch_size`` is reached.  The
+        caller must call ``_send_batch`` on the returned batch (if any)
+        **after** releasing the lock.
+
+        This method mutates ``self._pending_batch`` — an internal slot
+        used to pass the batch out of the locked section without returning
+        it (keeping the call ergonomic for callers that hold the lock in
+        a ``with`` block).
+        """
+        if len(self._buffer) > _MAX_BUFFER_SIZE:
+            dropped = len(self._buffer) - _MAX_BUFFER_SIZE
+            self._buffer = self._buffer[dropped:]
+            logger.warning(
+                "Event buffer exceeded %d entries; dropped %d oldest events",
+                _MAX_BUFFER_SIZE,
+                dropped,
+            )
+        if len(self._buffer) >= self.batch_size:
+            self._pending_batch = self._drain_buffer()
+        else:
+            self._pending_batch = None
+
     def send_event(self, event: dict[str, Any]) -> None:
         """Add a single event to the buffer. Flushes when batch_size is reached.
 
         This is more efficient than ``send_events([event])`` as it avoids
         creating and unpacking a single-element list.
         """
-        batch_to_send: list[dict[str, Any]] | None = None
         with self._lock:
             self._buffer.append(event)
-            if len(self._buffer) > _MAX_BUFFER_SIZE:
-                dropped = len(self._buffer) - _MAX_BUFFER_SIZE
-                self._buffer = self._buffer[dropped:]
-                logger.warning(
-                    "Event buffer exceeded %d entries; dropped %d oldest events",
-                    _MAX_BUFFER_SIZE,
-                    dropped,
-                )
-            if len(self._buffer) >= self.batch_size:
-                batch_to_send = self._drain_buffer()
+            self._buffer_and_maybe_flush()
+            batch_to_send = self._pending_batch
 
         if batch_to_send is not None:
             self._send_batch(batch_to_send)
@@ -129,20 +147,10 @@ class Transport:
         if len(events) == 1:
             self.send_event(events[0])
             return
-        batch_to_send: list[dict[str, Any]] | None = None
         with self._lock:
             self._buffer.extend(events)
-            # Drop oldest events if the buffer grows beyond the hard cap
-            if len(self._buffer) > _MAX_BUFFER_SIZE:
-                dropped = len(self._buffer) - _MAX_BUFFER_SIZE
-                self._buffer = self._buffer[dropped:]
-                logger.warning(
-                    "Event buffer exceeded %d entries; dropped %d oldest events",
-                    _MAX_BUFFER_SIZE,
-                    dropped,
-                )
-            if len(self._buffer) >= self.batch_size:
-                batch_to_send = self._drain_buffer()
+            self._buffer_and_maybe_flush()
+            batch_to_send = self._pending_batch
 
         if batch_to_send is not None:
             self._send_batch(batch_to_send)
