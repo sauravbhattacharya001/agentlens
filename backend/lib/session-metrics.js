@@ -108,4 +108,35 @@ function pctDelta(a, b) {
   return Math.round(((b - a) / a) * 10000) / 100;
 }
 
-module.exports = { computeSessionMetrics, pctDelta };
+/**
+ * Compute deltas between two metrics objects (B relative to A).
+ * Extracts the repetitive per-field delta logic from the compare endpoint.
+ *
+ * @param {Object} metricsA - Baseline metrics (from computeSessionMetrics).
+ * @param {Object} metricsB - Comparison metrics.
+ * @returns {Object} Deltas with absolute and percent change for each numeric field.
+ */
+function computeDeltas(metricsA, metricsB) {
+  const fields = [
+    "total_tokens",
+    "tokens_in",
+    "tokens_out",
+    "event_count",
+    "error_count",
+    "total_processing_ms",
+    "avg_event_duration_ms",
+  ];
+
+  const deltas = {};
+  for (const field of fields) {
+    const a = metricsA[field] || 0;
+    const b = metricsB[field] || 0;
+    const raw = b - a;
+    // Round ms fields to 2 decimal places
+    const absolute = field.endsWith("_ms") ? Math.round(raw * 100) / 100 : raw;
+    deltas[field] = { absolute, percent: pctDelta(a, b) };
+  }
+  return deltas;
+}
+
+module.exports = { computeSessionMetrics, pctDelta, computeDeltas };

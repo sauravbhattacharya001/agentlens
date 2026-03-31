@@ -2,7 +2,7 @@ const express = require("express");
 const { getDb } = require("../db");
 const { isValidSessionId, isValidStatus, safeJsonParse, validateTag, escapeLikeWildcards } = require("../lib/validation");
 const { generateExplanation } = require("../lib/explain");
-const { computeSessionMetrics, pctDelta } = require("../lib/session-metrics");
+const { computeSessionMetrics, pctDelta, computeDeltas } = require("../lib/session-metrics");
 const { getTagStatements } = require("../lib/tag-statements");
 const { parsePagination, requireSessionId, wrapRoute } = require("../lib/request-helpers");
 const { toExportEvent, eventsToCsv, eventToCsvRow, buildJsonExport, ndjsonSessionLine, CSV_HEADERS } = require("../lib/csv-export");
@@ -544,15 +544,7 @@ router.post("/compare", wrapRoute("compare sessions", (req, res) => {
     const metricsB = computeSessionMetrics(sessB, parsedB);
 
     // Compute deltas (B relative to A)
-    const deltas = {
-      total_tokens: { absolute: metricsB.total_tokens - metricsA.total_tokens, percent: pctDelta(metricsA.total_tokens, metricsB.total_tokens) },
-      tokens_in: { absolute: metricsB.tokens_in - metricsA.tokens_in, percent: pctDelta(metricsA.tokens_in, metricsB.tokens_in) },
-      tokens_out: { absolute: metricsB.tokens_out - metricsA.tokens_out, percent: pctDelta(metricsA.tokens_out, metricsB.tokens_out) },
-      event_count: { absolute: metricsB.event_count - metricsA.event_count, percent: pctDelta(metricsA.event_count, metricsB.event_count) },
-      error_count: { absolute: metricsB.error_count - metricsA.error_count, percent: pctDelta(metricsA.error_count, metricsB.error_count) },
-      total_processing_ms: { absolute: Math.round((metricsB.total_processing_ms - metricsA.total_processing_ms) * 100) / 100, percent: pctDelta(metricsA.total_processing_ms, metricsB.total_processing_ms) },
-      avg_event_duration_ms: { absolute: Math.round((metricsB.avg_event_duration_ms - metricsA.avg_event_duration_ms) * 100) / 100, percent: pctDelta(metricsA.avg_event_duration_ms, metricsB.avg_event_duration_ms) },
-    };
+    const deltas = computeDeltas(metricsA, metricsB);
 
     // All unique event types across both
     const allEventTypes = [...new Set([
