@@ -142,6 +142,28 @@ function replaySummary(frames, session) {
   };
 }
 
+// ── Cached prepared statements for replay ───────────────────────────
+// Lazily initialized once, reused across all requests to avoid
+// re-compiling SQL on every call (consistent with sessions.js,
+// analytics.js, and other route modules).
+let _replayStmts = null;
+
+function getReplayStatements() {
+  if (_replayStmts) return _replayStmts;
+  const db = getDb();
+
+  _replayStmts = {
+    getSession: db.prepare("SELECT * FROM sessions WHERE session_id = ?"),
+    getSessionId: db.prepare("SELECT session_id FROM sessions WHERE session_id = ?"),
+    eventsCapped: db.prepare("SELECT * FROM events WHERE session_id = ? ORDER BY timestamp ASC LIMIT ?"),
+    countEvents: db.prepare("SELECT COUNT(*) AS total FROM events WHERE session_id = ?"),
+    eventsPaged: db.prepare("SELECT * FROM events WHERE session_id = ? ORDER BY timestamp ASC LIMIT ? OFFSET ?"),
+    firstEventTs: db.prepare("SELECT timestamp FROM events WHERE session_id = ? ORDER BY timestamp ASC LIMIT 1"),
+  };
+
+  return _replayStmts;
+}
+
 // Shared session ID validation middleware for all replay routes
 function validateSessionIdParam(req, res, next) {
   const { sessionId } = req.params;
@@ -157,15 +179,13 @@ router.get(
   wrapRoute("replay session", (req, res) => {
     const { sessionId } = req.params;
 
-    const db = getDb();
-    const session = db.prepare("SELECT * FROM sessions WHERE session_id = ?").get(sessionId);
+    const stmts = getReplayStatements();
+    const session = stmts.getSession.get(sessionId);
     if (!session) {
       return res.status(404).json({ error: "Session not found" });
     }
 
-    const events = db
-      .prepare("SELECT * FROM events WHERE session_id = ? ORDER BY timestamp ASC LIMIT ?")
-      .all(sessionId, REPLAY_EVENT_CAP + 1);
+    const events = stmts.eventsCapped.all(sessionId, REPLAY_EVENT_CAP + 1);
 
     const truncated = events.length > REPLAY_EVENT_CAP;
     const cappedEvents = truncated ? events.slice(0, REPLAY_EVENT_CAP) : events;
@@ -209,17 +229,14 @@ router.get(
       return res.status(400).json({ error: "Invalid frame index" });
     }
 
-    const db = getDb();
-    const session = db.prepare("SELECT session_id FROM sessions WHERE session_id = ?").get(sessionId);
+    const stmts = getReplayStatements();
+    const session = stmts.getSessionId.get(sessionId);
     if (!session) {
       return res.status(404).json({ error: "Session not found" });
     }
 
     // Count total events without loading them all
-    const countRow = db
-      .prepare("SELECT COUNT(*) AS total FROM events WHERE session_id = ?")
-      .get(sessionId);
-    const totalFrames = countRow.total;
+    const totalFrames = stmts.countEvents.get(sessionId).total;
 
     if (frameIndex >= totalFrames) {
       return res.status(404).json({ error: "Frame index out of range", total_frames: totalFrames });
@@ -231,9 +248,7 @@ router.get(
     // full table scan + frame build for all events.
     const offset = frameIndex > 0 ? frameIndex - 1 : 0;
     const limit = frameIndex > 0 ? 2 : 1;
-    const nearby = db
-      .prepare("SELECT * FROM events WHERE session_id = ? ORDER BY timestamp ASC LIMIT ? OFFSET ?")
-      .all(sessionId, limit, offset);
+    const nearby = stmts.eventsPaged.all(sessionId, limit, offset);
 
     // Build the single frame with correct delay
     const targetEvent = frameIndex > 0 ? nearby[1] : nearby[0];
@@ -248,9 +263,7 @@ router.get(
     // Compute it from the timestamps of the first event and the target event.
     let elapsedMs = 0;
     if (frameIndex > 0) {
-      const firstEvent = db
-        .prepare("SELECT timestamp FROM events WHERE session_id = ? ORDER BY timestamp ASC LIMIT 1")
-        .get(sessionId);
+      const firstEvent = stmts.firstEventTs.get(sessionId);
       if (firstEvent) {
         elapsedMs = msBetween(firstEvent.timestamp, targetEvent.timestamp);
       }
@@ -289,15 +302,13 @@ router.get(
   wrapRoute("replay summary", (req, res) => {
     const { sessionId } = req.params;
 
-    const db = getDb();
-    const session = db.prepare("SELECT * FROM sessions WHERE session_id = ?").get(sessionId);
+    const stmts = getReplayStatements();
+    const session = stmts.getSession.get(sessionId);
     if (!session) {
       return res.status(404).json({ error: "Session not found" });
     }
 
-    const events = db
-      .prepare("SELECT * FROM events WHERE session_id = ? ORDER BY timestamp ASC LIMIT ?")
-      .all(sessionId, REPLAY_EVENT_CAP);
+    const events = stmts.eventsCapped.all(sessionId, REPLAY_EVENT_CAP);
 
     const frames = buildFrames(events);
     const summary = replaySummary(frames, session);
