@@ -32,6 +32,7 @@ Usage:
 
 from __future__ import annotations
 
+import bisect
 import math
 import statistics
 from dataclasses import dataclass, field
@@ -251,6 +252,8 @@ class CapacityPlanner:
         self._samples.clear()
         self._sorted_cache = None
         self._sorted_cache_key = -1
+        self._ts_cache = None
+        self._ts_cache_key = -1
 
     def _sorted_samples(self) -> List[WorkloadSample]:
         """Return samples sorted by timestamp, with caching.
@@ -298,12 +301,37 @@ class CapacityPlanner:
         return TrendDirection.STABLE, slope
 
     def _recent_samples(self, hours: float = 1.0) -> List[WorkloadSample]:
-        """Get samples from the most recent N hours."""
+        """Get samples from the most recent N hours.
+
+        Uses binary search (bisect) on the sorted timestamp list to avoid
+        scanning all samples — O(log n) lookup instead of O(n).
+        """
         if not self._samples:
             return []
         ss = self._sorted_samples()
         cutoff = ss[-1].timestamp - timedelta(hours=hours)
-        return [s for s in ss if s.timestamp >= cutoff]
+        # Build a list of timestamps for bisect (only when cache changes)
+        timestamps = self._sorted_timestamps()
+        idx = bisect.bisect_left(timestamps, cutoff)
+        return ss[idx:]
+
+    def _sorted_timestamps(self) -> List[datetime]:
+        """Return cached list of timestamps aligned with _sorted_samples().
+
+        Invalidated alongside the sorted-samples cache so the two stay
+        in sync.
+        """
+        cache_key = len(self._samples)
+        if (
+            hasattr(self, "_ts_cache")
+            and self._ts_cache_key == cache_key
+            and self._ts_cache is not None
+        ):
+            return self._ts_cache
+        ss = self._sorted_samples()
+        self._ts_cache = [s.timestamp for s in ss]
+        self._ts_cache_key = cache_key
+        return self._ts_cache
 
     def current_utilization(self) -> Dict[str, float]:
         """Average utilization from the most recent samples."""
