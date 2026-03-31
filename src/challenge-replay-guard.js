@@ -117,12 +117,21 @@ function createChallengeReplayGuard(options) {
     // Nonces older than 2x TTL are safe to remove
     // (even if token was issued at the nonce time, it would be expired)
     var cutoff = now - (ttlMs * 2);
-    _usedNonces.forEach(function (timestamp, nonce) {
-      if (timestamp < cutoff) {
-        _usedNonces.delete(nonce);
-        purged++;
+    // Map iterates in insertion order, so once we hit a nonce newer than
+    // the cutoff, all subsequent entries are also newer — safe to stop.
+    // Collect expired keys first to avoid mutating during iteration.
+    var toDelete = [];
+    for (var entry of _usedNonces) {
+      if (entry[1] < cutoff) {
+        toDelete.push(entry[0]);
+      } else {
+        break; // insertion-ordered: remaining are all newer
       }
-    });
+    }
+    for (var i = 0; i < toDelete.length; i++) {
+      _usedNonces.delete(toDelete[i]);
+    }
+    purged = toDelete.length;
     return purged;
   }
 
