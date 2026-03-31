@@ -86,27 +86,73 @@ function eventKey(e) {
 
 /**
  * Align two event lists using LCS on event keys.
+ *
+ * Uses O(m) space instead of O(n*m) by keeping only two rows of the DP
+ * table at a time. For the backtracking pass we store the LCS choice
+ * direction in a compact bit-array (1 bit per cell: 0 = go down,
+ * 1 = go right, diagonal is implicit when keys match).
+ *
+ * Previously allocated a full (n+1)×(m+1) array of numbers — for the
+ * MAX_DIFF_EVENTS cap of 2500, that's 6.25M entries (~50 MB). The new
+ * approach uses ~2×2501 numbers (~40 KB) + ~780 KB direction bits.
  */
 function alignEvents(baseline, candidate) {
   const n = baseline.length;
   const m = candidate.length;
 
-  // DP table
-  const dp = Array.from({ length: n + 1 }, () => new Array(m + 1).fill(0));
+  // Pre-compute keys to avoid repeated string concatenation in hot loop
+  const bKeys = new Array(n);
+  const cKeys = new Array(m);
+  for (let i = 0; i < n; i++) bKeys[i] = eventKey(baseline[i]);
+  for (let j = 0; j < m; j++) cKeys[j] = eventKey(candidate[j]);
+
+  // Direction matrix stored as bit-packed Uint8Array.
+  // 2 bits per cell: 0b00 = diagonal (match), 0b01 = down, 0b10 = right
+  // Packed 4 cells per byte.
+  const dirBytes = Math.ceil((n * m) / 4);
+  const dir = new Uint8Array(dirBytes);
+
+  function setDir(i, j, val) {
+    const idx = i * m + j;
+    const byteIdx = idx >> 2;
+    const shift = (idx & 3) << 1;
+    dir[byteIdx] = (dir[byteIdx] & ~(3 << shift)) | (val << shift);
+  }
+  function getDir(i, j) {
+    const idx = i * m + j;
+    return (dir[idx >> 2] >> ((idx & 3) << 1)) & 3;
+  }
+
+  // Two-row DP: curr = dp[i], prev = dp[i+1]
+  let prev = new Uint16Array(m + 1); // dp[i+1]
+  let curr = new Uint16Array(m + 1); // dp[i]
+
   for (let i = n - 1; i >= 0; i--) {
     for (let j = m - 1; j >= 0; j--) {
-      if (eventKey(baseline[i]) === eventKey(candidate[j])) {
-        dp[i][j] = dp[i + 1][j + 1] + 1;
+      if (bKeys[i] === cKeys[j]) {
+        curr[j] = prev[j + 1] + 1;
+        setDir(i, j, 0); // diagonal
+      } else if (prev[j] >= curr[j + 1]) {
+        curr[j] = prev[j];
+        setDir(i, j, 1); // down
       } else {
-        dp[i][j] = Math.max(dp[i + 1][j], dp[i][j + 1]);
+        curr[j] = curr[j + 1];
+        setDir(i, j, 2); // right
       }
     }
+    // Swap rows
+    const tmp = prev;
+    prev = curr;
+    curr = tmp;
+    curr.fill(0);
   }
+  // After the loop, prev = dp[0]
 
   const pairs = [];
   let i = 0, j = 0;
   while (i < n && j < m) {
-    if (eventKey(baseline[i]) === eventKey(candidate[j])) {
+    const d = getDir(i, j);
+    if (d === 0) { // diagonal — keys match
       const changes = {};
       if (baseline[i].tokens_in !== candidate[j].tokens_in) {
         changes.tokens_in = `${baseline[i].tokens_in}→${candidate[j].tokens_in}`;
@@ -128,35 +174,35 @@ function alignEvents(baseline, candidate) {
         candidate: candidate[j],
         status,
         changes,
-        label: eventKey(baseline[i]),
+        label: bKeys[i],
       });
       i++; j++;
-    } else if (dp[i + 1][j] >= dp[i][j + 1]) {
+    } else if (d === 1) { // down
       pairs.push({
         baseline: baseline[i],
         candidate: null,
         status: "removed",
         changes: {},
-        label: eventKey(baseline[i]),
+        label: bKeys[i],
       });
       i++;
-    } else {
+    } else { // right
       pairs.push({
         baseline: null,
         candidate: candidate[j],
         status: "added",
         changes: {},
-        label: eventKey(candidate[j]),
+        label: cKeys[j],
       });
       j++;
     }
   }
   while (i < n) {
-    pairs.push({ baseline: baseline[i], candidate: null, status: "removed", changes: {}, label: eventKey(baseline[i]) });
+    pairs.push({ baseline: baseline[i], candidate: null, status: "removed", changes: {}, label: bKeys[i] });
     i++;
   }
   while (j < m) {
-    pairs.push({ baseline: null, candidate: candidate[j], status: "added", changes: {}, label: eventKey(candidate[j]) });
+    pairs.push({ baseline: null, candidate: candidate[j], status: "added", changes: {}, label: cKeys[j] });
     j++;
   }
   return pairs;
