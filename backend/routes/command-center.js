@@ -13,35 +13,68 @@ const { wrapRoute, parseLimit, parseDays, daysAgoCutoff } = require("../lib/requ
 
 const router = express.Router();
 
+// ── Cached prepared statements ──────────────────────────────────────
+// The command center re-compiled SQL on every request — db.prepare()
+// parses and compiles the SQL each time (~0.1-0.5ms per call).  With
+// 6 queries per /feed + 4 per /summary, that's 1-5ms of pure overhead
+// per request.  Cache them once like analytics.js and forecast.js do.
+const { createLazyStatements } = require("../lib/lazy-statements");
+
+const getStatements = createLazyStatements((db) => ({
+  feedAlerts: db.prepare(
+    `SELECT ae.alert_id, ae.rule_id, ae.triggered_at, ae.metric_value,
+            ae.details, ae.acknowledged,
+            ar.name AS rule_name, ar.metric, ar.operator, ar.threshold
+     FROM alert_events ae
+     LEFT JOIN alert_rules ar ON ae.rule_id = ar.rule_id
+     WHERE ae.triggered_at >= ?
+     ORDER BY ae.triggered_at DESC
+     LIMIT ?`
+  ),
+  feedBudgets: db.prepare(
+    `SELECT * FROM budgets WHERE updated_at >= ? ORDER BY updated_at DESC LIMIT ?`
+  ),
+  feedErrors: db.prepare(
+    `SELECT session_id, event_type, output_data, timestamp
+     FROM events
+     WHERE event_type = 'error' AND timestamp >= ?
+     ORDER BY timestamp DESC
+     LIMIT ?`
+  ),
+  summaryAlerts: db.prepare(
+    `SELECT COUNT(*) as total,
+            SUM(CASE WHEN acknowledged = 0 THEN 1 ELSE 0 END) as unack
+     FROM alert_events WHERE triggered_at >= ?`
+  ),
+  summaryBudgets: db.prepare(
+    `SELECT spent, limit_amount FROM budgets WHERE updated_at >= ?`
+  ),
+  summaryErrors: db.prepare(
+    `SELECT COUNT(*) as total FROM events WHERE event_type = 'error' AND timestamp >= ?`
+  ),
+  summarySessions: db.prepare(
+    `SELECT COUNT(*) as total FROM sessions WHERE started_at >= ?`
+  ),
+}));
+
 // ── Feed ────────────────────────────────────────────────────────────
 
 router.get(
   "/feed",
   wrapRoute("fetch command center feed", (req, res) => {
-    const db = getDb();
     const limit = parseLimit(req.query.limit, 50, 200);
     const days = parseDays(req.query.days, 7, 90);
     const cutoff = daysAgoCutoff(days);
     const severity = req.query.severity; // critical, warning, info
     const category = req.query.category; // alert, anomaly, budget, health
 
+    const stmts = getStatements();
     const items = [];
 
     // 1. Alert events
     if (!category || category === "alert") {
       try {
-        const alerts = db
-          .prepare(
-            `SELECT ae.alert_id, ae.rule_id, ae.triggered_at, ae.metric_value,
-                    ae.details, ae.acknowledged,
-                    ar.name AS rule_name, ar.metric, ar.operator, ar.threshold
-             FROM alert_events ae
-             LEFT JOIN alert_rules ar ON ae.rule_id = ar.rule_id
-             WHERE ae.triggered_at >= ?
-             ORDER BY ae.triggered_at DESC
-             LIMIT ?`
-          )
-          .all(cutoff, limit);
+        const alerts = stmts.feedAlerts.all(cutoff, limit);
 
         for (const a of alerts) {
           items.push({
@@ -63,11 +96,7 @@ router.get(
     // 2. Budget overages
     if (!category || category === "budget") {
       try {
-        const budgets = db
-          .prepare(
-            `SELECT * FROM budgets WHERE updated_at >= ? ORDER BY updated_at DESC LIMIT ?`
-          )
-          .all(cutoff, limit);
+        const budgets = stmts.feedBudgets.all(cutoff, limit);
 
         for (const b of budgets) {
           const pct = b.limit_amount > 0 ? (b.spent / b.limit_amount) * 100 : 0;
@@ -91,18 +120,10 @@ router.get(
     // 3. Recent errors (aggregate as health signals)
     if (!category || category === "health") {
       try {
-        const errors = db
-          .prepare(
-            `SELECT session_id, type, data, timestamp
-             FROM events
-             WHERE type = 'error' AND timestamp >= ?
-             ORDER BY timestamp DESC
-             LIMIT ?`
-          )
-          .all(cutoff, limit);
+        const errors = stmts.feedErrors.all(cutoff, limit);
 
         for (const e of errors) {
-          const data = JSON.parse(e.data || "{}");
+          const data = JSON.parse(e.output_data || "{}");
           items.push({
             id: `error-${e.session_id}-${e.timestamp}`,
             category: "health",
@@ -147,10 +168,10 @@ router.get(
 router.get(
   "/summary",
   wrapRoute("fetch command center summary", (req, res) => {
-    const db = getDb();
     const days = parseDays(req.query.days, 7, 90);
     const cutoff = daysAgoCutoff(days);
 
+    const stmts = getStatements();
     const summary = {
       alerts: { total: 0, unacknowledged: 0 },
       budgets: { over_limit: 0, warning: 0 },
@@ -159,21 +180,13 @@ router.get(
     };
 
     try {
-      const alertRow = db
-        .prepare(
-          `SELECT COUNT(*) as total,
-                  SUM(CASE WHEN acknowledged = 0 THEN 1 ELSE 0 END) as unack
-           FROM alert_events WHERE triggered_at >= ?`
-        )
-        .get(cutoff);
+      const alertRow = stmts.summaryAlerts.get(cutoff);
       summary.alerts.total = alertRow?.total || 0;
       summary.alerts.unacknowledged = alertRow?.unack || 0;
     } catch (_) {}
 
     try {
-      const budgetRows = db
-        .prepare(`SELECT spent, limit_amount FROM budgets WHERE updated_at >= ?`)
-        .all(cutoff);
+      const budgetRows = stmts.summaryBudgets.all(cutoff);
       for (const b of budgetRows) {
         const pct = b.limit_amount > 0 ? (b.spent / b.limit_amount) * 100 : 0;
         if (pct >= 100) summary.budgets.over_limit++;
@@ -182,18 +195,12 @@ router.get(
     } catch (_) {}
 
     try {
-      const errRow = db
-        .prepare(
-          `SELECT COUNT(*) as total FROM events WHERE type = 'error' AND timestamp >= ?`
-        )
-        .get(cutoff);
+      const errRow = stmts.summaryErrors.get(cutoff);
       summary.errors.total = errRow?.total || 0;
     } catch (_) {}
 
     try {
-      const sessRow = db
-        .prepare(`SELECT COUNT(*) as total FROM sessions WHERE created_at >= ?`)
-        .get(cutoff);
+      const sessRow = stmts.summarySessions.get(cutoff);
       summary.sessions.total = sessRow?.total || 0;
     } catch (_) {}
 
