@@ -1,0 +1,333 @@
+<!DOCTYPE html>
+<html lang="en">
+<head>
+<meta charset="UTF-8">
+<meta name="viewport" content="width=device-width, initial-scale=1.0">
+<title>Session Replay — AgentLens</title>
+<link rel="stylesheet" href="styles.css">
+<style>
+  .replay-container { max-width: 1200px; margin: 0 auto; padding: 20px; }
+  .replay-header { display: flex; justify-content: space-between; align-items: center; margin-bottom: 24px; }
+  .replay-header h1 { font-size: 1.8rem; }
+  .session-picker { display: flex; gap: 12px; align-items: center; margin-bottom: 20px; }
+  .session-picker select { padding: 8px 12px; border-radius: 6px; border: 1px solid var(--border, #333); background: var(--bg-secondary, #1a1a2e); color: var(--text, #e0e0e0); font-size: 0.95rem; min-width: 300px; }
+  .transport { display: flex; gap: 8px; align-items: center; background: var(--bg-secondary, #1a1a2e); padding: 12px 20px; border-radius: 10px; margin-bottom: 20px; }
+  .transport button { padding: 8px 16px; border: none; border-radius: 6px; cursor: pointer; font-size: 1rem; background: var(--bg-tertiary, #252545); color: var(--text, #e0e0e0); transition: background 0.2s; }
+  .transport button:hover { background: var(--accent, #6c63ff); color: #fff; }
+  .transport button.active { background: var(--accent, #6c63ff); color: #fff; }
+  .transport .step-counter { font-family: monospace; font-size: 1.1rem; min-width: 80px; text-align: center; }
+  .transport .speed-control { margin-left: auto; display: flex; gap: 6px; align-items: center; }
+  .transport .speed-control label { font-size: 0.85rem; color: var(--text-muted, #888); }
+  .transport .speed-control select { padding: 4px 8px; border-radius: 4px; border: 1px solid var(--border, #333); background: var(--bg-tertiary, #252545); color: var(--text, #e0e0e0); }
+  .timeline { position: relative; width: 100%; height: 40px; background: var(--bg-secondary, #1a1a2e); border-radius: 8px; margin-bottom: 24px; cursor: pointer; overflow: hidden; }
+  .timeline .progress { height: 100%; background: linear-gradient(90deg, var(--accent, #6c63ff), #a78bfa); border-radius: 8px; transition: width 0.3s; }
+  .timeline .markers { position: absolute; top: 0; left: 0; width: 100%; height: 100%; display: flex; }
+  .timeline .marker { flex: 1; border-right: 1px solid rgba(255,255,255,0.05); display: flex; align-items: center; justify-content: center; font-size: 0.65rem; color: rgba(255,255,255,0.3); }
+  .timeline .marker.current { background: rgba(108,99,255,0.2); }
+  .timeline .marker.decision { border-bottom: 3px solid #f59e0b; }
+  .timeline .marker.tool-call { border-bottom: 3px solid #10b981; }
+  .timeline .marker.error { border-bottom: 3px solid #ef4444; }
+  .replay-body { display: grid; grid-template-columns: 300px 1fr; gap: 20px; }
+  .step-list { background: var(--bg-secondary, #1a1a2e); border-radius: 10px; max-height: 600px; overflow-y: auto; }
+  .step-item { padding: 12px 16px; border-bottom: 1px solid var(--border, #222); cursor: pointer; transition: background 0.15s; display: flex; gap: 10px; align-items: flex-start; }
+  .step-item:hover { background: var(--bg-tertiary, #252545); }
+  .step-item.active { background: rgba(108,99,255,0.15); border-left: 3px solid var(--accent, #6c63ff); }
+  .step-icon { font-size: 1.2rem; flex-shrink: 0; margin-top: 2px; }
+  .step-info .step-type { font-size: 0.75rem; text-transform: uppercase; letter-spacing: 0.05em; color: var(--text-muted, #888); }
+  .step-info .step-label { font-size: 0.9rem; margin-top: 2px; }
+  .step-info .step-time { font-size: 0.75rem; color: var(--text-muted, #888); margin-top: 2px; font-family: monospace; }
+  .detail-panel { background: var(--bg-secondary, #1a1a2e); border-radius: 10px; padding: 24px; }
+  .detail-panel h2 { font-size: 1.2rem; margin-bottom: 16px; display: flex; align-items: center; gap: 10px; }
+  .detail-section { margin-bottom: 20px; }
+  .detail-section h3 { font-size: 0.85rem; text-transform: uppercase; letter-spacing: 0.05em; color: var(--text-muted, #888); margin-bottom: 8px; }
+  .detail-section pre { background: var(--bg-tertiary, #252545); padding: 14px; border-radius: 8px; overflow-x: auto; font-size: 0.85rem; line-height: 1.5; white-space: pre-wrap; word-break: break-word; }
+  .meta-grid { display: grid; grid-template-columns: repeat(auto-fit, minmax(140px, 1fr)); gap: 12px; margin-bottom: 20px; }
+  .meta-card { background: var(--bg-tertiary, #252545); padding: 12px; border-radius: 8px; text-align: center; }
+  .meta-card .value { font-size: 1.3rem; font-weight: bold; color: var(--accent, #6c63ff); }
+  .meta-card .label { font-size: 0.75rem; color: var(--text-muted, #888); margin-top: 4px; }
+  .badge { display: inline-block; padding: 2px 8px; border-radius: 4px; font-size: 0.75rem; font-weight: 600; }
+  .badge-decision { background: rgba(245,158,11,0.2); color: #f59e0b; }
+  .badge-tool { background: rgba(16,185,129,0.2); color: #10b981; }
+  .badge-response { background: rgba(99,102,241,0.2); color: #818cf8; }
+  .badge-error { background: rgba(239,68,68,0.2); color: #ef4444; }
+  .badge-input { background: rgba(14,165,233,0.2); color: #0ea5e9; }
+  .empty-state { text-align: center; padding: 60px 20px; color: var(--text-muted, #888); }
+  .empty-state .icon { font-size: 3rem; margin-bottom: 12px; }
+  @media (max-width: 768px) { .replay-body { grid-template-columns: 1fr; } }
+</style>
+</head>
+<body>
+<div class="replay-container">
+  <div class="replay-header">
+    <h1>🔄 Session Replay</h1>
+    <a href="index.html" style="color:var(--text-muted,#888);text-decoration:none;">← Dashboard</a>
+  </div>
+
+  <div class="session-picker">
+    <label for="sessionSelect">Session:</label>
+    <select id="sessionSelect"></select>
+    <button onclick="loadSession()" style="padding:8px 16px;border:none;border-radius:6px;background:var(--accent,#6c63ff);color:#fff;cursor:pointer;">Load</button>
+  </div>
+
+  <div class="transport" id="transport" style="display:none;">
+    <button onclick="stepFirst()" title="First step">⏮</button>
+    <button onclick="stepPrev()" title="Previous step">⏪</button>
+    <button onclick="togglePlay()" id="playBtn" title="Play/Pause">▶️</button>
+    <button onclick="stepNext()" title="Next step">⏩</button>
+    <button onclick="stepLast()" title="Last step">⏭</button>
+    <span class="step-counter" id="stepCounter">0 / 0</span>
+    <div class="speed-control">
+      <label for="speedSelect">Speed:</label>
+      <select id="speedSelect">
+        <option value="2000">0.5x</option>
+        <option value="1000" selected>1x</option>
+        <option value="500">2x</option>
+        <option value="250">4x</option>
+      </select>
+    </div>
+  </div>
+
+  <div class="timeline" id="timeline" style="display:none;" onclick="clickTimeline(event)">
+    <div class="progress" id="timelineProgress"></div>
+    <div class="markers" id="timelineMarkers"></div>
+  </div>
+
+  <div id="emptyState" class="empty-state">
+    <div class="icon">🔄</div>
+    <h2>Session Replay Debugger</h2>
+    <p>Select a session above to step through agent decisions, tool calls, and responses in sequence.</p>
+    <p style="margin-top:12px;font-size:0.85rem;">Use keyboard shortcuts: <kbd>←</kbd> <kbd>→</kbd> to step, <kbd>Space</kbd> to play/pause</p>
+  </div>
+
+  <div class="replay-body" id="replayBody" style="display:none;">
+    <div class="step-list" id="stepList"></div>
+    <div class="detail-panel" id="detailPanel">
+      <div class="empty-state"><p>Click a step to view details</p></div>
+    </div>
+  </div>
+</div>
+
+<script>
+// Demo session data — in production, this loads from the AgentLens backend API
+const DEMO_SESSIONS = [
+  {
+    id: "sess_a1b2c3d4",
+    name: "Research Agent — Climate Report",
+    model: "gpt-4",
+    startTime: "2026-03-31T08:12:00Z",
+    totalTokens: 14820,
+    totalCost: 0.48,
+    steps: [
+      { type: "input", label: "User prompt received", time: 0, data: { content: "Generate a comprehensive report on climate change impacts in Southeast Asia for 2025-2026." } },
+      { type: "decision", label: "Planning research approach", time: 120, data: { reasoning: "The query requires multi-source research. I'll break this into: (1) search for recent IPCC reports, (2) find regional data for SE Asia, (3) look for economic impact studies, (4) synthesize into report format.", confidence: 0.92 } },
+      { type: "tool-call", label: "web_search('IPCC 2025 Southeast Asia')", time: 450, data: { tool: "web_search", input: { query: "IPCC 2025 Southeast Asia climate impact report" }, output: { results: 12, topResult: "IPCC AR7 Regional Assessment — Southeast Asia highlights rising sea levels, increased monsoon variability..." }, tokens: 1240, cost: 0.04 } },
+      { type: "decision", label: "Evaluating search results", time: 890, data: { reasoning: "Got good IPCC data. Missing economic impact numbers. Need to search for World Bank or ADB reports specifically.", confidence: 0.85 } },
+      { type: "tool-call", label: "web_search('ADB climate economics')", time: 1100, data: { tool: "web_search", input: { query: "Asian Development Bank 2025 climate economic impact Southeast Asia" }, output: { results: 8, topResult: "ADB estimates $4.7 trillion cumulative GDP impact across ASEAN nations by 2035..." }, tokens: 980, cost: 0.03 } },
+      { type: "tool-call", label: "fetch_document(ipcc_ar7_sea.pdf)", time: 1600, data: { tool: "fetch_document", input: { url: "https://ipcc.int/ar7/regional/sea_assessment.pdf" }, output: { pages: 47, extracted: true }, tokens: 3200, cost: 0.10 } },
+      { type: "decision", label: "Structuring the report", time: 2100, data: { reasoning: "I have sufficient data for a comprehensive report. Organizing into sections: Executive Summary, Temperature Trends, Sea Level Rise, Agricultural Impact, Economic Projections, Policy Recommendations.", confidence: 0.94 } },
+      { type: "response", label: "Generating report draft", time: 3400, data: { content: "# Climate Change Impacts in Southeast Asia (2025-2026)\n\n## Executive Summary\nSoutheast Asia faces accelerating climate risks...\n\n## Key Findings\n- Average temperatures rose 1.4°C above pre-industrial levels\n- Sea levels in the region rising 4.2mm/year (above global average)\n- Rice yields projected to decline 12-18% by 2035\n- $4.7 trillion cumulative GDP impact estimated...", tokens: 4800, cost: 0.15 } },
+      { type: "tool-call", label: "save_document(climate_report.md)", time: 4200, data: { tool: "save_document", input: { path: "climate_report.md", format: "markdown" }, output: { saved: true, size: "24KB" }, tokens: 120, cost: 0.004 } },
+      { type: "response", label: "Final response to user", time: 4500, data: { content: "I've completed the climate change impact report for Southeast Asia. The report covers temperature trends, sea level rise, agricultural and economic impacts, with data from IPCC AR7 and ADB sources. Saved as climate_report.md.", tokens: 280, cost: 0.009 } }
+    ]
+  },
+  {
+    id: "sess_e5f6g7h8",
+    name: "Code Review Agent — PR #142",
+    model: "claude-3.5-sonnet",
+    startTime: "2026-03-31T10:30:00Z",
+    totalTokens: 8450,
+    totalCost: 0.25,
+    steps: [
+      { type: "input", label: "Review PR #142 triggered", time: 0, data: { content: "Review pull request #142: Add rate limiting middleware to API gateway" } },
+      { type: "tool-call", label: "gh pr diff 142", time: 200, data: { tool: "github_cli", input: { command: "gh pr diff 142" }, output: { filesChanged: 4, additions: 187, deletions: 12 }, tokens: 2100, cost: 0.06 } },
+      { type: "decision", label: "Assessing change scope", time: 600, data: { reasoning: "4 files changed, mostly additions. This is a new middleware — need to check: (1) rate limit algorithm correctness, (2) Redis dependency handling, (3) error response format consistency, (4) test coverage.", confidence: 0.90 } },
+      { type: "tool-call", label: "read_file(middleware/rateLimit.ts)", time: 800, data: { tool: "read_file", input: { path: "src/middleware/rateLimit.ts" }, output: { lines: 142, language: "typescript" }, tokens: 1800, cost: 0.05 } },
+      { type: "decision", label: "Found potential issue", time: 1200, data: { reasoning: "The sliding window implementation uses a fixed array that grows unbounded per client. In high-traffic scenarios, this could cause memory issues. Should use a circular buffer or Redis sorted set instead.", confidence: 0.88 } },
+      { type: "error", label: "Missing test for edge case", time: 1500, data: { severity: "warning", message: "No test covers the case where Redis connection drops mid-request. The middleware should fall back to allowing requests (fail-open) rather than blocking all traffic.", suggestion: "Add test: 'should fail-open when Redis is unavailable'" } },
+      { type: "response", label: "Review comment posted", time: 2000, data: { content: "## Code Review Summary\n\n**Overall:** Good implementation, 2 issues to address before merge.\n\n### 🔴 Memory leak risk\nLine 47: Sliding window uses unbounded array per client IP...\n\n### 🟡 Missing fail-open test\nNo coverage for Redis connection failure scenario...", tokens: 1200, cost: 0.04 } }
+    ]
+  }
+];
+
+let currentSession = null;
+let currentStep = -1;
+let isPlaying = false;
+let playInterval = null;
+
+// Populate session picker
+function populateSessions() {
+  const sel = document.getElementById('sessionSelect');
+  DEMO_SESSIONS.forEach(s => {
+    const opt = document.createElement('option');
+    opt.value = s.id;
+    opt.textContent = `${s.name} (${s.model}) — ${s.steps.length} steps`;
+    sel.appendChild(opt);
+  });
+}
+
+function loadSession() {
+  const id = document.getElementById('sessionSelect').value;
+  currentSession = DEMO_SESSIONS.find(s => s.id === id);
+  if (!currentSession) return;
+  currentStep = -1;
+  stopPlay();
+
+  document.getElementById('emptyState').style.display = 'none';
+  document.getElementById('replayBody').style.display = 'grid';
+  document.getElementById('transport').style.display = 'flex';
+  document.getElementById('timeline').style.display = 'block';
+
+  renderStepList();
+  renderTimeline();
+  updateCounter();
+  if (currentSession.steps.length > 0) goToStep(0);
+}
+
+function renderStepList() {
+  const list = document.getElementById('stepList');
+  list.innerHTML = '';
+  currentSession.steps.forEach((step, i) => {
+    const div = document.createElement('div');
+    div.className = 'step-item';
+    div.dataset.index = i;
+    div.onclick = () => goToStep(i);
+    const icons = { input: '📥', decision: '🧠', 'tool-call': '🔧', response: '💬', error: '⚠️' };
+    const badges = { input: 'badge-input', decision: 'badge-decision', 'tool-call': 'badge-tool', response: 'badge-response', error: 'badge-error' };
+    div.innerHTML = `
+      <span class="step-icon">${icons[step.type] || '•'}</span>
+      <div class="step-info">
+        <div class="step-type"><span class="badge ${badges[step.type]}">${step.type}</span></div>
+        <div class="step-label">${step.label}</div>
+        <div class="step-time">${(step.time / 1000).toFixed(1)}s</div>
+      </div>`;
+    list.appendChild(div);
+  });
+}
+
+function renderTimeline() {
+  const markers = document.getElementById('timelineMarkers');
+  markers.innerHTML = '';
+  currentSession.steps.forEach((step, i) => {
+    const m = document.createElement('div');
+    m.className = `marker ${step.type === 'decision' ? 'decision' : step.type === 'tool-call' ? 'tool-call' : step.type === 'error' ? 'error' : ''}`;
+    m.dataset.index = i;
+    m.textContent = i + 1;
+    markers.appendChild(m);
+  });
+}
+
+function goToStep(i) {
+  if (!currentSession || i < 0 || i >= currentSession.steps.length) return;
+  currentStep = i;
+  updateCounter();
+  updateTimeline();
+  highlightStep();
+  renderDetail();
+}
+
+function updateCounter() {
+  document.getElementById('stepCounter').textContent = currentSession ? `${currentStep + 1} / ${currentSession.steps.length}` : '0 / 0';
+}
+
+function updateTimeline() {
+  const pct = currentSession ? ((currentStep + 1) / currentSession.steps.length * 100) : 0;
+  document.getElementById('timelineProgress').style.width = pct + '%';
+  document.querySelectorAll('.timeline .marker').forEach((m, i) => {
+    m.classList.toggle('current', i === currentStep);
+  });
+}
+
+function highlightStep() {
+  document.querySelectorAll('.step-item').forEach((el, i) => {
+    el.classList.toggle('active', i === currentStep);
+    if (i === currentStep) el.scrollIntoView({ block: 'nearest', behavior: 'smooth' });
+  });
+}
+
+function renderDetail() {
+  const panel = document.getElementById('detailPanel');
+  const step = currentSession.steps[currentStep];
+  if (!step) { panel.innerHTML = '<div class="empty-state"><p>Click a step to view details</p></div>'; return; }
+
+  const icons = { input: '📥', decision: '🧠', 'tool-call': '🔧', response: '💬', error: '⚠️' };
+  let html = `<h2>${icons[step.type] || ''} ${step.label}</h2>`;
+
+  // Meta cards
+  const metas = [];
+  metas.push({ value: (step.time / 1000).toFixed(1) + 's', label: 'Timestamp' });
+  metas.push({ value: step.type, label: 'Type' });
+  if (step.data.tokens) metas.push({ value: step.data.tokens.toLocaleString(), label: 'Tokens' });
+  if (step.data.cost) metas.push({ value: '$' + step.data.cost.toFixed(3), label: 'Cost' });
+  if (step.data.confidence) metas.push({ value: (step.data.confidence * 100).toFixed(0) + '%', label: 'Confidence' });
+
+  html += '<div class="meta-grid">' + metas.map(m => `<div class="meta-card"><div class="value">${m.value}</div><div class="label">${m.label}</div></div>`).join('') + '</div>';
+
+  // Content sections
+  if (step.data.content) {
+    html += `<div class="detail-section"><h3>Content</h3><pre>${escHtml(step.data.content)}</pre></div>`;
+  }
+  if (step.data.reasoning) {
+    html += `<div class="detail-section"><h3>Reasoning</h3><pre>${escHtml(step.data.reasoning)}</pre></div>`;
+  }
+  if (step.data.input) {
+    html += `<div class="detail-section"><h3>Input</h3><pre>${escHtml(JSON.stringify(step.data.input, null, 2))}</pre></div>`;
+  }
+  if (step.data.output) {
+    html += `<div class="detail-section"><h3>Output</h3><pre>${escHtml(JSON.stringify(step.data.output, null, 2))}</pre></div>`;
+  }
+  if (step.data.message) {
+    html += `<div class="detail-section"><h3>${step.data.severity === 'warning' ? '⚠️ Warning' : '🔴 Error'}</h3><pre>${escHtml(step.data.message)}</pre></div>`;
+  }
+  if (step.data.suggestion) {
+    html += `<div class="detail-section"><h3>💡 Suggestion</h3><pre>${escHtml(step.data.suggestion)}</pre></div>`;
+  }
+
+  // Session meta
+  html += `<div class="detail-section"><h3>Session Info</h3><pre>Session: ${currentSession.id}\nModel: ${currentSession.model}\nTotal Tokens: ${currentSession.totalTokens.toLocaleString()}\nTotal Cost: $${currentSession.totalCost.toFixed(2)}</pre></div>`;
+
+  panel.innerHTML = html;
+}
+
+function escHtml(s) { return s.replace(/&/g,'&amp;').replace(/</g,'&lt;').replace(/>/g,'&gt;'); }
+
+function stepNext() { if (currentSession && currentStep < currentSession.steps.length - 1) goToStep(currentStep + 1); else stopPlay(); }
+function stepPrev() { if (currentSession && currentStep > 0) goToStep(currentStep - 1); }
+function stepFirst() { if (currentSession) goToStep(0); }
+function stepLast() { if (currentSession) goToStep(currentSession.steps.length - 1); }
+
+function togglePlay() {
+  if (isPlaying) { stopPlay(); } else { startPlay(); }
+}
+function startPlay() {
+  isPlaying = true;
+  document.getElementById('playBtn').textContent = '⏸️';
+  const speed = parseInt(document.getElementById('speedSelect').value);
+  playInterval = setInterval(() => { stepNext(); }, speed);
+}
+function stopPlay() {
+  isPlaying = false;
+  document.getElementById('playBtn').textContent = '▶️';
+  if (playInterval) { clearInterval(playInterval); playInterval = null; }
+}
+
+function clickTimeline(e) {
+  if (!currentSession) return;
+  const rect = e.currentTarget.getBoundingClientRect();
+  const pct = (e.clientX - rect.left) / rect.width;
+  const idx = Math.floor(pct * currentSession.steps.length);
+  goToStep(Math.min(idx, currentSession.steps.length - 1));
+}
+
+// Keyboard shortcuts
+document.addEventListener('keydown', e => {
+  if (e.key === 'ArrowRight') { e.preventDefault(); stepNext(); }
+  else if (e.key === 'ArrowLeft') { e.preventDefault(); stepPrev(); }
+  else if (e.key === ' ') { e.preventDefault(); togglePlay(); }
+  else if (e.key === 'Home') { e.preventDefault(); stepFirst(); }
+  else if (e.key === 'End') { e.preventDefault(); stepLast(); }
+});
+
+populateSessions();
+</script>
+</body>
+</html>
