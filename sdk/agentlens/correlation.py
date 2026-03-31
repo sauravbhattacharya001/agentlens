@@ -428,16 +428,36 @@ class SessionCorrelator:
     # -- Analysis ---------------------------------------------------------
 
     def find_overlaps(self) -> List[TemporalOverlap]:
-        """Find all pairs of sessions that overlap in time."""
+        """Find all pairs of sessions that overlap in time.
+
+        Uses a sweep-line approach: sort sessions by start time, then
+        maintain a set of "active" sessions (those whose end > current
+        start).  Only active sessions can overlap with the current one,
+        pruning the O(n²) comparison to O(n·k) where k is the average
+        number of concurrently active sessions.
+        """
+        if len(self._windows) < 2:
+            return []
+
+        now = datetime.now(timezone.utc)
+        sorted_windows = sorted(self._windows, key=lambda w: w.start)
         overlaps: List[TemporalOverlap] = []
-        n = len(self._windows)
-        for i in range(n):
-            for j in range(i + 1, n):
-                a = self._windows[i]
-                b = self._windows[j]
-                overlap = self._compute_overlap(a, b)
+
+        # Active windows sorted by end time for efficient pruning
+        active: List[SessionWindow] = []
+
+        for win in sorted_windows:
+            # Prune expired windows (end <= current start)
+            active = [a for a in active if (a.end or now) > win.start]
+
+            # All remaining active windows overlap with win
+            for a in active:
+                overlap = self._compute_overlap(a, win)
                 if overlap:
                     overlaps.append(overlap)
+
+            active.append(win)
+
         return overlaps
 
     def _compute_overlap(

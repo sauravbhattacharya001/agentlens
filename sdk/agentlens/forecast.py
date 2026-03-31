@@ -171,10 +171,15 @@ class CostForecaster:
 
     def __init__(self) -> None:
         self._records: list[UsageRecord] = []
+        self._daily_cache: dict[str, dict[str, Any]] | None = None
 
     @property
     def record_count(self) -> int:
         return len(self._records)
+
+    def _invalidate_cache(self) -> None:
+        """Mark the daily aggregates cache as stale."""
+        self._daily_cache = None
 
     def add_record(self, record: UsageRecord) -> None:
         """Add a single usage record."""
@@ -183,20 +188,33 @@ class CostForecaster:
         if record.tokens_in < 0 or record.tokens_out < 0:
             raise ValueError("token counts cannot be negative")
         self._records.append(record)
+        self._invalidate_cache()
 
     def add_records(self, records: list[UsageRecord]) -> None:
         """Add multiple usage records."""
         for r in records:
-            self.add_record(r)
+            if r.cost_usd < 0:
+                raise ValueError("cost_usd cannot be negative")
+            if r.tokens_in < 0 or r.tokens_out < 0:
+                raise ValueError("token counts cannot be negative")
+            self._records.append(r)
+        if records:
+            self._invalidate_cache()
 
     def clear(self) -> None:
         """Remove all records."""
         self._records.clear()
+        self._invalidate_cache()
 
     # ── Aggregation helpers ──────────────────────────────────
 
     def _daily_aggregates(self) -> dict[str, dict[str, Any]]:
-        """Group records by date and aggregate cost/tokens."""
+        """Group records by date and aggregate cost/tokens.
+
+        Results are cached and only recomputed when records change.
+        """
+        if self._daily_cache is not None:
+            return self._daily_cache
         daily: dict[str, dict[str, Any]] = {}
         for r in self._records:
             key = r.timestamp.strftime("%Y-%m-%d")
@@ -210,6 +228,7 @@ class CostForecaster:
             daily[key]["tokens_in"] += r.tokens_in
             daily[key]["tokens_out"] += r.tokens_out
             daily[key]["count"] += 1
+        self._daily_cache = daily
         return daily
 
     def _sorted_daily_costs(self) -> list[tuple[str, float]]:
@@ -440,9 +459,10 @@ class CostForecaster:
         cost_values = [v["cost"] for _, v in sorted_days]
         n_days = len(sorted_days)
 
-        total_cost = sum(r.cost_usd for r in self._records)
-        total_in = sum(r.tokens_in for r in self._records)
-        total_out = sum(r.tokens_out for r in self._records)
+        # Derive totals from pre-aggregated daily data to avoid re-scanning records
+        total_cost = sum(v["cost"] for v in daily.values())
+        total_in = sum(v["tokens_in"] for v in daily.values())
+        total_out = sum(v["tokens_out"] for v in daily.values())
         total_tokens = total_in + total_out
 
         daily_avg_cost = total_cost / n_days if n_days else 0.0
@@ -454,7 +474,7 @@ class CostForecaster:
         # Busiest day
         busiest = max(sorted_days, key=lambda x: x[1]["cost"])
 
-        # Model breakdown
+        # Model breakdown — must scan records for per-model granularity
         model_stats: dict[str, dict[str, Any]] = {}
         for r in self._records:
             m = r.model or "unknown"
