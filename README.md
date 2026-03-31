@@ -80,6 +80,7 @@ AgentLens runs entirely on your infrastructure — SQLite for storage, no cloud 
 | ⏱️ **Trace Waterfall** | Interactive Gantt-style event visualization for session traces |
 | 🔄 **Session Diff** | Side-by-side visual comparison of two agent sessions |
 | ❌ **Error Analytics** | Error grouping by type, agent, and model with trend analysis |
+| 🎯 **Command Center** | Unified activity feed aggregating alerts, anomalies, budget warnings, and health signals |
 | 📋 **SLA Compliance** | Track SLA targets with compliance rings, violation alerts, and history |
 
 ## 🏗️ Architecture

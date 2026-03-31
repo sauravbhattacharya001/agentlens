@@ -1,0 +1,240 @@
+<!DOCTYPE html>
+<html lang="en">
+<head>
+  <meta charset="UTF-8">
+  <meta name="viewport" content="width=device-width, initial-scale=1.0">
+  <title>AgentLens — Command Center</title>
+  <link rel="stylesheet" href="styles.css">
+  <style>
+    .cc-container { max-width: 1100px; margin: 0 auto; padding: 24px; }
+    .cc-summary { display: grid; grid-template-columns: repeat(auto-fit, minmax(200px, 1fr)); gap: 16px; margin-bottom: 24px; }
+    .cc-stat { background: var(--bg-secondary); border: 1px solid var(--border); border-radius: var(--radius); padding: 20px; text-align: center; }
+    .cc-stat-value { font-size: 2rem; font-weight: 700; color: var(--text-primary); }
+    .cc-stat-label { font-size: 0.85rem; color: var(--text-secondary); margin-top: 4px; }
+    .cc-stat.critical .cc-stat-value { color: var(--red); }
+    .cc-stat.warning .cc-stat-value { color: var(--yellow); }
+    .cc-stat.ok .cc-stat-value { color: var(--green); }
+
+    .cc-controls { display: flex; gap: 12px; margin-bottom: 16px; flex-wrap: wrap; align-items: center; }
+    .cc-controls select, .cc-controls button {
+      background: var(--bg-secondary); color: var(--text-primary); border: 1px solid var(--border);
+      border-radius: var(--radius-sm); padding: 6px 12px; font-size: 0.85rem; cursor: pointer;
+    }
+    .cc-controls button:hover { background: var(--bg-hover); }
+    .cc-controls button.active { background: var(--accent); color: #fff; border-color: var(--accent); }
+
+    .cc-feed { display: flex; flex-direction: column; gap: 8px; }
+    .cc-item {
+      background: var(--bg-secondary); border: 1px solid var(--border); border-radius: var(--radius);
+      padding: 16px 20px; display: flex; align-items: flex-start; gap: 14px; transition: border-color 0.15s;
+    }
+    .cc-item:hover { border-color: var(--accent); }
+    .cc-item.severity-critical { border-left: 3px solid var(--red); }
+    .cc-item.severity-warning { border-left: 3px solid var(--yellow); }
+    .cc-item.severity-info { border-left: 3px solid var(--accent); }
+
+    .cc-icon { font-size: 1.5rem; flex-shrink: 0; margin-top: 2px; }
+    .cc-body { flex: 1; min-width: 0; }
+    .cc-title { font-weight: 600; color: var(--text-primary); margin-bottom: 4px; }
+    .cc-summary-text { font-size: 0.9rem; color: var(--text-secondary); word-break: break-word; }
+    .cc-meta { display: flex; gap: 12px; margin-top: 8px; font-size: 0.8rem; color: var(--text-muted); }
+    .cc-badge {
+      display: inline-block; padding: 2px 8px; border-radius: 10px; font-size: 0.75rem; font-weight: 600; text-transform: uppercase;
+    }
+    .cc-badge.critical { background: var(--red-dim); color: var(--red); }
+    .cc-badge.warning { background: var(--yellow-dim); color: var(--yellow); }
+    .cc-badge.info { background: var(--purple-dim); color: var(--purple); }
+
+    .cc-empty { text-align: center; padding: 60px 20px; color: var(--text-muted); }
+    .cc-empty-icon { font-size: 3rem; margin-bottom: 12px; }
+    .cc-loading { text-align: center; padding: 40px; color: var(--text-secondary); }
+
+    .cc-header-row { display: flex; justify-content: space-between; align-items: center; margin-bottom: 20px; flex-wrap: wrap; gap: 12px; }
+    .cc-header-row h2 { margin: 0; color: var(--text-primary); }
+    .cc-auto-refresh { font-size: 0.8rem; color: var(--text-muted); }
+  </style>
+</head>
+<body>
+  <div id="app">
+    <header class="header">
+      <div class="header-left">
+        <h1 class="logo">🔍 AgentLens</h1>
+        <span class="tagline">Command Center</span>
+      </div>
+      <div class="header-right">
+        <a href="index.html" class="btn btn-alert-header" style="text-decoration:none">📋 Sessions</a>
+        <a href="errors.html" class="btn btn-alert-header" style="text-decoration:none">🐛 Errors</a>
+        <a href="costs.html" class="btn btn-alert-header" style="text-decoration:none">💰 Costs</a>
+        <a href="scorecards.html" class="btn btn-alert-header" style="text-decoration:none">🏅 Scorecards</a>
+        <button class="theme-toggle" onclick="toggleTheme()" title="Toggle light/dark theme" id="themeToggleBtn">🌙</button>
+      </div>
+    </header>
+
+    <main class="cc-container">
+      <div class="cc-header-row">
+        <h2>🎯 Command Center</h2>
+        <span class="cc-auto-refresh" id="refreshStatus">Auto-refresh: 30s</span>
+      </div>
+
+      <div class="cc-summary" id="summaryCards">
+        <div class="cc-stat" id="statAlerts"><div class="cc-stat-value">—</div><div class="cc-stat-label">Unacked Alerts</div></div>
+        <div class="cc-stat" id="statBudgets"><div class="cc-stat-value">—</div><div class="cc-stat-label">Budget Warnings</div></div>
+        <div class="cc-stat" id="statErrors"><div class="cc-stat-value">—</div><div class="cc-stat-label">Errors (7d)</div></div>
+        <div class="cc-stat" id="statSessions"><div class="cc-stat-value">—</div><div class="cc-stat-label">Sessions (7d)</div></div>
+      </div>
+
+      <div class="cc-controls">
+        <select id="filterCategory">
+          <option value="">All Categories</option>
+          <option value="alert">🔔 Alerts</option>
+          <option value="budget">💰 Budgets</option>
+          <option value="health">🏥 Health</option>
+        </select>
+        <select id="filterSeverity">
+          <option value="">All Severities</option>
+          <option value="critical">🔴 Critical</option>
+          <option value="warning">🟡 Warning</option>
+          <option value="info">🔵 Info</option>
+        </select>
+        <select id="filterDays">
+          <option value="1">Last 24h</option>
+          <option value="7" selected>Last 7 days</option>
+          <option value="30">Last 30 days</option>
+          <option value="90">Last 90 days</option>
+        </select>
+        <button onclick="loadFeed()" title="Refresh now">🔄 Refresh</button>
+      </div>
+
+      <div class="cc-feed" id="feedContainer">
+        <div class="cc-loading">Loading activity feed…</div>
+      </div>
+    </main>
+  </div>
+
+  <script>
+    const API = window.location.origin;
+    let refreshTimer = null;
+
+    // Theme
+    function toggleTheme() {
+      const html = document.documentElement;
+      const current = html.getAttribute("data-theme");
+      const next = current === "light" ? "dark" : "light";
+      html.setAttribute("data-theme", next);
+      localStorage.setItem("agentlens-theme", next);
+      document.getElementById("themeToggleBtn").textContent = next === "light" ? "☀️" : "🌙";
+    }
+    (function initTheme() {
+      const saved = localStorage.getItem("agentlens-theme");
+      if (saved) {
+        document.documentElement.setAttribute("data-theme", saved);
+        document.getElementById("themeToggleBtn").textContent = saved === "light" ? "☀️" : "🌙";
+      }
+    })();
+
+    const CATEGORY_ICONS = { alert: "🔔", budget: "💰", health: "🏥", anomaly: "🔬" };
+
+    function timeAgo(ts) {
+      const diff = Date.now() - new Date(ts).getTime();
+      const mins = Math.floor(diff / 60000);
+      if (mins < 1) return "just now";
+      if (mins < 60) return mins + "m ago";
+      const hrs = Math.floor(mins / 60);
+      if (hrs < 24) return hrs + "h ago";
+      return Math.floor(hrs / 24) + "d ago";
+    }
+
+    function renderItem(item) {
+      const icon = CATEGORY_ICONS[item.category] || "📌";
+      return `
+        <div class="cc-item severity-${item.severity}">
+          <div class="cc-icon">${icon}</div>
+          <div class="cc-body">
+            <div class="cc-title">${escHtml(item.title)}</div>
+            <div class="cc-summary-text">${escHtml(item.summary)}</div>
+            <div class="cc-meta">
+              <span class="cc-badge ${item.severity}">${item.severity}</span>
+              <span>${item.category}</span>
+              <span>${timeAgo(item.timestamp)}</span>
+              ${item.acknowledged ? "<span>✅ Acknowledged</span>" : ""}
+            </div>
+          </div>
+        </div>`;
+    }
+
+    function escHtml(s) {
+      const d = document.createElement("div");
+      d.textContent = s || "";
+      return d.innerHTML;
+    }
+
+    async function loadSummary() {
+      try {
+        const days = document.getElementById("filterDays").value;
+        const resp = await fetch(`${API}/command-center/summary?days=${days}`);
+        const data = await resp.json();
+        const s = data.summary;
+
+        setStat("statAlerts", s.alerts.unacknowledged, s.alerts.unacknowledged > 0 ? "critical" : "ok");
+        setStat("statBudgets", s.budgets.over_limit + s.budgets.warning, s.budgets.over_limit > 0 ? "critical" : s.budgets.warning > 0 ? "warning" : "ok");
+        setStat("statErrors", s.errors.total, s.errors.total > 10 ? "critical" : s.errors.total > 0 ? "warning" : "ok");
+        setStat("statSessions", s.sessions.total, "ok");
+      } catch (e) {
+        console.error("Summary load failed:", e);
+      }
+    }
+
+    function setStat(id, value, cls) {
+      const el = document.getElementById(id);
+      el.querySelector(".cc-stat-value").textContent = value;
+      el.className = "cc-stat " + (cls || "");
+    }
+
+    async function loadFeed() {
+      const container = document.getElementById("feedContainer");
+      const category = document.getElementById("filterCategory").value;
+      const severity = document.getElementById("filterSeverity").value;
+      const days = document.getElementById("filterDays").value;
+
+      let url = `${API}/command-center/feed?days=${days}&limit=100`;
+      if (category) url += `&category=${category}`;
+      if (severity) url += `&severity=${severity}`;
+
+      try {
+        const resp = await fetch(url);
+        const data = await resp.json();
+
+        if (!data.feed || data.feed.length === 0) {
+          container.innerHTML = `
+            <div class="cc-empty">
+              <div class="cc-empty-icon">✅</div>
+              <div>All clear — no activity items match your filters.</div>
+            </div>`;
+          return;
+        }
+
+        container.innerHTML = data.feed.map(renderItem).join("");
+      } catch (e) {
+        container.innerHTML = `<div class="cc-empty"><div class="cc-empty-icon">⚠️</div><div>Failed to load feed. Is the backend running?</div></div>`;
+      }
+    }
+
+    function loadAll() { loadSummary(); loadFeed(); }
+
+    // Auto-refresh every 30s
+    function startAutoRefresh() {
+      if (refreshTimer) clearInterval(refreshTimer);
+      refreshTimer = setInterval(loadAll, 30000);
+    }
+
+    // Bind filter changes
+    document.getElementById("filterCategory").addEventListener("change", loadAll);
+    document.getElementById("filterSeverity").addEventListener("change", loadAll);
+    document.getElementById("filterDays").addEventListener("change", loadAll);
+
+    // Init
+    loadAll();
+    startAutoRefresh();
+  </script>
+</body>
+</html>
