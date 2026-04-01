@@ -165,6 +165,7 @@ def _summary_stats(entries: list[dict]) -> str:
 def cmd_audit(args: Any) -> None:
     """Fetch and display the agent action audit trail."""
     import os
+    import urllib.parse
     import urllib.request
 
     endpoint = (
@@ -177,23 +178,23 @@ def cmd_audit(args: Any) -> None:
     )
     headers = {"x-api-key": api_key}
 
-    params = []
+    params: dict[str, str] = {}
     if getattr(args, "agent", None):
-        params.append(f"agent={args.agent}")
+        params["agent"] = str(args.agent)
     if getattr(args, "action_filter", None):
-        params.append(f"action={args.action_filter}")
+        params["action"] = str(args.action_filter)
     if getattr(args, "severity", None):
-        params.append(f"severity={args.severity}")
+        params["severity"] = str(args.severity)
     if getattr(args, "model", None):
-        params.append(f"model={args.model}")
+        params["model"] = str(args.model)
     if getattr(args, "session", None):
-        params.append(f"session_id={args.session}")
+        params["session_id"] = str(args.session)
     if getattr(args, "since", None):
-        params.append(f"since_hours={args.since}")
+        params["since_hours"] = str(args.since)
     if getattr(args, "limit", None):
-        params.append(f"limit={args.limit}")
+        params["limit"] = str(args.limit)
 
-    qs = ("?" + "&".join(params)) if params else ""
+    qs = ("?" + urllib.parse.urlencode(params)) if params else ""
     url = f"{endpoint}/audit{qs}"
 
     req = urllib.request.Request(url, headers=headers)

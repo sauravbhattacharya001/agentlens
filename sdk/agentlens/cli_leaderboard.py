@@ -39,21 +39,22 @@ def cmd_leaderboard(args: Any) -> None:
 
     base_url, headers = _get_client(args)
 
+    import urllib.parse
     import urllib.request
 
-    params = []
+    params: dict[str, str] = {}
     if args.sort:
-        params.append(f"sort={args.sort}")
+        params["sort"] = str(args.sort)
     if args.days:
-        params.append(f"days={args.days}")
+        params["days"] = str(args.days)
     if args.limit:
-        params.append(f"limit={args.limit}")
+        params["limit"] = str(args.limit)
     if args.min_sessions:
-        params.append(f"min_sessions={args.min_sessions}")
+        params["min_sessions"] = str(args.min_sessions)
     if args.order:
-        params.append(f"order={args.order}")
+        params["order"] = str(args.order)
 
-    qs = ("?" + "&".join(params)) if params else ""
+    qs = ("?" + urllib.parse.urlencode(params)) if params else ""
     url = f"{base_url}/leaderboard{qs}"
 
     req = urllib.request.Request(url, headers=headers)
