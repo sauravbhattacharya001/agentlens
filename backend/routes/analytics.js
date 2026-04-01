@@ -4,6 +4,7 @@ const { latencyStats, round2 } = require("../lib/stats");
 const { wrapRoute, parseDays, daysAgoCutoff } = require("../lib/request-helpers");
 const { createCache, cacheMiddleware } = require("../lib/response-cache");
 const { loadPricingMap, computeCost } = require("../lib/pricing");
+const { createLazyStatements } = require("../lib/lazy-statements");
 
 const router = express.Router();
 
@@ -18,23 +19,62 @@ const analyticsCacheMw = isTest
   ? function (_req, _res, next) { next(); }
   : cacheMiddleware(analyticsCache);
 
-// ── Cached prepared statements for analytics ────────────────────────
-// These are read-only aggregation queries — safe to prepare once and
-// reuse on every request, avoiding repeated SQL compilation overhead.
-let _analyticsStmts = null;
-
 // ── Cached prepared statements for /performance endpoint ────────────
 // The performance endpoint has 4 possible filter combinations (none,
-// agent-only, model-only, both). Instead of calling db.prepare() on
-// dynamically built SQL every request (re-compiling each time), we
-// pre-compile all 4 variants once and select the right one at runtime.
-let _perfStmts = null;
+// agent-only, model-only, both). Pre-compiled once via createLazyStatements
+// to avoid db.prepare() re-compilation on every request.
 
-function getPerfStatements() {
-  if (_perfStmts) return _perfStmts;
-  const db = getDb();
+function _buildPerfVariant(db, where) {
+  return {
+    global: db.prepare(`
+      SELECT
+        COUNT(*)                              AS cnt,
+        COALESCE(SUM(e.duration_ms), 0)       AS total_dur,
+        COALESCE(SUM(e.tokens_in), 0)         AS total_tok_in,
+        COALESCE(SUM(e.tokens_out), 0)        AS total_tok_out,
+        MIN(e.timestamp)                      AS min_ts,
+        MAX(e.timestamp)                      AS max_ts
+      FROM events e
+      INNER JOIN sessions s ON e.session_id = s.session_id
+      WHERE ${where}`),
+    modelAgg: db.prepare(`
+      SELECT
+        COALESCE(e.model, '(unknown)')       AS grp,
+        COUNT(*)                              AS cnt,
+        COALESCE(SUM(e.duration_ms), 0)       AS total_dur,
+        COALESCE(SUM(e.tokens_in), 0)         AS tok_in,
+        COALESCE(SUM(e.tokens_out), 0)        AS tok_out,
+        MIN(e.duration_ms)                    AS min_dur,
+        MAX(e.duration_ms)                    AS max_dur,
+        AVG(e.duration_ms)                    AS avg_dur
+      FROM events e
+      INNER JOIN sessions s ON e.session_id = s.session_id
+      WHERE ${where}
+      GROUP BY grp
+      ORDER BY total_dur DESC`),
+    groupedDur: db.prepare(`
+      SELECT COALESCE(e.model, '(unknown)') AS model_grp, e.event_type AS type_grp, e.duration_ms
+      FROM events e
+      INNER JOIN sessions s ON e.session_id = s.session_id
+      WHERE ${where}
+      ORDER BY e.duration_ms ASC`),
+    typeAgg: db.prepare(`
+      SELECT
+        e.event_type                          AS grp,
+        COUNT(*)                              AS cnt,
+        COALESCE(SUM(e.duration_ms), 0)       AS total_dur,
+        MIN(e.duration_ms)                    AS min_dur,
+        MAX(e.duration_ms)                    AS max_dur,
+        AVG(e.duration_ms)                    AS avg_dur
+      FROM events e
+      INNER JOIN sessions s ON e.session_id = s.session_id
+      WHERE ${where}
+      GROUP BY grp
+      ORDER BY cnt DESC`),
+  };
+}
 
-  // Build all 4 WHERE clause variants
+const getPerfStatements = createLazyStatements((db) => {
   const baseWhere = "e.duration_ms IS NOT NULL AND e.duration_ms > 0 AND e.timestamp >= ?";
   const variants = {
     none:  baseWhere,
@@ -43,162 +83,105 @@ function getPerfStatements() {
     both:  baseWhere + " AND s.agent_name = ? AND e.model = ?",
   };
 
-  function buildStmts(where) {
-    return {
-      global: db.prepare(`
-        SELECT
-          COUNT(*)                              AS cnt,
-          COALESCE(SUM(e.duration_ms), 0)       AS total_dur,
-          COALESCE(SUM(e.tokens_in), 0)         AS total_tok_in,
-          COALESCE(SUM(e.tokens_out), 0)        AS total_tok_out,
-          MIN(e.timestamp)                      AS min_ts,
-          MAX(e.timestamp)                      AS max_ts
-        FROM events e
-        INNER JOIN sessions s ON e.session_id = s.session_id
-        WHERE ${where}`),
-      modelAgg: db.prepare(`
-        SELECT
-          COALESCE(e.model, '(unknown)')       AS grp,
-          COUNT(*)                              AS cnt,
-          COALESCE(SUM(e.duration_ms), 0)       AS total_dur,
-          COALESCE(SUM(e.tokens_in), 0)         AS tok_in,
-          COALESCE(SUM(e.tokens_out), 0)        AS tok_out,
-          MIN(e.duration_ms)                    AS min_dur,
-          MAX(e.duration_ms)                    AS max_dur,
-          AVG(e.duration_ms)                    AS avg_dur
-        FROM events e
-        INNER JOIN sessions s ON e.session_id = s.session_id
-        WHERE ${where}
-        GROUP BY grp
-        ORDER BY total_dur DESC`),
-      groupedDur: db.prepare(`
-        SELECT COALESCE(e.model, '(unknown)') AS model_grp, e.event_type AS type_grp, e.duration_ms
-        FROM events e
-        INNER JOIN sessions s ON e.session_id = s.session_id
-        WHERE ${where}
-        ORDER BY e.duration_ms ASC`),
-      typeAgg: db.prepare(`
-        SELECT
-          e.event_type                          AS grp,
-          COUNT(*)                              AS cnt,
-          COALESCE(SUM(e.duration_ms), 0)       AS total_dur,
-          MIN(e.duration_ms)                    AS min_dur,
-          MAX(e.duration_ms)                    AS max_dur,
-          AVG(e.duration_ms)                    AS avg_dur
-        FROM events e
-        INNER JOIN sessions s ON e.session_id = s.session_id
-        WHERE ${where}
-        GROUP BY grp
-        ORDER BY cnt DESC`),
-    };
-  }
-
-  _perfStmts = {};
+  const stmts = {};
   for (const [key, where] of Object.entries(variants)) {
-    _perfStmts[key] = buildStmts(where);
+    stmts[key] = _buildPerfVariant(db, where);
   }
+  return stmts;
+});
 
-  return _perfStmts;
-}
-
-function getAnalyticsStatements() {
-  if (_analyticsStmts) return _analyticsStmts;
-  const db = getDb();
-
-  _analyticsStmts = {
-    sessionStats: db.prepare(
-      `SELECT
-        COUNT(*) as total_sessions,
-        COALESCE(SUM(total_tokens_in), 0) as total_tokens_in,
-        COALESCE(SUM(total_tokens_out), 0) as total_tokens_out,
-        COALESCE(SUM(total_tokens_in + total_tokens_out), 0) as total_tokens,
-        AVG(total_tokens_in + total_tokens_out) as avg_tokens_per_session,
-        SUM(CASE WHEN status = 'active' THEN 1 ELSE 0 END) as active_sessions,
-        SUM(CASE WHEN status = 'completed' THEN 1 ELSE 0 END) as completed_sessions,
-        SUM(CASE WHEN status = 'error' THEN 1 ELSE 0 END) as error_sessions,
-        MIN(started_at) as earliest_session,
-        MAX(started_at) as latest_session
-      FROM sessions`
-    ),
-    topAgents: db.prepare(
-      `SELECT
-        agent_name,
-        COUNT(*) as session_count,
-        COALESCE(SUM(total_tokens_in + total_tokens_out), 0) as total_tokens,
-        AVG(total_tokens_in + total_tokens_out) as avg_tokens
-      FROM sessions
-      GROUP BY agent_name
-      ORDER BY total_tokens DESC
-      LIMIT 10`
-    ),
-    modelUsage: db.prepare(
-      `SELECT
-        model,
-        COUNT(*) as call_count,
-        COALESCE(SUM(tokens_in), 0) as total_tokens_in,
-        COALESCE(SUM(tokens_out), 0) as total_tokens_out,
-        COALESCE(SUM(tokens_in + tokens_out), 0) as total_tokens,
-        AVG(duration_ms) as avg_duration_ms
-      FROM events
-      WHERE model IS NOT NULL AND model != ''
-      GROUP BY model
-      ORDER BY total_tokens DESC`
-    ),
-    eventTypes: db.prepare(
-      `SELECT
-        event_type,
-        COUNT(*) as count
-      FROM events
-      WHERE event_type NOT IN ('session_start', 'session_end')
-      GROUP BY event_type
-      ORDER BY count DESC`
-    ),
-    sessionsOverTime: db.prepare(
-      `SELECT
-        DATE(started_at) as day,
-        COUNT(*) as session_count,
-        COALESCE(SUM(total_tokens_in + total_tokens_out), 0) as total_tokens
-      FROM sessions
-      GROUP BY DATE(started_at)
-      ORDER BY day DESC
-      LIMIT 90`
-    ),
-    hourlyActivity: db.prepare(
-      `SELECT
-        CAST(strftime('%H', timestamp) AS INTEGER) as hour,
-        COUNT(*) as event_count
-      FROM events
-      GROUP BY hour
-      ORDER BY hour ASC`
-    ),
-    durationStats: db.prepare(
-      `SELECT
-        AVG(
-          CASE WHEN ended_at IS NOT NULL
-            THEN (julianday(ended_at) - julianday(started_at)) * 86400000
-            ELSE NULL
-          END
-        ) as avg_duration_ms,
-        MIN(
-          CASE WHEN ended_at IS NOT NULL
-            THEN (julianday(ended_at) - julianday(started_at)) * 86400000
-            ELSE NULL
-          END
-        ) as min_duration_ms,
-        MAX(
-          CASE WHEN ended_at IS NOT NULL
-            THEN (julianday(ended_at) - julianday(started_at)) * 86400000
-            ELSE NULL
-          END
-        ) as max_duration_ms
-      FROM sessions
-      WHERE ended_at IS NOT NULL`
-    ),
-    eventCount: db.prepare(`SELECT COUNT(*) as total FROM events`),
-  };
-
-  return _analyticsStmts;
-}
+// ── Cached prepared statements for analytics (overview endpoint) ────
+const getAnalyticsStatements = createLazyStatements((db) => ({
+  sessionStats: db.prepare(
+    `SELECT
+      COUNT(*) as total_sessions,
+      COALESCE(SUM(total_tokens_in), 0) as total_tokens_in,
+      COALESCE(SUM(total_tokens_out), 0) as total_tokens_out,
+      COALESCE(SUM(total_tokens_in + total_tokens_out), 0) as total_tokens,
+      AVG(total_tokens_in + total_tokens_out) as avg_tokens_per_session,
+      SUM(CASE WHEN status = 'active' THEN 1 ELSE 0 END) as active_sessions,
+      SUM(CASE WHEN status = 'completed' THEN 1 ELSE 0 END) as completed_sessions,
+      SUM(CASE WHEN status = 'error' THEN 1 ELSE 0 END) as error_sessions,
+      MIN(started_at) as earliest_session,
+      MAX(started_at) as latest_session
+    FROM sessions`
+  ),
+  topAgents: db.prepare(
+    `SELECT
+      agent_name,
+      COUNT(*) as session_count,
+      COALESCE(SUM(total_tokens_in + total_tokens_out), 0) as total_tokens,
+      AVG(total_tokens_in + total_tokens_out) as avg_tokens
+    FROM sessions
+    GROUP BY agent_name
+    ORDER BY total_tokens DESC
+    LIMIT 10`
+  ),
+  modelUsage: db.prepare(
+    `SELECT
+      model,
+      COUNT(*) as call_count,
+      COALESCE(SUM(tokens_in), 0) as total_tokens_in,
+      COALESCE(SUM(tokens_out), 0) as total_tokens_out,
+      COALESCE(SUM(tokens_in + tokens_out), 0) as total_tokens,
+      AVG(duration_ms) as avg_duration_ms
+    FROM events
+    WHERE model IS NOT NULL AND model != ''
+    GROUP BY model
+    ORDER BY total_tokens DESC`
+  ),
+  eventTypes: db.prepare(
+    `SELECT
+      event_type,
+      COUNT(*) as count
+    FROM events
+    WHERE event_type NOT IN ('session_start', 'session_end')
+    GROUP BY event_type
+    ORDER BY count DESC`
+  ),
+  sessionsOverTime: db.prepare(
+    `SELECT
+      DATE(started_at) as day,
+      COUNT(*) as session_count,
+      COALESCE(SUM(total_tokens_in + total_tokens_out), 0) as total_tokens
+    FROM sessions
+    GROUP BY DATE(started_at)
+    ORDER BY day DESC
+    LIMIT 90`
+  ),
+  hourlyActivity: db.prepare(
+    `SELECT
+      CAST(strftime('%H', timestamp) AS INTEGER) as hour,
+      COUNT(*) as event_count
+    FROM events
+    GROUP BY hour
+    ORDER BY hour ASC`
+  ),
+  durationStats: db.prepare(
+    `SELECT
+      AVG(
+        CASE WHEN ended_at IS NOT NULL
+          THEN (julianday(ended_at) - julianday(started_at)) * 86400000
+          ELSE NULL
+        END
+      ) as avg_duration_ms,
+      MIN(
+        CASE WHEN ended_at IS NOT NULL
+          THEN (julianday(ended_at) - julianday(started_at)) * 86400000
+          ELSE NULL
+        END
+      ) as min_duration_ms,
+      MAX(
+        CASE WHEN ended_at IS NOT NULL
+          THEN (julianday(ended_at) - julianday(started_at)) * 86400000
+          ELSE NULL
+        END
+      ) as max_duration_ms
+    FROM sessions
+    WHERE ended_at IS NOT NULL`
+  ),
+  eventCount: db.prepare(`SELECT COUNT(*) as total FROM events`),
+}));
 
 // GET /analytics — Aggregate statistics across all sessions
 router.get("/", analyticsCacheMw, wrapRoute("fetch analytics", (req, res) => {
@@ -409,44 +392,35 @@ router.get("/performance", isTest ? analyticsCacheMw : cacheMiddleware(analytics
 }));
 
 // ── Cached prepared statements for /heatmap endpoint ────────────────
-// Three metric variants (events, tokens, sessions) — pre-compiled once
-// to avoid db.prepare() re-compilation on every request.
-let _heatmapStmts = null;
-
-function getHeatmapStatements() {
-  if (_heatmapStmts) return _heatmapStmts;
-  const db = getDb();
-  _heatmapStmts = {
-    sessions: db.prepare(`
-      SELECT
-        CAST(strftime('%w', started_at) AS INTEGER) as dow,
-        CAST(strftime('%H', started_at) AS INTEGER) as hour,
-        COUNT(*) as value
-      FROM sessions
-      WHERE started_at >= ?
-      GROUP BY dow, hour
-    `),
-    tokens: db.prepare(`
-      SELECT
-        CAST(strftime('%w', timestamp) AS INTEGER) as dow,
-        CAST(strftime('%H', timestamp) AS INTEGER) as hour,
-        COALESCE(SUM(tokens_in + tokens_out), 0) as value
-      FROM events
-      WHERE timestamp >= ?
-      GROUP BY dow, hour
-    `),
-    events: db.prepare(`
-      SELECT
-        CAST(strftime('%w', timestamp) AS INTEGER) as dow,
-        CAST(strftime('%H', timestamp) AS INTEGER) as hour,
-        COUNT(*) as value
-      FROM events
-      WHERE timestamp >= ?
-      GROUP BY dow, hour
-    `),
-  };
-  return _heatmapStmts;
-}
+const getHeatmapStatements = createLazyStatements((db) => ({
+  sessions: db.prepare(`
+    SELECT
+      CAST(strftime('%w', started_at) AS INTEGER) as dow,
+      CAST(strftime('%H', started_at) AS INTEGER) as hour,
+      COUNT(*) as value
+    FROM sessions
+    WHERE started_at >= ?
+    GROUP BY dow, hour
+  `),
+  tokens: db.prepare(`
+    SELECT
+      CAST(strftime('%w', timestamp) AS INTEGER) as dow,
+      CAST(strftime('%H', timestamp) AS INTEGER) as hour,
+      COALESCE(SUM(tokens_in + tokens_out), 0) as value
+    FROM events
+    WHERE timestamp >= ?
+    GROUP BY dow, hour
+  `),
+  events: db.prepare(`
+    SELECT
+      CAST(strftime('%w', timestamp) AS INTEGER) as dow,
+      CAST(strftime('%H', timestamp) AS INTEGER) as hour,
+      COUNT(*) as value
+    FROM events
+    WHERE timestamp >= ?
+    GROUP BY dow, hour
+  `),
+}));
 
 // GET /analytics/heatmap — Day-of-week × hour-of-day activity matrix
 router.get("/heatmap", isTest ? analyticsCacheMw : cacheMiddleware(analyticsCache, { ttlMs: 60000 }), wrapRoute("fetch heatmap data", (req, res) => {
@@ -533,37 +507,30 @@ router.get("/heatmap", isTest ? analyticsCacheMw : cacheMiddleware(analyticsCach
 // across all sessions.  Returns per-model cost breakdown, daily cost
 // trend, and overall totals.  Optional ?days=N parameter (default 30).
 // ── Cached prepared statements for /costs endpoint ──────────────────
-let _costStmts = null;
-
-function getCostStatements() {
-  if (_costStmts) return _costStmts;
-  const db = getDb();
-  _costStmts = {
-    modelAgg: db.prepare(`
-      SELECT
-        model,
-        COUNT(*) as call_count,
-        COALESCE(SUM(tokens_in), 0) as total_tokens_in,
-        COALESCE(SUM(tokens_out), 0) as total_tokens_out
-      FROM events
-      WHERE model IS NOT NULL AND model != '' AND timestamp >= ?
-      GROUP BY model
-      ORDER BY (COALESCE(SUM(tokens_in), 0) + COALESCE(SUM(tokens_out), 0)) DESC
-    `),
-    dailyAgg: db.prepare(`
-      SELECT
-        DATE(timestamp) as day,
-        model,
-        COALESCE(SUM(tokens_in), 0) as tokens_in,
-        COALESCE(SUM(tokens_out), 0) as tokens_out
-      FROM events
-      WHERE model IS NOT NULL AND model != '' AND timestamp >= ?
-      GROUP BY DATE(timestamp), model
-      ORDER BY day ASC
-    `),
-  };
-  return _costStmts;
-}
+const getCostStatements = createLazyStatements((db) => ({
+  modelAgg: db.prepare(`
+    SELECT
+      model,
+      COUNT(*) as call_count,
+      COALESCE(SUM(tokens_in), 0) as total_tokens_in,
+      COALESCE(SUM(tokens_out), 0) as total_tokens_out
+    FROM events
+    WHERE model IS NOT NULL AND model != '' AND timestamp >= ?
+    GROUP BY model
+    ORDER BY (COALESCE(SUM(tokens_in), 0) + COALESCE(SUM(tokens_out), 0)) DESC
+  `),
+  dailyAgg: db.prepare(`
+    SELECT
+      DATE(timestamp) as day,
+      model,
+      COALESCE(SUM(tokens_in), 0) as tokens_in,
+      COALESCE(SUM(tokens_out), 0) as tokens_out
+    FROM events
+    WHERE model IS NOT NULL AND model != '' AND timestamp >= ?
+    GROUP BY DATE(timestamp), model
+    ORDER BY day ASC
+  `),
+}));
 
 router.get("/costs", analyticsCacheMw, wrapRoute("fetch cost analytics", (req, res) => {
   const days = parseDays(req.query.days);
