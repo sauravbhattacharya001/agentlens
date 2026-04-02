@@ -546,23 +546,16 @@ router.post("/compare", wrapRoute("compare sessions", (req, res) => {
     // Compute deltas (B relative to A)
     const deltas = computeDeltas(metricsA, metricsB);
 
-    // All unique event types across both
-    const allEventTypes = [...new Set([
-      ...Object.keys(metricsA.event_types),
-      ...Object.keys(metricsB.event_types),
-    ])];
-
-    // All unique tools across both
-    const allTools = [...new Set([
-      ...Object.keys(metricsA.tools),
-      ...Object.keys(metricsB.tools),
-    ])];
-
-    // All unique models across both
-    const allModels = [...new Set([
-      ...Object.keys(metricsA.models),
-      ...Object.keys(metricsB.models),
-    ])];
+    // Collect unique keys across both sessions in a single helper
+    // to avoid creating 6 intermediate arrays and 3 Sets.
+    function mergeKeys(objA, objB) {
+      const set = new Set(Object.keys(objA));
+      for (const k of Object.keys(objB)) set.add(k);
+      return [...set];
+    }
+    const allEventTypes = mergeKeys(metricsA.event_types, metricsB.event_types);
+    const allTools = mergeKeys(metricsA.tools, metricsB.tools);
+    const allModels = mergeKeys(metricsA.models, metricsB.models);
 
     res.json({
       compared_at: new Date().toISOString(),
@@ -727,18 +720,22 @@ router.get("/:id/events/search", requireSessionId, wrapRoute("search events", (r
     // Parse JSON columns
     const parsed = dbResults.map(parseEventRow);
 
-    // ── Compute summary stats (only for this page — avoids loading all) ──
-    const totalTokensIn = parsed.reduce((s, e) => s + (e.tokens_in || 0), 0);
-    const totalTokensOut = parsed.reduce((s, e) => s + (e.tokens_out || 0), 0);
-    const totalDuration = parsed.reduce((s, e) => s + (e.duration_ms || 0), 0);
+    // ── Compute summary stats in a single pass (avoids 4 iterations) ──
+    let totalTokensIn = 0;
+    let totalTokensOut = 0;
+    let totalDuration = 0;
     const eventTypes = {};
     const models = {};
-    parsed.forEach((e) => {
+    for (let i = 0; i < parsed.length; i++) {
+      const e = parsed[i];
+      totalTokensIn += e.tokens_in || 0;
+      totalTokensOut += e.tokens_out || 0;
+      totalDuration += e.duration_ms || 0;
       eventTypes[e.event_type] = (eventTypes[e.event_type] || 0) + 1;
       if (e.model) {
         models[e.model] = (models[e.model] || 0) + 1;
       }
-    });
+    }
 
     res.json({
       session_id: id,
