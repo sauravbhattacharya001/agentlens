@@ -1,0 +1,507 @@
+<!DOCTYPE html>
+<html lang="en">
+<head>
+  <meta charset="UTF-8">
+  <meta name="viewport" content="width=device-width, initial-scale=1.0">
+  <title>AgentLens — Alert Rules Builder</title>
+  <link rel="stylesheet" href="styles.css">
+  <style>
+    .alerts-page { max-width: 1200px; margin: 0 auto; padding: 24px; }
+    .alerts-page h2 { margin: 0 0 8px; font-size: 1.5rem; }
+    .alerts-page .subtitle { color: var(--text-secondary); margin-bottom: 24px; }
+
+    .rules-toolbar { display: flex; gap: 12px; margin-bottom: 20px; flex-wrap: wrap; align-items: center; }
+    .rules-toolbar input[type="text"] { flex: 1; min-width: 200px; padding: 8px 12px; background: var(--bg-tertiary); border: 1px solid var(--border); border-radius: var(--radius-sm); color: var(--text-primary); font-size: 0.9rem; }
+    .rules-toolbar select { padding: 8px 12px; background: var(--bg-tertiary); border: 1px solid var(--border); border-radius: var(--radius-sm); color: var(--text-primary); }
+
+    .btn-create { background: var(--green); color: #fff; border: none; padding: 8px 16px; border-radius: var(--radius-sm); cursor: pointer; font-weight: 600; font-size: 0.9rem; }
+    .btn-create:hover { filter: brightness(1.15); }
+    .btn-sm { padding: 4px 10px; font-size: 0.8rem; border: 1px solid var(--border); background: var(--bg-tertiary); color: var(--text-primary); border-radius: var(--radius-sm); cursor: pointer; }
+    .btn-sm:hover { background: var(--bg-hover); }
+    .btn-danger { color: var(--red); border-color: var(--red); }
+    .btn-danger:hover { background: var(--red-dim); }
+
+    .rules-table { width: 100%; border-collapse: collapse; }
+    .rules-table th, .rules-table td { text-align: left; padding: 10px 14px; border-bottom: 1px solid var(--border); }
+    .rules-table th { color: var(--text-secondary); font-size: 0.8rem; text-transform: uppercase; letter-spacing: 0.05em; background: var(--bg-secondary); position: sticky; top: 0; }
+    .rules-table tr:hover td { background: var(--bg-hover); }
+
+    .severity-badge { padding: 2px 8px; border-radius: 10px; font-size: 0.75rem; font-weight: 600; text-transform: uppercase; }
+    .severity-critical { background: var(--red-dim); color: var(--red); }
+    .severity-warning { background: var(--yellow-dim); color: var(--yellow); }
+    .severity-info { background: var(--purple-dim); color: var(--purple); }
+
+    .status-toggle { position: relative; width: 36px; height: 20px; cursor: pointer; }
+    .status-toggle input { opacity: 0; width: 0; height: 0; }
+    .status-toggle .slider { position: absolute; top: 0; left: 0; right: 0; bottom: 0; background: var(--bg-hover); border-radius: 10px; transition: 0.2s; }
+    .status-toggle .slider::before { content: ''; position: absolute; width: 16px; height: 16px; left: 2px; bottom: 2px; background: var(--text-secondary); border-radius: 50%; transition: 0.2s; }
+    .status-toggle input:checked + .slider { background: var(--green-dim); }
+    .status-toggle input:checked + .slider::before { transform: translateX(16px); background: var(--green); }
+
+    .channel-tag { display: inline-block; padding: 2px 8px; margin: 1px 2px; background: var(--bg-tertiary); border: 1px solid var(--border); border-radius: 10px; font-size: 0.75rem; color: var(--text-secondary); }
+
+    /* Modal */
+    .modal-overlay { display: none; position: fixed; inset: 0; background: rgba(0,0,0,0.6); z-index: 1000; justify-content: center; align-items: flex-start; padding-top: 60px; }
+    .modal-overlay.open { display: flex; }
+    .modal { background: var(--bg-secondary); border: 1px solid var(--border); border-radius: var(--radius); width: 620px; max-width: 95vw; max-height: 80vh; overflow-y: auto; padding: 24px; box-shadow: var(--shadow); }
+    .modal h3 { margin: 0 0 20px; font-size: 1.2rem; }
+    .form-group { margin-bottom: 16px; }
+    .form-group label { display: block; margin-bottom: 4px; font-size: 0.85rem; color: var(--text-secondary); font-weight: 600; }
+    .form-group input, .form-group select, .form-group textarea { width: 100%; padding: 8px 12px; background: var(--bg-tertiary); border: 1px solid var(--border); border-radius: var(--radius-sm); color: var(--text-primary); font-size: 0.9rem; box-sizing: border-box; }
+    .form-group textarea { resize: vertical; min-height: 60px; font-family: inherit; }
+
+    .conditions-list { display: flex; flex-direction: column; gap: 8px; }
+    .condition-row { display: flex; gap: 8px; align-items: center; }
+    .condition-row select, .condition-row input { padding: 6px 8px; background: var(--bg-tertiary); border: 1px solid var(--border); border-radius: var(--radius-sm); color: var(--text-primary); font-size: 0.85rem; }
+    .condition-row select { min-width: 120px; }
+    .condition-row input[type="number"] { width: 90px; }
+    .btn-remove-cond { background: none; border: none; color: var(--red); cursor: pointer; font-size: 1.1rem; padding: 0 4px; }
+
+    .channels-check { display: flex; gap: 12px; flex-wrap: wrap; }
+    .channels-check label { display: flex; align-items: center; gap: 4px; font-size: 0.85rem; color: var(--text-primary); cursor: pointer; }
+
+    .modal-actions { display: flex; gap: 8px; justify-content: flex-end; margin-top: 20px; }
+    .btn-cancel { padding: 8px 16px; background: var(--bg-tertiary); border: 1px solid var(--border); border-radius: var(--radius-sm); color: var(--text-primary); cursor: pointer; }
+    .btn-save { padding: 8px 16px; background: var(--accent); border: none; border-radius: var(--radius-sm); color: #fff; cursor: pointer; font-weight: 600; }
+    .btn-save:hover { background: var(--accent-hover); }
+
+    .empty-state { text-align: center; padding: 60px 20px; color: var(--text-secondary); }
+    .empty-state .icon { font-size: 3rem; margin-bottom: 12px; }
+
+    .stats-bar { display: flex; gap: 16px; margin-bottom: 20px; flex-wrap: wrap; }
+    .stat-card { background: var(--bg-secondary); border: 1px solid var(--border); border-radius: var(--radius); padding: 14px 20px; flex: 1; min-width: 140px; }
+    .stat-card .stat-value { font-size: 1.5rem; font-weight: 700; }
+    .stat-card .stat-label { font-size: 0.8rem; color: var(--text-secondary); margin-top: 2px; }
+
+    .history-panel { margin-top: 32px; }
+    .history-panel h3 { font-size: 1.1rem; margin-bottom: 12px; }
+    .history-list { max-height: 300px; overflow-y: auto; }
+    .history-item { display: flex; align-items: center; gap: 12px; padding: 8px 12px; border-bottom: 1px solid var(--border); font-size: 0.85rem; }
+    .history-item .time { color: var(--text-muted); min-width: 130px; }
+    .history-item .rule-name { font-weight: 600; min-width: 140px; }
+    .fired-dot { width: 8px; height: 8px; border-radius: 50%; flex-shrink: 0; }
+    .fired-dot.critical { background: var(--red); }
+    .fired-dot.warning { background: var(--yellow); }
+    .fired-dot.info { background: var(--purple); }
+  </style>
+</head>
+<body>
+  <header class="header">
+    <div class="header-left">
+      <h1 class="logo">🔍 AgentLens</h1>
+      <span class="tagline">Observability for AI Agents</span>
+    </div>
+    <div class="header-right">
+      <a href="index.html" class="btn btn-alert-header" style="text-decoration:none">← Dashboard</a>
+      <button class="theme-toggle" onclick="toggleTheme()" id="themeToggleBtn">🌙</button>
+    </div>
+  </header>
+
+  <div class="alerts-page">
+    <h2>🔔 Alert Rules Builder</h2>
+    <p class="subtitle">Create and manage custom alerting rules for your AI agent fleet.</p>
+
+    <!-- Stats -->
+    <div class="stats-bar">
+      <div class="stat-card"><div class="stat-value" id="totalRules">0</div><div class="stat-label">Total Rules</div></div>
+      <div class="stat-card"><div class="stat-value" id="activeRules">0</div><div class="stat-label">Active</div></div>
+      <div class="stat-card"><div class="stat-value" id="firedToday">0</div><div class="stat-label">Fired Today</div></div>
+      <div class="stat-card"><div class="stat-value" id="mutedRules">0</div><div class="stat-label">Muted</div></div>
+    </div>
+
+    <!-- Toolbar -->
+    <div class="rules-toolbar">
+      <input type="text" id="searchRules" placeholder="Search rules..." oninput="renderRules()">
+      <select id="filterSeverity" onchange="renderRules()">
+        <option value="all">All Severities</option>
+        <option value="critical">Critical</option>
+        <option value="warning">Warning</option>
+        <option value="info">Info</option>
+      </select>
+      <select id="filterStatus" onchange="renderRules()">
+        <option value="all">All Status</option>
+        <option value="enabled">Enabled</option>
+        <option value="disabled">Disabled</option>
+      </select>
+      <button class="btn-create" onclick="openModal()">+ New Rule</button>
+      <button class="btn-sm" onclick="importRules()">📥 Import</button>
+      <button class="btn-sm" onclick="exportRules()">📤 Export</button>
+    </div>
+
+    <!-- Rules Table -->
+    <div style="overflow-x:auto">
+      <table class="rules-table">
+        <thead>
+          <tr>
+            <th>Name</th>
+            <th>Metric</th>
+            <th>Condition</th>
+            <th>Severity</th>
+            <th>Channels</th>
+            <th>Fired</th>
+            <th>Enabled</th>
+            <th>Actions</th>
+          </tr>
+        </thead>
+        <tbody id="rulesBody"></tbody>
+      </table>
+      <div id="emptyState" class="empty-state" style="display:none">
+        <div class="icon">🔕</div>
+        <p>No alert rules yet. Click <strong>+ New Rule</strong> to get started.</p>
+      </div>
+    </div>
+
+    <!-- Recent Firings -->
+    <div class="history-panel">
+      <h3>🔥 Recent Alert Firings</h3>
+      <div class="history-list" id="historyList"></div>
+    </div>
+  </div>
+
+  <!-- Create/Edit Modal -->
+  <div class="modal-overlay" id="ruleModal">
+    <div class="modal">
+      <h3 id="modalTitle">Create Alert Rule</h3>
+
+      <div class="form-group">
+        <label>Rule Name</label>
+        <input type="text" id="ruleName" placeholder="e.g. High Latency Alert">
+      </div>
+
+      <div class="form-group">
+        <label>Description</label>
+        <textarea id="ruleDesc" placeholder="What does this rule monitor?"></textarea>
+      </div>
+
+      <div class="form-group">
+        <label>Conditions</label>
+        <div class="conditions-list" id="conditionsList"></div>
+        <button class="btn-sm" style="margin-top:8px" onclick="addCondition()">+ Add Condition</button>
+      </div>
+
+      <div class="form-group">
+        <label>Evaluation Window</label>
+        <select id="ruleWindow">
+          <option value="1m">1 minute</option>
+          <option value="5m" selected>5 minutes</option>
+          <option value="15m">15 minutes</option>
+          <option value="30m">30 minutes</option>
+          <option value="1h">1 hour</option>
+          <option value="6h">6 hours</option>
+          <option value="24h">24 hours</option>
+        </select>
+      </div>
+
+      <div class="form-group">
+        <label>Severity</label>
+        <select id="ruleSeverity">
+          <option value="critical">🔴 Critical</option>
+          <option value="warning" selected>🟡 Warning</option>
+          <option value="info">🟣 Info</option>
+        </select>
+      </div>
+
+      <div class="form-group">
+        <label>Cooldown (minutes between re-fires)</label>
+        <input type="number" id="ruleCooldown" value="15" min="1" max="1440">
+      </div>
+
+      <div class="form-group">
+        <label>Notification Channels</label>
+        <div class="channels-check">
+          <label><input type="checkbox" value="email" checked> 📧 Email</label>
+          <label><input type="checkbox" value="slack"> 💬 Slack</label>
+          <label><input type="checkbox" value="webhook"> 🔗 Webhook</label>
+          <label><input type="checkbox" value="pagerduty"> 📟 PagerDuty</label>
+          <label><input type="checkbox" value="telegram"> ✈️ Telegram</label>
+          <label><input type="checkbox" value="dashboard" checked> 🖥️ Dashboard</label>
+        </div>
+      </div>
+
+      <div class="modal-actions">
+        <button class="btn-cancel" onclick="closeModal()">Cancel</button>
+        <button class="btn-save" onclick="saveRule()">Save Rule</button>
+      </div>
+    </div>
+  </div>
+
+  <input type="file" id="importFile" accept=".json" style="display:none" onchange="handleImport(event)">
+
+  <script>
+    // ── Theme ──
+    function toggleTheme() {
+      const html = document.documentElement;
+      const current = html.getAttribute('data-theme');
+      const next = current === 'light' ? 'dark' : 'light';
+      html.setAttribute('data-theme', next);
+      localStorage.setItem('agentlens-theme', next);
+      document.getElementById('themeToggleBtn').textContent = next === 'light' ? '🌙' : '☀️';
+    }
+    (function() {
+      const saved = localStorage.getItem('agentlens-theme') || 'dark';
+      document.documentElement.setAttribute('data-theme', saved);
+      document.getElementById('themeToggleBtn').textContent = saved === 'light' ? '🌙' : '☀️';
+    })();
+
+    // ── Data ──
+    const METRICS = [
+      { value: 'latency_p50', label: 'Latency P50 (ms)' },
+      { value: 'latency_p95', label: 'Latency P95 (ms)' },
+      { value: 'latency_p99', label: 'Latency P99 (ms)' },
+      { value: 'error_rate', label: 'Error Rate (%)' },
+      { value: 'token_usage', label: 'Token Usage' },
+      { value: 'cost_per_session', label: 'Cost per Session ($)' },
+      { value: 'total_cost', label: 'Total Cost ($)' },
+      { value: 'sessions_per_min', label: 'Sessions / min' },
+      { value: 'health_score', label: 'Health Score' },
+      { value: 'hallucination_rate', label: 'Hallucination Rate (%)' },
+      { value: 'tool_failure_rate', label: 'Tool Failure Rate (%)' },
+      { value: 'avg_turns', label: 'Avg Turns per Session' },
+      { value: 'queue_depth', label: 'Queue Depth' },
+    ];
+
+    const OPERATORS = [
+      { value: 'gt', label: '>' },
+      { value: 'gte', label: '≥' },
+      { value: 'lt', label: '<' },
+      { value: 'lte', label: '≤' },
+      { value: 'eq', label: '=' },
+      { value: 'neq', label: '≠' },
+      { value: 'spike', label: 'spikes by %' },
+      { value: 'drop', label: 'drops by %' },
+    ];
+
+    let rules = JSON.parse(localStorage.getItem('agentlens-alert-rules') || '[]');
+    let editingId = null;
+
+    // Seed demo rules if empty
+    if (rules.length === 0) {
+      rules = [
+        { id: genId(), name: 'High P95 Latency', desc: 'Fires when P95 latency exceeds 3 seconds', conditions: [{ metric: 'latency_p95', op: 'gt', value: 3000 }], window: '5m', severity: 'critical', cooldown: 15, channels: ['email','slack','pagerduty','dashboard'], enabled: true, firedCount: 7, lastFired: Date.now() - 1800000, created: Date.now() - 86400000*5 },
+        { id: genId(), name: 'Error Rate Spike', desc: 'Detects sudden error rate increases', conditions: [{ metric: 'error_rate', op: 'spike', value: 50 }], window: '5m', severity: 'warning', cooldown: 30, channels: ['slack','dashboard'], enabled: true, firedCount: 3, lastFired: Date.now() - 7200000, created: Date.now() - 86400000*3 },
+        { id: genId(), name: 'Cost Budget Exceeded', desc: 'Alert when session cost exceeds budget', conditions: [{ metric: 'cost_per_session', op: 'gt', value: 2.5 }, { metric: 'total_cost', op: 'gt', value: 500 }], window: '1h', severity: 'warning', cooldown: 60, channels: ['email','dashboard'], enabled: true, firedCount: 1, lastFired: Date.now() - 86400000, created: Date.now() - 86400000*7 },
+        { id: genId(), name: 'Low Health Score', desc: 'Agent health below threshold', conditions: [{ metric: 'health_score', op: 'lt', value: 60 }], window: '15m', severity: 'critical', cooldown: 15, channels: ['pagerduty','slack','email','dashboard'], enabled: true, firedCount: 12, lastFired: Date.now() - 600000, created: Date.now() - 86400000*10 },
+        { id: genId(), name: 'Hallucination Monitor', desc: 'Tracks hallucination rate', conditions: [{ metric: 'hallucination_rate', op: 'gt', value: 5 }], window: '30m', severity: 'info', cooldown: 60, channels: ['dashboard'], enabled: false, firedCount: 0, lastFired: null, created: Date.now() - 86400000*2 },
+      ];
+      saveData();
+    }
+
+    function genId() { return Math.random().toString(36).slice(2, 10); }
+    function saveData() { localStorage.setItem('agentlens-alert-rules', JSON.stringify(rules)); }
+
+    function renderRules() {
+      const search = document.getElementById('searchRules').value.toLowerCase();
+      const sevFilter = document.getElementById('filterSeverity').value;
+      const statusFilter = document.getElementById('filterStatus').value;
+
+      let filtered = rules.filter(r => {
+        if (search && !r.name.toLowerCase().includes(search) && !r.desc.toLowerCase().includes(search)) return false;
+        if (sevFilter !== 'all' && r.severity !== sevFilter) return false;
+        if (statusFilter === 'enabled' && !r.enabled) return false;
+        if (statusFilter === 'disabled' && r.enabled) return false;
+        return true;
+      });
+
+      const body = document.getElementById('rulesBody');
+      const empty = document.getElementById('emptyState');
+
+      if (filtered.length === 0) {
+        body.innerHTML = '';
+        empty.style.display = 'block';
+      } else {
+        empty.style.display = 'none';
+        body.innerHTML = filtered.map(r => {
+          const condText = r.conditions.map(c => {
+            const m = METRICS.find(x => x.value === c.metric);
+            const o = OPERATORS.find(x => x.value === c.op);
+            return `${m ? m.label : c.metric} ${o ? o.label : c.op} ${c.value}`;
+          }).join(' AND ');
+          const channels = r.channels.map(ch => `<span class="channel-tag">${ch}</span>`).join('');
+          const lastFired = r.lastFired ? timeAgo(r.lastFired) : '—';
+          return `<tr>
+            <td><strong>${esc(r.name)}</strong><br><span style="font-size:0.8rem;color:var(--text-muted)">${esc(r.desc)}</span></td>
+            <td style="font-size:0.85rem">${r.conditions.map(c => (METRICS.find(x=>x.value===c.metric)||{label:c.metric}).label).join(', ')}</td>
+            <td style="font-size:0.85rem;font-family:monospace">${esc(condText)}</td>
+            <td><span class="severity-badge severity-${r.severity}">${r.severity}</span></td>
+            <td>${channels}</td>
+            <td style="font-size:0.85rem">${r.firedCount}× <span style="color:var(--text-muted)">(${lastFired})</span></td>
+            <td><label class="status-toggle"><input type="checkbox" ${r.enabled?'checked':''} onchange="toggleRule('${r.id}')"><span class="slider"></span></label></td>
+            <td><button class="btn-sm" onclick="editRule('${r.id}')">✏️</button> <button class="btn-sm" onclick="dupRule('${r.id}')">📋</button> <button class="btn-sm btn-danger" onclick="deleteRule('${r.id}')">🗑️</button></td>
+          </tr>`;
+        }).join('');
+      }
+
+      // Stats
+      document.getElementById('totalRules').textContent = rules.length;
+      document.getElementById('activeRules').textContent = rules.filter(r => r.enabled).length;
+      document.getElementById('firedToday').textContent = rules.reduce((s, r) => s + (r.lastFired && Date.now() - r.lastFired < 86400000 ? 1 : 0), 0);
+      document.getElementById('mutedRules').textContent = rules.filter(r => !r.enabled).length;
+    }
+
+    function timeAgo(ts) {
+      const diff = Date.now() - ts;
+      if (diff < 60000) return 'just now';
+      if (diff < 3600000) return Math.floor(diff / 60000) + 'm ago';
+      if (diff < 86400000) return Math.floor(diff / 3600000) + 'h ago';
+      return Math.floor(diff / 86400000) + 'd ago';
+    }
+    function esc(s) { const d = document.createElement('div'); d.textContent = s; return d.innerHTML; }
+
+    function toggleRule(id) {
+      const r = rules.find(x => x.id === id);
+      if (r) { r.enabled = !r.enabled; saveData(); renderRules(); }
+    }
+    function deleteRule(id) {
+      if (!confirm('Delete this rule?')) return;
+      rules = rules.filter(x => x.id !== id);
+      saveData(); renderRules(); renderHistory();
+    }
+    function dupRule(id) {
+      const r = rules.find(x => x.id === id);
+      if (!r) return;
+      const copy = JSON.parse(JSON.stringify(r));
+      copy.id = genId(); copy.name += ' (copy)'; copy.firedCount = 0; copy.lastFired = null; copy.created = Date.now();
+      rules.push(copy); saveData(); renderRules();
+    }
+
+    // ── Modal ──
+    function openModal(ruleId) {
+      editingId = ruleId || null;
+      document.getElementById('modalTitle').textContent = ruleId ? 'Edit Alert Rule' : 'Create Alert Rule';
+      const r = ruleId ? rules.find(x => x.id === ruleId) : null;
+
+      document.getElementById('ruleName').value = r ? r.name : '';
+      document.getElementById('ruleDesc').value = r ? r.desc : '';
+      document.getElementById('ruleWindow').value = r ? r.window : '5m';
+      document.getElementById('ruleSeverity').value = r ? r.severity : 'warning';
+      document.getElementById('ruleCooldown').value = r ? r.cooldown : 15;
+
+      // Channels
+      document.querySelectorAll('.channels-check input').forEach(cb => {
+        cb.checked = r ? r.channels.includes(cb.value) : (cb.value === 'email' || cb.value === 'dashboard');
+      });
+
+      // Conditions
+      const list = document.getElementById('conditionsList');
+      list.innerHTML = '';
+      if (r && r.conditions.length) {
+        r.conditions.forEach(c => addCondition(c));
+      } else {
+        addCondition();
+      }
+
+      document.getElementById('ruleModal').classList.add('open');
+    }
+    function editRule(id) { openModal(id); }
+    function closeModal() { document.getElementById('ruleModal').classList.remove('open'); editingId = null; }
+
+    function addCondition(data) {
+      const list = document.getElementById('conditionsList');
+      const row = document.createElement('div');
+      row.className = 'condition-row';
+      row.innerHTML = `
+        <select class="cond-metric">${METRICS.map(m => `<option value="${m.value}" ${data && data.metric === m.value ? 'selected' : ''}>${m.label}</option>`).join('')}</select>
+        <select class="cond-op">${OPERATORS.map(o => `<option value="${o.value}" ${data && data.op === o.value ? 'selected' : ''}>${o.label}</option>`).join('')}</select>
+        <input type="number" class="cond-value" value="${data ? data.value : ''}" placeholder="threshold">
+        <button class="btn-remove-cond" onclick="this.parentElement.remove()">✕</button>
+      `;
+      list.appendChild(row);
+    }
+
+    function saveRule() {
+      const name = document.getElementById('ruleName').value.trim();
+      if (!name) { alert('Please enter a rule name.'); return; }
+
+      const conditions = [];
+      document.querySelectorAll('#conditionsList .condition-row').forEach(row => {
+        const metric = row.querySelector('.cond-metric').value;
+        const op = row.querySelector('.cond-op').value;
+        const value = parseFloat(row.querySelector('.cond-value').value);
+        if (!isNaN(value)) conditions.push({ metric, op, value });
+      });
+      if (conditions.length === 0) { alert('Add at least one condition.'); return; }
+
+      const channels = [];
+      document.querySelectorAll('.channels-check input:checked').forEach(cb => channels.push(cb.value));
+
+      const ruleData = {
+        name,
+        desc: document.getElementById('ruleDesc').value.trim(),
+        conditions,
+        window: document.getElementById('ruleWindow').value,
+        severity: document.getElementById('ruleSeverity').value,
+        cooldown: parseInt(document.getElementById('ruleCooldown').value) || 15,
+        channels,
+      };
+
+      if (editingId) {
+        const r = rules.find(x => x.id === editingId);
+        if (r) Object.assign(r, ruleData);
+      } else {
+        rules.push({ id: genId(), ...ruleData, enabled: true, firedCount: 0, lastFired: null, created: Date.now() });
+      }
+
+      saveData(); closeModal(); renderRules();
+    }
+
+    // ── Import/Export ──
+    function exportRules() {
+      const blob = new Blob([JSON.stringify(rules, null, 2)], { type: 'application/json' });
+      const a = document.createElement('a');
+      a.href = URL.createObjectURL(blob); a.download = 'agentlens-alert-rules.json'; a.click();
+    }
+    function importRules() { document.getElementById('importFile').click(); }
+    function handleImport(e) {
+      const file = e.target.files[0]; if (!file) return;
+      const reader = new FileReader();
+      reader.onload = () => {
+        try {
+          const imported = JSON.parse(reader.result);
+          if (!Array.isArray(imported)) throw new Error('Invalid format');
+          imported.forEach(r => { r.id = genId(); rules.push(r); });
+          saveData(); renderRules(); renderHistory();
+          alert(`Imported ${imported.length} rules.`);
+        } catch { alert('Invalid JSON file.'); }
+      };
+      reader.readAsText(file);
+      e.target.value = '';
+    }
+
+    // ── Simulated Alert History ──
+    function renderHistory() {
+      const list = document.getElementById('historyList');
+      const events = [];
+      rules.forEach(r => {
+        if (r.firedCount > 0 && r.lastFired) {
+          for (let i = 0; i < Math.min(r.firedCount, 5); i++) {
+            events.push({ name: r.name, severity: r.severity, time: r.lastFired - i * 3600000 * (1 + Math.random() * 5) });
+          }
+        }
+      });
+      events.sort((a, b) => b.time - a.time);
+
+      if (events.length === 0) {
+        list.innerHTML = '<p style="color:var(--text-muted);padding:12px">No alert firings recorded yet.</p>';
+        return;
+      }
+      list.innerHTML = events.slice(0, 20).map(e => `
+        <div class="history-item">
+          <span class="fired-dot ${e.severity}"></span>
+          <span class="time">${new Date(e.time).toLocaleString()}</span>
+          <span class="rule-name">${esc(e.name)}</span>
+          <span class="severity-badge severity-${e.severity}">${e.severity}</span>
+        </div>
+      `).join('');
+    }
+
+    // ── Init ──
+    renderRules();
+    renderHistory();
+
+    // Close modal on overlay click
+    document.getElementById('ruleModal').addEventListener('click', e => { if (e.target === e.currentTarget) closeModal(); });
+    // Close modal on Escape
+    document.addEventListener('keydown', e => { if (e.key === 'Escape') closeModal(); });
+  </script>
+</body>
+</html>
