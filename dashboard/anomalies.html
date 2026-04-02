@@ -1,0 +1,517 @@
+<!DOCTYPE html>
+<html lang="en">
+<head>
+  <meta charset="UTF-8">
+  <meta name="viewport" content="width=device-width, initial-scale=1.0">
+  <title>AgentLens — Anomaly Detection</title>
+  <link rel="stylesheet" href="styles.css">
+  <style>
+    .anomaly-page { padding: 24px; max-width: 1400px; margin: 0 auto; }
+    .anomaly-controls { display: flex; gap: 12px; flex-wrap: wrap; align-items: center; margin-bottom: 20px; }
+    .anomaly-controls select, .anomaly-controls input {
+      background: var(--bg-tertiary); color: var(--text-primary); border: 1px solid var(--border);
+      border-radius: var(--radius-sm); padding: 6px 10px; font-size: 13px;
+    }
+    .anomaly-controls label { color: var(--text-secondary); font-size: 13px; display: flex; align-items: center; gap: 6px; }
+    .timeline-canvas { width: 100%; height: 280px; background: var(--bg-secondary); border: 1px solid var(--border); border-radius: var(--radius); margin-bottom: 20px; cursor: crosshair; }
+    .anomaly-stats { display: grid; grid-template-columns: repeat(auto-fit, minmax(180px, 1fr)); gap: 12px; margin-bottom: 20px; }
+    .stat-card { background: var(--bg-secondary); border: 1px solid var(--border); border-radius: var(--radius); padding: 16px; text-align: center; }
+    .stat-card .stat-value { font-size: 28px; font-weight: 700; color: var(--text-primary); }
+    .stat-card .stat-label { font-size: 12px; color: var(--text-secondary); margin-top: 4px; }
+    .stat-card.critical .stat-value { color: var(--red); }
+    .stat-card.warning .stat-value { color: var(--yellow); }
+    .stat-card.ok .stat-value { color: var(--green); }
+    .anomaly-table { width: 100%; border-collapse: collapse; background: var(--bg-secondary); border: 1px solid var(--border); border-radius: var(--radius); overflow: hidden; }
+    .anomaly-table th, .anomaly-table td { padding: 10px 14px; text-align: left; border-bottom: 1px solid var(--border); font-size: 13px; }
+    .anomaly-table th { background: var(--bg-tertiary); color: var(--text-secondary); font-weight: 600; text-transform: uppercase; font-size: 11px; letter-spacing: 0.5px; }
+    .anomaly-table td { color: var(--text-primary); }
+    .anomaly-table tr:hover td { background: var(--bg-hover); }
+    .severity-badge { padding: 2px 8px; border-radius: 10px; font-size: 11px; font-weight: 600; }
+    .severity-critical { background: var(--red-dim); color: var(--red); }
+    .severity-warning { background: var(--yellow-dim); color: var(--yellow); }
+    .severity-info { background: var(--purple-dim); color: var(--purple); }
+    .metric-tag { background: var(--bg-tertiary); color: var(--accent); padding: 2px 6px; border-radius: var(--radius-sm); font-size: 11px; }
+    .root-cause { color: var(--text-secondary); font-size: 12px; font-style: italic; }
+    .section-title { color: var(--text-primary); font-size: 16px; font-weight: 600; margin: 20px 0 12px; display: flex; align-items: center; gap: 8px; }
+    .threshold-config { display: grid; grid-template-columns: repeat(auto-fit, minmax(250px, 1fr)); gap: 12px; margin-bottom: 20px; }
+    .threshold-card { background: var(--bg-secondary); border: 1px solid var(--border); border-radius: var(--radius); padding: 14px; }
+    .threshold-card h4 { color: var(--text-primary); font-size: 13px; margin: 0 0 8px; }
+    .threshold-row { display: flex; align-items: center; gap: 8px; margin-top: 6px; }
+    .threshold-row input[type="range"] { flex: 1; accent-color: var(--accent); }
+    .threshold-row .val { color: var(--accent); font-size: 13px; font-weight: 600; min-width: 40px; text-align: right; }
+    .empty-state { text-align: center; padding: 40px; color: var(--text-secondary); }
+    .back-link { color: var(--accent); text-decoration: none; font-size: 13px; }
+    .back-link:hover { text-decoration: underline; }
+    .legend { display: flex; gap: 16px; margin-bottom: 12px; flex-wrap: wrap; }
+    .legend-item { display: flex; align-items: center; gap: 4px; font-size: 12px; color: var(--text-secondary); }
+    .legend-dot { width: 10px; height: 10px; border-radius: 50%; }
+  </style>
+</head>
+<body>
+  <div id="app">
+    <header class="header">
+      <div class="header-left">
+        <h1 class="logo">🔍 AgentLens</h1>
+        <span class="tagline">Anomaly Detection</span>
+      </div>
+      <div class="header-right">
+        <a href="index.html" class="back-link">← Back to Dashboard</a>
+        <button class="theme-toggle" onclick="toggleTheme()" title="Toggle theme" id="themeToggleBtn">🌙</button>
+      </div>
+    </header>
+
+    <main class="anomaly-page">
+      <!-- Stats -->
+      <div class="anomaly-stats" id="statsRow"></div>
+
+      <!-- Controls -->
+      <div class="anomaly-controls">
+        <label>Metric:
+          <select id="metricSelect">
+            <option value="all">All Metrics</option>
+            <option value="latency">Latency</option>
+            <option value="error_rate">Error Rate</option>
+            <option value="cost">Cost</option>
+            <option value="tokens">Token Usage</option>
+            <option value="throughput">Throughput</option>
+          </select>
+        </label>
+        <label>Severity:
+          <select id="severitySelect">
+            <option value="all">All</option>
+            <option value="critical">Critical</option>
+            <option value="warning">Warning</option>
+            <option value="info">Info</option>
+          </select>
+        </label>
+        <label>Agent:
+          <select id="agentSelect">
+            <option value="all">All Agents</option>
+          </select>
+        </label>
+        <label>Window:
+          <select id="windowSelect">
+            <option value="1h">Last 1h</option>
+            <option value="6h" selected>Last 6h</option>
+            <option value="24h">Last 24h</option>
+            <option value="7d">Last 7d</option>
+          </select>
+        </label>
+        <label>Algorithm:
+          <select id="algoSelect">
+            <option value="zscore">Z-Score</option>
+            <option value="iqr">IQR</option>
+            <option value="mad">MAD</option>
+          </select>
+        </label>
+        <button class="btn btn-analytics" onclick="regenerateData()" style="margin-left:auto">🔄 Refresh</button>
+      </div>
+
+      <!-- Threshold Configuration -->
+      <div class="section-title">⚙️ Thresholds</div>
+      <div class="threshold-config" id="thresholdConfig"></div>
+
+      <!-- Timeline Chart -->
+      <div class="section-title">📈 Anomaly Timeline</div>
+      <div class="legend" id="legend"></div>
+      <canvas class="timeline-canvas" id="timelineCanvas"></canvas>
+
+      <!-- Anomaly Table -->
+      <div class="section-title">🚨 Detected Anomalies <span id="anomalyCount" style="color:var(--text-secondary);font-weight:400;font-size:13px"></span></div>
+      <table class="anomaly-table" id="anomalyTable">
+        <thead>
+          <tr>
+            <th>Time</th>
+            <th>Agent</th>
+            <th>Metric</th>
+            <th>Value</th>
+            <th>Baseline</th>
+            <th>Deviation</th>
+            <th>Severity</th>
+            <th>Root Cause</th>
+          </tr>
+        </thead>
+        <tbody id="anomalyBody"></tbody>
+      </table>
+    </main>
+  </div>
+
+  <script>
+    // Theme toggle
+    function toggleTheme() {
+      const html = document.documentElement;
+      const current = html.getAttribute('data-theme');
+      const next = current === 'light' ? 'dark' : 'light';
+      html.setAttribute('data-theme', next);
+      localStorage.setItem('agentlens-theme', next);
+      document.getElementById('themeToggleBtn').textContent = next === 'light' ? '☀️' : '🌙';
+      drawTimeline();
+    }
+    (function initTheme() {
+      const saved = localStorage.getItem('agentlens-theme');
+      if (saved) {
+        document.documentElement.setAttribute('data-theme', saved);
+        if (saved === 'light') document.getElementById('themeToggleBtn').textContent = '☀️';
+      }
+    })();
+
+    // --- Data Generation ---
+    const AGENTS = ['search-agent', 'code-agent', 'support-agent', 'data-agent', 'review-agent'];
+    const METRICS = ['latency', 'error_rate', 'cost', 'tokens', 'throughput'];
+    const METRIC_UNITS = { latency: 'ms', error_rate: '%', cost: '$', tokens: 'tok', throughput: 'req/s' };
+    const METRIC_BASELINES = { latency: 220, error_rate: 3.2, cost: 0.08, tokens: 1800, throughput: 45 };
+    const ROOT_CAUSES = {
+      latency: ['Provider API slowdown', 'Network congestion', 'Token limit reached', 'Rate limit backoff', 'Cold start penalty'],
+      error_rate: ['Model timeout', 'Invalid prompt format', 'Context window exceeded', 'Auth token expired', 'Upstream 503'],
+      cost: ['Long chain-of-thought', 'Retry storm', 'Large context payload', 'Premium model fallback', 'Batch overflow'],
+      tokens: ['Verbose system prompt', 'Document injection', 'Multi-turn accumulation', 'RAG over-retrieval', 'Few-shot bloat'],
+      throughput: ['Queue saturation', 'Worker crash', 'Load balancer failover', 'Dependency bottleneck', 'Memory pressure']
+    };
+
+    let thresholds = { latency: 2.5, error_rate: 2.5, cost: 2.5, tokens: 2.5, throughput: 2.5 };
+    let dataPoints = [];
+    let anomalies = [];
+    let tooltipInfo = null;
+
+    function windowHours() {
+      const w = document.getElementById('windowSelect').value;
+      return w === '1h' ? 1 : w === '6h' ? 6 : w === '24h' ? 24 : 168;
+    }
+
+    function generateTimeSeries() {
+      const hours = windowHours();
+      const now = Date.now();
+      const start = now - hours * 3600000;
+      const interval = Math.max(60000, (hours * 3600000) / 300); // ~300 points
+      dataPoints = [];
+      for (let t = start; t <= now; t += interval) {
+        for (const agent of AGENTS) {
+          for (const metric of METRICS) {
+            const base = METRIC_BASELINES[metric];
+            const noise = (Math.random() - 0.5) * base * 0.3;
+            let value = base + noise;
+            // Inject anomalies (~4% chance)
+            const isAnomaly = Math.random() < 0.04;
+            if (isAnomaly) {
+              const spike = metric === 'throughput' ? -1 : 1;
+              value = base + spike * base * (1.5 + Math.random() * 2);
+            }
+            if (metric === 'error_rate') value = Math.max(0, Math.min(100, value));
+            if (metric === 'throughput') value = Math.max(0, value);
+            if (metric === 'cost') value = Math.max(0, value);
+            dataPoints.push({ t, agent, metric, value, baseline: base });
+          }
+        }
+      }
+    }
+
+    function detectAnomalies() {
+      const algo = document.getElementById('algoSelect').value;
+      anomalies = [];
+      // Group by metric+agent
+      const groups = {};
+      for (const dp of dataPoints) {
+        const key = dp.metric + '|' + dp.agent;
+        if (!groups[key]) groups[key] = [];
+        groups[key].push(dp);
+      }
+      for (const [key, pts] of Object.entries(groups)) {
+        const values = pts.map(p => p.value);
+        const mean = values.reduce((a, b) => a + b, 0) / values.length;
+        let threshold;
+        if (algo === 'zscore') {
+          const std = Math.sqrt(values.reduce((s, v) => s + (v - mean) ** 2, 0) / values.length);
+          for (const p of pts) {
+            const z = std > 0 ? Math.abs(p.value - mean) / std : 0;
+            const th = thresholds[p.metric] || 2.5;
+            if (z > th) {
+              const severity = z > th * 1.5 ? 'critical' : z > th * 1.1 ? 'warning' : 'info';
+              const causes = ROOT_CAUSES[p.metric];
+              anomalies.push({ ...p, deviation: z.toFixed(2) + 'σ', severity, rootCause: causes[Math.floor(Math.random() * causes.length)], mean });
+            }
+          }
+        } else if (algo === 'iqr') {
+          const sorted = [...values].sort((a, b) => a - b);
+          const q1 = sorted[Math.floor(sorted.length * 0.25)];
+          const q3 = sorted[Math.floor(sorted.length * 0.75)];
+          const iqr = q3 - q1;
+          const factor = thresholds[pts[0].metric] || 2.5;
+          for (const p of pts) {
+            if (p.value < q1 - factor * iqr || p.value > q3 + factor * iqr) {
+              const dev = iqr > 0 ? Math.abs(p.value - mean) / iqr : 0;
+              const severity = dev > factor * 1.5 ? 'critical' : dev > factor * 1.1 ? 'warning' : 'info';
+              const causes = ROOT_CAUSES[p.metric];
+              anomalies.push({ ...p, deviation: dev.toFixed(1) + 'x IQR', severity, rootCause: causes[Math.floor(Math.random() * causes.length)], mean });
+            }
+          }
+        } else { // MAD
+          const median = values.slice().sort((a, b) => a - b)[Math.floor(values.length / 2)];
+          const absDevs = values.map(v => Math.abs(v - median));
+          const mad = absDevs.slice().sort((a, b) => a - b)[Math.floor(absDevs.length / 2)] * 1.4826;
+          const factor = thresholds[pts[0].metric] || 2.5;
+          for (const p of pts) {
+            const z = mad > 0 ? Math.abs(p.value - median) / mad : 0;
+            if (z > factor) {
+              const severity = z > factor * 1.5 ? 'critical' : z > factor * 1.1 ? 'warning' : 'info';
+              const causes = ROOT_CAUSES[p.metric];
+              anomalies.push({ ...p, deviation: z.toFixed(2) + ' MAD', severity, rootCause: causes[Math.floor(Math.random() * causes.length)], mean });
+            }
+          }
+        }
+      }
+      anomalies.sort((a, b) => b.t - a.t);
+    }
+
+    function filterAnomalies() {
+      const metric = document.getElementById('metricSelect').value;
+      const severity = document.getElementById('severitySelect').value;
+      const agent = document.getElementById('agentSelect').value;
+      return anomalies.filter(a =>
+        (metric === 'all' || a.metric === metric) &&
+        (severity === 'all' || a.severity === severity) &&
+        (agent === 'all' || a.agent === agent)
+      );
+    }
+
+    // --- Rendering ---
+    function renderStats() {
+      const filtered = filterAnomalies();
+      const critical = filtered.filter(a => a.severity === 'critical').length;
+      const warning = filtered.filter(a => a.severity === 'warning').length;
+      const info = filtered.filter(a => a.severity === 'info').length;
+      const affectedAgents = new Set(filtered.map(a => a.agent)).size;
+      document.getElementById('statsRow').innerHTML = `
+        <div class="stat-card critical"><div class="stat-value">${critical}</div><div class="stat-label">Critical</div></div>
+        <div class="stat-card warning"><div class="stat-value">${warning}</div><div class="stat-label">Warning</div></div>
+        <div class="stat-card ok"><div class="stat-value">${info}</div><div class="stat-label">Info</div></div>
+        <div class="stat-card"><div class="stat-value">${filtered.length}</div><div class="stat-label">Total Anomalies</div></div>
+        <div class="stat-card"><div class="stat-value">${affectedAgents}</div><div class="stat-label">Affected Agents</div></div>
+      `;
+    }
+
+    function renderThresholds() {
+      const html = METRICS.map(m => `
+        <div class="threshold-card">
+          <h4>${m.replace('_', ' ').replace(/\b\w/g, c => c.toUpperCase())} (${METRIC_UNITS[m]})</h4>
+          <div class="threshold-row">
+            <span style="color:var(--text-secondary);font-size:12px">Sensitivity</span>
+            <input type="range" min="1" max="5" step="0.1" value="${thresholds[m]}" data-metric="${m}" oninput="updateThreshold(this)">
+            <span class="val" id="th-${m}">${thresholds[m]}σ</span>
+          </div>
+        </div>
+      `).join('');
+      document.getElementById('thresholdConfig').innerHTML = html;
+    }
+
+    function updateThreshold(el) {
+      const m = el.dataset.metric;
+      thresholds[m] = parseFloat(el.value);
+      document.getElementById('th-' + m).textContent = el.value + 'σ';
+      detectAnomalies();
+      render();
+    }
+
+    function renderTable() {
+      const filtered = filterAnomalies();
+      document.getElementById('anomalyCount').textContent = `(${filtered.length})`;
+      if (filtered.length === 0) {
+        document.getElementById('anomalyBody').innerHTML = '<tr><td colspan="8" class="empty-state">No anomalies detected with current filters ✨</td></tr>';
+        return;
+      }
+      document.getElementById('anomalyBody').innerHTML = filtered.slice(0, 100).map(a => `
+        <tr>
+          <td>${new Date(a.t).toLocaleTimeString()}</td>
+          <td>${a.agent}</td>
+          <td><span class="metric-tag">${a.metric.replace('_', ' ')}</span></td>
+          <td><strong>${formatVal(a.value, a.metric)}</strong></td>
+          <td>${formatVal(a.mean, a.metric)}</td>
+          <td>${a.deviation}</td>
+          <td><span class="severity-badge severity-${a.severity}">${a.severity}</span></td>
+          <td class="root-cause">${a.rootCause}</td>
+        </tr>
+      `).join('');
+    }
+
+    function formatVal(v, metric) {
+      if (metric === 'cost') return '$' + v.toFixed(3);
+      if (metric === 'error_rate') return v.toFixed(1) + '%';
+      if (metric === 'tokens') return Math.round(v).toLocaleString();
+      if (metric === 'latency') return Math.round(v) + 'ms';
+      if (metric === 'throughput') return v.toFixed(1) + '/s';
+      return v.toFixed(2);
+    }
+
+    function renderLegend() {
+      const colors = { critical: 'var(--red)', warning: 'var(--yellow)', info: 'var(--purple)' };
+      document.getElementById('legend').innerHTML = Object.entries(colors).map(([k, c]) =>
+        `<div class="legend-item"><span class="legend-dot" style="background:${c}"></span>${k}</div>`
+      ).join('') + '<div class="legend-item"><span class="legend-dot" style="background:var(--accent)"></span>baseline</div>';
+    }
+
+    function drawTimeline() {
+      const canvas = document.getElementById('timelineCanvas');
+      const rect = canvas.parentElement.getBoundingClientRect();
+      canvas.width = rect.width;
+      canvas.height = 280;
+      const ctx = canvas.getContext('2d');
+      const cs = getComputedStyle(document.documentElement);
+      const bgColor = cs.getPropertyValue('--bg-secondary').trim();
+      const borderColor = cs.getPropertyValue('--border').trim();
+      const textMuted = cs.getPropertyValue('--text-muted').trim();
+      const accentColor = cs.getPropertyValue('--accent').trim();
+
+      ctx.fillStyle = bgColor;
+      ctx.fillRect(0, 0, canvas.width, canvas.height);
+
+      const metricFilter = document.getElementById('metricSelect').value;
+      const selectedMetric = metricFilter === 'all' ? 'latency' : metricFilter;
+      const agentFilter = document.getElementById('agentSelect').value;
+
+      // Filter data
+      const pts = dataPoints.filter(d => d.metric === selectedMetric && (agentFilter === 'all' || d.agent === agentFilter));
+      if (pts.length === 0) return;
+
+      const pad = { top: 20, right: 20, bottom: 40, left: 60 };
+      const w = canvas.width - pad.left - pad.right;
+      const h = canvas.height - pad.top - pad.bottom;
+
+      const tMin = pts[0].t, tMax = pts[pts.length - 1].t;
+      const vMin = Math.min(...pts.map(p => p.value)) * 0.9;
+      const vMax = Math.max(...pts.map(p => p.value)) * 1.1;
+
+      const xScale = t => pad.left + ((t - tMin) / (tMax - tMin || 1)) * w;
+      const yScale = v => pad.top + h - ((v - vMin) / (vMax - vMin || 1)) * h;
+
+      // Grid lines
+      ctx.strokeStyle = borderColor;
+      ctx.lineWidth = 0.5;
+      for (let i = 0; i <= 4; i++) {
+        const y = pad.top + (h / 4) * i;
+        ctx.beginPath(); ctx.moveTo(pad.left, y); ctx.lineTo(pad.left + w, y); ctx.stroke();
+        ctx.fillStyle = textMuted; ctx.font = '11px sans-serif'; ctx.textAlign = 'right';
+        const val = vMax - ((vMax - vMin) / 4) * i;
+        ctx.fillText(formatVal(val, selectedMetric), pad.left - 6, y + 4);
+      }
+
+      // Time labels
+      ctx.textAlign = 'center';
+      for (let i = 0; i <= 5; i++) {
+        const t = tMin + ((tMax - tMin) / 5) * i;
+        ctx.fillText(new Date(t).toLocaleTimeString([], { hour: '2-digit', minute: '2-digit' }), xScale(t), canvas.height - 8);
+      }
+
+      // Baseline
+      const baseline = METRIC_BASELINES[selectedMetric];
+      if (baseline >= vMin && baseline <= vMax) {
+        ctx.setLineDash([6, 4]);
+        ctx.strokeStyle = accentColor;
+        ctx.lineWidth = 1.5;
+        ctx.beginPath(); ctx.moveTo(pad.left, yScale(baseline)); ctx.lineTo(pad.left + w, yScale(baseline)); ctx.stroke();
+        ctx.setLineDash([]);
+      }
+
+      // Aggregate by time bucket for line
+      const buckets = {};
+      for (const p of pts) {
+        const bk = Math.round(xScale(p.t));
+        if (!buckets[bk]) buckets[bk] = [];
+        buckets[bk].push(p.value);
+      }
+      const linePoints = Object.entries(buckets).map(([x, vs]) => [+x, vs.reduce((a, b) => a + b) / vs.length]).sort((a, b) => a[0] - b[0]);
+
+      // Line
+      ctx.strokeStyle = accentColor;
+      ctx.lineWidth = 1.5;
+      ctx.beginPath();
+      linePoints.forEach(([x, y], i) => i === 0 ? ctx.moveTo(x, yScale(y)) : ctx.lineTo(x, yScale(y)));
+      ctx.stroke();
+
+      // Anomaly dots
+      const filtered = filterAnomalies().filter(a => a.metric === selectedMetric);
+      const sevColors = { critical: cs.getPropertyValue('--red').trim(), warning: cs.getPropertyValue('--yellow').trim(), info: cs.getPropertyValue('--purple').trim() };
+      for (const a of filtered) {
+        ctx.fillStyle = sevColors[a.severity] || sevColors.info;
+        ctx.beginPath();
+        ctx.arc(xScale(a.t), yScale(a.value), a.severity === 'critical' ? 6 : 4, 0, Math.PI * 2);
+        ctx.fill();
+        ctx.strokeStyle = bgColor;
+        ctx.lineWidth = 2;
+        ctx.stroke();
+      }
+
+      // Tooltip
+      if (tooltipInfo) {
+        const { x, y, text } = tooltipInfo;
+        ctx.fillStyle = 'rgba(0,0,0,0.85)';
+        const tw = ctx.measureText(text).width + 16;
+        ctx.fillRect(x - tw / 2, y - 30, tw, 22);
+        ctx.fillStyle = '#fff'; ctx.font = '12px sans-serif'; ctx.textAlign = 'center';
+        ctx.fillText(text, x, y - 14);
+      }
+    }
+
+    // Canvas hover
+    document.getElementById('timelineCanvas').addEventListener('mousemove', function(e) {
+      const rect = this.getBoundingClientRect();
+      const mx = e.clientX - rect.left, my = e.clientY - rect.top;
+      const metricFilter = document.getElementById('metricSelect').value;
+      const selectedMetric = metricFilter === 'all' ? 'latency' : metricFilter;
+      const filtered = filterAnomalies().filter(a => a.metric === selectedMetric);
+      const pad = { top: 20, right: 20, bottom: 40, left: 60 };
+      const w = this.width - pad.left - pad.right, h = this.height - pad.top - pad.bottom;
+      const pts = dataPoints.filter(d => d.metric === selectedMetric);
+      if (!pts.length) return;
+      const tMin = pts[0].t, tMax = pts[pts.length - 1].t;
+      const vMin = Math.min(...pts.map(p => p.value)) * 0.9, vMax = Math.max(...pts.map(p => p.value)) * 1.1;
+      const xScale = t => pad.left + ((t - tMin) / (tMax - tMin || 1)) * w;
+      const yScale = v => pad.top + h - ((v - vMin) / (vMax - vMin || 1)) * h;
+
+      tooltipInfo = null;
+      for (const a of filtered) {
+        const ax = xScale(a.t), ay = yScale(a.value);
+        if (Math.abs(mx - ax) < 10 && Math.abs(my - ay) < 10) {
+          tooltipInfo = { x: ax, y: ay, text: `${a.agent}: ${formatVal(a.value, a.metric)} (${a.deviation})` };
+          break;
+        }
+      }
+      drawTimeline();
+    });
+
+    // Populate agent select
+    function populateAgentSelect() {
+      const sel = document.getElementById('agentSelect');
+      sel.innerHTML = '<option value="all">All Agents</option>' + AGENTS.map(a => `<option value="${a}">${a}</option>`).join('');
+    }
+
+    function render() {
+      renderStats();
+      renderTable();
+      drawTimeline();
+    }
+
+    function regenerateData() {
+      generateTimeSeries();
+      detectAnomalies();
+      render();
+    }
+
+    // Filter change listeners
+    ['metricSelect', 'severitySelect', 'agentSelect', 'windowSelect', 'algoSelect'].forEach(id => {
+      document.getElementById(id).addEventListener('change', () => {
+        if (id === 'windowSelect' || id === 'algoSelect') {
+          generateTimeSeries();
+          detectAnomalies();
+        }
+        render();
+      });
+    });
+
+    // Init
+    populateAgentSelect();
+    renderThresholds();
+    renderLegend();
+    regenerateData();
+    window.addEventListener('resize', drawTimeline);
+  </script>
+</body>
+</html>
