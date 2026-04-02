@@ -10,6 +10,8 @@ Run with: python mock_agent.py
 Make sure the AgentLens backend is running on http://localhost:3000
 """
 
+import ast
+import operator
 import random
 import time
 import sys
@@ -46,11 +48,45 @@ def calculator(expression: str) -> str:
     """Simulated calculator tool."""
     time.sleep(random.uniform(0.05, 0.1))
     try:
-        # Safe eval for simple math
-        result = eval(expression, {"__builtins__": {}}, {})
+        result = _safe_eval(expression)
         return str(result)
     except Exception:
         return "Error: invalid expression"
+
+
+_SAFE_BIN_OPS = {
+    ast.Add: operator.add, ast.Sub: operator.sub,
+    ast.Mult: operator.mul, ast.Div: operator.truediv,
+    ast.FloorDiv: operator.floordiv, ast.Mod: operator.mod,
+    ast.Pow: operator.pow,
+}
+_SAFE_UNARY_OPS = {ast.UAdd: operator.pos, ast.USub: operator.neg}
+
+
+def _safe_eval(expr: str):
+    """Evaluate a simple arithmetic expression without eval().
+
+    Supports: integers, floats, +, -, *, /, //, %, ** and unary +/-.
+    Raises ValueError on anything else (function calls, attribute access, etc.).
+    """
+    tree = ast.parse(expr.strip(), mode="eval")
+    return _eval_node(tree.body)
+
+
+def _eval_node(node):
+    if isinstance(node, ast.Constant) and isinstance(node.value, (int, float)):
+        return node.value
+    if isinstance(node, ast.BinOp):
+        op = _SAFE_BIN_OPS.get(type(node.op))
+        if op is None:
+            raise ValueError(f"Unsupported operator: {type(node.op).__name__}")
+        return op(_eval_node(node.left), _eval_node(node.right))
+    if isinstance(node, ast.UnaryOp):
+        op = _SAFE_UNARY_OPS.get(type(node.op))
+        if op is None:
+            raise ValueError(f"Unsupported unary operator: {type(node.op).__name__}")
+        return op(_eval_node(node.operand))
+    raise ValueError(f"Unsupported expression node: {type(node).__name__}")
 
 
 @track_tool_call(tool_name="file_reader")
