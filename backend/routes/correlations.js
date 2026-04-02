@@ -17,6 +17,7 @@ const router = express.Router();
 const dbMod = require("../db");
 const { wrapRoute, parseLimit, parseOffset } = require("../lib/request-helpers");
 const { sanitizeString, safeJsonParse, safeJsonStringify } = require("../lib/validation");
+const { createLazyStatements } = require("../lib/lazy-statements");
 
 // ── Input limits ────────────────────────────────────────────────────
 const MAX_NAME_LENGTH = 128;
@@ -94,33 +95,96 @@ const CORRELATION_STRATEGIES = {
 
 const VALID_TYPES = Object.keys(CORRELATION_STRATEGIES);
 
+// ── Cached prepared statements for correlation engine ────────────────
+// Previously, runCorrelation() and route handlers called db.prepare()
+// on every request, recompiling SQL each time. This adds ~0.1-0.5ms per
+// call. Since the correlation engine can run hundreds of times (scheduled
+// or batch), caching these statements eliminates redundant compilation.
+
+const getCorrelationStatements = createLazyStatements((db) => ({
+  eventsWithAgent: db.prepare(
+    `SELECT e.*, s.agent_name FROM events e
+     JOIN sessions s ON e.session_id = s.session_id
+     WHERE e.timestamp >= ? AND s.agent_name = ?
+     ORDER BY e.timestamp ASC LIMIT ?`
+  ),
+  eventsAll: db.prepare(
+    `SELECT e.*, s.agent_name FROM events e
+     JOIN sessions s ON e.session_id = s.session_id
+     WHERE e.timestamp >= ?
+     ORDER BY e.timestamp ASC LIMIT ?`
+  ),
+  insertGroup: db.prepare(
+    `INSERT OR IGNORE INTO correlation_groups (group_id, rule_id, label, created_at, metadata)
+     VALUES (?, ?, ?, ?, ?)`
+  ),
+  insertMember: db.prepare(
+    `INSERT OR IGNORE INTO correlation_members (group_id, event_id, session_id, role, added_at)
+     VALUES (?, ?, ?, ?, ?)`
+  ),
+  getRuleById: db.prepare(
+    "SELECT * FROM correlation_rules WHERE rule_id = ?"
+  ),
+  deleteRule: db.prepare(
+    "DELETE FROM correlation_rules WHERE rule_id = ?"
+  ),
+  ruleGroupCount: db.prepare(
+    "SELECT COUNT(*) as group_count FROM correlation_groups WHERE rule_id = ?"
+  ),
+  listRulesAll: db.prepare(
+    "SELECT * FROM correlation_rules ORDER BY priority DESC, created_at DESC"
+  ),
+  listRulesEnabled: db.prepare(
+    "SELECT * FROM correlation_rules WHERE enabled = ? ORDER BY priority DESC, created_at DESC"
+  ),
+  getGroupDetail: db.prepare(
+    `SELECT g.*, r.name as rule_name, r.match_type FROM correlation_groups g
+     JOIN correlation_rules r ON g.rule_id = r.rule_id WHERE g.group_id = ?`
+  ),
+  getGroupMembers: db.prepare(
+    `SELECT m.*, e.event_type, e.timestamp, e.model, e.duration_ms, s.agent_name
+     FROM correlation_members m
+     JOIN events e ON m.event_id = e.event_id
+     JOIN sessions s ON m.session_id = s.session_id
+     WHERE m.group_id = ? ORDER BY e.timestamp ASC`
+  ),
+  deleteGroup: db.prepare(
+    "DELETE FROM correlation_groups WHERE group_id = ?"
+  ),
+  statsRuleCount: db.prepare("SELECT COUNT(*) as cnt FROM correlation_rules"),
+  statsEnabledCount: db.prepare("SELECT COUNT(*) as cnt FROM correlation_rules WHERE enabled = 1"),
+  statsGroupCount: db.prepare("SELECT COUNT(*) as cnt FROM correlation_groups"),
+  statsMemberCount: db.prepare("SELECT COUNT(*) as cnt FROM correlation_members"),
+  statsByType: db.prepare(
+    `SELECT r.match_type, COUNT(g.group_id) as groups FROM correlation_rules r
+     LEFT JOIN correlation_groups g ON r.rule_id = g.rule_id GROUP BY r.match_type`
+  ),
+  eventCorrelations: db.prepare(
+    `SELECT m.group_id, m.role, g.label, g.created_at, g.metadata, r.name as rule_name, r.match_type
+     FROM correlation_members m JOIN correlation_groups g ON m.group_id = g.group_id
+     JOIN correlation_rules r ON g.rule_id = r.rule_id WHERE m.event_id = ? ORDER BY g.created_at DESC`
+  ),
+  groupsCountAll: db.prepare("SELECT COUNT(*) as cnt FROM correlation_groups"),
+  groupsCountByRule: db.prepare("SELECT COUNT(*) as cnt FROM correlation_groups WHERE rule_id = ?"),
+}));
+
 // ── Correlation engine ──────────────────────────────────────────────
 
 const MAX_LOOKBACK_MINUTES = 10080; // 7 days
 const EVENT_CAP = 50000;
 
 function runCorrelation(rule, lookbackMinutes) {
-  const db = dbMod.getDb();
   const config = safeJsonParse(rule.config);
   let lookback = lookbackMinutes || config.lookback_minutes || 60;
   if (lookback > MAX_LOOKBACK_MINUTES) lookback = MAX_LOOKBACK_MINUTES;
   const cutoff = new Date(Date.now() - lookback * 60000).toISOString();
 
+  const stmts = getCorrelationStatements();
   let events;
   if (rule.agent_filter) {
-    events = db.prepare(
-      `SELECT e.*, s.agent_name FROM events e
-       JOIN sessions s ON e.session_id = s.session_id
-       WHERE e.timestamp >= ? AND s.agent_name = ?
-       ORDER BY e.timestamp ASC LIMIT ?`
-    ).all(cutoff, rule.agent_filter, EVENT_CAP);
+    events = stmts.eventsWithAgent.all(cutoff, rule.agent_filter, EVENT_CAP);
   } else {
-    events = db.prepare(
-      `SELECT e.*, s.agent_name FROM events e
-       JOIN sessions s ON e.session_id = s.session_id
-       WHERE e.timestamp >= ?
-       ORDER BY e.timestamp ASC LIMIT ?`
-    ).all(cutoff, EVENT_CAP);
+    events = stmts.eventsAll.all(cutoff, EVENT_CAP);
   }
 
   if (events.length === 0) return [];
@@ -379,14 +443,7 @@ function correlateByCustom(events, config) {
 
 function persistGroups(rule, groups) {
   const db = dbMod.getDb();
-  const insertGroup = db.prepare(
-    `INSERT OR IGNORE INTO correlation_groups (group_id, rule_id, label, created_at, metadata)
-     VALUES (?, ?, ?, ?, ?)`
-  );
-  const insertMember = db.prepare(
-    `INSERT OR IGNORE INTO correlation_members (group_id, event_id, session_id, role, added_at)
-     VALUES (?, ?, ?, ?, ?)`
-  );
+  const stmts = getCorrelationStatements();
 
   const timestamp = now();
   const persisted = [];
@@ -394,10 +451,10 @@ function persistGroups(rule, groups) {
   const txn = db.transaction(() => {
     for (const group of groups) {
       const groupId = uid();
-      insertGroup.run(groupId, rule.rule_id, group.label, timestamp, safeJsonStringify(group.metadata));
+      stmts.insertGroup.run(groupId, rule.rule_id, group.label, timestamp, safeJsonStringify(group.metadata));
       for (let m = 0; m < group.events.length; m++) {
         const evt = group.events[m];
-        insertMember.run(groupId, evt.event_id, evt.session_id, m === 0 ? "origin" : "member", timestamp);
+        stmts.insertMember.run(groupId, evt.event_id, evt.session_id, m === 0 ? "origin" : "member", timestamp);
       }
       persisted.push({ group_id: groupId, label: group.label, member_count: group.events.length });
     }
@@ -456,16 +513,13 @@ router.post("/rules", wrapRoute("create correlation rule", (req, res) => {
 /** GET /rules — List all correlation rules */
 router.get("/rules", wrapRoute("list correlation rules", (req, res) => {
   ensureCorrelationTables();
-  const db = dbMod.getDb();
-  let query = "SELECT * FROM correlation_rules";
-  const params = [];
+  const stmts = getCorrelationStatements();
+  let rules;
   if (req.query.enabled !== undefined) {
-    query += " WHERE enabled = ?";
-    params.push(req.query.enabled === "true" ? 1 : 0);
+    rules = stmts.listRulesEnabled.all(req.query.enabled === "true" ? 1 : 0);
+  } else {
+    rules = stmts.listRulesAll.all();
   }
-  query += " ORDER BY priority DESC, created_at DESC";
-
-  const rules = db.prepare(query).all(...params);
   for (const rule of rules) rule.config = safeJsonParse(rule.config);
   res.json({ rules, total: rules.length });
 }));
@@ -473,11 +527,11 @@ router.get("/rules", wrapRoute("list correlation rules", (req, res) => {
 /** GET /rules/:ruleId — Get a specific rule */
 router.get("/rules/:ruleId", wrapRoute("get correlation rule", (req, res) => {
   ensureCorrelationTables();
-  const db = dbMod.getDb();
-  const rule = db.prepare("SELECT * FROM correlation_rules WHERE rule_id = ?").get(req.params.ruleId);
+  const stmts = getCorrelationStatements();
+  const rule = stmts.getRuleById.get(req.params.ruleId);
   if (!rule) return res.status(404).json({ error: "Rule not found" });
   rule.config = safeJsonParse(rule.config);
-  const stats = db.prepare("SELECT COUNT(*) as group_count FROM correlation_groups WHERE rule_id = ?").get(rule.rule_id);
+  const stats = stmts.ruleGroupCount.get(rule.rule_id);
   rule.group_count = stats.group_count;
   res.json(rule);
 }));
@@ -486,7 +540,8 @@ router.get("/rules/:ruleId", wrapRoute("get correlation rule", (req, res) => {
 router.patch("/rules/:ruleId", wrapRoute("update correlation rule", (req, res) => {
   ensureCorrelationTables();
   const db = dbMod.getDb();
-  const rule = db.prepare("SELECT * FROM correlation_rules WHERE rule_id = ?").get(req.params.ruleId);
+  const stmts = getCorrelationStatements();
+  const rule = stmts.getRuleById.get(req.params.ruleId);
   if (!rule) return res.status(404).json({ error: "Rule not found" });
 
   const fields = [];
@@ -549,8 +604,8 @@ router.patch("/rules/:ruleId", wrapRoute("update correlation rule", (req, res) =
 /** DELETE /rules/:ruleId — Delete a rule (cascades groups) */
 router.delete("/rules/:ruleId", wrapRoute("delete correlation rule", (req, res) => {
   ensureCorrelationTables();
-  const db = dbMod.getDb();
-  const result = db.prepare("DELETE FROM correlation_rules WHERE rule_id = ?").run(req.params.ruleId);
+  const stmts = getCorrelationStatements();
+  const result = stmts.deleteRule.run(req.params.ruleId);
   if (result.changes === 0) return res.status(404).json({ error: "Rule not found" });
   res.json({ deleted: true, rule_id: req.params.ruleId });
 }));
@@ -560,8 +615,8 @@ const MAX_GROUPS_PER_RUN = 500;
 /** POST /rules/:ruleId/run — Execute a correlation rule */
 router.post("/rules/:ruleId/run", wrapRoute("run correlation rule", (req, res) => {
   ensureCorrelationTables();
-  const db = dbMod.getDb();
-  const rule = db.prepare("SELECT * FROM correlation_rules WHERE rule_id = ?").get(req.params.ruleId);
+  const stmts = getCorrelationStatements();
+  const rule = stmts.getRuleById.get(req.params.ruleId);
   if (!rule) return res.status(404).json({ error: "Rule not found" });
 
   let lookback = null;
@@ -635,21 +690,12 @@ router.get("/groups", wrapRoute("list correlation groups", (req, res) => {
 /** GET /groups/:groupId — Get group details with members */
 router.get("/groups/:groupId", wrapRoute("get correlation group", (req, res) => {
   ensureCorrelationTables();
-  const db = dbMod.getDb();
-  const group = db.prepare(
-    `SELECT g.*, r.name as rule_name, r.match_type FROM correlation_groups g
-     JOIN correlation_rules r ON g.rule_id = r.rule_id WHERE g.group_id = ?`
-  ).get(req.params.groupId);
+  const stmts = getCorrelationStatements();
+  const group = stmts.getGroupDetail.get(req.params.groupId);
   if (!group) return res.status(404).json({ error: "Group not found" });
   group.metadata = safeJsonParse(group.metadata);
 
-  const members = db.prepare(
-    `SELECT m.*, e.event_type, e.timestamp, e.model, e.duration_ms, s.agent_name
-     FROM correlation_members m
-     JOIN events e ON m.event_id = e.event_id
-     JOIN sessions s ON m.session_id = s.session_id
-     WHERE m.group_id = ? ORDER BY e.timestamp ASC`
-  ).all(req.params.groupId);
+  const members = stmts.getGroupMembers.all(req.params.groupId);
 
   group.members = members;
   group.member_count = members.length;
@@ -659,8 +705,8 @@ router.get("/groups/:groupId", wrapRoute("get correlation group", (req, res) => 
 /** DELETE /groups/:groupId — Delete a correlation group */
 router.delete("/groups/:groupId", wrapRoute("delete correlation group", (req, res) => {
   ensureCorrelationTables();
-  const db = dbMod.getDb();
-  const result = db.prepare("DELETE FROM correlation_groups WHERE group_id = ?").run(req.params.groupId);
+  const stmts = getCorrelationStatements();
+  const result = stmts.deleteGroup.run(req.params.groupId);
   if (result.changes === 0) return res.status(404).json({ error: "Group not found" });
   res.json({ deleted: true, group_id: req.params.groupId });
 }));
@@ -668,16 +714,12 @@ router.delete("/groups/:groupId", wrapRoute("delete correlation group", (req, re
 /** GET /stats — Correlation statistics */
 router.get("/stats", wrapRoute("correlation stats", (req, res) => {
   ensureCorrelationTables();
-  const db = dbMod.getDb();
-  const ruleCount = db.prepare("SELECT COUNT(*) as cnt FROM correlation_rules").get().cnt;
-  const enabledCount = db.prepare("SELECT COUNT(*) as cnt FROM correlation_rules WHERE enabled = 1").get().cnt;
-  const groupCount = db.prepare("SELECT COUNT(*) as cnt FROM correlation_groups").get().cnt;
-  const memberCount = db.prepare("SELECT COUNT(*) as cnt FROM correlation_members").get().cnt;
-
-  const byType = db.prepare(
-    `SELECT r.match_type, COUNT(g.group_id) as groups FROM correlation_rules r
-     LEFT JOIN correlation_groups g ON r.rule_id = g.rule_id GROUP BY r.match_type`
-  ).all();
+  const stmts = getCorrelationStatements();
+  const ruleCount = stmts.statsRuleCount.get().cnt;
+  const enabledCount = stmts.statsEnabledCount.get().cnt;
+  const groupCount = stmts.statsGroupCount.get().cnt;
+  const memberCount = stmts.statsMemberCount.get().cnt;
+  const byType = stmts.statsByType.all();
 
   res.json({
     total_rules: ruleCount, enabled_rules: enabledCount,
@@ -689,12 +731,8 @@ router.get("/stats", wrapRoute("correlation stats", (req, res) => {
 /** GET /event/:eventId — Find all correlations for an event */
 router.get("/event/:eventId", wrapRoute("find event correlations", (req, res) => {
   ensureCorrelationTables();
-  const db = dbMod.getDb();
-  const memberships = db.prepare(
-    `SELECT m.group_id, m.role, g.label, g.created_at, g.metadata, r.name as rule_name, r.match_type
-     FROM correlation_members m JOIN correlation_groups g ON m.group_id = g.group_id
-     JOIN correlation_rules r ON g.rule_id = r.rule_id WHERE m.event_id = ? ORDER BY g.created_at DESC`
-  ).all(req.params.eventId);
+  const stmts = getCorrelationStatements();
+  const memberships = stmts.eventCorrelations.all(req.params.eventId);
   for (const m of memberships) m.metadata = safeJsonParse(m.metadata);
   res.json({ event_id: req.params.eventId, correlations: memberships, total: memberships.length });
 }));
