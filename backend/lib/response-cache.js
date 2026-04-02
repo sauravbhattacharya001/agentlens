@@ -1,5 +1,7 @@
 "use strict";
 
+var crypto = require("crypto");
+
 /**
  * In-memory response cache for read-heavy endpoints.
  *
@@ -249,8 +251,15 @@ function cacheMiddleware(cache, options) {
 
     // Include API key hash in cache key to prevent cross-user cache
     // poisoning when multiple API keys have different access levels.
+    // Use a SHA-256 hash of the full key (not a prefix slice) so that
+    // keys sharing the same prefix never collide in the cache.
     var apiKey = req.headers && req.headers["x-api-key"];
-    var keySuffix = apiKey ? "|k:" + apiKey.slice(0, 8) : "|anon";
+    var keySuffix;
+    if (apiKey) {
+      keySuffix = "|k:" + crypto.createHash("sha256").update(String(apiKey)).digest("hex").slice(0, 16);
+    } else {
+      keySuffix = "|anon";
+    }
     var key = (req.originalUrl || req.url) + keySuffix;
     var cached = cache.get(key);
 
