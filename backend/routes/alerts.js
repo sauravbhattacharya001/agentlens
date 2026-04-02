@@ -1,27 +1,11 @@
 /* ── Alert Rules — threshold-based alerting for agent observability ──── */
 
 const express = require("express");
-const crypto = require("crypto");
 const router = express.Router();
 const { getDb } = require("../db");
 const { fireWebhooks } = require("./webhooks");
 const { wrapRoute, parseLimit } = require("../lib/request-helpers");
-
-// ── Path parameter validation ───────────────────────────────────────
-// IDs are generated via `Date.now().toString(36)-<12 hex chars>`, so
-// they only contain alphanumeric characters and hyphens.  Reject
-// anything else early to prevent SQL injection or parameter confusion.
-const SAFE_ID_RE = /^[a-zA-Z0-9][a-zA-Z0-9-]{0,63}$/;
-
-function validateIdParam(paramName) {
-  return (req, res, next) => {
-    const val = req.params[paramName];
-    if (!val || !SAFE_ID_RE.test(val)) {
-      return res.status(400).json({ error: `Invalid ${paramName} format` });
-    }
-    next();
-  };
-}
+const { generateId, isValidResourceId } = require("../lib/id-helpers");
 
 // ── Schema initialisation ───────────────────────────────────────────
 
@@ -83,16 +67,7 @@ const MAX_NAME_LENGTH = 128;
 const MAX_AGENT_FILTER_LENGTH = 256;
 const MAX_ALERT_RULES = 100;        // cap total rules to prevent DoS via evaluate endpoint
 
-// Validate ruleId / alertId: alphanumeric + hyphens, max 64 chars.
-// Matches the pattern used by generateId() and prevents log injection
-// or cache pollution from arbitrary-length / special-char params.
-const RESOURCE_ID_RE = /^[a-zA-Z0-9][a-zA-Z0-9-]{0,63}$/;
-
-function isValidResourceId(id) {
-  return typeof id === "string" && RESOURCE_ID_RE.test(id);
-}
-
-// Middleware: reject invalid ruleId early (mirrors webhooks.js pattern)
+// Middleware: reject invalid ruleId/alertId early
 router.param("ruleId", (req, res, next, val) => {
   if (!isValidResourceId(val)) {
     return res.status(400).json({ error: "Invalid rule ID format" });
@@ -106,12 +81,6 @@ router.param("alertId", (req, res, next, val) => {
   }
   next();
 });
-
-// ── Helper: generate unique ID ──────────────────────────────────────
-
-function generateId() {
-  return `${Date.now().toString(36)}-${crypto.randomBytes(6).toString('hex')}`;
-}
 
 // ── Helper: evaluate metric value for a time window ─────────────────
 
@@ -290,7 +259,7 @@ router.post("/rules", wrapRoute("create alert rule", (req, res) => {
 
 // ── PUT /alerts/rules/:ruleId — update an alert rule ────────────────
 
-router.put("/rules/:ruleId", validateIdParam("ruleId"), wrapRoute("update alert rule", (req, res) => {
+router.put("/rules/:ruleId", wrapRoute("update alert rule", (req, res) => {
     ensureAlertsTable();
     const db = getDb();
     const { ruleId } = req.params;
@@ -339,7 +308,7 @@ router.put("/rules/:ruleId", validateIdParam("ruleId"), wrapRoute("update alert 
 
 // ── DELETE /alerts/rules/:ruleId — delete a rule ────────────────────
 
-router.delete("/rules/:ruleId", validateIdParam("ruleId"), wrapRoute("delete alert rule", (req, res) => {
+router.delete("/rules/:ruleId", wrapRoute("delete alert rule", (req, res) => {
     ensureAlertsTable();
     const db = getDb();
     const { ruleId } = req.params;
@@ -462,7 +431,7 @@ router.get("/events", wrapRoute("list alert events", (req, res) => {
 
 // ── PUT /alerts/events/:alertId/acknowledge — ack an alert ──────────
 
-router.put("/events/:alertId/acknowledge", validateIdParam("alertId"), wrapRoute("acknowledge alert", (req, res) => {
+router.put("/events/:alertId/acknowledge", wrapRoute("acknowledge alert", (req, res) => {
     ensureAlertsTable();
     const db = getDb();
     const { alertId } = req.params;

@@ -1,10 +1,10 @@
 /* ── Session Annotations — notes and comments on sessions ──────────── */
 
 const express = require("express");
-const crypto = require("crypto");
 const router = express.Router();
 const { getDb } = require("../db");
 const { parsePagination, wrapRoute } = require("../lib/request-helpers");
+const { generateId } = require("../lib/id-helpers");
 
 // ── Schema initialisation ───────────────────────────────────────────
 
@@ -40,10 +40,10 @@ const VALID_TYPES = ["note", "bug", "insight", "warning", "milestone"];
 const MAX_TEXT_LENGTH = 4000;
 const MAX_AUTHOR_LENGTH = 100;
 
-// ── Helper: generate unique ID ──────────────────────────────────────
+// ── Helper: generate unique annotation ID ───────────────────────────
 
-function generateId() {
-  return `ann-${Date.now().toString(36)}-${crypto.randomBytes(6).toString('hex')}`;
+function generateAnnotationId() {
+  return generateId("ann");
 }
 
 // ── Helper: validate annotation input ───────────────────────────────
@@ -114,7 +114,7 @@ router.post("/:id/annotations", wrapRoute("create annotation", (req, res) => {
   }
 
   const now = new Date().toISOString();
-  const annotationId = generateId();
+  const annotationId = generateAnnotationId();
 
   db.prepare(`
     INSERT INTO annotations

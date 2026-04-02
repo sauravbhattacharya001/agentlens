@@ -9,6 +9,7 @@ const router = express.Router();
 const { getDb } = require("../db");
 const { validateWebhookUrl } = require("../lib/validation");
 const { parseLimit, wrapRoute } = require("../lib/request-helpers");
+const { generateId, isValidResourceId } = require("../lib/id-helpers");
 
 // ── Stricter rate limit for outbound webhook requests ───────────────
 // The /test and fire endpoints trigger outbound HTTP requests to
@@ -76,20 +77,16 @@ function ensureWebhooksTable() {
   _tableReady = true;
 }
 
-function generateId() {
-  return `${Date.now().toString(36)}-${crypto.randomBytes(6).toString("hex")}`;
-}
-
-// Validate webhookId: alphanumeric + hyphens, max 64 chars
-const WEBHOOK_ID_RE = /^[a-zA-Z0-9][a-zA-Z0-9-]{0,63}$/;
-
-function validateWebhookId(id) {
-  return typeof id === "string" && WEBHOOK_ID_RE.test(id);
-}
+// Middleware: reject invalid webhook IDs early
+router.param("webhookId", (req, res, next, val) => {
+  if (!isValidResourceId(val)) {
+    return res.status(400).json({ error: "Invalid webhook ID format" });
+  }
+  next();
+});
 
 // ── Shared response formatter ───────────────────────────────────────
-// Consolidates 3 identical inline mapping blocks that mask secrets
-// and parse rule_ids JSON for the API response.
+// Masks secrets and parses rule_ids JSON for the API response.
 
 function formatWebhookResponse(w) {
   return {
@@ -99,14 +96,6 @@ function formatWebhookResponse(w) {
     secret: w.secret ? "••••••" : null,
   };
 }
-
-// Middleware: reject invalid webhook IDs early
-router.param("webhookId", (req, res, next, val) => {
-  if (!validateWebhookId(val)) {
-    return res.status(400).json({ error: "Invalid webhook ID format" });
-  }
-  next();
-});
 
 // Middleware: ensure table exists (once per process, not per request)
 router.use((req, res, next) => {
