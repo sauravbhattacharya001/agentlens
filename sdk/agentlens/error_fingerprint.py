@@ -256,7 +256,7 @@ class ErrorFingerprinter:
         self._occurrences.append(occ)
 
         template = self._normalise_message(message)
-        frame_sig = self._normalise_stack(stack_trace)
+        frame_sig = self._normalise_stack(stack_trace, self._top_frames)
         fp_id = self._compute_fingerprint(error_type, template, frame_sig)
         occ.fingerprint_id = fp_id
 
@@ -469,12 +469,19 @@ class ErrorFingerprinter:
         return result
 
     @staticmethod
-    def _normalise_stack(stack_trace: str | None) -> str:
+    def _normalise_stack(stack_trace: str | None, top_frames: int = 3) -> str:
         """Extract a normalised signature from a stack trace.
 
         Takes the top N frames (closest to the error site), strips
         line numbers and file paths, keeping only function/method names.
         This produces a stable signature even when line numbers shift.
+
+        Parameters
+        ----------
+        stack_trace : str | None
+            Full stack trace string.
+        top_frames : int
+            Number of frames to include in the signature (default 3).
         """
         if not stack_trace:
             return ""
@@ -523,10 +530,10 @@ class ErrorFingerprinter:
         # Take only top N frames (reversed for Python — innermost last)
         if py_frames:
             # Python: innermost frame is last, so take last N
-            frames = frames[-3:]  # top_frames default
+            frames = frames[-top_frames:]
         else:
             # JS/Java: innermost is first
-            frames = frames[:3]
+            frames = frames[:top_frames]
 
         return " > ".join(frames) if frames else ""
 
