@@ -187,6 +187,11 @@ class SessionReplayer:
     # -- Configuration -----------------------------------------------------
 
     def set_speed(self, speed: float) -> "SessionReplayer":
+        """Set playback speed multiplier (e.g. 2.0 = twice as fast).
+
+        Raises:
+            ValueError: If speed is not positive.
+        """
         if speed <= 0:
             raise ValueError("speed must be positive")
         self._speed = speed
@@ -198,33 +203,91 @@ class SessionReplayer:
         return self
 
     def remove_filter(self, *event_types: str) -> "SessionReplayer":
+        """Remove event types from the inclusion allowlist.
+
+        Args:
+            *event_types: One or more event type strings to remove.
+
+        Returns:
+            Self for fluent chaining.
+        """
         for t in event_types:
             self._filters.discard(t)
         return self
 
     def clear_filters(self) -> "SessionReplayer":
+        """Remove all inclusion and exclusion filters."""
         self._filters.clear()
         self._exclude_filters.clear()
         return self
 
     def exclude(self, *event_types: str) -> "SessionReplayer":
-        """Exclude these event types (blocklist)."""
+        """Exclude specific event types from replay (blocklist).
+
+        Exclusions take precedence over inclusions: an event type
+        present in both lists will be excluded.
+
+        Args:
+            *event_types: One or more event type strings to exclude.
+
+        Returns:
+            Self for fluent chaining.
+        """
         self._exclude_filters.update(event_types)
         return self
 
     def add_breakpoint(self, predicate: BreakpointFn) -> "SessionReplayer":
+        """Register a breakpoint predicate.
+
+        During replay, any event for which ``predicate(event)`` returns
+        ``True`` will have its frame marked with ``is_breakpoint=True``.
+        The caller is responsible for deciding how to handle a breakpoint
+        (e.g. pausing, prompting, or logging).
+
+        Args:
+            predicate: A callable ``(AgentEvent) -> bool``.
+
+        Returns:
+            Self for fluent chaining.
+        """
         self._breakpoints.append(predicate)
         return self
 
     def clear_breakpoints(self) -> "SessionReplayer":
+        """Remove all registered breakpoints."""
         self._breakpoints.clear()
         return self
 
     def on_frame(self, callback: CallbackFn) -> "SessionReplayer":
+        """Register a callback invoked for every emitted replay frame.
+
+        Callbacks fire inside :meth:`play` after the frame is constructed
+        but before it is yielded to the caller.  Multiple callbacks are
+        called in registration order.
+
+        Args:
+            callback: A callable ``(ReplayFrame) -> None``.
+
+        Returns:
+            Self for fluent chaining.
+        """
         self._callbacks.append(callback)
         return self
 
     def annotate(self, event_id: str, note: str) -> "SessionReplayer":
+        """Attach a textual annotation to a specific event.
+
+        Annotations appear in the ``annotations`` list of the
+        corresponding :class:`ReplayFrame` and are included in all
+        export formats.
+
+        Args:
+            event_id: The ``event_id`` of the target event.
+            note: Free-text annotation string.
+
+        Returns:
+            Self for fluent chaining.
+        """
         self._annotations.setdefault(event_id, []).append(note)
         return self
 
@@ -329,7 +392,12 @@ class SessionReplayer:
     def play_range(
         self, start: int = 0, end: int | None = None
     ) -> Iterator[ReplayFrame]:
-        """Yield frames for a slice of the filtered events."""
+        """Yield frames for a slice of the filtered event list.
+
+        Args:
+            start: First frame index to include (0-indexed).
+            end: Exclusive upper bound.  ``None`` means play to the end.
+        """
         for frame in self.play():
             if frame.index < start:
                 continue
@@ -338,7 +406,12 @@ class SessionReplayer:
             yield frame
 
     def step(self) -> ReplayFrame | None:
-        """Step through one frame at a time (stateful)."""
+        """Advance replay by one frame (stateful cursor).
+
+        Each call returns the next :class:`ReplayFrame` and advances the
+        internal position.  Returns ``None`` when the session is exhausted.
+        Use :meth:`reset` or :meth:`seek` to reposition the cursor.
+        """
         filtered = self.filtered_events
         if self._position >= len(filtered):
             return None
@@ -347,13 +420,17 @@ class SessionReplayer:
         return frames[0] if frames else None
 
     def reset(self) -> "SessionReplayer":
-        """Reset step position."""
+        """Reset the step cursor to the beginning and clear accumulated stats."""
         self._position = 0
         self._stats = ReplayStats()
         return self
 
     def seek(self, position: int) -> "SessionReplayer":
-        """Set step position."""
+        """Move the step cursor to a specific position (0-indexed).
+
+        Clamped to 0 at minimum.  The next :meth:`step` call will emit
+        the frame at this position.
+        """
         self._position = max(0, position)
         return self
 
@@ -366,6 +443,7 @@ class SessionReplayer:
     # -- Export ------------------------------------------------------------
 
     def to_json(self, *, indent: int = 2) -> str:
+        """Serialize the full replay (all frames + stats) to a JSON string."""
         frames = [f.to_dict() for f in self.play()]
         return json.dumps(
             {
@@ -392,6 +470,7 @@ class SessionReplayer:
         return "\n".join(lines)
 
     def to_markdown(self) -> str:
+        """Export the replay as a Markdown document with a timeline table."""
         lines = [
             f"# Session Replay: `{self._session.session_id}`",
             "",
