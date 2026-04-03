@@ -488,31 +488,48 @@ class SessionCorrelator:
         )
 
     def find_shared_resources(self) -> List[SharedResource]:
-        """Find tools and models shared across sessions."""
-        # Aggregate by resource
+        """Find tools and models shared across sessions.
+
+        Collects per-resource usage intervals in a single pass over all
+        events, then computes max concurrent usage per resource via
+        sweep-line.  Previous implementation called
+        ``_max_concurrent_usage`` per resource, each re-scanning every
+        event — O(resources × total_events).  This is now O(total_events)
+        for collection plus O(n log n) per resource for the sweep.
+        """
+        # Aggregate by resource — single pass over all events
         tool_sessions: Dict[str, Set[str]] = defaultdict(set)
         model_sessions: Dict[str, Set[str]] = defaultdict(set)
         tool_counts: Dict[str, int] = Counter()
         model_counts: Dict[str, int] = Counter()
+        # Collect intervals for concurrent usage calculation
+        resource_intervals: Dict[Tuple[str, str], List[Tuple[datetime, float]]] = defaultdict(list)
 
         for session, window in zip(self._sessions, self._windows):
             events = getattr(session, "events", [])
             for e in events:
+                ts = getattr(e, "timestamp", datetime.now(timezone.utc))
+                dur = getattr(e, "duration_ms", 100) or 100
+
                 m = getattr(e, "model", None)
                 if m:
                     model_sessions[m].add(window.session_id)
                     model_counts[m] += 1
+                    resource_intervals[(m, "model")].append((ts, dur))
                 tc = getattr(e, "tool_call", None)
                 if tc:
                     name = getattr(tc, "tool_name", "unknown")
                     tool_sessions[name].add(window.session_id)
                     tool_counts[name] += 1
+                    resource_intervals[(name, "tool")].append((ts, dur))
 
         results: List[SharedResource] = []
 
         for tool, sids in tool_sessions.items():
             if len(sids) >= 2:
-                concurrent = self._max_concurrent_usage(tool, "tool")
+                concurrent = self._max_concurrent_from_intervals(
+                    resource_intervals.get((tool, "tool"), [])
+                )
                 results.append(SharedResource(
                     resource_name=tool,
                     resource_type="tool",
@@ -523,7 +540,9 @@ class SessionCorrelator:
 
         for model, sids in model_sessions.items():
             if len(sids) >= 2:
-                concurrent = self._max_concurrent_usage(model, "model")
+                concurrent = self._max_concurrent_from_intervals(
+                    resource_intervals.get((model, "model"), [])
+                )
                 results.append(SharedResource(
                     resource_name=model,
                     resource_type="model",
@@ -533,6 +552,29 @@ class SessionCorrelator:
                 ))
 
         return sorted(results, key=lambda r: -r.total_uses)
+
+    @staticmethod
+    def _max_concurrent_from_intervals(
+        intervals: List[Tuple[datetime, float]],
+    ) -> int:
+        """Compute max concurrent usage from (timestamp, duration_ms) pairs.
+
+        Uses a sweep-line algorithm: O(n log n) sort + O(n) scan.
+        """
+        if not intervals:
+            return 0
+        events: List[Tuple[datetime, int]] = []
+        for ts, dur in intervals:
+            events.append((ts, 1))
+            events.append((ts + timedelta(milliseconds=dur), -1))
+        events.sort(key=lambda x: x[0])
+        current = 0
+        peak = 0
+        for _, delta in events:
+            current += delta
+            if current > peak:
+                peak = current
+        return peak
 
     def _max_concurrent_usage(self, resource: str, rtype: str) -> int:
         """Estimate max concurrent uses of a resource across sessions."""
