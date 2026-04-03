@@ -20,13 +20,30 @@ var { wrapRoute } = require("../lib/request-helpers");
 
 // ── SSE client management ───────────────────────────────────────────
 
+// ── Security limits ─────────────────────────────────────────────────
+var MAX_SSE_CLIENTS = 50;          // prevent memory exhaustion via open connections
+var MIN_INTERVAL_SECONDS = 30;     // prevent DoS via rapid-fire correlation runs
+var MAX_INTERVAL_SECONDS = 86400;  // 24 hours max
+var MIN_LOOKBACK_MINUTES = 1;
+var MAX_LOOKBACK_MINUTES = 10080;  // 7 days max — prevents expensive full-table scans
+var SAFE_ID_RE = /^[a-zA-Z0-9][a-zA-Z0-9_\-.:]{0,127}$/;
+
+function isValidResourceId(id) {
+  return typeof id === "string" && SAFE_ID_RE.test(id);
+}
+
 var sseClients = [];
 
 function addClient(res) {
+  if (sseClients.length >= MAX_SSE_CLIENTS) {
+    res.status(503).json({ error: "Too many SSE clients connected" });
+    return false;
+  }
   sseClients.push(res);
   res.on("close", function () {
     sseClients = sseClients.filter(function (c) { return c !== res; });
   });
+  return true;
 }
 
 function broadcast(eventName, data) {
@@ -240,14 +257,18 @@ function stopScheduler() {
 
 /** GET /stream — SSE endpoint for real-time correlation notifications */
 router.get("/stream", function (req, res) {
+  // Check capacity before committing to SSE headers
+  if (sseClients.length >= MAX_SSE_CLIENTS) {
+    return res.status(503).json({ error: "Too many SSE clients connected" });
+  }
   res.writeHead(200, {
     "Content-Type": "text/event-stream",
     "Cache-Control": "no-cache",
     Connection: "keep-alive",
     "X-Accel-Buffering": "no",
   });
-  res.write("event: connected\ndata: {\"status\":\"ok\"}\n\n");
   addClient(res);
+  res.write("event: connected\ndata: {\"status\":\"ok\"}\n\n");
 
   // Keep-alive every 30s
   var keepAlive = setInterval(function () {
@@ -262,16 +283,16 @@ router.post("/schedules", wrapRoute("create/update correlation schedule", functi
   var db = dbMod.getDb();
   var body = req.body;
 
-  if (!body.rule_id) {
-    return res.status(400).json({ error: "rule_id is required" });
+  if (!body.rule_id || !isValidResourceId(body.rule_id)) {
+    return res.status(400).json({ error: "rule_id is required and must be a valid ID" });
   }
 
   // Verify rule exists
   var rule = db.prepare("SELECT rule_id FROM correlation_rules WHERE rule_id = ?").get(body.rule_id);
   if (!rule) return res.status(404).json({ error: "Rule not found" });
 
-  var interval = body.interval_seconds || 300;
-  var lookback = body.lookback_minutes || 60;
+  var interval = Math.min(Math.max(MIN_INTERVAL_SECONDS, Number(body.interval_seconds) || 300), MAX_INTERVAL_SECONDS);
+  var lookback = Math.min(Math.max(MIN_LOOKBACK_MINUTES, Number(body.lookback_minutes) || 60), MAX_LOOKBACK_MINUTES);
   var enabled = body.enabled !== undefined ? (body.enabled ? 1 : 0) : 1;
   var nextRun = new Date(Date.now() + interval * 1000).toISOString();
 
@@ -304,6 +325,9 @@ router.get("/schedules", wrapRoute("list correlation schedules", function (req, 
 
 /** DELETE /schedules/:ruleId — Remove a schedule */
 router.delete("/schedules/:ruleId", wrapRoute("delete correlation schedule", function (req, res) {
+  if (!isValidResourceId(req.params.ruleId)) {
+    return res.status(400).json({ error: "Invalid rule ID format" });
+  }
   ensureSchedulerTables();
   var db = dbMod.getDb();
   var result = db.prepare("DELETE FROM correlation_schedules WHERE rule_id = ?").run(req.params.ruleId);
