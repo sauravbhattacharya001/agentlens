@@ -9,6 +9,7 @@
 
 const express = require("express");
 const { getDb } = require("../db");
+const { safeJsonParse } = require("../lib/validation");
 const { wrapRoute, parseLimit, parseDays, daysAgoCutoff } = require("../lib/request-helpers");
 
 const router = express.Router();
@@ -85,7 +86,7 @@ router.get(
             summary: `${a.metric} ${a.operator} ${a.threshold} (actual: ${a.metric_value})`,
             timestamp: a.triggered_at,
             acknowledged: !!a.acknowledged,
-            details: JSON.parse(a.details || "{}"),
+            details: safeJsonParse(a.details),
           });
         }
       } catch (_) {
@@ -123,7 +124,7 @@ router.get(
         const errors = stmts.feedErrors.all(cutoff, limit);
 
         for (const e of errors) {
-          const data = JSON.parse(e.output_data || "{}");
+          const data = safeJsonParse(e.output_data);
           items.push({
             id: `error-${e.session_id}-${e.timestamp}`,
             category: "health",
