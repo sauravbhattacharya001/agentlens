@@ -1,0 +1,504 @@
+<!DOCTYPE html>
+<html lang="en">
+<head>
+  <meta charset="UTF-8">
+  <meta name="viewport" content="width=device-width, initial-scale=1.0">
+  <title>AgentLens — Session Timeline</title>
+  <link rel="stylesheet" href="styles.css">
+  <style>
+    .timeline-container { padding: 24px; max-width: 1400px; margin: 0 auto; }
+    .timeline-header { display: flex; justify-content: space-between; align-items: center; margin-bottom: 20px; }
+    .timeline-header h2 { font-size: 1.3rem; font-weight: 600; }
+
+    /* Summary cards */
+    .tl-summary { display: grid; grid-template-columns: repeat(5, 1fr); gap: 12px; margin-bottom: 24px; }
+    .tl-card { background: var(--bg-secondary); border: 1px solid var(--border); border-radius: var(--radius); padding: 16px; text-align: center; }
+    .tl-card .val { font-size: 1.8rem; font-weight: 700; }
+    .tl-card .lbl { font-size: 0.75rem; color: var(--text-muted); text-transform: uppercase; letter-spacing: 0.5px; margin-top: 4px; }
+    .tl-card .val.accent { color: var(--accent); }
+    .tl-card .val.green { color: var(--green); }
+    .tl-card .val.purple { color: var(--purple); }
+    .tl-card .val.orange { color: var(--orange); }
+    .tl-card .val.yellow { color: var(--yellow); }
+
+    /* Controls */
+    .tl-controls { display: flex; gap: 12px; align-items: center; margin-bottom: 16px; flex-wrap: wrap; }
+    .tl-controls label { font-size: 0.8rem; color: var(--text-secondary); }
+    .tl-controls select, .tl-controls input { background: var(--bg-tertiary); border: 1px solid var(--border); color: var(--text-primary); padding: 6px 10px; border-radius: var(--radius-sm); font-size: 0.85rem; }
+    .tl-controls input[type="range"] { width: 120px; accent-color: var(--accent); }
+
+    /* Gantt chart */
+    .gantt-wrapper { background: var(--bg-secondary); border: 1px solid var(--border); border-radius: var(--radius); overflow: hidden; }
+    .gantt-scroll { overflow-x: auto; overflow-y: auto; max-height: 600px; position: relative; }
+    .gantt-header-row { display: flex; position: sticky; top: 0; z-index: 10; background: var(--bg-tertiary); border-bottom: 1px solid var(--border); min-height: 32px; }
+    .gantt-label-col { width: 200px; min-width: 200px; flex-shrink: 0; padding: 8px 12px; font-size: 0.75rem; font-weight: 600; color: var(--text-muted); text-transform: uppercase; letter-spacing: 0.5px; position: sticky; left: 0; z-index: 11; background: var(--bg-tertiary); border-right: 1px solid var(--border); }
+    .gantt-time-headers { display: flex; flex: 1; }
+    .gantt-time-mark { font-size: 0.7rem; color: var(--text-muted); text-align: center; border-left: 1px solid var(--border); padding: 8px 0; }
+
+    .gantt-row { display: flex; min-height: 36px; border-bottom: 1px solid rgba(48, 54, 61, 0.5); transition: background 0.1s; }
+    .gantt-row:hover { background: var(--bg-tertiary); }
+    .gantt-row-label { width: 200px; min-width: 200px; flex-shrink: 0; padding: 8px 12px; font-size: 0.82rem; color: var(--text-primary); overflow: hidden; text-overflow: ellipsis; white-space: nowrap; position: sticky; left: 0; z-index: 5; background: var(--bg-secondary); border-right: 1px solid var(--border); display: flex; align-items: center; gap: 6px; }
+    .gantt-row:hover .gantt-row-label { background: var(--bg-tertiary); }
+    .gantt-row-chart { flex: 1; position: relative; min-height: 36px; }
+
+    .gantt-bar { position: absolute; height: 20px; top: 8px; border-radius: 4px; cursor: pointer; transition: opacity 0.15s; display: flex; align-items: center; padding: 0 6px; font-size: 0.7rem; color: #fff; font-weight: 600; overflow: hidden; white-space: nowrap; text-overflow: ellipsis; }
+    .gantt-bar:hover { opacity: 0.85; filter: brightness(1.15); }
+
+    .gantt-bar.status-active { background: var(--green); }
+    .gantt-bar.status-completed { background: var(--accent); }
+    .gantt-bar.status-error { background: var(--red); }
+    .gantt-bar.status-default { background: var(--purple); }
+
+    /* Concurrency chart */
+    .concurrency-panel { background: var(--bg-secondary); border: 1px solid var(--border); border-radius: var(--radius); padding: 20px; margin-top: 16px; }
+    .concurrency-panel h3 { font-size: 0.95rem; margin-bottom: 12px; color: var(--text-secondary); }
+    .concurrency-canvas { width: 100%; height: 160px; }
+
+    /* Tooltip */
+    .gantt-tooltip { position: fixed; background: var(--bg-primary); border: 1px solid var(--border); border-radius: var(--radius); padding: 12px 16px; font-size: 0.82rem; z-index: 1000; pointer-events: none; box-shadow: var(--shadow); max-width: 320px; display: none; }
+    .gantt-tooltip .tt-title { font-weight: 700; margin-bottom: 6px; color: var(--text-primary); }
+    .gantt-tooltip .tt-row { display: flex; justify-content: space-between; gap: 16px; margin-bottom: 2px; }
+    .gantt-tooltip .tt-label { color: var(--text-muted); }
+    .gantt-tooltip .tt-value { color: var(--text-primary); font-weight: 500; }
+
+    /* Color legend */
+    .tl-legend { display: flex; gap: 16px; margin-bottom: 16px; flex-wrap: wrap; }
+    .tl-legend-item { display: flex; align-items: center; gap: 6px; font-size: 0.8rem; color: var(--text-secondary); }
+    .tl-legend-dot { width: 12px; height: 12px; border-radius: 3px; }
+
+    @media (max-width: 768px) {
+      .tl-summary { grid-template-columns: repeat(2, 1fr); }
+      .gantt-row-label, .gantt-label-col { width: 120px; min-width: 120px; }
+    }
+  </style>
+</head>
+<body>
+  <header class="header">
+    <div class="header-left">
+      <a href="index.html" style="text-decoration:none"><h1 class="logo">🔍 AgentLens</h1></a>
+      <span class="tagline">Session Timeline</span>
+    </div>
+    <div class="header-right">
+      <a href="index.html" class="btn btn-alert-header" style="text-decoration:none">← Dashboard</a>
+      <button class="theme-toggle" onclick="toggleTheme()" id="themeToggleBtn">🌙</button>
+    </div>
+  </header>
+
+  <div class="timeline-container">
+    <div class="timeline-header">
+      <h2>📅 Session Timeline</h2>
+      <div style="display:flex;gap:8px">
+        <button class="btn" onclick="exportTimelineSVG()">📥 Export SVG</button>
+        <button class="btn" onclick="exportTimelineJSON()">📥 Export JSON</button>
+      </div>
+    </div>
+
+    <div class="tl-summary" id="tlSummary"></div>
+
+    <div class="tl-controls">
+      <div class="control-group">
+        <label>Time Range</label>
+        <select id="timeRange" onchange="rebuildGantt()">
+          <option value="1h">Last 1 Hour</option>
+          <option value="6h">Last 6 Hours</option>
+          <option value="24h" selected>Last 24 Hours</option>
+          <option value="7d">Last 7 Days</option>
+          <option value="30d">Last 30 Days</option>
+          <option value="all">All Time</option>
+        </select>
+      </div>
+      <div class="control-group">
+        <label>Sort By</label>
+        <select id="sortBy" onchange="rebuildGantt()">
+          <option value="start">Start Time</option>
+          <option value="duration">Duration</option>
+          <option value="agent">Agent Name</option>
+          <option value="tokens">Total Tokens</option>
+        </select>
+      </div>
+      <div class="control-group">
+        <label>Group By</label>
+        <select id="groupBy" onchange="rebuildGantt()">
+          <option value="none">None</option>
+          <option value="agent">Agent</option>
+          <option value="status">Status</option>
+        </select>
+      </div>
+      <div class="control-group">
+        <label>Zoom</label>
+        <input type="range" id="zoomLevel" min="1" max="5" value="2" step="0.5" onchange="rebuildGantt()">
+      </div>
+      <div class="control-group">
+        <label style="display:flex;align-items:center;gap:6px;cursor:pointer">
+          <input type="checkbox" id="showConcurrency" checked onchange="rebuildGantt()" style="accent-color:var(--accent)">
+          Concurrency
+        </label>
+      </div>
+    </div>
+
+    <div class="tl-legend">
+      <div class="tl-legend-item"><div class="tl-legend-dot" style="background:var(--green)"></div> Active</div>
+      <div class="tl-legend-item"><div class="tl-legend-dot" style="background:var(--accent)"></div> Completed</div>
+      <div class="tl-legend-item"><div class="tl-legend-dot" style="background:var(--red)"></div> Error</div>
+      <div class="tl-legend-item"><div class="tl-legend-dot" style="background:var(--purple)"></div> Other</div>
+    </div>
+
+    <div class="gantt-wrapper">
+      <div class="gantt-scroll" id="ganttScroll">
+        <div id="ganttChart"><div class="loading" style="padding:40px">Loading sessions...</div></div>
+      </div>
+    </div>
+
+    <div class="concurrency-panel" id="concurrencyPanel" style="display:none">
+      <h3>⚡ Concurrency Over Time</h3>
+      <canvas class="concurrency-canvas" id="concurrencyCanvas"></canvas>
+    </div>
+  </div>
+
+  <div class="gantt-tooltip" id="ganttTooltip"></div>
+
+  <script>
+    /* ── Theme ─────────────────────────────────────────────────── */
+    function toggleTheme() {
+      const html = document.documentElement;
+      const next = html.getAttribute('data-theme') === 'light' ? 'dark' : 'light';
+      html.setAttribute('data-theme', next);
+      document.getElementById('themeToggleBtn').textContent = next === 'light' ? '☀️' : '🌙';
+      localStorage.setItem('agentlens-theme', next);
+    }
+    (() => {
+      const saved = localStorage.getItem('agentlens-theme');
+      if (saved) {
+        document.documentElement.setAttribute('data-theme', saved);
+        document.getElementById('themeToggleBtn').textContent = saved === 'light' ? '☀️' : '🌙';
+      }
+    })();
+
+    /* ── State ─────────────────────────────────────────────────── */
+    const API_BASE = window.location.origin;
+    let allSessions = [];
+    let filteredSessions = [];
+
+    /* ── Init ──────────────────────────────────────────────────── */
+    document.addEventListener('DOMContentLoaded', loadTimeline);
+
+    async function loadTimeline() {
+      try {
+        const res = await fetch(`${API_BASE}/sessions`);
+        const data = await res.json();
+        allSessions = (data.sessions || []).map(normSession);
+        rebuildGantt();
+      } catch (e) {
+        document.getElementById('ganttChart').innerHTML = `<div class="loading">⚠️ Could not load sessions. Is the backend running?</div>`;
+        generateDemoData();
+      }
+    }
+
+    function normSession(s) {
+      const start = new Date(s.started_at || s.created_at || Date.now()).getTime();
+      const end = s.ended_at ? new Date(s.ended_at).getTime() : (s.status === 'active' ? Date.now() : start + (s.duration_ms || 60000));
+      return {
+        id: s.session_id || s.id,
+        agent: s.agent_name || s.agent || 'unknown',
+        status: (s.status || 'completed').toLowerCase(),
+        start, end,
+        duration: end - start,
+        tokens: (s.total_tokens || s.tokens_in + s.tokens_out || 0),
+        tokensIn: s.tokens_in || 0,
+        tokensOut: s.tokens_out || 0,
+        events: s.event_count || 0,
+        model: s.model || '',
+        cost: s.cost || 0,
+      };
+    }
+
+    function generateDemoData() {
+      const agents = ['gpt-4-agent', 'claude-3-agent', 'gemini-agent', 'tool-runner', 'code-reviewer', 'summarizer'];
+      const statuses = ['completed', 'completed', 'completed', 'active', 'error', 'completed'];
+      const models = ['gpt-4o', 'claude-3-opus', 'gemini-1.5-pro', 'gpt-4o-mini', 'claude-3-sonnet'];
+      const now = Date.now();
+      allSessions = [];
+      for (let i = 0; i < 30; i++) {
+        const start = now - Math.random() * 86400000;
+        const dur = 5000 + Math.random() * 600000;
+        allSessions.push({
+          id: `sess-${i}`, agent: agents[i % agents.length],
+          status: statuses[i % statuses.length],
+          start, end: start + dur, duration: dur,
+          tokens: Math.floor(500 + Math.random() * 15000),
+          tokensIn: Math.floor(200 + Math.random() * 8000),
+          tokensOut: Math.floor(100 + Math.random() * 7000),
+          events: Math.floor(3 + Math.random() * 50),
+          model: models[i % models.length],
+          cost: +(Math.random() * 2).toFixed(4),
+        });
+      }
+      rebuildGantt();
+    }
+
+    /* ── Filter & Sort ─────────────────────────────────────────── */
+    function rebuildGantt() {
+      const range = document.getElementById('timeRange').value;
+      const sortBy = document.getElementById('sortBy').value;
+      const groupBy = document.getElementById('groupBy').value;
+      const now = Date.now();
+
+      // Filter by time range
+      const rangeMs = { '1h': 3600e3, '6h': 21600e3, '24h': 86400e3, '7d': 604800e3, '30d': 2592000e3, 'all': Infinity }[range];
+      filteredSessions = allSessions.filter(s => now - s.start < rangeMs);
+
+      // Sort
+      const sorters = {
+        start: (a, b) => a.start - b.start,
+        duration: (a, b) => b.duration - a.duration,
+        agent: (a, b) => a.agent.localeCompare(b.agent),
+        tokens: (a, b) => b.tokens - a.tokens,
+      };
+      filteredSessions.sort(sorters[sortBy] || sorters.start);
+
+      // Group
+      let groups = null;
+      if (groupBy === 'agent') {
+        groups = {};
+        filteredSessions.forEach(s => { (groups[s.agent] = groups[s.agent] || []).push(s); });
+      } else if (groupBy === 'status') {
+        groups = {};
+        filteredSessions.forEach(s => { (groups[s.status] = groups[s.status] || []).push(s); });
+      }
+
+      renderSummary();
+      renderGantt(groups);
+
+      if (document.getElementById('showConcurrency').checked) {
+        document.getElementById('concurrencyPanel').style.display = '';
+        renderConcurrency();
+      } else {
+        document.getElementById('concurrencyPanel').style.display = 'none';
+      }
+    }
+
+    /* ── Summary Cards ─────────────────────────────────────────── */
+    function renderSummary() {
+      const s = filteredSessions;
+      const totalDur = s.reduce((a, x) => a + x.duration, 0);
+      const totalTokens = s.reduce((a, x) => a + x.tokens, 0);
+      const totalCost = s.reduce((a, x) => a + x.cost, 0);
+      const peakConc = calcPeakConcurrency();
+      const avgDur = s.length ? totalDur / s.length : 0;
+
+      document.getElementById('tlSummary').innerHTML = `
+        <div class="tl-card"><div class="val accent">${s.length}</div><div class="lbl">Sessions</div></div>
+        <div class="tl-card"><div class="val green">${fmtDuration(avgDur)}</div><div class="lbl">Avg Duration</div></div>
+        <div class="tl-card"><div class="val purple">${peakConc}</div><div class="lbl">Peak Concurrency</div></div>
+        <div class="tl-card"><div class="val orange">${fmtNum(totalTokens)}</div><div class="lbl">Total Tokens</div></div>
+        <div class="tl-card"><div class="val yellow">$${totalCost.toFixed(2)}</div><div class="lbl">Total Cost</div></div>
+      `;
+    }
+
+    function calcPeakConcurrency() {
+      if (!filteredSessions.length) return 0;
+      const events = [];
+      filteredSessions.forEach(s => { events.push({ t: s.start, d: 1 }, { t: s.end, d: -1 }); });
+      events.sort((a, b) => a.t - b.t || a.d - b.d);
+      let cur = 0, peak = 0;
+      events.forEach(e => { cur += e.d; peak = Math.max(peak, cur); });
+      return peak;
+    }
+
+    /* ── Gantt Render ──────────────────────────────────────────── */
+    function renderGantt(groups) {
+      const chart = document.getElementById('ganttChart');
+      if (!filteredSessions.length) {
+        chart.innerHTML = '<div class="loading">No sessions in selected time range.</div>';
+        return;
+      }
+
+      const zoom = parseFloat(document.getElementById('zoomLevel').value);
+      const minT = Math.min(...filteredSessions.map(s => s.start));
+      const maxT = Math.max(...filteredSessions.map(s => s.end));
+      const span = maxT - minT || 1;
+      const chartWidth = Math.max(800, span / 1000 * zoom * 0.5);
+
+      // Time marks
+      const markCount = Math.max(4, Math.min(24, Math.floor(chartWidth / 100)));
+      const markWidth = chartWidth / markCount;
+      let timeHeaders = '';
+      for (let i = 0; i < markCount; i++) {
+        const t = new Date(minT + (span * i / markCount));
+        timeHeaders += `<div class="gantt-time-mark" style="width:${markWidth}px">${fmtTime(t)}</div>`;
+      }
+
+      const headerRow = `<div class="gantt-header-row"><div class="gantt-label-col">Session</div><div class="gantt-time-headers" style="width:${chartWidth}px">${timeHeaders}</div></div>`;
+
+      let rows = '';
+      const renderRow = (s) => {
+        const left = ((s.start - minT) / span) * chartWidth;
+        const width = Math.max(4, ((s.end - s.start) / span) * chartWidth);
+        const statusCls = ['active', 'completed', 'error'].includes(s.status) ? `status-${s.status}` : 'status-default';
+        const label = s.agent.length > 22 ? s.agent.slice(0, 20) + '…' : s.agent;
+        const statusDot = s.status === 'active' ? '🟢' : s.status === 'error' ? '🔴' : '🔵';
+        rows += `
+          <div class="gantt-row">
+            <div class="gantt-row-label" title="${esc(s.agent)} (${s.id})">${statusDot} ${esc(label)}</div>
+            <div class="gantt-row-chart" style="width:${chartWidth}px">
+              <div class="gantt-bar ${statusCls}" style="left:${left}px;width:${width}px"
+                onmouseenter="showTooltip(event, '${esc(s.id)}')"
+                onmousemove="moveTooltip(event)"
+                onmouseleave="hideTooltip()"
+                data-sid="${esc(s.id)}">${fmtDuration(s.duration)}</div>
+            </div>
+          </div>`;
+      };
+
+      if (groups) {
+        for (const [groupName, items] of Object.entries(groups)) {
+          rows += `<div class="gantt-row" style="background:var(--bg-tertiary)"><div class="gantt-row-label" style="font-weight:700;color:var(--accent);background:var(--bg-tertiary)">▸ ${esc(groupName)} (${items.length})</div><div class="gantt-row-chart" style="width:${chartWidth}px"></div></div>`;
+          items.forEach(renderRow);
+        }
+      } else {
+        filteredSessions.forEach(renderRow);
+      }
+
+      chart.innerHTML = headerRow + rows;
+    }
+
+    /* ── Concurrency Chart ─────────────────────────────────────── */
+    function renderConcurrency() {
+      const canvas = document.getElementById('concurrencyCanvas');
+      const ctx = canvas.getContext('2d');
+      const rect = canvas.parentElement.getBoundingClientRect();
+      canvas.width = rect.width - 40;
+      canvas.height = 160;
+
+      if (!filteredSessions.length) return;
+
+      const minT = Math.min(...filteredSessions.map(s => s.start));
+      const maxT = Math.max(...filteredSessions.map(s => s.end));
+      const span = maxT - minT || 1;
+      const buckets = Math.min(200, Math.max(50, Math.floor(canvas.width / 4)));
+      const counts = new Array(buckets).fill(0);
+
+      filteredSessions.forEach(s => {
+        const bi = Math.floor(((s.start - minT) / span) * (buckets - 1));
+        const ei = Math.floor(((s.end - minT) / span) * (buckets - 1));
+        for (let i = bi; i <= ei; i++) counts[i]++;
+      });
+
+      const maxC = Math.max(...counts, 1);
+      const w = canvas.width / buckets;
+      const h = canvas.height - 20;
+
+      // Background grid
+      const cs = getComputedStyle(document.documentElement);
+      ctx.strokeStyle = cs.getPropertyValue('--border').trim() || '#30363d';
+      ctx.lineWidth = 0.5;
+      for (let i = 1; i <= 4; i++) {
+        const y = h - (h * i / 4);
+        ctx.beginPath(); ctx.moveTo(0, y); ctx.lineTo(canvas.width, y); ctx.stroke();
+      }
+
+      // Bars
+      const gradient = ctx.createLinearGradient(0, 0, 0, h);
+      gradient.addColorStop(0, cs.getPropertyValue('--accent').trim() || '#58a6ff');
+      gradient.addColorStop(1, (cs.getPropertyValue('--accent').trim() || '#58a6ff') + '33');
+      ctx.fillStyle = gradient;
+
+      for (let i = 0; i < buckets; i++) {
+        const barH = (counts[i] / maxC) * h;
+        ctx.fillRect(i * w, h - barH, Math.max(1, w - 1), barH);
+      }
+
+      // Y-axis labels
+      ctx.fillStyle = cs.getPropertyValue('--text-muted').trim() || '#6e7681';
+      ctx.font = '10px sans-serif';
+      ctx.textAlign = 'right';
+      for (let i = 0; i <= 4; i++) {
+        const val = Math.round(maxC * i / 4);
+        ctx.fillText(val, canvas.width - 4, h - (h * i / 4) + 4);
+      }
+
+      // X-axis time labels
+      ctx.textAlign = 'center';
+      for (let i = 0; i <= 4; i++) {
+        const t = new Date(minT + span * i / 4);
+        ctx.fillText(fmtTime(t), (canvas.width * i / 4), h + 14);
+      }
+    }
+
+    /* ── Tooltip ───────────────────────────────────────────────── */
+    function showTooltip(event, sid) {
+      const s = filteredSessions.find(x => x.id === sid) || allSessions.find(x => x.id === sid);
+      if (!s) return;
+      const tt = document.getElementById('ganttTooltip');
+      tt.innerHTML = `
+        <div class="tt-title">${esc(s.agent)}</div>
+        <div class="tt-row"><span class="tt-label">Session</span><span class="tt-value">${esc(s.id)}</span></div>
+        <div class="tt-row"><span class="tt-label">Status</span><span class="tt-value">${s.status}</span></div>
+        <div class="tt-row"><span class="tt-label">Start</span><span class="tt-value">${new Date(s.start).toLocaleString()}</span></div>
+        <div class="tt-row"><span class="tt-label">Duration</span><span class="tt-value">${fmtDuration(s.duration)}</span></div>
+        <div class="tt-row"><span class="tt-label">Tokens</span><span class="tt-value">${fmtNum(s.tokensIn)} in / ${fmtNum(s.tokensOut)} out</span></div>
+        <div class="tt-row"><span class="tt-label">Events</span><span class="tt-value">${s.events}</span></div>
+        <div class="tt-row"><span class="tt-label">Model</span><span class="tt-value">${esc(s.model || '—')}</span></div>
+        <div class="tt-row"><span class="tt-label">Cost</span><span class="tt-value">$${s.cost.toFixed(4)}</span></div>
+      `;
+      tt.style.display = 'block';
+      moveTooltip(event);
+    }
+
+    function moveTooltip(event) {
+      const tt = document.getElementById('ganttTooltip');
+      const x = event.clientX + 12;
+      const y = event.clientY + 12;
+      tt.style.left = (x + tt.offsetWidth > window.innerWidth ? event.clientX - tt.offsetWidth - 8 : x) + 'px';
+      tt.style.top = (y + tt.offsetHeight > window.innerHeight ? event.clientY - tt.offsetHeight - 8 : y) + 'px';
+    }
+
+    function hideTooltip() { document.getElementById('ganttTooltip').style.display = 'none'; }
+
+    /* ── Export ─────────────────────────────────────────────────── */
+    function exportTimelineJSON() {
+      const blob = new Blob([JSON.stringify(filteredSessions, null, 2)], { type: 'application/json' });
+      downloadBlob(blob, 'agentlens-timeline.json');
+    }
+
+    function exportTimelineSVG() {
+      const el = document.getElementById('ganttChart');
+      const svg = `<svg xmlns="http://www.w3.org/2000/svg" width="${el.scrollWidth}" height="${el.scrollHeight}">
+        <foreignObject width="100%" height="100%"><body xmlns="http://www.w3.org/1999/xhtml" style="margin:0;background:#0d1117;color:#e6edf3;font-family:sans-serif">${el.innerHTML}</body></foreignObject></svg>`;
+      downloadBlob(new Blob([svg], { type: 'image/svg+xml' }), 'agentlens-timeline.svg');
+    }
+
+    function downloadBlob(blob, name) {
+      const a = document.createElement('a');
+      a.href = URL.createObjectURL(blob);
+      a.download = name;
+      a.click();
+      URL.revokeObjectURL(a.href);
+    }
+
+    /* ── Helpers ────────────────────────────────────────────────── */
+    function fmtDuration(ms) {
+      if (ms < 1000) return ms + 'ms';
+      if (ms < 60000) return (ms / 1000).toFixed(1) + 's';
+      if (ms < 3600000) return (ms / 60000).toFixed(1) + 'm';
+      return (ms / 3600000).toFixed(1) + 'h';
+    }
+
+    function fmtNum(n) {
+      if (n >= 1e6) return (n / 1e6).toFixed(1) + 'M';
+      if (n >= 1e3) return (n / 1e3).toFixed(1) + 'K';
+      return n.toString();
+    }
+
+    function fmtTime(d) {
+      const diff = Date.now() - d.getTime();
+      if (diff > 86400000 * 2) return d.toLocaleDateString(undefined, { month: 'short', day: 'numeric' });
+      return d.toLocaleTimeString(undefined, { hour: '2-digit', minute: '2-digit' });
+    }
+
+    function esc(s) { return (s || '').replace(/&/g,'&amp;').replace(/</g,'&lt;').replace(/>/g,'&gt;').replace(/"/g,'&quot;').replace(/'/g,'&#39;'); }
+
+    window.addEventListener('resize', () => { if (document.getElementById('showConcurrency').checked) renderConcurrency(); });
+  </script>
+</body>
+</html>
