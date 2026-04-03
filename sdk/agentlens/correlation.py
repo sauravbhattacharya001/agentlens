@@ -601,6 +601,7 @@ class SessionCorrelator:
             current = 0
             active_sessions: Dict[str, int] = defaultdict(int)
             window_start: Optional[datetime] = None
+            peak_sessions: Set[str] = set()
 
             for ts, delta, sid in sweep:
                 if delta == 1:
@@ -608,6 +609,9 @@ class SessionCorrelator:
                     current += 1
                     if current >= self.contention_threshold and window_start is None:
                         window_start = ts
+                    if current >= self.contention_threshold:
+                        # Snapshot active sessions at each new peak or same level
+                        peak_sessions = set(active_sessions.keys())
                 else:
                     active_sessions[sid] -= 1
                     if active_sessions[sid] == 0:
@@ -621,17 +625,13 @@ class SessionCorrelator:
 
                     # Emit contention when we drop below threshold
                     if current < self.contention_threshold and window_start is not None:
-                        peak = current + 1  # count before this decrement
                         key = (resource, round(window_start.timestamp(), 1))
                         if key not in seen:
                             seen.add(key)
-                            # Collect sessions that were active during peak
-                            # Re-scan intervals for sessions overlapping window
                             window_end = ts
-                            involved: Set[str] = set()
-                            for s, e, s_sid in intervals:
-                                if s < window_end and e > window_start:
-                                    involved.add(s_sid)
+                            # Use the peak_sessions snapshot captured at peak
+                            # instead of re-scanning all intervals O(n).
+                            involved = peak_sessions.copy()
                             contentions.append(ResourceContention(
                                 resource_name=resource,
                                 resource_type=rtype,
@@ -649,11 +649,8 @@ class SessionCorrelator:
                 key = (resource, round(window_start.timestamp(), 1))
                 if key not in seen:
                     seen.add(key)
-                    involved_final: Set[str] = set()
                     last_ts = sweep[-1][0] if sweep else window_start
-                    for s, e, s_sid in intervals:
-                        if s < last_ts and e > window_start:
-                            involved_final.add(s_sid)
+                    involved_final = peak_sessions.copy()
                     contentions.append(ResourceContention(
                         resource_name=resource,
                         resource_type=rtype,
@@ -695,11 +692,17 @@ class SessionCorrelator:
         Looks for sessions that share resources and where an error in one
         session is followed by an error in another within the propagation
         window.
-        """
-        propagations: List[ErrorPropagation] = []
-        error_events: Dict[str, list] = {}
 
-        # Collect error events per session
+        Uses sorted timestamps + bisect for O(E·log E) per session pair
+        instead of the previous O(E_src × E_tgt) brute-force.
+        """
+        import bisect
+
+        propagations: List[ErrorPropagation] = []
+        # Collect error timestamps per session, pre-sorted
+        error_timestamps: Dict[str, List[datetime]] = {}
+        error_events_raw: Dict[str, list] = {}
+
         for session in self._sessions:
             sid = getattr(session, "session_id", "")
             errors = []
@@ -707,11 +710,16 @@ class SessionCorrelator:
                 if "error" in getattr(e, "event_type", "").lower():
                     errors.append(e)
             if errors:
-                error_events[sid] = errors
+                error_events_raw[sid] = errors
+                timestamps = sorted(
+                    getattr(e, "timestamp", datetime.now(timezone.utc))
+                    for e in errors
+                )
+                error_timestamps[sid] = timestamps
 
-        # Check all pairs
-        sids = list(error_events.keys())
-        window = timedelta(milliseconds=self.error_propagation_window_ms)
+        sids = list(error_timestamps.keys())
+        window_ms = self.error_propagation_window_ms
+        window_td = timedelta(milliseconds=window_ms)
 
         for i in range(len(sids)):
             for j in range(len(sids)):
@@ -719,30 +727,31 @@ class SessionCorrelator:
                     continue
                 src = sids[i]
                 tgt = sids[j]
-                # Find shared resources between these sessions
                 shared = self._shared_resources_between(src, tgt)
                 if not shared:
                     continue
 
-                for src_err in error_events[src]:
-                    src_ts = getattr(src_err, "timestamp", datetime.now(timezone.utc))
-                    for tgt_err in error_events[tgt]:
-                        tgt_ts = getattr(tgt_err, "timestamp", datetime.now(timezone.utc))
-                        delay = tgt_ts - src_ts
-                        if timedelta(0) < delay <= window:
-                            delay_ms = delay.total_seconds() * 1000
-                            # Confidence: inversely proportional to delay
-                            confidence = max(0.1, 1.0 - (delay_ms / self.error_propagation_window_ms))
-                            propagations.append(ErrorPropagation(
-                                source_session=src,
-                                target_session=tgt,
-                                source_error_time=src_ts,
-                                target_error_time=tgt_ts,
-                                delay_ms=delay_ms,
-                                direction=PropagationDirection.FORWARD,
-                                shared_resources=shared,
-                                confidence=confidence,
-                            ))
+                tgt_ts_list = error_timestamps[tgt]
+
+                for src_ts in error_timestamps[src]:
+                    # Binary search for target errors in (src_ts, src_ts + window]
+                    lo = bisect.bisect_right(tgt_ts_list, src_ts)
+                    hi = bisect.bisect_right(tgt_ts_list, src_ts + window_td)
+
+                    for k in range(lo, hi):
+                        tgt_ts = tgt_ts_list[k]
+                        delay_ms = (tgt_ts - src_ts).total_seconds() * 1000
+                        confidence = max(0.1, 1.0 - (delay_ms / window_ms))
+                        propagations.append(ErrorPropagation(
+                            source_session=src,
+                            target_session=tgt,
+                            source_error_time=src_ts,
+                            target_error_time=tgt_ts,
+                            delay_ms=delay_ms,
+                            direction=PropagationDirection.FORWARD,
+                            shared_resources=shared,
+                            confidence=confidence,
+                        ))
 
         # Deduplicate: keep highest confidence per session pair
         best: Dict[Tuple[str, str], ErrorPropagation] = {}
