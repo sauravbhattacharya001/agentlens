@@ -213,7 +213,9 @@ router.get("/search", wrapRoute("search sessions", (req, res) => {
     // Full-text search across agent_name and metadata
     const q = req.query.q;
     if (q) {
-      const terms = q.trim().split(/\s+/).filter(Boolean);
+      // Cap at 10 terms to prevent parameter overflow and excessive
+      // query complexity (each term adds 2 LIKE parameters).
+      const terms = q.trim().split(/\s+/).filter(Boolean).slice(0, 10);
       for (const term of terms) {
         const escaped = escapeLikeWildcards(term);
         conditions.push("(s.agent_name LIKE ? ESCAPE '\\' OR s.metadata LIKE ? ESCAPE '\\')");
@@ -260,10 +262,12 @@ router.get("/search", wrapRoute("search sessions", (req, res) => {
     }
 
     // Tag filter (comma-separated, sessions must have ALL specified tags)
+    // Cap at 20 tags to prevent SQLite variable-count overflow (limit ~999)
+    // and excessive query complexity from unbounded user input.
     const tagFilter = req.query.tags;
     let tagJoin = "";
     if (tagFilter) {
-      const tags = tagFilter.split(",").map(t => t.trim()).filter(Boolean);
+      const tags = tagFilter.split(",").map(t => t.trim()).filter(Boolean).slice(0, 20);
       if (tags.length > 0) {
         tagJoin = `INNER JOIN (
           SELECT session_id FROM session_tags
@@ -611,9 +615,11 @@ router.get("/:id/events/search", requireSessionId, wrapRoute("search events", (r
     const params = [id];
 
     // Filter by event type (comma-separated, pushed to SQL via IN)
+    // Cap at 20 values to prevent SQLite parameter overflow from
+    // unbounded user input (SQLite limit is ~999 variables per query).
     const typeFilter = req.query.type;
     if (typeFilter) {
-      const types = typeFilter.split(",").map((t) => t.trim()).filter(Boolean);
+      const types = typeFilter.split(",").map((t) => t.trim()).filter(Boolean).slice(0, 20);
       if (types.length > 0) {
         conditions.push(`LOWER(event_type) IN (${types.map(() => "LOWER(?)").join(",")})`);
         params.push(...types);
@@ -621,9 +627,10 @@ router.get("/:id/events/search", requireSessionId, wrapRoute("search events", (r
     }
 
     // Filter by model (comma-separated, substring match via LIKE)
+    // Cap at 20 values to prevent SQLite parameter overflow.
     const modelFilter = req.query.model;
     if (modelFilter) {
-      const models = modelFilter.split(",").map((m) => m.trim()).filter(Boolean);
+      const models = modelFilter.split(",").map((m) => m.trim()).filter(Boolean).slice(0, 20);
       if (models.length > 0) {
         const modelClauses = models.map(() => "LOWER(model) LIKE ? ESCAPE '\\'");
         conditions.push(`model IS NOT NULL AND (${modelClauses.join(" OR ")})`);
@@ -689,7 +696,10 @@ router.get("/:id/events/search", requireSessionId, wrapRoute("search events", (r
     // ── Full-text search — push to SQL via LIKE when possible ─────
     const q = req.query.q;
     if (q) {
-      const searchTerms = q.split(/\s+/).filter(Boolean);
+      // Cap at 10 search terms — each term adds 6 LIKE clauses with
+      // bound parameters.  Unbounded input could exceed SQLite's ~999
+      // variable limit or cause excessive query complexity.
+      const searchTerms = q.split(/\s+/).filter(Boolean).slice(0, 10);
       for (const term of searchTerms) {
         const likeTerm = `%${escapeLikeWildcards(term)}%`;
         conditions.push(
