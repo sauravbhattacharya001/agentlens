@@ -4,6 +4,7 @@ const express = require("express");
 const crypto = require("crypto");
 const router = express.Router();
 const { getDb } = require("../db");
+const { isValidSessionId } = require("../lib/validation");
 const { parsePagination, wrapRoute } = require("../lib/request-helpers");
 
 // ── Schema initialisation ───────────────────────────────────────────
@@ -71,6 +72,25 @@ function validateAnnotation(body) {
 
   return errors;
 }
+
+const ANNOTATION_ID_RE = /^ann-[a-zA-Z0-9][a-zA-Z0-9-]{0,63}$/;
+
+// ── Path parameter validation ───────────────────────────────────────
+// Reject malformed IDs early to prevent log pollution and ensure
+// consistent behaviour with other route modules (webhooks, alerts).
+router.param("id", (req, res, next, val) => {
+  if (!isValidSessionId(val)) {
+    return res.status(400).json({ error: "Invalid session ID format" });
+  }
+  next();
+});
+
+router.param("annId", (req, res, next, val) => {
+  if (!val || typeof val !== "string" || !ANNOTATION_ID_RE.test(val)) {
+    return res.status(400).json({ error: "Invalid annotation ID format" });
+  }
+  next();
+});
 
 // ── POST /sessions/:id/annotations — add annotation ─────────────────
 

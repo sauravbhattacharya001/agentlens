@@ -152,11 +152,11 @@ function renderSessionInfo(session) {
     </div>
     <div class="info-card">
       <div class="label">Models</div>
-      <div class="value" style="font-size:0.85rem">${modelsUsed.join(", ") || "—"}</div>
+      <div class="value" style="font-size:0.85rem">${modelsUsed.map(m => escHtml(m)).join(", ") || "—"}</div>
     </div>
     <div class="info-card">
       <div class="label">Session ID</div>
-      <div class="value" style="font-size:0.75rem;word-break:break-all">${session.session_id}</div>
+      <div class="value" style="font-size:0.75rem;word-break:break-all">${escHtml(session.session_id)}</div>
     </div>
   `;
 }
