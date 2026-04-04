@@ -230,6 +230,7 @@ class CapacityPlanner:
         self.max_error_threshold = max_error_threshold
         self.headroom_factor = headroom_factor
         self.max_samples = max_samples
+        self._invalidate_caches()
 
     @property
     def sample_count(self) -> int:
@@ -248,12 +249,16 @@ class CapacityPlanner:
             self.add_sample(s)
 
     def clear(self) -> None:
-        """Remove all samples."""
+        """Remove all samples and invalidate caches."""
         self._samples.clear()
-        self._sorted_cache = None
-        self._sorted_cache_key = -1
-        self._ts_cache = None
-        self._ts_cache_key = -1
+        self._invalidate_caches()
+
+    def _invalidate_caches(self) -> None:
+        """Reset all internal caches."""
+        self._sorted_cache: Optional[List[WorkloadSample]] = None
+        self._sorted_cache_key: int = -1
+        self._ts_cache: Optional[List[datetime]] = None
+        self._ts_cache_key: int = -1
 
     def _sorted_samples(self) -> List[WorkloadSample]:
         """Return samples sorted by timestamp, with caching.
@@ -421,85 +426,11 @@ class CapacityPlanner:
 
     def detect_bottlenecks(self) -> List[Bottleneck]:
         """Identify current and emerging capacity bottlenecks."""
-        bottlenecks: List[Bottleneck] = []
         if not self._samples:
-            return bottlenecks
-
-        cur = self.current_utilization()
-        trends = self.compute_trends()
-        ss = self._sorted_samples()
-
-        # CPU bottleneck
-        cpu = cur["cpu"]
-        if cpu >= self.max_cpu_threshold:
-            severity = BottleneckSeverity.CRITICAL if cpu >= 0.95 else BottleneckSeverity.HIGH
-            sat_hours = None
-            bottlenecks.append(Bottleneck(
-                resource=ResourceKind.COMPUTE,
-                severity=severity,
-                current_utilization=cpu,
-                projected_saturation_hours=sat_hours,
-                description=f"CPU at {cpu:.0%} (threshold {self.max_cpu_threshold:.0%})",
-                recommendation="Scale out compute or optimize hot paths",
-            ))
-        elif trends.get("cpu") == TrendDirection.RISING and cpu > 0.5:
-            # Project when CPU hits threshold
-            cpu_vals = [s.cpu_utilization for s in ss]
-            _, slope = self._compute_trend(cpu_vals)
-            obs_hours = self._observation_hours()
-            samples_per_hour = len(ss) / max(obs_hours, 1) if obs_hours > 0 else 1
-            if slope > 0:
-                remaining = (self.max_cpu_threshold - cpu) / (slope * samples_per_hour)
-                bottlenecks.append(Bottleneck(
-                    resource=ResourceKind.COMPUTE,
-                    severity=BottleneckSeverity.MEDIUM,
-                    current_utilization=cpu,
-                    projected_saturation_hours=round(remaining, 1),
-                    description=f"CPU trending up at {cpu:.0%}, projected to hit {self.max_cpu_threshold:.0%} in {remaining:.0f}h",
-                    recommendation="Plan compute scaling within projection window",
-                ))
-
-        # Memory bottleneck
-        mem = cur["memory"]
-        if mem >= self.max_memory_threshold:
-            severity = BottleneckSeverity.CRITICAL if mem >= 0.95 else BottleneckSeverity.HIGH
-            bottlenecks.append(Bottleneck(
-                resource=ResourceKind.MEMORY,
-                severity=severity,
-                current_utilization=mem,
-                projected_saturation_hours=None,
-                description=f"Memory at {mem:.0%} (threshold {self.max_memory_threshold:.0%})",
-                recommendation="Increase memory or reduce session cache sizes",
-            ))
-
-        # Error rate bottleneck
-        err = cur["error_rate"]
-        if err >= self.max_error_threshold:
-            severity = BottleneckSeverity.HIGH if err >= 0.10 else BottleneckSeverity.MEDIUM
-            bottlenecks.append(Bottleneck(
-                resource=ResourceKind.API_RATE,
-                severity=severity,
-                current_utilization=err,
-                projected_saturation_hours=None,
-                description=f"Error rate at {err:.1%} (threshold {self.max_error_threshold:.0%})",
-                recommendation="Check rate limits, add retry logic, or reduce request volume",
-            ))
-
-        # Concurrency / session pressure
-        peak = self.peak_utilization()
-        if peak["sessions"] > 0:
-            session_ratio = cur["sessions"] / peak["sessions"]
-            if session_ratio > 0.9 and trends.get("sessions") == TrendDirection.RISING:
-                bottlenecks.append(Bottleneck(
-                    resource=ResourceKind.CONCURRENCY,
-                    severity=BottleneckSeverity.MEDIUM,
-                    current_utilization=session_ratio,
-                    projected_saturation_hours=None,
-                    description=f"Active sessions at {session_ratio:.0%} of historical peak ({cur['sessions']:.0f}/{peak['sessions']:.0f})",
-                    recommendation="Prepare for session scaling or implement queue-based admission",
-                ))
-
-        return bottlenecks
+            return []
+        return self._detect_bottlenecks_with(
+            self.current_utilization(), self.compute_trends(),
+        )
 
     def size_resources(
         self,
@@ -560,67 +491,12 @@ class CapacityPlanner:
 
     def scaling_recommendations(self) -> List[ScalingRecommendation]:
         """Generate scaling recommendations based on current state."""
-        recs: List[ScalingRecommendation] = []
         if not self._samples:
-            return recs
-
+            return []
         cur = self.current_utilization()
         trends = self.compute_trends()
-        bottlenecks = self.detect_bottlenecks()
-
-        # Critical bottleneck → urgent action
-        for b in bottlenecks:
-            if b.severity == BottleneckSeverity.CRITICAL:
-                recs.append(ScalingRecommendation(
-                    action=ScalingAction.URGENT,
-                    resource=b.resource,
-                    urgency_hours=1,
-                    rationale=b.description,
-                    estimated_impact="Prevent service degradation or outage",
-                ))
-
-        # Rising CPU trend
-        if trends.get("cpu") == TrendDirection.RISING and cur["cpu"] > 0.6:
-            recs.append(ScalingRecommendation(
-                action=ScalingAction.SCALE_OUT,
-                resource=ResourceKind.COMPUTE,
-                urgency_hours=24 if cur["cpu"] > 0.7 else 72,
-                rationale=f"CPU at {cur['cpu']:.0%} and rising",
-                estimated_impact="Maintain response times as load increases",
-            ))
-
-        # Falling utilization → scale down
-        if (trends.get("cpu") == TrendDirection.FALLING
-                and trends.get("rpm") == TrendDirection.FALLING
-                and cur["cpu"] < 0.3):
-            recs.append(ScalingRecommendation(
-                action=ScalingAction.SCALE_DOWN,
-                resource=ResourceKind.COMPUTE,
-                urgency_hours=None,
-                rationale=f"CPU at {cur['cpu']:.0%} with falling demand",
-                estimated_impact="Reduce infrastructure costs",
-            ))
-
-        # High error rate → optimize
-        if cur["error_rate"] > self.max_error_threshold:
-            recs.append(ScalingRecommendation(
-                action=ScalingAction.OPTIMIZE,
-                resource=ResourceKind.API_RATE,
-                urgency_hours=12,
-                rationale=f"Error rate at {cur['error_rate']:.1%}",
-                estimated_impact="Improve reliability and reduce wasted tokens",
-            ))
-
-        if not recs:
-            recs.append(ScalingRecommendation(
-                action=ScalingAction.NONE,
-                resource=ResourceKind.COMPUTE,
-                urgency_hours=None,
-                rationale="All metrics within acceptable ranges",
-                estimated_impact="No action needed",
-            ))
-
-        return recs
+        bottlenecks = self._detect_bottlenecks_with(cur, trends)
+        return self._scaling_recommendations_with(cur, trends, bottlenecks)
 
     def headroom_score(self) -> float:
         """Calculate overall headroom score (0-100).
@@ -629,23 +505,7 @@ class CapacityPlanner:
         """
         if not self._samples:
             return 100.0
-
-        cur = self.current_utilization()
-        cpu_headroom = 1.0 - cur["cpu"]
-        mem_headroom = 1.0 - cur["memory"]
-        err_headroom = (
-            1.0 - (cur["error_rate"] / self.max_error_threshold)
-            if self.max_error_threshold > 0
-            else 0.0
-        )
-
-        # Weighted average
-        score = (
-            cpu_headroom * 40
-            + mem_headroom * 30
-            + max(0, err_headroom) * 30
-        )
-        return round(max(0, min(100, score)), 1)
+        return self._headroom_score_with(self.current_utilization())
 
     def report(self) -> CapacityReport:
         """Generate a comprehensive capacity planning report.
