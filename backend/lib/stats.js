@@ -29,13 +29,16 @@ function percentile(sorted, p) {
  * Compute a full latency statistics object from sorted durations.
  *
  * @param {number[]} sortedDurations — Duration values sorted ascending.
+ * @param {number}   [precomputedSum] — If the caller already has the sum
+ *   (e.g. from a SQL SUM()), pass it here to skip the O(n) reduce.
  * @returns {{ p50: number, p75: number, p90: number, p95: number, p99: number,
  *             avg: number, min: number, max: number } | null}
  *   Rounded to 2 decimal places. Returns null if the array is empty.
  */
-function latencyStats(sortedDurations) {
+function latencyStats(sortedDurations, precomputedSum) {
   if (sortedDurations.length === 0) return null;
-  const total = sortedDurations.reduce((a, b) => a + b, 0);
+  const total = typeof precomputedSum === "number" ? precomputedSum
+    : sortedDurations.reduce((a, b) => a + b, 0);
   return {
     p50: round2(percentile(sortedDurations, 50)),
     p75: round2(percentile(sortedDurations, 75)),

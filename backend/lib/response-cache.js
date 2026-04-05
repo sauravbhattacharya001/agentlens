@@ -233,6 +233,24 @@ function cacheMiddleware(cache, options) {
   var routeTtl = options.ttlMs;
   var invPrefix = options.invalidatePrefix;
 
+  // Micro-cache for API key → hash-prefix mapping.
+  // Avoids re-computing SHA-256 on every GET request for the same key.
+  // Most deployments use 1-3 keys, so a small Map suffices.
+  var keyHashCache = new Map();
+  var KEY_HASH_CACHE_MAX = 16;
+
+  function apiKeyHashPrefix(apiKey) {
+    var cached = keyHashCache.get(apiKey);
+    if (cached) return cached;
+    var hash = crypto.createHash("sha256").update(String(apiKey)).digest("hex").slice(0, 16);
+    if (keyHashCache.size >= KEY_HASH_CACHE_MAX) {
+      var oldest = keyHashCache.keys().next().value;
+      keyHashCache.delete(oldest);
+    }
+    keyHashCache.set(apiKey, hash);
+    return hash;
+  }
+
   return function (req, res, next) {
     // Only cache GET requests
     if (req.method !== "GET") {
@@ -256,7 +274,7 @@ function cacheMiddleware(cache, options) {
     var apiKey = req.headers && req.headers["x-api-key"];
     var keySuffix;
     if (apiKey) {
-      keySuffix = "|k:" + crypto.createHash("sha256").update(String(apiKey)).digest("hex").slice(0, 16);
+      keySuffix = "|k:" + apiKeyHashPrefix(apiKey);
     } else {
       keySuffix = "|anon";
     }

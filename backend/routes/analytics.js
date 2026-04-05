@@ -331,7 +331,7 @@ router.get("/performance", isTest ? analyticsCacheMw : cacheMiddleware(analytics
       const groupDurs = modelDurMap[row.grp] || [];
       byModel[row.grp] = {
         count: row.cnt,
-        latency: latencyStats(groupDurs),
+        latency: latencyStats(groupDurs, row.total_dur),
         tokens: {
           total_in: row.tok_in,
           total_out: row.tok_out,
@@ -365,7 +365,7 @@ router.get("/performance", isTest ? analyticsCacheMw : cacheMiddleware(analytics
       period_days: days,
       filters: { agent: agentName || null, model: model || null },
       sample_size: g.cnt,
-      latency: latencyStats(durations),
+      latency: latencyStats(durations, g.total_dur),
       throughput: {
         total_events: g.cnt,
         total_tokens: totalTokens,
