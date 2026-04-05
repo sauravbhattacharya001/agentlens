@@ -1,0 +1,79 @@
+name: ⚡ Performance Issue
+description: Report a performance problem with AgentLens SDK, Backend, or Dashboard
+title: "[Perf]: "
+labels: ["performance", "triage"]
+body:
+  - type: markdown
+    attributes:
+      value: |
+        Performance matters, especially for an observability tool. Please provide as much detail as possible so we can profile and fix the bottleneck.
+
+  - type: dropdown
+    id: component
+    attributes:
+      label: Component
+      description: Which part of AgentLens is slow or resource-intensive?
+      options:
+        - Python SDK (tracing overhead)
+        - Backend API (ingestion / query latency)
+        - Dashboard (rendering / loading)
+        - Database (storage growth / query performance)
+        - Other
+    validations:
+      required: true
+
+  - type: textarea
+    id: description
+    attributes:
+      label: Performance Issue Description
+      description: Describe the performance problem. What operation is slow? What's the impact?
+      placeholder: |
+        Tracing a function with `@tracker.trace()` adds ~50ms overhead per call.
+        In a pipeline with 200 traced functions, this adds 10 seconds to each run.
+    validations:
+      required: true
+
+  - type: textarea
+    id: measurements
+    attributes:
+      label: Measurements
+      description: |
+        Provide concrete numbers — timing data, memory usage, CPU profiles, or before/after comparisons.
+      placeholder: |
+        - Without tracing: 2.3s per pipeline run
+        - With tracing: 12.1s per pipeline run
+        - Memory: RSS grows from 180MB to 1.2GB after 1000 events
+        - Backend P99 latency: 800ms for /api/events query with 50k records
+    validations:
+      required: true
+
+  - type: textarea
+    id: environment
+    attributes:
+      label: Environment & Scale
+      description: |
+        What's your setup? Number of events, agents, concurrency level, infrastructure specs.
+      placeholder: |
+        - AgentLens SDK version: 0.1.0
+        - Python version: 3.11
+        - Events per run: ~500
+        - Concurrent agents: 10
+        - Backend: single node, 4 vCPU, 8GB RAM
+        - Database: SQLite / PostgreSQL 16
+        - OS: Ubuntu 22.04
+    validations:
+      required: true
+
+  - type: textarea
+    id: profiling
+    attributes:
+      label: Profiling Data (optional)
+      description: |
+        Attach or paste profiling output — py-spy flamegraphs, cProfile output, Chrome DevTools Performance traces, slow query logs, etc.
+      render: shell
+
+  - type: textarea
+    id: context
+    attributes:
+      label: Additional Context
+      description: Workarounds you've tried, links to related issues, expected vs. acceptable performance targets.
