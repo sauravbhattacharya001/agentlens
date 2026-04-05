@@ -47,25 +47,55 @@ class GroupStats:
         self.name = name
         self.count = len(sessions)
 
-        self.total_tokens_in = sum(s.total_tokens_in for s in sessions)
-        self.total_tokens_out = sum(s.total_tokens_out for s in sessions)
-        self.total_events = sum(len(s.events) for s in sessions)
+        # Single pass over sessions to collect all scalar aggregates,
+        # durations, status counts, and distinct models.  The previous
+        # implementation made 7+ separate passes (one per metric/status)
+        # plus a nested loop for models — O(7·S + E) work.  This
+        # single-pass approach is O(S + E).
+        total_tokens_in = 0
+        total_tokens_out = 0
+        total_events = 0
+        durations: list[float] = []
+        completed = 0
+        errors = 0
+        active = 0
+        models: set[str] = set()
 
-        self.avg_tokens_in = self.total_tokens_in / self.count if self.count else 0.0
-        self.avg_tokens_out = self.total_tokens_out / self.count if self.count else 0.0
-        self.avg_events = self.total_events / self.count if self.count else 0.0
-
-        # Duration stats (only for sessions that have ended)
-        self.durations: list[float] = []
         for s in sessions:
-            if s.ended_at and s.started_at:
-                d = (s.ended_at - s.started_at).total_seconds() * 1000
-                self.durations.append(d)
+            total_tokens_in += s.total_tokens_in
+            total_tokens_out += s.total_tokens_out
+            total_events += len(s.events)
 
-        if self.durations:
-            self.avg_duration_ms = statistics.mean(self.durations)
-            self.median_duration_ms = statistics.median(self.durations)
-            sorted_d = sorted(self.durations)
+            if s.ended_at and s.started_at:
+                durations.append(
+                    (s.ended_at - s.started_at).total_seconds() * 1000
+                )
+
+            status = s.status
+            if status == "completed":
+                completed += 1
+            elif status == "error":
+                errors += 1
+            elif status == "active":
+                active += 1
+
+            for e in s.events:
+                if e.model:
+                    models.add(e.model)
+
+        self.total_tokens_in = total_tokens_in
+        self.total_tokens_out = total_tokens_out
+        self.total_events = total_events
+
+        self.avg_tokens_in = total_tokens_in / self.count if self.count else 0.0
+        self.avg_tokens_out = total_tokens_out / self.count if self.count else 0.0
+        self.avg_events = total_events / self.count if self.count else 0.0
+
+        self.durations = durations
+        if durations:
+            self.avg_duration_ms = statistics.mean(durations)
+            self.median_duration_ms = statistics.median(durations)
+            sorted_d = sorted(durations)
             idx = min(int(math.ceil(0.95 * len(sorted_d))) - 1, len(sorted_d) - 1)
             self.p95_duration_ms = sorted_d[max(idx, 0)]
             self.min_duration_ms = sorted_d[0]
@@ -77,18 +107,12 @@ class GroupStats:
             self.min_duration_ms = 0.0
             self.max_duration_ms = 0.0
 
-        self.completed_count = sum(1 for s in sessions if s.status == "completed")
-        self.error_count = sum(1 for s in sessions if s.status == "error")
-        self.active_count = sum(1 for s in sessions if s.status == "active")
-        self.completion_rate = self.completed_count / self.count if self.count else 0.0
-        self.error_rate = self.error_count / self.count if self.count else 0.0
+        self.completed_count = completed
+        self.error_count = errors
+        self.active_count = active
+        self.completion_rate = completed / self.count if self.count else 0.0
+        self.error_rate = errors / self.count if self.count else 0.0
 
-        # Distinct models
-        models: set[str] = set()
-        for s in sessions:
-            for e in s.events:
-                if e.model:
-                    models.add(e.model)
         self.models_used = sorted(models)
 
     def to_dict(self) -> dict[str, Any]:
