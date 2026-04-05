@@ -358,24 +358,62 @@ class CapacityPlanner:
             "sessions": max(s.active_sessions for s in self._samples),
         }
 
-    def compute_trends(self) -> Dict[str, TrendDirection]:
-        """Compute trends for key metrics."""
+    def _compute_all_trends(
+        self,
+    ) -> Dict[str, Tuple[TrendDirection, float, List[float]]]:
+        """Single-pass trend computation for all metrics.
+
+        Iterates over sorted samples once to extract all metric vectors,
+        then runs linear regression on each. Returns a dict mapping metric
+        name to (direction, slope, values). The values list is cached for
+        callers that need the raw data (e.g. project_workload).
+
+        This replaces 6+ separate list comprehensions that each scanned
+        the full sample list independently.
+        """
+        _ALL_KEYS = ("cpu", "memory", "rpm", "sessions", "error_rate", "latency")
         ss = self._sorted_samples()
         if len(ss) < 2:
-            return {k: TrendDirection.STABLE for k in ["cpu", "memory", "rpm", "sessions", "error_rate", "latency"]}
-        return {
-            "cpu": self._compute_trend([s.cpu_utilization for s in ss])[0],
-            "memory": self._compute_trend([s.memory_utilization for s in ss])[0],
-            "rpm": self._compute_trend([s.requests_per_minute for s in ss])[0],
-            "sessions": self._compute_trend([s.active_sessions for s in ss])[0],
-            "error_rate": self._compute_trend([s.error_rate for s in ss])[0],
-            "latency": self._compute_trend([s.avg_latency_ms for s in ss])[0],
+            return {
+                k: (TrendDirection.STABLE, 0.0, [])
+                for k in _ALL_KEYS
+            }
+        # Single pass: extract all metric vectors simultaneously
+        cpu_v: List[float] = []
+        mem_v: List[float] = []
+        rpm_v: List[float] = []
+        ses_v: List[float] = []
+        err_v: List[float] = []
+        lat_v: List[float] = []
+        for s in ss:
+            cpu_v.append(s.cpu_utilization)
+            mem_v.append(s.memory_utilization)
+            rpm_v.append(s.requests_per_minute)
+            ses_v.append(float(s.active_sessions))
+            err_v.append(s.error_rate)
+            lat_v.append(s.avg_latency_ms)
+        vectors = {
+            "cpu": cpu_v, "memory": mem_v, "rpm": rpm_v,
+            "sessions": ses_v, "error_rate": err_v, "latency": lat_v,
         }
+        result: Dict[str, Tuple[TrendDirection, float, List[float]]] = {}
+        for key in _ALL_KEYS:
+            vals = vectors[key]
+            direction, slope = self._compute_trend(vals)
+            result[key] = (direction, slope, vals)
+        return result
+
+    def compute_trends(self) -> Dict[str, TrendDirection]:
+        """Compute trends for key metrics."""
+        all_trends = self._compute_all_trends()
+        return {k: v[0] for k, v in all_trends.items()}
 
     def project_workload(self, horizon_hours: float = 24, steps: int = 6) -> List[WorkloadProjection]:
         """Project workload metrics into the future.
 
         Uses linear trend extrapolation with decaying confidence.
+        Reuses pre-computed trend data from _compute_all_trends() to
+        avoid redundant list extraction and regression calls.
         """
         ss = self._sorted_samples()
         if len(ss) < 2:
@@ -384,30 +422,31 @@ class CapacityPlanner:
         now = ss[-1].timestamp
         obs_hours = self._observation_hours()
 
-        rpm_vals = [s.requests_per_minute for s in ss]
-        ses_vals = [float(s.active_sessions) for s in ss]
-        tok_vals = [s.token_throughput for s in ss]
+        # Reuse trend data; rpm/sessions are already computed.
+        all_trends = self._compute_all_trends()
+        rpm_vals = all_trends["rpm"][2]
+        ses_vals = all_trends["sessions"][2]
+        rpm_slope = all_trends["rpm"][1]
+        ses_slope = all_trends["sessions"][1]
+        rpm_trend = all_trends["rpm"][0]
 
-        _, rpm_slope = self._compute_trend(rpm_vals)
-        _, ses_slope = self._compute_trend(ses_vals)
+        # Token throughput is not in the standard trend set; extract once.
+        tok_vals = [s.token_throughput for s in ss]
         _, tok_slope = self._compute_trend(tok_vals)
 
         cur_rpm = statistics.mean(rpm_vals[-3:]) if len(rpm_vals) >= 3 else rpm_vals[-1]
         cur_ses = statistics.mean(ses_vals[-3:]) if len(ses_vals) >= 3 else ses_vals[-1]
         cur_tok = statistics.mean(tok_vals[-3:]) if len(tok_vals) >= 3 else tok_vals[-1]
 
+        samples_per_hour = len(ss) / max(obs_hours, 1)
+
         projections: List[WorkloadProjection] = []
         for i in range(1, steps + 1):
             t = horizon_hours * i / steps
-            # Scale slope from per-sample to per-hour
-            samples_per_hour = len(ss) / max(obs_hours, 1)
             rpm_proj = max(0, cur_rpm + rpm_slope * samples_per_hour * t)
             ses_proj = max(0, cur_ses + ses_slope * samples_per_hour * t)
             tok_proj = max(0, cur_tok + tok_slope * samples_per_hour * t)
-            # Confidence decays with projection distance
             confidence = max(0.1, 1.0 - (t / horizon_hours) * 0.7)
-
-            overall_trend = self._compute_trend(rpm_vals)[0]
 
             projections.append(WorkloadProjection(
                 timestamp=now + timedelta(hours=t),
@@ -415,7 +454,7 @@ class CapacityPlanner:
                 projected_sessions=round(ses_proj, 1),
                 projected_tokens=round(tok_proj, 1),
                 confidence=round(confidence, 2),
-                trend=overall_trend,
+                trend=rpm_trend,
             ))
         return projections
 
