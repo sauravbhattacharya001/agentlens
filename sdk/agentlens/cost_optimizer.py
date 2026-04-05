@@ -49,6 +49,11 @@ def _new_id() -> str:
 
 
 class ModelTier(str, Enum):
+    """Capability and cost tier for LLM models.
+
+    Ordered from cheapest to most expensive:
+    ECONOMY < STANDARD < PREMIUM < FLAGSHIP.
+    """
     ECONOMY = "economy"
     STANDARD = "standard"
     PREMIUM = "premium"
@@ -62,6 +67,16 @@ _TIER_INDEX: dict[ModelTier, int] = {t: i for i, t in enumerate(_TIER_ORDER)}
 
 @dataclass
 class ModelInfo:
+    """Pricing and capability metadata for a single LLM model.
+
+    Attributes:
+        name: Model identifier (e.g. ``"gpt-4o"``).
+        tier: Capability/cost tier.
+        input_cost_per_1m: Cost per 1M input tokens (USD).
+        output_cost_per_1m: Cost per 1M output tokens (USD).
+        max_context: Maximum context window in tokens.
+        strengths: Task types this model excels at.
+    """
     name: str
     tier: ModelTier
     input_cost_per_1m: float
@@ -71,6 +86,7 @@ class ModelInfo:
 
     @property
     def avg_cost_per_1m(self) -> float:
+        """Average cost per 1M tokens (mean of input and output)."""
         return (self.input_cost_per_1m + self.output_cost_per_1m) / 2
 
 
@@ -97,6 +113,12 @@ MODEL_REGISTRY: dict[str, ModelInfo] = {
 
 
 class ComplexityLevel(str, Enum):
+    """Task complexity classification for model selection.
+
+    Maps to recommended model tiers:
+    TRIVIAL/LOW → ECONOMY, MEDIUM → STANDARD,
+    HIGH → PREMIUM, CRITICAL → FLAGSHIP.
+    """
     TRIVIAL = "trivial"
     LOW = "low"
     MEDIUM = "medium"
@@ -106,6 +128,15 @@ class ComplexityLevel(str, Enum):
 
 @dataclass
 class ComplexityAssessment:
+    """Result of analyzing a single event's task complexity.
+
+    Attributes:
+        level: Discrete complexity classification.
+        score: Continuous complexity score (0.0–1.0).
+        factors: Per-factor scores that contributed to the overall score.
+        recommended_tier: Cheapest model tier that should handle this task.
+        reasoning: Human-readable explanation of the assessment.
+    """
     level: ComplexityLevel
     score: float
     factors: dict[str, float] = field(default_factory=dict)
@@ -121,6 +152,22 @@ class Confidence(str, Enum):
 
 @dataclass
 class Recommendation:
+    """A single model downgrade recommendation for one event.
+
+    Attributes:
+        rec_id: Unique recommendation identifier.
+        event_id: ID of the event this applies to.
+        current_model: Model currently used.
+        recommended_model: Cheaper model suggested.
+        current_tier: Tier of the current model.
+        recommended_tier: Tier of the recommended model.
+        complexity: Complexity assessment that drove this recommendation.
+        estimated_savings_usd: Estimated cost savings in USD.
+        savings_pct: Savings as a percentage of current cost.
+        confidence: How confident we are this downgrade is safe.
+        reason: Human-readable justification.
+        risk: Human-readable risk assessment.
+    """
     rec_id: str = field(default_factory=_new_id)
     event_id: str = ""
     current_model: str = ""
@@ -136,11 +183,22 @@ class Recommendation:
 
     @property
     def is_downgrade(self) -> bool:
+        """True if the recommendation moves to a lower (cheaper) tier."""
         return _TIER_INDEX[self.recommended_tier] < _TIER_INDEX[self.current_tier]
 
 
 @dataclass
 class MigrationStep:
+    """One phase of a gradual model migration plan.
+
+    Attributes:
+        phase: Phase number (1 = highest confidence, do first).
+        description: Human-readable description of this phase.
+        models_to_change: Models to migrate away from.
+        target_model: Model(s) to migrate to.
+        estimated_savings_pct: Average savings percentage for this phase.
+        risk_level: Risk classification (low/medium/high).
+    """
     phase: int
     description: str
     models_to_change: list[str] = field(default_factory=list)
@@ -151,6 +209,11 @@ class MigrationStep:
 
 @dataclass
 class OptimizationReport:
+    """Complete cost optimization analysis for a set of events.
+
+    Contains per-event recommendations, aggregate savings estimates,
+    model usage distribution, and a phased migration plan.
+    """
     report_id: str = field(default_factory=_new_id)
     timestamp: datetime = field(default_factory=_utcnow)
     total_events: int = 0
@@ -167,10 +230,17 @@ class OptimizationReport:
 
     @property
     def has_savings(self) -> bool:
+        """True if the analysis found meaningful cost savings (> $0.001)."""
         return self.total_savings_usd > 0.001
 
 
 class ComplexityAnalyzer:
+    """Scores event complexity to determine the minimum model tier needed.
+
+    Uses a weighted multi-factor model considering output ratio, token
+    volume, tool usage, decision traces, and event type to produce a
+    0.0–1.0 complexity score mapped to a :class:`ModelTier`.
+    """
     FACTOR_WEIGHTS: dict[str, float] = {
         "output_ratio": 0.25, "token_volume": 0.20, "has_tool_call": 0.15,
         "has_decision": 0.20, "event_type": 0.20,
@@ -183,6 +253,15 @@ class ComplexityAnalyzer:
     }
 
     def assess(self, event: AgentEvent) -> ComplexityAssessment:
+        """Assess the complexity of a single agent event.
+
+        Args:
+            event: The agent event to analyze.
+
+        Returns:
+            A :class:`ComplexityAssessment` with score, level, and
+            recommended minimum model tier.
+        """
         factors: dict[str, float] = {}
         total = event.tokens_in + event.tokens_out
         factors["output_ratio"] = (min(event.tokens_out / max(event.tokens_in, 1), 2.0) / 2.0) if total > 0 else 0.0
@@ -242,9 +321,28 @@ class CostOptimizer:
         self._analyzer = ComplexityAnalyzer()
 
     def register_model(self, name: str, info: ModelInfo) -> None:
+        """Register a custom model for optimization analysis.
+
+        Args:
+            name: Model identifier.
+            info: Model pricing and capability metadata.
+        """
         self.models[name] = info
 
     def analyze(self, events: list[AgentEvent]) -> OptimizationReport:
+        """Analyze events and generate cost optimization recommendations.
+
+        Evaluates each event's complexity, checks if the model used is
+        overprovisioned, and recommends cheaper alternatives where the
+        savings exceed :attr:`min_savings_pct`.
+
+        Args:
+            events: List of agent events to analyze.
+
+        Returns:
+            An :class:`OptimizationReport` with per-event recommendations,
+            aggregate savings, and a phased migration plan.
+        """
         report = OptimizationReport(total_events=len(events))
         recs: list[Recommendation] = []
         current_total = optimized_total = 0.0
@@ -313,11 +411,21 @@ class CostOptimizer:
         return report
 
     def analyze_session_events(self, events: list[AgentEvent], session_id: str = "") -> OptimizationReport:
+        """Analyze events for a specific session.
+
+        Filters events by ``session_id`` (if provided) then delegates
+        to :meth:`analyze`.
+        """
         if session_id:
             events = [e for e in events if e.session_id == session_id]
         return self.analyze(events)
 
     def quick_estimate(self, events: list[AgentEvent]) -> dict[str, Any]:
+        """Fast savings estimate without full recommendation details.
+
+        Returns a dict with ``current_cost``, ``potential_savings``,
+        ``savings_pct``, ``overprovisioned_count``, and ``total_events``.
+        """
         current_cost = potential_savings = 0.0
         overprovisioned = 0
         for event in events:
@@ -341,6 +449,11 @@ class CostOptimizer:
                 "overprovisioned_count": overprovisioned, "total_events": len(events)}
 
     def suggest_model(self, event: AgentEvent) -> str | None:
+        """Suggest a cheaper model for a single event, or None if optimal.
+
+        Returns the recommended model name if a downgrade is warranted,
+        or ``None`` if the current model is already appropriate.
+        """
         if not event.model:
             return None
         mi = self.models.get(event.model)
