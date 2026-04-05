@@ -14,6 +14,7 @@
 
 const express = require("express");
 const { getDb } = require("../db");
+const { parseLimit, wrapRoute } = require("../lib/request-helpers");
 
 const router = express.Router();
 
@@ -79,6 +80,25 @@ function _setCachedBaselines(agentName, rows, baselines) {
   _baselineCache.set(key, { rows, baselines, ts: Date.now() });
 }
 
+// ── Shared dimension computation ───────────────────────────────────
+// Extracts z-score dimensions for a single row against baselines.
+// Used by both detectAnomalies() and the /session/:id endpoint,
+// eliminating duplicated inline z-score calculations.
+
+function computeDimensions(row, baselines) {
+  const tokens = row.total_tokens || 0;
+  const dur = row.duration_ms || 0;
+  const evts = row.event_count || 0;
+  const errs = row.error_count || 0;
+
+  return {
+    totalTokens: { value: tokens, zScore: +zScore(tokens, baselines.totalTokens.mean, baselines.totalTokens.stddev).toFixed(3) },
+    duration_ms: { value: dur, zScore: +zScore(dur, baselines.duration_ms.mean, baselines.duration_ms.stddev).toFixed(3) },
+    eventCount: { value: evts, zScore: +zScore(evts, baselines.eventCount.mean, baselines.eventCount.stddev).toFixed(3) },
+    errorCount: { value: errs, zScore: +zScore(errs, baselines.errorCount.mean, baselines.errorCount.stddev).toFixed(3) },
+  };
+}
+
 // ── Core detection ─────────────────────────────────────────────────
 
 function computeBaselines(db, agentName) {
@@ -132,21 +152,14 @@ function detectAnomalies(db, { threshold = 2, agentName, limit = 50 } = {}) {
   const anomalies = [];
 
   for (const row of rows) {
+    const allDims = computeDimensions(row, baselines);
+    // Filter to only dimensions exceeding the threshold
     const dimensions = {};
-    const tokens = row.total_tokens || 0;
-    const dur = row.duration_ms || 0;
-    const evts = row.event_count || 0;
-    const errs = row.error_count || 0;
-
-    const zTokens = zScore(tokens, baselines.totalTokens.mean, baselines.totalTokens.stddev);
-    const zDur = zScore(dur, baselines.duration_ms.mean, baselines.duration_ms.stddev);
-    const zEvents = zScore(evts, baselines.eventCount.mean, baselines.eventCount.stddev);
-    const zErrors = zScore(errs, baselines.errorCount.mean, baselines.errorCount.stddev);
-
-    if (Math.abs(zTokens) >= threshold) dimensions.totalTokens = { value: tokens, zScore: +zTokens.toFixed(3) };
-    if (Math.abs(zDur) >= threshold) dimensions.duration_ms = { value: dur, zScore: +zDur.toFixed(3) };
-    if (Math.abs(zEvents) >= threshold) dimensions.eventCount = { value: evts, zScore: +zEvents.toFixed(3) };
-    if (Math.abs(zErrors) >= threshold) dimensions.errorCount = { value: errs, zScore: +zErrors.toFixed(3) };
+    for (const [key, dim] of Object.entries(allDims)) {
+      if (Math.abs(dim.zScore) >= threshold) {
+        dimensions[key] = dim;
+      }
+    }
 
     if (Object.keys(dimensions).length > 0) {
       const maxAbsZ = Math.max(...Object.values(dimensions).map((d) => Math.abs(d.zScore)));
@@ -168,92 +181,61 @@ function detectAnomalies(db, { threshold = 2, agentName, limit = 50 } = {}) {
 
 // ── Routes ─────────────────────────────────────────────────────────
 
-router.get("/", (req, res) => {
-  try {
-    const db = getDb();
-    const threshold = parseFloat(req.query.threshold) || 2;
-    const agentName = req.query.agent || undefined;
-    const limit = parseInt(req.query.limit, 10) || 50;
+router.get("/", wrapRoute("detect anomalies", (req, res) => {
+  const db = getDb();
+  const threshold = parseFloat(req.query.threshold) || 2;
+  const agentName = req.query.agent || undefined;
+  const limit = parseLimit(req.query.limit, 50, 500);
 
-    const result = detectAnomalies(db, { threshold, agentName, limit });
-    res.json(result);
-  } catch (err) {
-    console.error("Anomaly detection error:", err);
-    res.status(500).json({ error: "Anomaly detection failed" });
+  const result = detectAnomalies(db, { threshold, agentName, limit });
+  res.json(result);
+}));
+
+router.get("/stats", wrapRoute("compute baseline stats", (req, res) => {
+  const db = getDb();
+  const agentName = req.query.agent || undefined;
+  const { baselines } = computeBaselines(db, agentName);
+  if (!baselines) return res.json({ baselines: null, message: "No sessions found" });
+  res.json({ baselines });
+}));
+
+router.get("/session/:id", wrapRoute("check session anomaly", (req, res) => {
+  const db = getDb();
+  const sessionId = req.params.id;
+  const agentName = req.query.agent || undefined;
+
+  const { rows, baselines } = computeBaselines(db, agentName);
+  if (!baselines || baselines.sampleSize < 3) {
+    return res.json({ anomaly: null, baselines, message: "Insufficient data" });
   }
-});
 
-router.get("/stats", (req, res) => {
-  try {
-    const db = getDb();
-    const agentName = req.query.agent || undefined;
-    const { baselines } = computeBaselines(db, agentName);
-    if (!baselines) return res.json({ baselines: null, message: "No sessions found" });
-    res.json({ baselines });
-  } catch (err) {
-    console.error("Baseline stats error:", err);
-    res.status(500).json({ error: "Failed to compute baselines" });
-  }
-});
+  const row = rows.find((r) => r.session_id === sessionId);
+  if (!row) return res.status(404).json({ error: "Session not found" });
 
-router.get("/session/:id", (req, res) => {
-  try {
-    const db = getDb();
-    const sessionId = req.params.id;
-    const agentName = req.query.agent || undefined;
+  const dimensions = computeDimensions(row, baselines);
+  const maxAbsZ = Math.max(...Object.values(dimensions).map((d) => Math.abs(d.zScore)));
 
-    const { rows, baselines } = computeBaselines(db, agentName);
-    if (!baselines || baselines.sampleSize < 3) {
-      return res.json({ anomaly: null, baselines, message: "Insufficient data" });
-    }
+  res.json({
+    session_id: sessionId,
+    agent_name: row.agent_name,
+    isAnomaly: maxAbsZ >= 2,
+    severity: classifySeverity(maxAbsZ),
+    maxZScore: +maxAbsZ.toFixed(3),
+    dimensions,
+    baselines,
+  });
+}));
 
-    const row = rows.find((r) => r.session_id === sessionId);
-    if (!row) return res.status(404).json({ error: "Session not found" });
+router.post("/scan", wrapRoute("scan for anomalies", (req, res) => {
+  const db = getDb();
+  const threshold = parseFloat(req.body?.threshold) || 2;
+  const agentName = req.body?.agent || undefined;
+  // Explicit scan should bypass cache for fresh results
+  _baselineCache.delete(_baselineCacheKey(agentName));
+  const limit = parseLimit(String(req.body?.limit || 100), 100, 500);
 
-    const tokens = row.total_tokens || 0;
-    const dur = row.duration_ms || 0;
-    const evts = row.event_count || 0;
-    const errs = row.error_count || 0;
-
-    const dimensions = {
-      totalTokens: { value: tokens, zScore: +zScore(tokens, baselines.totalTokens.mean, baselines.totalTokens.stddev).toFixed(3) },
-      duration_ms: { value: dur, zScore: +zScore(dur, baselines.duration_ms.mean, baselines.duration_ms.stddev).toFixed(3) },
-      eventCount: { value: evts, zScore: +zScore(evts, baselines.eventCount.mean, baselines.eventCount.stddev).toFixed(3) },
-      errorCount: { value: errs, zScore: +zScore(errs, baselines.errorCount.mean, baselines.errorCount.stddev).toFixed(3) },
-    };
-
-    const maxAbsZ = Math.max(...Object.values(dimensions).map((d) => Math.abs(d.zScore)));
-
-    res.json({
-      session_id: sessionId,
-      agent_name: row.agent_name,
-      isAnomaly: maxAbsZ >= 2,
-      severity: classifySeverity(maxAbsZ),
-      maxZScore: +maxAbsZ.toFixed(3),
-      dimensions,
-      baselines,
-    });
-  } catch (err) {
-    console.error("Session anomaly error:", err);
-    res.status(500).json({ error: "Session anomaly check failed" });
-  }
-});
-
-router.post("/scan", (req, res) => {
-  try {
-    const db = getDb();
-    const threshold = parseFloat(req.body?.threshold) || 2;
-    const agentName = req.body?.agent || undefined;
-    // Explicit scan should bypass cache for fresh results
-    _baselineCache.delete(_baselineCacheKey(agentName));
-    const limit = parseInt(req.body?.limit, 10) || 100;
-
-    const result = detectAnomalies(db, { threshold, agentName, limit });
-    res.json({ ...result, scannedAt: new Date().toISOString() });
-  } catch (err) {
-    console.error("Anomaly scan error:", err);
-    res.status(500).json({ error: "Anomaly scan failed" });
-  }
-});
+  const result = detectAnomalies(db, { threshold, agentName, limit });
+  res.json({ ...result, scannedAt: new Date().toISOString() });
+}));
 
 module.exports = router;
