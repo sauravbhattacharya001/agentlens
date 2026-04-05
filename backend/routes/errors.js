@@ -161,12 +161,16 @@ const getStatements = createLazyStatements((db) => ({
       ORDER BY hour ASC
     `),
 
-    // Mean time between errors (for MTBF calculation)
-    errorTimestamps: db.prepare(`
-      SELECT timestamp
+    // Mean time between errors — computed in SQL to avoid loading all
+    // timestamps into JS memory.  Returns the total span and error count
+    // so MTBF = span / (count - 1).
+    mtbfStats: db.prepare(`
+      SELECT
+        COUNT(*) AS error_count,
+        MIN(timestamp) AS first_ts,
+        MAX(timestamp) AS last_ts
       FROM events
       WHERE event_type IN ('error', 'tool_error', 'agent_error')
-      ORDER BY timestamp ASC
     `),
 }));
 
@@ -189,18 +193,17 @@ function extractErrorMessage(outputData, maxLen = 200) {
   return JSON.stringify(parsed).slice(0, maxLen);
 }
 
-// ── Helper: compute MTBF from sorted timestamps ─────────────────────
-function computeMtbf(timestamps) {
-  if (timestamps.length < 2) return null;
-  let totalGapMs = 0;
-  for (let i = 1; i < timestamps.length; i++) {
-    const prev = new Date(timestamps[i - 1]).getTime();
-    const curr = new Date(timestamps[i]).getTime();
-    if (!isNaN(prev) && !isNaN(curr)) {
-      totalGapMs += curr - prev;
-    }
-  }
-  const avgGapMs = totalGapMs / (timestamps.length - 1);
+// ── Helper: compute MTBF from pre-aggregated SQL stats ──────────────
+// Previous implementation loaded every error timestamp row into a JS
+// array and iterated to sum gaps — O(n) memory and O(n) compute.
+// Since gaps are contiguous, MTBF = (last - first) / (count - 1),
+// which SQL can answer with a single MIN/MAX/COUNT aggregate.
+function computeMtbf(mtbfRow) {
+  if (!mtbfRow || mtbfRow.error_count < 2) return null;
+  const first = new Date(mtbfRow.first_ts).getTime();
+  const last = new Date(mtbfRow.last_ts).getTime();
+  if (isNaN(first) || isNaN(last)) return null;
+  const avgGapMs = (last - first) / (mtbfRow.error_count - 1);
   return {
     mean_ms: Math.round(avgGapMs),
     mean_seconds: Math.round(avgGapMs / 1000),
@@ -213,14 +216,29 @@ router.get("/", wrapRoute("compute error analytics", (req, res) => {
     const limit = parseLimit(req.query.limit, 10, 100);
     const days = parseLimit(req.query.days, 30, 365);
     const stmts = getStatements();
+    const db = require("../db").getDb();
 
-    // Summary
-    const summary = stmts.errorSummary.get();
+    // Run all queries inside a single deferred transaction for a
+    // consistent snapshot and to avoid acquiring/releasing the WAL
+    // read-lock 8 separate times (same pattern as analytics.js).
+    const data = db.transaction(() => ({
+      summary: stmts.errorSummary.get(),
+      rateRows: stmts.errorRateDaily.all(days),
+      byType: stmts.errorsByType.all(),
+      byModelRows: stmts.errorsByModel.all(limit),
+      byAgentRows: stmts.errorsByAgent.all(limit),
+      topErrorRows: stmts.topErrors.all(limit),
+      errorSessions: stmts.errorSessions.all(limit),
+      hourlyDistribution: stmts.errorsByHour.all(),
+      mtbfRow: stmts.mtbfStats.get(),
+    }))();
+
+    const { summary } = data;
     const errorRate = toPercent(summary.total_errors, summary.total_events);
     const sessionErrorRate = toPercent(summary.affected_sessions, summary.total_sessions);
 
     // Error rate over time
-    const rateOverTime = stmts.errorRateDaily.all(days).map((row) => ({
+    const rateOverTime = data.rateRows.map((row) => ({
       day: row.day,
       error_count: row.error_count,
       total_events: row.total_events,
@@ -228,22 +246,22 @@ router.get("/", wrapRoute("compute error analytics", (req, res) => {
     }));
 
     // By type
-    const byType = stmts.errorsByType.all();
+    const byType = data.byType;
 
     // By model
-    const byModel = stmts.errorsByModel.all(limit).map((row) => ({
+    const byModel = data.byModelRows.map((row) => ({
       ...row,
       error_rate: toPercent(row.error_count, row.total_calls),
     }));
 
     // By agent
-    const byAgent = stmts.errorsByAgent.all(limit).map((row) => ({
+    const byAgent = data.byAgentRows.map((row) => ({
       ...row,
       error_rate: toPercent(row.error_sessions, row.total_sessions),
     }));
 
     // Top error patterns
-    const topErrors = stmts.topErrors.all(limit).map((row) => ({
+    const topErrors = data.topErrorRows.map((row) => ({
       event_type: row.event_type,
       message: extractErrorMessage(row.output_data),
       model: row.model || "unknown",
@@ -254,16 +272,13 @@ router.get("/", wrapRoute("compute error analytics", (req, res) => {
     }));
 
     // Error sessions
-    const errorSessions = stmts.errorSessions.all(limit);
+    const errorSessions = data.errorSessions;
 
     // Hourly distribution
-    const hourlyDistribution = stmts.errorsByHour.all();
+    const hourlyDistribution = data.hourlyDistribution;
 
-    // MTBF
-    const timestamps = stmts.errorTimestamps
-      .all()
-      .map((r) => r.timestamp);
-    const mtbf = computeMtbf(timestamps);
+    // MTBF — computed from SQL aggregates (no per-row loading)
+    const mtbf = computeMtbf(data.mtbfRow);
 
     res.json({
       summary: {
@@ -283,7 +298,6 @@ router.get("/", wrapRoute("compute error analytics", (req, res) => {
       error_sessions: errorSessions,
       hourly_distribution: hourlyDistribution,
     });
-  });
 }));
 
 // ── GET /errors/summary — Lightweight error summary ─────────────────
