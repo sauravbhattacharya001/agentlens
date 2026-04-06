@@ -296,17 +296,27 @@ router.get("/search", wrapRoute("search sessions", (req, res) => {
     const dataSql = `SELECT s.* FROM sessions s ${tagJoin} ${whereClause} ORDER BY ${sortColumn} ${sortOrder} LIMIT ? OFFSET ?`;
     const sessions = cachedPrepare(dataSql).all(...params, limit, offset);
 
-    // Batch-fetch tags for returned sessions
+    // Batch-fetch tags for returned sessions.
+    // Uses db.prepare() directly instead of cachedPrepare() because each
+    // unique result-set size produces a different placeholder count,
+    // polluting the LRU statement cache with one-off queries and evicting
+    // frequently-used statements.  Fixed-size chunking bounds the number
+    // of distinct prepared statements to ceil(maxResults / CHUNK_SIZE).
     const sessionIds = sessions.map(s => s.session_id);
     const tagMap = {};
     if (sessionIds.length > 0) {
-      const placeholders = sessionIds.map(() => "?").join(",");
-      const tagRows = cachedPrepare(
-        `SELECT session_id, tag FROM session_tags WHERE session_id IN (${placeholders}) ORDER BY created_at ASC`
-      ).all(...sessionIds);
-      for (const row of tagRows) {
-        if (!tagMap[row.session_id]) tagMap[row.session_id] = [];
-        tagMap[row.session_id].push(row.tag);
+      const db = getDb();
+      const TAG_CHUNK = 50;
+      for (let i = 0; i < sessionIds.length; i += TAG_CHUNK) {
+        const chunk = sessionIds.slice(i, i + TAG_CHUNK);
+        const placeholders = chunk.map(() => "?").join(",");
+        const tagRows = db.prepare(
+          `SELECT session_id, tag FROM session_tags WHERE session_id IN (${placeholders}) ORDER BY created_at ASC`
+        ).all(...chunk);
+        for (const row of tagRows) {
+          if (!tagMap[row.session_id]) tagMap[row.session_id] = [];
+          tagMap[row.session_id].push(row.tag);
+        }
       }
     }
 

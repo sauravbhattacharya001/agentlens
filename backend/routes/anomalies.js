@@ -70,14 +70,14 @@ function _getCachedBaselines(agentName) {
   return null;
 }
 
-function _setCachedBaselines(agentName, rows, baselines) {
+function _setCachedBaselines(agentName, rows, baselines, rowIndex) {
   const key = _baselineCacheKey(agentName);
   // Cap cache size to prevent unbounded growth from many agent filters
   if (_baselineCache.size >= 50) {
     const oldest = _baselineCache.keys().next().value;
     _baselineCache.delete(oldest);
   }
-  _baselineCache.set(key, { rows, baselines, ts: Date.now() });
+  _baselineCache.set(key, { rows, baselines, rowIndex, ts: Date.now() });
 }
 
 // ── Shared dimension computation ───────────────────────────────────
@@ -104,7 +104,7 @@ function computeDimensions(row, baselines) {
 function computeBaselines(db, agentName) {
   // Return cached baselines if still fresh
   const cached = _getCachedBaselines(agentName);
-  if (cached) return { rows: cached.rows, baselines: cached.baselines };
+  if (cached) return { rows: cached.rows, baselines: cached.baselines, rowIndex: cached.rowIndex };
   const filter = agentName ? "WHERE s.agent_name = ?" : "";
   const params = agentName ? [agentName] : [];
 
@@ -124,7 +124,7 @@ function computeBaselines(db, agentName) {
     )
     .all(...params);
 
-  if (!rows.length) return { rows: [], baselines: null };
+  if (!rows.length) return { rows: [], baselines: null, rowIndex: new Map() };
 
   const totalTokens = rows.map((r) => r.total_tokens || 0);
   const durations = rows.map((r) => r.duration_ms || 0);
@@ -139,8 +139,13 @@ function computeBaselines(db, agentName) {
     sampleSize: rows.length,
   };
 
-  _setCachedBaselines(agentName, rows, baselines);
-  return { rows, baselines };
+  // Build a Map for O(1) session lookup (used by /session/:id endpoint)
+  // instead of O(n) Array.find() on every request.
+  const rowIndex = new Map();
+  for (const r of rows) rowIndex.set(r.session_id, r);
+
+  _setCachedBaselines(agentName, rows, baselines, rowIndex);
+  return { rows, baselines, rowIndex };
 }
 
 function detectAnomalies(db, { threshold = 2, agentName, limit = 50 } = {}) {
@@ -204,12 +209,12 @@ router.get("/session/:id", wrapRoute("check session anomaly", (req, res) => {
   const sessionId = req.params.id;
   const agentName = req.query.agent || undefined;
 
-  const { rows, baselines } = computeBaselines(db, agentName);
+  const { rows, baselines, rowIndex } = computeBaselines(db, agentName);
   if (!baselines || baselines.sampleSize < 3) {
     return res.json({ anomaly: null, baselines, message: "Insufficient data" });
   }
 
-  const row = rows.find((r) => r.session_id === sessionId);
+  const row = rowIndex.get(sessionId);
   if (!row) return res.status(404).json({ error: "Session not found" });
 
   const dimensions = computeDimensions(row, baselines);
