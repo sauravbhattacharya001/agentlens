@@ -92,10 +92,12 @@ function buildGroupPerf(groups) {
   const result = Object.create(null);
   for (const [key, data] of Object.entries(groups)) {
     const totalTokens = data.tokens_in + data.tokens_out;
+    // Compute sum once and pass to latencyStats via precomputedSum
+    // to avoid a redundant O(n) reduce inside latencyStats.
     const totalDur = data.durations.reduce((a, b) => a + b, 0);
     result[key] = {
       count: data.count,
-      latency: latencyStats(data.durations),
+      latency: latencyStats(data.durations, totalDur),
       tokens: {
         total_in: data.tokens_in,
         total_out: data.tokens_out,

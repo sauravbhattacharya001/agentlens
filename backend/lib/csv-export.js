@@ -96,23 +96,12 @@ function csvEscape(val) {
  * @returns {string} Complete CSV content with header row.
  */
 function eventsToCsv(events) {
-  const rows = [CSV_HEADERS.join(",")];
-  for (const e of events) {
-    rows.push([
-      csvEscape(e.event_id),
-      csvEscape(e.event_type),
-      csvEscape(e.timestamp),
-      csvEscape(e.model),
-      csvEscape(e.tokens_in),
-      csvEscape(e.tokens_out),
-      csvEscape(e.duration_ms),
-      csvEscape(e.input_data),
-      csvEscape(e.output_data),
-      csvEscape(e.tool_call?.tool_name),
-      csvEscape(e.tool_call?.tool_input),
-      csvEscape(e.tool_call?.tool_output),
-      csvEscape(e.decision_trace?.reasoning),
-    ].join(","));
+  // Pre-allocate array with known size to avoid repeated resizing.
+  // Use eventToCsvRow to avoid duplicating the column-mapping logic.
+  const rows = new Array(events.length + 1);
+  rows[0] = CSV_HEADERS.join(",");
+  for (let i = 0; i < events.length; i++) {
+    rows[i + 1] = eventToCsvRow(events[i]);
   }
   return rows.join("\n");
 }

@@ -125,8 +125,12 @@ function computeServiceStats(rawMap) {
 
   for (const name of Object.keys(rawMap)) {
     const svc = rawMap[name];
-    const sorted = svc.durations.slice().sort((a, b) => a - b);
-    const latency = latencyStats(sorted);
+    // Sort in-place — the raw array is not needed in original order
+    // after this point, saving an O(n) allocation from .slice().
+    svc.durations.sort((a, b) => a - b);
+    // Pass precomputed totalDurationMs to avoid redundant O(n) reduce
+    // inside latencyStats.
+    const latency = latencyStats(svc.durations, svc.totalDurationMs);
     const errorRate =
       svc.callCount > 0 ? round2((svc.errorCount / svc.callCount) * 100) : 0;
 
