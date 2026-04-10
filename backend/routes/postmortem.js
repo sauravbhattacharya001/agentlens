@@ -48,10 +48,20 @@ function parseEvent(row) {
   return event;
 }
 
-function classifySeverity(errorRate, config) {
-  if (errorRate >= (config.sev1Rate || 0.50)) return "SEV-1";
-  if (errorRate >= (config.sev2Rate || 0.25)) return "SEV-2";
-  if (errorRate >= (config.sev3Rate || 0.10)) return "SEV-3";
+// Severity thresholds are fixed to prevent manipulation via query parameters.
+// Previously, callers could override thresholds (e.g. ?sev1Rate=0.001) to
+// inflate all incidents to SEV-1 (causing alert fatigue or triggering
+// automated responses) or suppress genuine critical incidents.
+const SEVERITY_THRESHOLDS = Object.freeze({
+  sev1: 0.50,
+  sev2: 0.25,
+  sev3: 0.10,
+});
+
+function classifySeverity(errorRate) {
+  if (errorRate >= SEVERITY_THRESHOLDS.sev1) return "SEV-1";
+  if (errorRate >= SEVERITY_THRESHOLDS.sev2) return "SEV-2";
+  if (errorRate >= SEVERITY_THRESHOLDS.sev3) return "SEV-3";
   return "SEV-4";
 }
 
@@ -219,7 +229,7 @@ router.post(
     }
 
     const errorRate = errors.length / events.length;
-    const severity = classifySeverity(errorRate, req.query);
+    const severity = classifySeverity(errorRate);
     const timeline = buildTimeline(events, errors);
     const rootCauses = identifyRootCauses(errors);
 

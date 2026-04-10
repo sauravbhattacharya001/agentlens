@@ -4,7 +4,20 @@ const express = require("express");
 const crypto = require("crypto");
 const router = express.Router();
 const { getDb } = require("../db");
+const { isValidSessionId, safeJsonParse } = require("../lib/validation");
 const { parsePagination, wrapRoute } = require("../lib/request-helpers");
+
+// Shared session ID validation for annotation routes.
+// Unlike sessions.js (which uses requireSessionId middleware),
+// annotation routes previously passed raw :id params to the DB
+// without format validation - a defense-in-depth gap.
+function requireValidSessionId(req, res, next) {
+  const id = req.params.id;
+  if (!id || !isValidSessionId(id)) {
+    return res.status(400).json({ error: "Invalid session ID format" });
+  }
+  next();
+}
 
 // ── Schema initialisation ───────────────────────────────────────────
 
@@ -74,7 +87,7 @@ function validateAnnotation(body) {
 
 // ── POST /sessions/:id/annotations — add annotation ─────────────────
 
-router.post("/:id/annotations", wrapRoute("create annotation", (req, res) => {
+router.post("/:id/annotations", requireValidSessionId, wrapRoute("create annotation", (req, res) => {
   ensureAnnotationsTable();
   const db = getDb();
   const sessionId = req.params.id;
@@ -140,7 +153,7 @@ router.post("/:id/annotations", wrapRoute("create annotation", (req, res) => {
 
 // ── GET /sessions/:id/annotations — list annotations ────────────────
 
-router.get("/:id/annotations", wrapRoute("fetch annotations", (req, res) => {
+router.get("/:id/annotations", requireValidSessionId, wrapRoute("fetch annotations", (req, res) => {
   ensureAnnotationsTable();
   const db = getDb();
   const sessionId = req.params.id;
@@ -232,7 +245,7 @@ router.get("/:id/annotations", wrapRoute("fetch annotations", (req, res) => {
 
 // ── PUT /sessions/:id/annotations/:annId — update annotation ────────
 
-router.put("/:id/annotations/:annId", wrapRoute("update annotation", (req, res) => {
+router.put("/:id/annotations/:annId", requireValidSessionId, wrapRoute("update annotation", (req, res) => {
   ensureAnnotationsTable();
   const db = getDb();
   const { id: sessionId, annId } = req.params;
@@ -309,7 +322,7 @@ router.put("/:id/annotations/:annId", wrapRoute("update annotation", (req, res) 
 
 // ── DELETE /sessions/:id/annotations/:annId — delete annotation ─────
 
-router.delete("/:id/annotations/:annId", wrapRoute("delete annotation", (req, res) => {
+router.delete("/:id/annotations/:annId", requireValidSessionId, wrapRoute("delete annotation", (req, res) => {
   ensureAnnotationsTable();
   const db = getDb();
   const { id: sessionId, annId } = req.params;
