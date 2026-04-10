@@ -108,6 +108,11 @@ function persistGroupsDeduped(rule, groups) {
     "VALUES (?, ?, ?, ?, ?)"
   );
 
+  // Prepare the dedup lookup once - avoid re-compiling SQL per group
+  const checkExisting = db.prepare(
+    "SELECT group_id FROM correlation_groups WHERE content_hash = ?"
+  );
+
   const timestamp = now();
   const newGroups = [];
 
@@ -116,9 +121,7 @@ function persistGroupsDeduped(rule, groups) {
       const hash = groupContentHash(rule.rule_id, group.events);
 
       // Check if this exact group already exists
-      const existing = db.prepare(
-        "SELECT group_id FROM correlation_groups WHERE content_hash = ?"
-      ).get(hash);
+      const existing = checkExisting.get(hash);
 
       if (existing) continue; // Skip duplicate
 
@@ -174,6 +177,12 @@ function runDueCorrelations() {
      WHERE s.enabled = 1 AND r.enabled = 1 AND (s.next_run_at IS NULL OR s.next_run_at <= ?)`
   ).all(timestamp);
 
+  // Resolve the correlation engine once outside the loop
+  let correlations;
+  try { correlations = require("./correlations"); } catch (e) { return; }
+  const engine = correlations._engine;
+  if (!engine || !engine.runCorrelation) return;
+
   for (const schedule of due) {
     const rule = {
       rule_id: schedule.rule_id,
@@ -182,12 +191,6 @@ function runDueCorrelations() {
       config: schedule.config,
       agent_filter: schedule.agent_filter,
     };
-
-    // Import the correlation engine from the main correlations router
-    let correlations;
-    try { correlations = require("./correlations"); } catch (e) { continue; }
-    const engine = correlations._engine;
-    if (!engine || !engine.runCorrelation) continue;
 
     const groups = engine.runCorrelation(rule, schedule.lookback_minutes);
     const persisted = persistGroupsDeduped(rule, groups);
