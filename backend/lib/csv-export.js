@@ -13,27 +13,30 @@ const { safeJsonParse } = require("./validation");
 // ── Event field selection ───────────────────────────────────────────
 
 /**
- * Parse a raw event row (via parseEventRow-style expansion) and select
- * only the fields relevant for export, with safe defaults for nulls.
+ * Parse a raw event row and select only the fields relevant for export,
+ * with safe defaults for nulls.  Calls parseEventRow (which mutates
+ * in-place) then extracts a minimal export object — this avoids a
+ * redundant full-row copy while still isolating the export shape from
+ * internal DB column additions.
  *
  * @param {Object} e - Raw event row from the events table.
- * @param {Function} parseEventRow - Row parser that expands JSON text columns.
+ * @param {Function} parseEventRow - Row parser that expands JSON text columns in-place.
  * @returns {Object} Flattened export-ready event object.
  */
 function toExportEvent(e, parseEventRow) {
-  const parsed = parseEventRow(e);
+  parseEventRow(e);
   return {
-    event_id: parsed.event_id,
-    event_type: parsed.event_type,
-    timestamp: parsed.timestamp,
-    model: parsed.model || "",
-    tokens_in: parsed.tokens_in || 0,
-    tokens_out: parsed.tokens_out || 0,
-    duration_ms: parsed.duration_ms || 0,
-    input_data: parsed.input_data,
-    output_data: parsed.output_data,
-    tool_call: parsed.tool_call,
-    decision_trace: parsed.decision_trace,
+    event_id: e.event_id,
+    event_type: e.event_type,
+    timestamp: e.timestamp,
+    model: e.model || "",
+    tokens_in: e.tokens_in || 0,
+    tokens_out: e.tokens_out || 0,
+    duration_ms: e.duration_ms || 0,
+    input_data: e.input_data,
+    output_data: e.output_data,
+    tool_call: e.tool_call,
+    decision_trace: e.decision_trace,
   };
 }
 
@@ -116,12 +119,24 @@ function eventsToCsv(events) {
 
 /**
  * Build the JSON export envelope for a session + its events.
+ * Computes summary stats in a single pass over events instead of
+ * creating intermediate arrays via filter+map+Set.
  *
  * @param {Object} session - Session row (with raw metadata).
  * @param {Object[]} parsedEvents - Array of export-ready event objects.
  * @returns {Object} Full export payload with session, events, and summary.
  */
 function buildJsonExport(session, parsedEvents) {
+  const modelsUsed = new Set();
+  const eventTypesUsed = new Set();
+  let totalDuration = 0;
+  for (let i = 0; i < parsedEvents.length; i++) {
+    const e = parsedEvents[i];
+    if (e.model) modelsUsed.add(e.model);
+    eventTypesUsed.add(e.event_type);
+    totalDuration += e.duration_ms || 0;
+  }
+
   return {
     exported_at: new Date().toISOString(),
     session: {
@@ -138,9 +153,9 @@ function buildJsonExport(session, parsedEvents) {
     summary: {
       total_events: parsedEvents.length,
       total_tokens: session.total_tokens_in + session.total_tokens_out,
-      models_used: [...new Set(parsedEvents.filter(e => e.model).map(e => e.model))],
-      event_types: [...new Set(parsedEvents.map(e => e.event_type))],
-      total_duration_ms: parsedEvents.reduce((sum, e) => sum + (e.duration_ms || 0), 0),
+      models_used: [...modelsUsed],
+      event_types: [...eventTypesUsed],
+      total_duration_ms: totalDuration,
     },
   };
 }
