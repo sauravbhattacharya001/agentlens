@@ -22,7 +22,7 @@ import sys
 from datetime import datetime, timezone, timedelta
 from typing import Any
 
-from agentlens.cli_common import print_json as _print_json
+from agentlens.cli_common import get_client_only, print_json as _print_json
 
 
 # ── Severity helpers ───────────────────────────────────────────────────
@@ -250,8 +250,9 @@ def _cmd_stats(client, args: argparse.Namespace) -> None:
 
 # ── Entry point (called from main CLI) ─────────────────────────────────
 
-def cmd_alert(client, args: argparse.Namespace) -> None:
+def cmd_alert(args: argparse.Namespace) -> None:
     """Dispatch alert sub-commands."""
+    client = get_client_only(args)
     sub = getattr(args, "alert_sub", None)
     dispatch = {
         "history": _cmd_history,

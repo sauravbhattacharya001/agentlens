@@ -16,6 +16,8 @@ from typing import Any
 
 import httpx
 
+from agentlens.cli_common import get_client_only, print_json
+
 
 def _bar(pct: float, width: int = 20) -> str:
     """Render a percentage as a colored progress bar."""
@@ -34,8 +36,9 @@ def _status_icon(status: str) -> str:
     return {"ok": "✅", "warning": "⚠️", "exceeded": "🚨"}.get(status, "❓")
 
 
-def cmd_budget(args: argparse.Namespace, client: httpx.Client) -> None:
+def cmd_budget(args: argparse.Namespace) -> None:
     """Dispatch budget subcommands."""
+    client = get_client_only(args)
     sub = getattr(args, "budget_action", None)
     if sub == "list":
         _budget_list(args, client)
