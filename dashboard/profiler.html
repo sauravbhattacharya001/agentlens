@@ -1,0 +1,266 @@
+<!DOCTYPE html>
+<html lang="en">
+<head>
+  <meta charset="UTF-8">
+  <meta name="viewport" content="width=device-width, initial-scale=1.0">
+  <title>AgentLens — Behavior Profiler</title>
+  <link rel="stylesheet" href="styles.css">
+  <style>
+    .profiler-grid { display: grid; grid-template-columns: 1fr 2fr; gap: 1.5rem; margin-top: 1rem; }
+    .agent-list { display: flex; flex-direction: column; gap: 0.5rem; max-height: 70vh; overflow-y: auto; }
+    .agent-card { padding: 1rem; border-radius: 8px; background: var(--card-bg, #1e1e2e); cursor: pointer; border: 2px solid transparent; transition: all 0.2s; }
+    .agent-card:hover { border-color: var(--accent, #89b4fa); }
+    .agent-card.selected { border-color: var(--accent, #89b4fa); background: var(--card-bg-active, #2a2a3e); }
+    .agent-card .name { font-weight: 700; font-size: 1.1rem; }
+    .agent-card .meta { font-size: 0.85rem; opacity: 0.7; margin-top: 0.25rem; }
+    .drift-badge { display: inline-block; padding: 2px 8px; border-radius: 12px; font-size: 0.75rem; font-weight: 600; text-transform: uppercase; }
+    .drift-badge.stable { background: #a6e3a1; color: #1e1e2e; }
+    .drift-badge.medium { background: #f9e2af; color: #1e1e2e; }
+    .drift-badge.high { background: #fab387; color: #1e1e2e; }
+    .drift-badge.critical { background: #f38ba8; color: #1e1e2e; }
+    .drift-badge.building { background: #89b4fa; color: #1e1e2e; }
+    .detail-panel { min-height: 400px; }
+    .dimension-bars { display: flex; flex-direction: column; gap: 0.75rem; margin-top: 1rem; }
+    .dim-row { display: flex; align-items: center; gap: 0.75rem; }
+    .dim-label { width: 120px; font-size: 0.85rem; font-weight: 600; }
+    .dim-bar-bg { flex: 1; height: 24px; background: var(--bar-bg, #313244); border-radius: 4px; overflow: hidden; position: relative; }
+    .dim-bar-fill { height: 100%; border-radius: 4px; transition: width 0.5s ease; }
+    .dim-bar-fill.stable { background: #a6e3a1; }
+    .dim-bar-fill.medium { background: #f9e2af; }
+    .dim-bar-fill.high { background: #fab387; }
+    .dim-bar-fill.critical { background: #f38ba8; }
+    .dim-value { width: 60px; text-align: right; font-size: 0.85rem; font-weight: 600; }
+    .stats-grid { display: grid; grid-template-columns: repeat(auto-fit, minmax(150px, 1fr)); gap: 1rem; margin-top: 1rem; }
+    .stat-box { padding: 1rem; border-radius: 8px; background: var(--card-bg, #1e1e2e); text-align: center; }
+    .stat-box .value { font-size: 1.5rem; font-weight: 700; }
+    .stat-box .label { font-size: 0.8rem; opacity: 0.6; margin-top: 0.25rem; }
+    .drift-canvas { width: 100%; height: 200px; margin-top: 1rem; border-radius: 8px; background: var(--card-bg, #1e1e2e); }
+    .compare-table { width: 100%; margin-top: 1rem; border-collapse: collapse; }
+    .compare-table th, .compare-table td { padding: 0.5rem 0.75rem; text-align: left; border-bottom: 1px solid var(--border, #313244); }
+    .compare-table th { font-size: 0.8rem; text-transform: uppercase; opacity: 0.6; }
+    .delta-up { color: #f38ba8; } .delta-down { color: #a6e3a1; } .delta-flat { opacity: 0.5; }
+    .empty-state { text-align: center; padding: 4rem 2rem; opacity: 0.5; }
+    .empty-state .icon { font-size: 3rem; }
+    @media (max-width: 800px) { .profiler-grid { grid-template-columns: 1fr; } }
+  </style>
+</head>
+<body>
+  <div id="app">
+    <header class="header">
+      <div class="header-left">
+        <a href="index.html" style="text-decoration:none"><h1 class="logo">🔍 AgentLens</h1></a>
+        <span class="tagline">Behavior Profiler</span>
+      </div>
+      <div class="header-right">
+        <a href="index.html" class="btn btn-alert-header" style="text-decoration:none">📋 Dashboard</a>
+        <button class="btn btn-alert-header" onclick="refreshAll()">🔄 Refresh</button>
+        <select id="daysSelect" class="btn btn-alert-header" onchange="refreshAll()" style="background:var(--card-bg,#1e1e2e);color:inherit;border:none;cursor:pointer">
+          <option value="7">7 days</option>
+          <option value="14">14 days</option>
+          <option value="30" selected>30 days</option>
+          <option value="60">60 days</option>
+          <option value="90">90 days</option>
+        </select>
+        <button class="theme-toggle" onclick="toggleTheme()" id="themeToggleBtn">🌙</button>
+      </div>
+    </header>
+    <main class="main" style="padding:1.5rem">
+      <div class="profiler-grid">
+        <div>
+          <h3>Agents</h3>
+          <div class="agent-list" id="agentList">
+            <div class="empty-state"><div class="icon">🔄</div><p>Loading...</p></div>
+          </div>
+        </div>
+        <div class="detail-panel" id="detailPanel">
+          <div class="empty-state"><div class="icon">🧬</div><p>Select an agent to view their behavioral profile</p></div>
+        </div>
+      </div>
+    </main>
+  </div>
+<script>
+const API = window.location.origin;
+let currentAgent = null;
+
+function getDays() { return document.getElementById('daysSelect').value; }
+
+async function fetchProfiles() {
+  try {
+    const r = await fetch(`${API}/profiler?days=${getDays()}`);
+    if (!r.ok) throw new Error(r.statusText);
+    return await r.json();
+  } catch { return { profiles: [] }; }
+}
+
+async function fetchDetail(agent) {
+  try {
+    const r = await fetch(`${API}/profiler/${encodeURIComponent(agent)}?days=${getDays()}`);
+    if (!r.ok) throw new Error(r.statusText);
+    return await r.json();
+  } catch { return null; }
+}
+
+async function fetchDrift(agent) {
+  try {
+    const r = await fetch(`${API}/profiler/${encodeURIComponent(agent)}/drift?days=${getDays()}`);
+    if (!r.ok) throw new Error(r.statusText);
+    return await r.json();
+  } catch { return null; }
+}
+
+function renderAgentList(profiles) {
+  const el = document.getElementById('agentList');
+  if (!profiles.length) { el.innerHTML = '<div class="empty-state"><div class="icon">📭</div><p>No agents found in this time range</p></div>'; return; }
+  el.innerHTML = profiles.map(p => `
+    <div class="agent-card ${currentAgent === p.agent ? 'selected' : ''}" onclick="selectAgent('${p.agent}')">
+      <div style="display:flex;justify-content:space-between;align-items:center">
+        <span class="name">🤖 ${p.agent}</span>
+        <span class="drift-badge ${p.status}">${p.status}</span>
+      </div>
+      <div class="meta">${p.sessionCount} sessions${p.overallDrift != null ? ` · drift: ${(p.overallDrift * 100).toFixed(1)}%` : ''}</div>
+    </div>
+  `).join('');
+}
+
+async function selectAgent(agent) {
+  currentAgent = agent;
+  document.querySelectorAll('.agent-card').forEach(c => c.classList.toggle('selected', c.textContent.includes(agent)));
+  const panel = document.getElementById('detailPanel');
+  panel.innerHTML = '<div class="empty-state"><div class="icon">🔄</div><p>Loading profile...</p></div>';
+
+  const [detail, drift] = await Promise.all([fetchDetail(agent), fetchDrift(agent)]);
+  if (!detail) { panel.innerHTML = '<div class="empty-state"><div class="icon">❌</div><p>Failed to load</p></div>'; return; }
+
+  const p = detail.profile;
+  let html = `<h3>🧬 ${agent} Profile</h3>`;
+
+  // Stats
+  html += `<div class="stats-grid">
+    <div class="stat-box"><div class="value">${p.sessionCount}</div><div class="label">Sessions</div></div>
+    <div class="stat-box"><div class="value">${p.avgTokens.toLocaleString()}</div><div class="label">Avg Tokens</div></div>
+    <div class="stat-box"><div class="value">${(p.avgDuration/1000).toFixed(1)}s</div><div class="label">Avg Duration</div></div>
+    <div class="stat-box"><div class="value">${(p.errorRate*100).toFixed(1)}%</div><div class="label">Error Rate</div></div>
+    <div class="stat-box"><div class="value">${(p.p95Duration/1000).toFixed(1)}s</div><div class="label">P95 Duration</div></div>
+    <div class="stat-box"><div class="value">${p.p95Tokens.toLocaleString()}</div><div class="label">P95 Tokens</div></div>
+  </div>`;
+
+  // Event type distribution
+  const evtEntries = Object.entries(p.eventTypeDist).sort((a,b) => b[1]-a[1]).slice(0,8);
+  if (evtEntries.length) {
+    html += `<h4 style="margin-top:1.5rem">📊 Event Distribution</h4><div class="dimension-bars">`;
+    for (const [k, v] of evtEntries) {
+      html += `<div class="dim-row"><div class="dim-label">${k}</div><div class="dim-bar-bg"><div class="dim-bar-fill stable" style="width:${(v*100).toFixed(1)}%"></div></div><div class="dim-value">${(v*100).toFixed(1)}%</div></div>`;
+    }
+    html += '</div>';
+  }
+
+  // Tool usage distribution
+  const toolEntries = Object.entries(p.toolCallDist).sort((a,b) => b[1]-a[1]).slice(0,8);
+  if (toolEntries.length) {
+    html += `<h4 style="margin-top:1.5rem">🔧 Tool Usage</h4><div class="dimension-bars">`;
+    for (const [k, v] of toolEntries) {
+      html += `<div class="dim-row"><div class="dim-label">${k}</div><div class="dim-bar-bg"><div class="dim-bar-fill medium" style="width:${(v*100).toFixed(1)}%"></div></div><div class="dim-value">${(v*100).toFixed(1)}%</div></div>`;
+    }
+    html += '</div>';
+  }
+
+  // Drift timeline chart
+  if (drift && drift.timeline && drift.timeline.length > 1) {
+    html += `<h4 style="margin-top:1.5rem">📈 Drift Timeline</h4><canvas class="drift-canvas" id="driftCanvas"></canvas>`;
+  }
+
+  panel.innerHTML = html;
+
+  // Draw drift chart
+  if (drift && drift.timeline && drift.timeline.length > 1) {
+    drawDriftChart(drift.timeline);
+  }
+}
+
+function drawDriftChart(timeline) {
+  const canvas = document.getElementById('driftCanvas');
+  if (!canvas) return;
+  const ctx = canvas.getContext('2d');
+  const dpr = window.devicePixelRatio || 1;
+  canvas.width = canvas.offsetWidth * dpr;
+  canvas.height = canvas.offsetHeight * dpr;
+  ctx.scale(dpr, dpr);
+  const W = canvas.offsetWidth, H = canvas.offsetHeight;
+  const pad = { top: 20, right: 20, bottom: 30, left: 50 };
+  const plotW = W - pad.left - pad.right, plotH = H - pad.top - pad.bottom;
+
+  // Background
+  ctx.fillStyle = getComputedStyle(document.body).getPropertyValue('--card-bg') || '#1e1e2e';
+  ctx.fillRect(0, 0, W, H);
+
+  const maxDrift = Math.max(0.5, ...timeline.map(t => Math.max(t.eventDrift, t.toolDrift)));
+
+  // Grid
+  ctx.strokeStyle = 'rgba(128,128,128,0.2)';
+  ctx.lineWidth = 1;
+  for (let i = 0; i <= 4; i++) {
+    const y = pad.top + plotH * (1 - i / 4);
+    ctx.beginPath(); ctx.moveTo(pad.left, y); ctx.lineTo(pad.left + plotW, y); ctx.stroke();
+    ctx.fillStyle = 'rgba(200,200,200,0.5)';
+    ctx.font = '11px monospace';
+    ctx.textAlign = 'right';
+    ctx.fillText((maxDrift * i / 4).toFixed(2), pad.left - 5, y + 4);
+  }
+
+  // Threshold lines
+  const thresholds = [{v: 0.1, c: '#f9e2af'}, {v: 0.25, c: '#fab387'}, {v: 0.4, c: '#f38ba8'}];
+  for (const t of thresholds) {
+    if (t.v <= maxDrift) {
+      const y = pad.top + plotH * (1 - t.v / maxDrift);
+      ctx.strokeStyle = t.c + '40'; ctx.setLineDash([4,4]);
+      ctx.beginPath(); ctx.moveTo(pad.left, y); ctx.lineTo(pad.left + plotW, y); ctx.stroke();
+      ctx.setLineDash([]);
+    }
+  }
+
+  // Draw lines
+  function drawLine(data, color) {
+    ctx.strokeStyle = color; ctx.lineWidth = 2; ctx.beginPath();
+    data.forEach((v, i) => {
+      const x = pad.left + (i / (data.length - 1)) * plotW;
+      const y = pad.top + plotH * (1 - v / maxDrift);
+      i === 0 ? ctx.moveTo(x, y) : ctx.lineTo(x, y);
+    });
+    ctx.stroke();
+  }
+
+  drawLine(timeline.map(t => t.eventDrift), '#89b4fa');
+  drawLine(timeline.map(t => t.toolDrift), '#cba6f7');
+
+  // Legend
+  ctx.font = '11px sans-serif'; ctx.fillStyle = '#89b4fa';
+  ctx.fillText('● Event Mix', pad.left + 10, pad.top + 12);
+  ctx.fillStyle = '#cba6f7';
+  ctx.fillText('● Tool Usage', pad.left + 100, pad.top + 12);
+
+  // Date labels
+  ctx.fillStyle = 'rgba(200,200,200,0.5)'; ctx.font = '10px monospace'; ctx.textAlign = 'center';
+  const step = Math.max(1, Math.floor(timeline.length / 6));
+  for (let i = 0; i < timeline.length; i += step) {
+    const x = pad.left + (i / (timeline.length - 1)) * plotW;
+    ctx.fillText(timeline[i].date.slice(5), x, H - 5);
+  }
+}
+
+function toggleTheme() {
+  document.body.classList.toggle('light-theme');
+  const btn = document.getElementById('themeToggleBtn');
+  btn.textContent = document.body.classList.contains('light-theme') ? '☀️' : '🌙';
+  if (currentAgent) selectAgent(currentAgent);
+}
+
+async function refreshAll() {
+  const data = await fetchProfiles();
+  renderAgentList(data.profiles || []);
+  if (currentAgent) selectAgent(currentAgent);
+}
+
+refreshAll();
+</script>
+</body>
+</html>

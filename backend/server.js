@@ -53,6 +53,7 @@ const routeDefs = [
   ["/scorecards",   "./routes/scorecards"],
   ["/diff",         "./routes/diff"],
   ["/command-center", "./routes/command-center"],
+  ["/profiler",       "./routes/profiler"],
   // Session-scoped annotation routes
   ["/sessions",     "./routes/annotations"],
 ];
