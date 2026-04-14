@@ -6,41 +6,16 @@ const { computeSessionMetrics, pctDelta, computeDeltas } = require("../lib/sessi
 const { getTagStatements } = require("../lib/tag-statements");
 const { parsePagination, requireSessionId, wrapRoute } = require("../lib/request-helpers");
 const { toExportEvent, eventsToCsv, eventToCsvRow, buildJsonExport, ndjsonSessionLine, CSV_HEADERS } = require("../lib/csv-export");
+const { createLazyStatements } = require("../lib/lazy-statements");
+const { createStatementCache } = require("../lib/statement-cache");
 
 const router = express.Router();
 
 // ── LRU prepared-statement cache for dynamic SQL queries ────────────
-// The event-search and session-search endpoints build SQL dynamically
-// based on filter combinations.  Calling db.prepare() re-compiles the
-// SQL every time, which adds ~0.1-0.5ms per call.  Since the number of
-// distinct filter combos is small (users repeat the same searches), we
-// cache the last N compiled statements keyed by their SQL string.
-const STMT_CACHE_MAX = 64;
-const _stmtCache = new Map();
-
-/**
- * Get or compile a prepared statement, with LRU caching.
- * @param {string} sql - The SQL string to prepare.
- * @returns {import("better-sqlite3").Statement} Compiled statement.
- */
-function cachedPrepare(sql) {
-  let stmt = _stmtCache.get(sql);
-  if (stmt) {
-    // Move to end for LRU freshness
-    _stmtCache.delete(sql);
-    _stmtCache.set(sql, stmt);
-    return stmt;
-  }
-  const db = getDb();
-  stmt = db.prepare(sql);
-  if (_stmtCache.size >= STMT_CACHE_MAX) {
-    // Evict oldest entry
-    const oldest = _stmtCache.keys().next().value;
-    _stmtCache.delete(oldest);
-  }
-  _stmtCache.set(sql, stmt);
-  return stmt;
-}
+// Session/event search endpoints build SQL dynamically based on filter
+// combinations.  This cache avoids re-compiling the same SQL string on
+// every request (~0.1-0.5 ms savings per repeated query).
+const cachedPrepare = createStatementCache(getDb);
 
 // Sanitize a string for use in Content-Disposition filenames.
 // Strips characters that could cause header injection ("  \r  \n),
@@ -99,43 +74,27 @@ function fetchSessionOrFail(id, res) {
 }
 
 // ── Cached prepared statements ──────────────────────────────────────
-// Lazily initialized once, reused across all requests to avoid
-// re-compiling SQL on every call.
-let _sessionStmts = null;
-
-/**
- * Get lazily-initialized prepared SQL statements for session queries.
- * Statements are compiled once and reused across all requests.
- *
- * @returns {{ listAll: Statement, listByStatus: Statement, countAll: Statement,
- *             countByStatus: Statement, getById: Statement, eventsBySession: Statement }}
- */
-function getSessionStatements() {
-  if (_sessionStmts) return _sessionStmts;
-  const db = getDb();
-
-  _sessionStmts = {
-    listAll: db.prepare("SELECT * FROM sessions ORDER BY started_at DESC LIMIT ? OFFSET ?"),
-    listByStatus: db.prepare("SELECT * FROM sessions WHERE status = ? ORDER BY started_at DESC LIMIT ? OFFSET ?"),
-    countAll: db.prepare("SELECT COUNT(*) as count FROM sessions"),
-    countByStatus: db.prepare("SELECT COUNT(*) as count FROM sessions WHERE status = ?"),
-    getById: db.prepare("SELECT * FROM sessions WHERE session_id = ?"),
-    // Uses the composite index idx_events_session_ts for efficient ordered retrieval
-    eventsBySession: db.prepare("SELECT * FROM events WHERE session_id = ? ORDER BY timestamp ASC"),
-    // Paginated events query — avoids loading entire event history into memory
-    eventsBySessionPaged: db.prepare("SELECT * FROM events WHERE session_id = ? ORDER BY timestamp ASC LIMIT ? OFFSET ?"),
-    // Count events for a session (used for pagination metadata)
-    countEventsBySession: db.prepare("SELECT COUNT(*) as total FROM events WHERE session_id = ?"),
-    // Capped events query for diff endpoint — hard limit to prevent OOM
-    eventsBySessionCapped: db.prepare("SELECT * FROM events WHERE session_id = ? ORDER BY timestamp ASC LIMIT ?"),
-    // Streaming iterator for NDJSON export — avoids loading all events into memory
-    iterateEventsBySession: db.prepare("SELECT * FROM events WHERE session_id = ? ORDER BY timestamp ASC"),
-    // Total event count for a session (used by event search)
-    totalEventsBySession: db.prepare("SELECT COUNT(*) as total FROM events WHERE session_id = ?"),
-  };
-
-  return _sessionStmts;
-}
+// Uses the shared createLazyStatements factory (same pattern as every
+// other route file) instead of a hand-rolled _sessionStmts singleton.
+const getSessionStatements = createLazyStatements((db) => ({
+  listAll: db.prepare("SELECT * FROM sessions ORDER BY started_at DESC LIMIT ? OFFSET ?"),
+  listByStatus: db.prepare("SELECT * FROM sessions WHERE status = ? ORDER BY started_at DESC LIMIT ? OFFSET ?"),
+  countAll: db.prepare("SELECT COUNT(*) as count FROM sessions"),
+  countByStatus: db.prepare("SELECT COUNT(*) as count FROM sessions WHERE status = ?"),
+  getById: db.prepare("SELECT * FROM sessions WHERE session_id = ?"),
+  // Uses the composite index idx_events_session_ts for efficient ordered retrieval
+  eventsBySession: db.prepare("SELECT * FROM events WHERE session_id = ? ORDER BY timestamp ASC"),
+  // Paginated events query — avoids loading entire event history into memory
+  eventsBySessionPaged: db.prepare("SELECT * FROM events WHERE session_id = ? ORDER BY timestamp ASC LIMIT ? OFFSET ?"),
+  // Count events for a session (used for pagination metadata)
+  countEventsBySession: db.prepare("SELECT COUNT(*) as total FROM events WHERE session_id = ?"),
+  // Capped events query for diff endpoint — hard limit to prevent OOM
+  eventsBySessionCapped: db.prepare("SELECT * FROM events WHERE session_id = ? ORDER BY timestamp ASC LIMIT ?"),
+  // Streaming iterator for NDJSON export — avoids loading all events into memory
+  iterateEventsBySession: db.prepare("SELECT * FROM events WHERE session_id = ? ORDER BY timestamp ASC"),
+  // Total event count for a session (used by event search)
+  totalEventsBySession: db.prepare("SELECT COUNT(*) as total FROM events WHERE session_id = ?"),
+}));
 
 /**
  * GET /sessions — List all sessions with pagination and optional filtering.
