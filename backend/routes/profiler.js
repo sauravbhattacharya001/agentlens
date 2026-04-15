@@ -122,12 +122,24 @@ function fetchSessions(db, agentName, cutoff) {
   return db.prepare(sql).all(...params);
 }
 
+/**
+ * Fetch events for a list of session IDs, chunking to stay within
+ * SQLite's ~999 variable limit per query.  Without chunking, >999
+ * session IDs would crash with "SQLITE_ERROR: too many SQL variables".
+ */
 function fetchEvents(db, sessionIds) {
   if (!sessionIds.length) return [];
-  const placeholders = sessionIds.map(() => "?").join(",");
-  return db.prepare(
-    `SELECT session_id, type, name, tool_name FROM events WHERE session_id IN (${placeholders})`
-  ).all(...sessionIds);
+  const CHUNK = 500;
+  const results = [];
+  for (let i = 0; i < sessionIds.length; i += CHUNK) {
+    const chunk = sessionIds.slice(i, i + CHUNK);
+    const placeholders = chunk.map(() => "?").join(",");
+    const rows = db.prepare(
+      `SELECT session_id, type, name, tool_name FROM events WHERE session_id IN (${placeholders})`
+    ).all(...chunk);
+    results.push(...rows);
+  }
+  return results;
 }
 
 // ── Routes ─────────────────────────────────────────────────────────
@@ -193,10 +205,25 @@ router.get("/", wrapRoute("list agent profiles", (req, res) => {
   res.json({ profiles, meta: { days, recentDays, agentCount: agents.length } });
 }));
 
+// ── Agent name validation ──────────────────────────────────────────
+// Agent names come from user-controlled URL path segments.  Limit to
+// 128 chars and reject characters that could confuse SQL or logs.
+const SAFE_AGENT_RE = /^[\w .:\-@/]{1,128}$/;
+
+function validateAgent(req, res) {
+  const agent = req.params.agent;
+  if (!agent || !SAFE_AGENT_RE.test(agent)) {
+    res.status(400).json({ error: "Invalid agent name format" });
+    return null;
+  }
+  return agent;
+}
+
 // GET /profiler/:agent – detailed profile
 router.get("/:agent", wrapRoute("get agent profile", (req, res) => {
   const db = getDb();
-  const agent = req.params.agent;
+  const agent = validateAgent(req, res);
+  if (!agent) return;
   const days = parseDays(req.query.days, 30, 90);
   const cutoff = daysAgoCutoff(days);
 
@@ -206,15 +233,18 @@ router.get("/:agent", wrapRoute("get agent profile", (req, res) => {
   const events = fetchEvents(db, sessions.map(s => s.id));
   const profile = buildProfile(sessions, events);
 
-  // Daily breakdown
+  // Daily breakdown — index sessions by ID for O(1) lookup instead
+  // of O(n) sessions.find() per event (was O(events × sessions)).
   const dailyMap = {};
+  const sessionById = {};
   for (const s of sessions) {
+    sessionById[s.id] = s;
     const day = s.created_at.slice(0, 10);
     if (!dailyMap[day]) dailyMap[day] = { sessions: [], events: [] };
     dailyMap[day].sessions.push(s);
   }
   for (const e of events) {
-    const s = sessions.find(x => x.id === e.session_id);
+    const s = sessionById[e.session_id];
     if (s) {
       const day = s.created_at.slice(0, 10);
       if (dailyMap[day]) dailyMap[day].events.push(e);
@@ -232,7 +262,8 @@ router.get("/:agent", wrapRoute("get agent profile", (req, res) => {
 // GET /profiler/:agent/drift – drift timeline
 router.get("/:agent/drift", wrapRoute("get drift timeline", (req, res) => {
   const db = getDb();
-  const agent = req.params.agent;
+  const agent = validateAgent(req, res);
+  if (!agent) return;
   const days = parseDays(req.query.days, 30, 90);
   const windowDays = Math.max(1, Math.min(parseInt(req.query.window) || 3, 14));
   const cutoff = daysAgoCutoff(days);
