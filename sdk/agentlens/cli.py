@@ -1,4 +1,4 @@
-﻿"""AgentLens CLI â€" query your AgentLens backend from the command line.
+"""AgentLens CLI — query your AgentLens backend from the command line.
 
 Usage:
     agentlens-cli sessions [--limit N] [--endpoint URL] [--api-key KEY]
@@ -97,6 +97,8 @@ from agentlens.cli_profile import cmd_profile, register_profile_parser  # agent 
 from agentlens.cli_trace import cmd_trace  # terminal waterfall timeline
 from agentlens.cli_heatmap import cmd_heatmap  # GitHub-style activity heatmap
 from agentlens.cli_correlate import run as cmd_correlate, setup_parser as register_correlate_parser  # metric correlations
+from agentlens.cli_dashboard import cmd_dashboard  # self-contained HTML dashboard
+from agentlens.cli_replay import cmd_replay, build_session_from_api as _build_session_from_api  # session replay
 from agentlens.cli_capacity import cmd_capacity
 from agentlens.cli_baseline import cmd_baseline, register_baseline_parser  # fleet capacity planning
 from agentlens.cli_retention import cmd_retention, register_retention_parser  # data retention analysis
@@ -125,7 +127,7 @@ def _print_table(rows: list[dict], columns: list[str], *, max_width: int = 40) -
         print(line)
 
 
-# â"€â"€ Commands â"€â"€â"€â"€â"€â"€â"€â"€â"€â"€â"€â"€â"€â"€â"€â"€â"€â"€â"€â"€â"€â"€â"€â"€â"€â"€â"€â"€â"€â"€â"€â"€â"€â"€â"€â"€â"€â"€â"€â"€â"€â"€â"€â"€â"€â"€â"€â"€â"€â"€â"€â"€â"€â"€â"€â"€â"€
+# ── Commands ─────────────────────────────────────────────────────────
 
 
 def cmd_sessions(args: argparse.Namespace) -> None:
@@ -298,17 +300,17 @@ def cmd_postmortem(args: argparse.Namespace) -> None:
     report = resp.json()
 
     if report.get("incident_id") == "INC-NONE":
-        print(f"âœ… Session {args.session_id}: No incidents detected.")
+        print(f"✅ Session {args.session_id}: No incidents detected.")
         print(f"   Events analysed: {report.get('event_count', 0)}")
         return
 
     # Pretty-print the postmortem
     severity = report.get("severity", "?")
-    sev_colors = {"SEV-1": "ðŸ"´", "SEV-2": "ðŸŸ ", "SEV-3": "ðŸŸ¡", "SEV-4": "ðŸŸ¢"}
-    icon = sev_colors.get(severity, "âšª")
+    sev_colors = {"SEV-1": "🔴", "SEV-2": "🟠", "SEV-3": "🟡", "SEV-4": "🟢"}
+    icon = sev_colors.get(severity, "⚪")
 
     print(f"\n{'='*60}")
-    print(f"  {icon} INCIDENT POSTMORTEM â€" {report.get('incident_id', '')}")
+    print(f"  {icon} INCIDENT POSTMORTEM — {report.get('incident_id', '')}")
     print(f"{'='*60}")
     print(f"\n  Title:    {report.get('title', '')}")
     print(f"  Severity: {severity}")
@@ -320,9 +322,9 @@ def cmd_postmortem(args: argparse.Namespace) -> None:
     # Impact
     impact = report.get("impact", {})
     if impact:
-        print(f"\n  {'â"€'*50}")
+        print(f"\n  {'─'*50}")
         print(f"  IMPACT")
-        print(f"  {'â"€'*50}")
+        print(f"  {'─'*50}")
         print(f"    Errors:        {impact.get('error_count', 0)} / {impact.get('total_events', 0)} events ({_pct(impact.get('error_rate', 0))})")
         print(f"    Tokens wasted: {impact.get('tokens_wasted', 0):,}")
         print(f"    Est. cost:     ${impact.get('estimated_cost_impact', 0):.4f}")
@@ -334,32 +336,32 @@ def cmd_postmortem(args: argparse.Namespace) -> None:
         if models:
             print(f"    Models:        {', '.join(models)}")
         if impact.get("user_facing"):
-            print(f"    âš  User-facing errors detected")
+            print(f"    ⚠ User-facing errors detected")
 
     # Root causes
     root_causes = report.get("root_causes", [])
     if root_causes:
-        print(f"\n  {'â"€'*50}")
+        print(f"\n  {'─'*50}")
         print(f"  ROOT CAUSES")
-        print(f"  {'â"€'*50}")
+        print(f"  {'─'*50}")
         for i, rc in enumerate(root_causes, 1):
             conf = rc.get("confidence", 0)
-            conf_bar = "â-ˆ" * int(conf * 10) + "â-'" * (10 - int(conf * 10))
+            conf_bar = "█" * int(conf * 10) + "▒" * (10 - int(conf * 10))
             print(f"    {i}. {rc.get('description', '')}")
             print(f"       Confidence: [{conf_bar}] {conf:.0%}")
             print(f"       Category:   {rc.get('category', '')}")
             print(f"       Affected:   {rc.get('affected_events', 0)} events")
             for ev in rc.get("evidence", []):
-                print(f"       â€¢ {ev}")
+                print(f"       • {ev}")
 
     # Timeline
     timeline = report.get("timeline", [])
     if timeline:
-        print(f"\n  {'â"€'*50}")
+        print(f"\n  {'─'*50}")
         print(f"  TIMELINE")
-        print(f"  {'â"€'*50}")
+        print(f"  {'─'*50}")
         for entry in timeline:
-            sev_icon = {"error": "âŒ", "warning": "âš ï¸", "info": "â"¹ï¸"}.get(entry.get("severity", ""), "â€¢")
+            sev_icon = {"error": "❌", "warning": "⚠️", "info": "┹️"}.get(entry.get("severity", ""), "•")
             elapsed = _format_duration(entry.get("elapsed_ms", 0))
             print(f"    {sev_icon} +{elapsed:<10} {entry.get('description', '')}")
 
@@ -408,14 +410,14 @@ def cmd_tail(args: argparse.Namespace) -> None:
             eid = ev.get("event_id") or ev.get("id") or ""
             if eid:
                 seen.add(eid)
-        print(f"ðŸ" Tailing events at {endpoint} (interval={interval}s, Ctrl+C to stop)")
+        print(f"🔍 Tailing events at {endpoint} (interval={interval}s, Ctrl+C to stop)")
         if session_filter:
             print(f"   Session filter: {session_filter}")
         if type_filter:
             print(f"   Type filter: {type_filter}")
         print(f"   Skipped {len(seen)} existing events\n")
     except httpx.HTTPError:
-        print(f"ðŸ" Tailing events at {endpoint} (interval={interval}s, Ctrl+C to stop)\n")
+        print(f"🔍 Tailing events at {endpoint} (interval={interval}s, Ctrl+C to stop)\n")
 
     def _format_event(ev: dict) -> str:
         ts = ev.get("timestamp", "")
@@ -428,11 +430,11 @@ def cmd_tail(args: argparse.Namespace) -> None:
 
         parts = [f"[{ts}]", f"{etype}"]
         if sid:
-            parts.append(f"sess={sid}â€¦")
+            parts.append(f"sess={sid}…")
         if model:
             parts.append(f"model={model}")
         if tok_in or tok_out:
-            parts.append(f"tokens={tok_in}â†'{tok_out}")
+            parts.append(f"tokens={tok_in}→{tok_out}")
         if dur is not None:
             parts.append(f"{dur}ms")
         return " ".join(parts)
@@ -454,13 +456,13 @@ def cmd_tail(args: argparse.Namespace) -> None:
                 for ev in new_events:
                     print(_format_event(ev))
             except httpx.HTTPError as exc:
-                print(f"âš  poll error: {exc}", file=sys.stderr)
+                print(f"⚠ poll error: {exc}", file=sys.stderr)
     except KeyboardInterrupt:
-        print("\nðŸ'‹ Stopped tailing.")
+        print("\n💋 Stopped tailing.")
 
 
 def cmd_top(args: argparse.Namespace) -> None:
-    """Live leaderboard of sessions ranked by cost, tokens, or event count â€" like htop for agents."""
+    """Live leaderboard of sessions ranked by cost, tokens, or event count — like htop for agents."""
     import time as _time
 
     client, endpoint = _get_client(args)
@@ -480,14 +482,14 @@ def cmd_top(args: argparse.Namespace) -> None:
             return " " * width
         filled = int(round(value / max_val * width))
         filled = min(filled, width)
-        return "â-ˆ" * filled + "â-'" * (width - filled)
+        return "█" * filled + "▒" * (width - filled)
 
     def _fetch_and_display() -> None:
         try:
             resp = client.get("/sessions", params={"limit": limit * 2})
             resp.raise_for_status()
         except httpx.HTTPError as exc:
-            print(f"âš  Error fetching sessions: {exc}", file=sys.stderr)
+            print(f"⚠ Error fetching sessions: {exc}", file=sys.stderr)
             return
 
         data = resp.json()
@@ -514,7 +516,7 @@ def cmd_top(args: argparse.Namespace) -> None:
         if sys.stdout.isatty():
             print("\033[2J\033[H", end="")
 
-        print(f"âš¡ AgentLens Top â€" sorted by {sort_key} | {endpoint} | Ctrl+C to stop")
+        print(f"⚡ AgentLens Top — sorted by {sort_key} | {endpoint} | Ctrl+C to stop")
         print(f"   Refreshing every {interval}s\n")
 
         if not sessions:
@@ -525,7 +527,7 @@ def cmd_top(args: argparse.Namespace) -> None:
 
         # Header
         print(f"  {'#':<3} {'SESSION':<12} {'AGENT':<18} {'STATUS':<10} {'EVENTS':>7} {'TOKENS':>10} {'COST':>10}  {'':20}")
-        print(f"  {'â"€'*3} {'â"€'*12} {'â"€'*18} {'â"€'*10} {'â"€'*7} {'â"€'*10} {'â"€'*10}  {'â"€'*20}")
+        print(f"  {'─'*3} {'─'*12} {'─'*18} {'─'*10} {'─'*7} {'─'*10} {'─'*10}  {'─'*20}")
 
         for i, s in enumerate(sessions, 1):
             sid = str(s.get("id", ""))[:12]
@@ -537,18 +539,18 @@ def cmd_top(args: argparse.Namespace) -> None:
             val = s.get(sort_field, 0) or 0
             bar = _bar(val, max_val)
 
-            cost_str = f"${cost:.4f}" if cost > 0 else "â€""
+            cost_str = f"${cost:.4f}" if cost > 0 else "—"
             print(f"  {i:<3} {sid:<12} {agent:<18} {status:<10} {events:>7} {tokens:>10} {cost_str:>10}  {bar}")
 
         print(f"\n  Showing {len(sessions)} sessions")
 
-    print(f"âš¡ AgentLens Top â€" connecting to {endpoint}...")
+    print(f"⚡ AgentLens Top — connecting to {endpoint}...")
     try:
         while True:
             _fetch_and_display()
             _time.sleep(interval)
     except KeyboardInterrupt:
-        print("\nðŸ'‹ Stopped.")
+        print("\n💋 Stopped.")
 
 
 
@@ -577,7 +579,7 @@ def cmd_flamegraph(args: argparse.Namespace) -> None:
         raw_events = raw_events.get("events", [raw_events])
 
     if not raw_events:
-        print(f"âš ï¸  No events found for session {args.session_id}")
+        print(f"⚠️  No events found for session {args.session_id}")
         sys.exit(1)
 
     # Convert raw dicts to AgentEvent objects
@@ -589,13 +591,13 @@ def cmd_flamegraph(args: argparse.Namespace) -> None:
             # Skip malformed events
             continue
 
-    print(f"ðŸ"Š Building flamegraph for session {args.session_id} ({len(events)} events)...")
+    print(f"🔊 Building flamegraph for session {args.session_id} ({len(events)} events)...")
 
     fg = Flamegraph(events=events, session_name=session_name)
 
     if args.stats:
         stats = fg.get_stats()
-        print(f"\nðŸ"¥ Flamegraph Statistics")
+        print(f"\n🔥 Flamegraph Statistics")
         print(f"   Total duration: {stats['total_ms']:.1f} ms")
         print(f"   Node count:     {stats['node_count']}")
         print(f"   Max depth:      {stats['max_depth']}")
@@ -607,17 +609,17 @@ def cmd_flamegraph(args: argparse.Namespace) -> None:
         if stats.get("slowest_events"):
             print(f"\n   Slowest events:")
             for i, ev in enumerate(stats["slowest_events"][:5], 1):
-                print(f"     {i}. {ev.get('name', 'unknown')} â€" {ev.get('duration', 0):.1f} ms")
+                print(f"     {i}. {ev.get('name', 'unknown')} — {ev.get('duration', 0):.1f} ms")
         return
 
     output = args.output or f"flamegraph-{args.session_id}.html"
     fg.save(output)
     abs_path = str(Path(output).resolve())
-    print(f"âœ… Flamegraph saved to {abs_path}")
+    print(f"✅ Flamegraph saved to {abs_path}")
 
     if args.open:
         _wb.open(f"file://{abs_path}")
-        print("ðŸŒ Opened in browser")
+        print("🌐 Opened in browser")
 
 
 # cmd_trace extracted to cli_trace.py
@@ -631,404 +633,28 @@ def cmd_status(args: argparse.Namespace) -> None:
     try:
         resp = client.get("/health")
         resp.raise_for_status()
-        print(f"âœ… AgentLens backend is healthy at {endpoint}")
+        print(f"✅ AgentLens backend is healthy at {endpoint}")
         data = resp.json()
         if isinstance(data, dict):
             for k, v in data.items():
                 print(f"  {k}: {v}")
     except httpx.HTTPError as e:
-        print(f"âŒ Cannot reach AgentLens backend at {endpoint}")
+        print(f"❌ Cannot reach AgentLens backend at {endpoint}")
         print(f"   Error: {e}")
         sys.exit(1)
 
 
-def cmd_dashboard(args: argparse.Namespace) -> None:
-    """Generate a self-contained HTML dashboard with interactive charts."""
-    import webbrowser as _webbrowser
-    from datetime import datetime, timezone
+# cmd_dashboard extracted to cli_dashboard.py
 
-    client, endpoint = _get_client(args)
-    limit = getattr(args, "limit", 100) or 100
-    output = getattr(args, "output", None)
+# cmd_replay and _build_session_from_api extracted to cli_replay.py
 
-    # Fetch data
-    print(f"ðŸ"Š Fetching data from {endpoint} ...")
-    resp = client.get("/sessions", params={"limit": limit})
-    resp.raise_for_status()
-    raw = resp.json()
-    sessions = raw if isinstance(raw, list) else raw.get("sessions", [raw])
-
-    try:
-        resp2 = client.get("/analytics")
-        resp2.raise_for_status()
-        analytics = resp2.json()
-    except Exception:
-        analytics = {}
-
-    # Gather per-session summaries
-    session_rows = []
-    model_counts: dict[str, int] = {}
-    model_tokens: dict[str, int] = {}
-    model_costs: dict[str, float] = {}
-    status_counts: dict[str, int] = {}
-    daily_sessions: dict[str, int] = {}
-    daily_costs: dict[str, float] = {}
-    total_cost = 0.0
-    total_tokens = 0
-    total_events = 0
-    error_count = 0
-
-    for s in sessions:
-        sid = s.get("id", "?")
-        agent = s.get("agent_name", "unknown")
-        status = s.get("status", "unknown")
-        tokens = int(s.get("total_tokens", 0) or 0)
-        events = int(s.get("event_count", 0) or 0)
-        cost = float(s.get("total_cost", 0) or 0)
-        created = s.get("created_at", "")
-
-        session_rows.append({"id": sid, "agent": agent, "status": status,
-                             "tokens": tokens, "events": events, "cost": cost,
-                             "created": created})
-
-        status_counts[status] = status_counts.get(status, 0) + 1
-        total_cost += cost
-        total_tokens += tokens
-        total_events += events
-        if status in ("error", "failed"):
-            error_count += 1
-
-        # daily aggregation
-        day = created[:10] if len(created) >= 10 else "unknown"
-        daily_sessions[day] = daily_sessions.get(day, 0) + 1
-        daily_costs[day] = daily_costs.get(day, 0) + cost
-
-        # Try to get model info from events in session
-        for ev in s.get("events", []):
-            m = ev.get("model", "")
-            if m:
-                model_counts[m] = model_counts.get(m, 0) + 1
-                model_tokens[m] = model_tokens.get(m, 0) + int(ev.get("tokens_in", 0) or 0) + int(ev.get("tokens_out", 0) or 0)
-
-    # Sort daily data
-    sorted_days = sorted(daily_sessions.keys())
-    day_labels = json.dumps(sorted_days)
-    day_session_data = json.dumps([daily_sessions.get(d, 0) for d in sorted_days])
-    day_cost_data = json.dumps([round(daily_costs.get(d, 0), 4) for d in sorted_days])
-
-    # Status chart data
-    status_labels = json.dumps(list(status_counts.keys()))
-    status_data = json.dumps(list(status_counts.values()))
-
-    # Model chart data
-    m_labels = json.dumps(list(model_counts.keys())[:15])
-    m_data = json.dumps(list(model_counts.values())[:15])
-
-    # Top sessions by cost
-    top_by_cost = sorted(session_rows, key=lambda r: r["cost"], reverse=True)[:10]
-    top_labels = json.dumps([r["id"][:12] for r in top_by_cost])
-    top_data = json.dumps([round(r["cost"], 4) for r in top_by_cost])
-
-    # Session table rows
-    table_html = ""
-    for r in session_rows[:50]:
-        css = ' class="error"' if r["status"] in ("error", "failed") else ""
-        table_html += f'<tr{css}><td>{r["id"][:16]}</td><td>{r["agent"]}</td><td>{r["status"]}</td><td>{r["events"]}</td><td>{r["tokens"]:,}</td><td>${r["cost"]:.4f}</td><td>{r["created"][:19]}</td></tr>\n'
-
-    now_str = datetime.now(timezone.utc).strftime("%Y-%m-%d %H:%M UTC")
-    error_rate = (error_count / len(sessions) * 100) if sessions else 0
-
-    html = f"""<!DOCTYPE html>
-<html lang="en">
-<head>
-<meta charset="utf-8"><meta name="viewport" content="width=device-width,initial-scale=1">
-<title>AgentLens Dashboard</title>
-<script src="https://cdn.jsdelivr.net/npm/chart.js@4/dist/chart.umd.min.js"></script>
-<style>
-*{{margin:0;padding:0;box-sizing:border-box}}
-body{{font-family:-apple-system,BlinkMacSystemFont,'Segoe UI',Roboto,sans-serif;background:#0f172a;color:#e2e8f0;padding:24px}}
-h1{{font-size:1.8rem;margin-bottom:4px}}
-.subtitle{{color:#94a3b8;margin-bottom:24px;font-size:.9rem}}
-.kpi-grid{{display:grid;grid-template-columns:repeat(auto-fit,minmax(180px,1fr));gap:16px;margin-bottom:32px}}
-.kpi{{background:#1e293b;border-radius:12px;padding:20px;text-align:center}}
-.kpi .value{{font-size:2rem;font-weight:700;color:#38bdf8}}
-.kpi .label{{font-size:.8rem;color:#94a3b8;margin-top:4px}}
-.kpi.error .value{{color:#f87171}}
-.charts{{display:grid;grid-template-columns:repeat(auto-fit,minmax(420px,1fr));gap:24px;margin-bottom:32px}}
-.chart-card{{background:#1e293b;border-radius:12px;padding:20px}}
-.chart-card h3{{margin-bottom:12px;font-size:1rem;color:#cbd5e1}}
-canvas{{max-height:280px}}
-table{{width:100%;border-collapse:collapse;font-size:.85rem}}
-th,td{{padding:8px 12px;text-align:left;border-bottom:1px solid #334155}}
-th{{background:#1e293b;color:#94a3b8;position:sticky;top:0}}
-tr:hover{{background:#1e293b}}
-tr.error td{{color:#f87171}}
-.table-wrap{{background:#1e293b;border-radius:12px;padding:20px;max-height:500px;overflow:auto}}
-.table-wrap h3{{margin-bottom:12px;color:#cbd5e1}}
-</style>
-</head>
-<body>
-<h1>ðŸ" AgentLens Dashboard</h1>
-<p class="subtitle">Generated {now_str} Â· {len(sessions)} sessions from {endpoint}</p>
-
-<div class="kpi-grid">
-<div class="kpi"><div class="value">{len(sessions)}</div><div class="label">Sessions</div></div>
-<div class="kpi"><div class="value">{total_events:,}</div><div class="label">Total Events</div></div>
-<div class="kpi"><div class="value">{total_tokens:,}</div><div class="label">Total Tokens</div></div>
-<div class="kpi"><div class="value">${total_cost:.4f}</div><div class="label">Total Cost</div></div>
-<div class="kpi error"><div class="value">{error_rate:.1f}%</div><div class="label">Error Rate</div></div>
-<div class="kpi"><div class="value">{len(model_counts)}</div><div class="label">Models Used</div></div>
-</div>
-
-<div class="charts">
-<div class="chart-card"><h3>Sessions per Day</h3><canvas id="dailyChart"></canvas></div>
-<div class="chart-card"><h3>Daily Cost ($)</h3><canvas id="costChart"></canvas></div>
-<div class="chart-card"><h3>Session Status</h3><canvas id="statusChart"></canvas></div>
-<div class="chart-card"><h3>Top 10 Sessions by Cost</h3><canvas id="topChart"></canvas></div>
-</div>
-
-<div class="table-wrap">
-<h3>Sessions (latest {min(50, len(sessions))})</h3>
-<table>
-<thead><tr><th>ID</th><th>Agent</th><th>Status</th><th>Events</th><th>Tokens</th><th>Cost</th><th>Created</th></tr></thead>
-<tbody>{table_html}</tbody>
-</table>
-</div>
-
-<script>
-const colors = ['#38bdf8','#a78bfa','#34d399','#fbbf24','#f87171','#fb923c','#e879f9','#22d3ee'];
-const doughnutColors = ['#34d399','#f87171','#fbbf24','#38bdf8','#a78bfa','#fb923c'];
-
-new Chart(document.getElementById('dailyChart'),{{
-  type:'bar',
-  data:{{labels:{day_labels},datasets:[{{label:'Sessions',data:{day_session_data},backgroundColor:'#38bdf8',borderRadius:4}}]}},
-  options:{{responsive:true,plugins:{{legend:{{display:false}}}},scales:{{y:{{beginAtZero:true,ticks:{{color:'#94a3b8'}}}},x:{{ticks:{{color:'#94a3b8',maxRotation:45}}}}}}}}
-}});
-
-new Chart(document.getElementById('costChart'),{{
-  type:'line',
-  data:{{labels:{day_labels},datasets:[{{label:'Cost ($)',data:{day_cost_data},borderColor:'#a78bfa',backgroundColor:'rgba(167,139,250,0.1)',fill:true,tension:0.3}}]}},
-  options:{{responsive:true,plugins:{{legend:{{display:false}}}},scales:{{y:{{beginAtZero:true,ticks:{{color:'#94a3b8'}}}},x:{{ticks:{{color:'#94a3b8',maxRotation:45}}}}}}}}
-}});
-
-new Chart(document.getElementById('statusChart'),{{
-  type:'doughnut',
-  data:{{labels:{status_labels},datasets:[{{data:{status_data},backgroundColor:doughnutColors}}]}},
-  options:{{responsive:true,plugins:{{legend:{{position:'bottom',labels:{{color:'#cbd5e1'}}}}}}}}
-}});
-
-new Chart(document.getElementById('topChart'),{{
-  type:'bar',
-  data:{{labels:{top_labels},datasets:[{{label:'Cost ($)',data:{top_data},backgroundColor:'#fbbf24',borderRadius:4}}]}},
-  options:{{responsive:true,indexAxis:'y',plugins:{{legend:{{display:false}}}},scales:{{x:{{beginAtZero:true,ticks:{{color:'#94a3b8'}}}},y:{{ticks:{{color:'#94a3b8'}}}}}}}}
-}});
-</script>
-</body>
-</html>"""
-
-    fname = output or "agentlens-dashboard.html"
-    with open(fname, "w", encoding="utf-8") as f:
-        f.write(html)
-    print(f"âœ… Dashboard written to {fname}")
-
-    if getattr(args, "open", False):
-        _webbrowser.open(fname)
-        print("ðŸŒ Opened in browser")
-
-
-# â"€â"€ Replay â"€â"€â"€â"€â"€â"€â"€â"€â"€â"€â"€â"€â"€â"€â"€â"€â"€â"€â"€â"€â"€â"€â"€â"€â"€â"€â"€â"€â"€â"€â"€â"€â"€â"€â"€â"€â"€â"€â"€â"€â"€â"€â"€â"€â"€â"€â"€â"€â"€â"€â"€â"€â"€â"€â"€â"€â"€â"€â"€
-
-
-def _build_session_from_api(session_data: dict, events_data: list[dict]) -> Any:
-    """Construct a Session + AgentEvent tree from raw API dicts."""
-    from datetime import datetime, timezone
-    from agentlens.models import AgentEvent, Session, ToolCall
-
-    def _parse_ts(val: Any) -> datetime:
-        if isinstance(val, datetime):
-            return val
-        if isinstance(val, str):
-            # handle Z suffix and +00:00
-            val = val.replace("Z", "+00:00")
-            try:
-                return datetime.fromisoformat(val)
-            except Exception:
-                return datetime.now(timezone.utc)
-        return datetime.now(timezone.utc)
-
-    events: list[AgentEvent] = []
-    for raw in events_data:
-        tc = None
-        if raw.get("tool_call"):
-            tc_raw = raw["tool_call"]
-            tc = ToolCall(
-                tool_call_id=tc_raw.get("tool_call_id", ""),
-                tool_name=tc_raw.get("tool_name", "unknown"),
-                tool_input=tc_raw.get("tool_input", {}),
-                tool_output=tc_raw.get("tool_output"),
-                duration_ms=tc_raw.get("duration_ms"),
-            )
-        events.append(AgentEvent(
-            event_id=raw.get("event_id", raw.get("id", "")),
-            session_id=raw.get("session_id", session_data.get("session_id", "")),
-            event_type=raw.get("event_type", raw.get("type", "generic")),
-            timestamp=_parse_ts(raw.get("timestamp")),
-            model=raw.get("model"),
-            tokens_in=raw.get("tokens_in", 0),
-            tokens_out=raw.get("tokens_out", 0),
-            tool_call=tc,
-            duration_ms=raw.get("duration_ms"),
-        ))
-
-    session = Session(
-        session_id=session_data.get("session_id", session_data.get("id", "unknown")),
-        agent_name=session_data.get("agent_name", "unknown"),
-        started_at=_parse_ts(session_data.get("started_at", session_data.get("created_at"))),
-        ended_at=_parse_ts(session_data["ended_at"]) if session_data.get("ended_at") else None,
-        status=session_data.get("status", "completed"),
-        events=events,
-        total_tokens_in=sum(e.tokens_in for e in events),
-        total_tokens_out=sum(e.tokens_out for e in events),
-    )
-    return session
-
-
-def cmd_replay(args: argparse.Namespace) -> None:
-    """Replay a session event-by-event in the terminal.
-
-    Fetches session data and events from the API, then uses
-    SessionReplayer to produce a formatted chronological replay
-    with optional speed control, type filtering, and multiple
-    output formats.
-    """
-    import time as _time
-    from agentlens.replayer import SessionReplayer
-
-    client, _ = _get_client(args)
-
-    # Fetch session metadata
-    resp = client.get(f"/sessions/{args.session_id}")
-    resp.raise_for_status()
-    session_data = resp.json()
-
-    # Fetch events
-    resp = client.get("/events", params={"session_id": args.session_id, "limit": 10000})
-    resp.raise_for_status()
-    events_raw = resp.json()
-    if isinstance(events_raw, dict):
-        events_raw = events_raw.get("events", [events_raw])
-
-    if not events_raw:
-        print(f"No events found for session {args.session_id}")
-        return
-
-    session = _build_session_from_api(session_data, events_raw)
-    replayer = SessionReplayer(session, speed=args.speed)
-
-    # Apply type filters
-    if args.type:
-        replayer.add_filter(*[t.strip() for t in args.type.split(",")])
-    if args.exclude:
-        replayer.exclude(*[t.strip() for t in args.exclude.split(",")])
-
-    # Non-live output formats
-    fmt = args.format or "text"
-    if fmt == "json":
-        output = replayer.to_json()
-        if args.output:
-            with open(args.output, "w", encoding="utf-8") as f:
-                f.write(output)
-            print(f"âœ… JSON replay written to {args.output}")
-        else:
-            print(output)
-        return
-
-    if fmt == "markdown":
-        output = replayer.to_markdown()
-        if args.output:
-            with open(args.output, "w", encoding="utf-8") as f:
-                f.write(output)
-            print(f"âœ… Markdown replay written to {args.output}")
-        else:
-            print(output)
-        return
-
-    # Live text mode â€" stream frames to terminal with delays
-    if args.live:
-        print(
-            f"â-¶ Replaying session {session.session_id}"
-            f"  agent={session.agent_name}  speed={args.speed}x"
-            f"  events={len(replayer.filtered_events)}"
-        )
-        print()
-
-        use_color = not getattr(args, "no_color", False)
-
-        _TYPE_COLORS = {
-            "llm_call": "\033[36m",    # cyan
-            "tool_call": "\033[33m",   # yellow
-            "error": "\033[31m",       # red
-            "decision": "\033[35m",    # magenta
-            "guardrail": "\033[32m",   # green
-        }
-        _RESET = "\033[0m"
-
-        for frame in replayer.play():
-            # Sleep for the wall delay to simulate real-time playback
-            if frame.wall_delay_ms > 0 and frame.index > 0:
-                _time.sleep(frame.wall_delay_ms / 1000.0)
-
-            e = frame.event
-            # Build display line
-            idx_str = f"[{frame.index + 1:>3}/{frame.total}]"
-            pct_str = f"{frame.progress_pct:5.1f}%"
-
-            type_str = e.event_type
-            if use_color:
-                color = _TYPE_COLORS.get(e.event_type, "\033[37m")
-                type_str = f"{color}{e.event_type}{_RESET}"
-
-            parts = [idx_str, type_str]
-            if e.model:
-                parts.append(f"model={e.model}")
-            if e.tool_call:
-                parts.append(f"tool={e.tool_call.tool_name}")
-            if e.duration_ms is not None:
-                parts.append(f"dur={e.duration_ms:.0f}ms")
-            if e.tokens_in or e.tokens_out:
-                parts.append(f"tok={e.tokens_in}â†'{e.tokens_out}")
-            if frame.is_breakpoint:
-                bp_marker = "\033[31;1mâ¸ BREAK\033[0m" if use_color else "â¸ BREAK"
-                parts.append(bp_marker)
-
-            # Progress bar
-            bar_width = 20
-            filled = int(frame.progress * bar_width)
-            bar = "â-ˆ" * filled + "â-'" * (bar_width - filled)
-            parts.append(f"[{bar}] {pct_str}")
-
-            print(" | ".join(parts))
-
-        print()
-        print(replayer.stats.summary())
-    else:
-        # Static text dump
-        output = replayer.to_text()
-        if args.output:
-            with open(args.output, "w", encoding="utf-8") as f:
-                f.write(output)
-            print(f"âœ… Text replay written to {args.output}")
-        else:
-            print(output)
-
-
-# â"€â"€ Main â"€â"€â"€â"€â"€â"€â"€â"€â"€â"€â"€â"€â"€â"€â"€â"€â"€â"€â"€â"€â"€â"€â"€â"€â"€â"€â"€â"€â"€â"€â"€â"€â"€â"€â"€â"€â"€â"€â"€â"€â"€â"€â"€â"€â"€â"€â"€â"€â"€â"€â"€â"€â"€â"€â"€â"€â"€â"€â"€â"€â"€
+# ── Main ─────────────────────────────────────────────────────────────
 
 
 def main() -> None:
     parser = argparse.ArgumentParser(
         prog="agentlens",
-        description="AgentLens CLI â€" query your AgentLens backend from the command line.",
+        description="AgentLens CLI — query your AgentLens backend from the command line.",
     )
     parser.add_argument("--endpoint", help="Backend URL (or set AGENTLENS_ENDPOINT)")
     parser.add_argument("--api-key", help="API key (or set AGENTLENS_API_KEY)")
@@ -1122,7 +748,7 @@ def main() -> None:
     p.add_argument("--min-ms", type=float, default=None, help="Only show events slower than N milliseconds")
 
     # heatmap
-    p = sub.add_parser("heatmap", help="GitHub-style activity heatmap (day-of-week Ã- hour)")
+    p = sub.add_parser("heatmap", help="GitHub-style activity heatmap (day-of-week Ö hour)")
     p.add_argument("--metric", choices=["sessions", "cost", "tokens", "events"], default="sessions", help="Metric to visualize (default: sessions)")
     p.add_argument("--weeks", type=int, default=12, help="Number of weeks to include (default: 12)")
     p.add_argument("--limit", type=int, default=500, help="Max sessions to fetch (default: 500)")
