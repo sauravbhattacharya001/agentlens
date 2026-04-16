@@ -42,8 +42,33 @@ def load_config() -> Dict[str, Any]:
 
 
 def save_config(cfg: Dict[str, Any]) -> None:
-    """Persist config to disk."""
-    CONFIG_PATH.write_text(json.dumps(cfg, indent=2) + "\n", encoding="utf-8")
+    """Persist config to disk with restrictive file permissions.
+
+    The config file may contain sensitive values (e.g. ``api_key``).
+    On POSIX systems, the file is created with mode 0o600 (owner-only
+    read/write) to prevent other users on the system from reading
+    credentials.  On Windows, default ACLs already restrict access to
+    the owning user in most configurations.
+    """
+    content = json.dumps(cfg, indent=2) + "\n"
+
+    if os.name == "posix":
+        # Atomic-ish write: open with restricted permissions from the
+        # start so there's no window where the file is world-readable.
+        fd = os.open(
+            str(CONFIG_PATH),
+            os.O_WRONLY | os.O_CREAT | os.O_TRUNC,
+            0o600,
+        )
+        try:
+            os.write(fd, content.encode("utf-8"))
+        finally:
+            os.close(fd)
+        # Also fix permissions on pre-existing files that were created
+        # before this patch (they may be world-readable).
+        os.chmod(str(CONFIG_PATH), 0o600)
+    else:
+        CONFIG_PATH.write_text(content, encoding="utf-8")
 
 
 def get_config_value(key: str) -> Optional[str]:
