@@ -341,6 +341,8 @@ class LatencyProfiler:
         self._sessions: dict[str, ProfilingSession] = {}
         self._session_order: list[str] = []  # insertion order
         self.baseline_window = baseline_window
+        self._baseline_cache: dict[str, PercentileStats] | None = None
+        self._baseline_generation: int = 0  # bumped on session add/remove
 
     def start_session(self, session_id: str | None = None, label: str = "") -> ProfilingSession:
         """Create and register a new profiling session.
@@ -356,6 +358,8 @@ class LatencyProfiler:
         session = ProfilingSession(session_id=sid, label=label)
         self._sessions[sid] = session
         self._session_order.append(sid)
+        self._baseline_cache = None  # invalidate
+        self._baseline_generation += 1
         return session
 
     def get_session(self, session_id: str) -> ProfilingSession | None:
@@ -366,10 +370,13 @@ class LatencyProfiler:
         """Remove a session. Returns True if it existed."""
         if session_id in self._sessions:
             del self._sessions[session_id]
-            try:
-                self._session_order.remove(session_id)
-            except ValueError:
-                pass
+            # Rebuild order list only when removing; this trades O(n)
+            # remove for a clean list without tombstones.
+            self._session_order = [
+                sid for sid in self._session_order if sid != session_id
+            ]
+            self._baseline_cache = None  # invalidate
+            self._baseline_generation += 1
             return True
         return False
 
@@ -435,12 +442,18 @@ class LatencyProfiler:
     def step_baselines(self) -> dict[str, PercentileStats]:
         """Compute per-step latency baselines from recent sessions.
 
-        Uses the last `baseline_window` sessions to build percentile
-        distributions for each step name.
+        Uses the last ``baseline_window`` sessions to build percentile
+        distributions for each step name.  Results are cached and
+        invalidated automatically when sessions are added or removed,
+        so repeated calls (e.g. from ``detect_slow_steps`` followed by
+        ``fleet_summary``) are O(1) after the first computation.
 
         Returns:
             Dict mapping step name to PercentileStats.
         """
+        if self._baseline_cache is not None:
+            return self._baseline_cache
+
         recent_ids = self._session_order[-self.baseline_window:]
         step_values: dict[str, list[float]] = {}
 
@@ -458,6 +471,7 @@ class LatencyProfiler:
             if stats is not None:
                 baselines[name] = stats
 
+        self._baseline_cache = baselines
         return baselines
 
     def detect_slow_steps(
