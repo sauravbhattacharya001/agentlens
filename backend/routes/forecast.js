@@ -122,6 +122,11 @@ function fetchDailyAggregates(db, days, agent, model, pricingMap) {
  * Simple OLS linear regression: y = slope * x + intercept.
  * x-values are 0, 1, 2, ...
  *
+ * Single-pass implementation: computes slope, intercept, and R² in one
+ * loop over the data (previously required 2-3 separate passes).
+ * For x = 0..n-1, xMean = (n-1)/2 and Σ(x-xMean)² = n(n²-1)/12,
+ * both computed analytically to avoid a pass over x values.
+ *
  * @param {number[]} values - y-values
  * @returns {{ slope: number, intercept: number, r2: number }}
  */
@@ -131,29 +136,29 @@ function linearRegression(values) {
   if (n === 1) return { slope: 0, intercept: values[0], r2: 1 };
 
   const xMean = (n - 1) / 2;
+  // Σ(x - xMean)² for x = 0..n-1 has a closed-form: n(n²-1)/12
+  const den = n * (n * n - 1) / 12;
+  if (den === 0) return { slope: 0, intercept: values[0], r2: 0 };
+
+  // Single pass: accumulate ySum, cross-product, and sum-of-squares
+  // for residuals simultaneously.
   let ySum = 0;
-  for (let i = 0; i < n; i++) ySum += values[i];
-  const yMean = ySum / n;
-
-  let num = 0, den = 0, ssTot = 0;
+  let crossSum = 0;
   for (let i = 0; i < n; i++) {
-    const dx = i - xMean;
-    const dy = values[i] - yMean;
-    num += dx * dy;
-    den += dx * dx;
-    ssTot += dy * dy;
+    ySum += values[i];
+    crossSum += (i - xMean) * values[i];
   }
-
-  if (den === 0) return { slope: 0, intercept: yMean, r2: 0 };
-
-  const slope = num / den;
+  const yMean = ySum / n;
+  const slope = crossSum / den;
   const intercept = yMean - slope * xMean;
 
-  // R² (coefficient of determination)
-  let ssRes = 0;
+  // R² in one more pass (combined with ssTot)
+  let ssTot = 0, ssRes = 0;
   for (let i = 0; i < n; i++) {
-    const predicted = slope * i + intercept;
-    ssRes += (values[i] - predicted) ** 2;
+    const dy = values[i] - yMean;
+    ssTot += dy * dy;
+    const residual = values[i] - (slope * i + intercept);
+    ssRes += residual * residual;
   }
   const r2 = ssTot > 0 ? Math.max(0, 1 - ssRes / ssTot) : 0;
 
@@ -216,10 +221,16 @@ function predictionInterval(values, slope, intercept, futureX) {
 
 /**
  * Detect trend: "increasing", "decreasing", "stable", or "insufficient_data".
+ *
+ * Accepts an optional pre-computed regression result to avoid redundant
+ * linearRegression() calls when the caller already has it.
+ *
+ * @param {number[]} values
+ * @param {{ slope: number }} [regression] - Pre-computed regression result
  */
-function detectTrend(values) {
+function detectTrend(values, regression) {
   if (values.length < 3) return { trend: "insufficient_data", pctPerDay: 0 };
-  const { slope } = linearRegression(values);
+  const { slope } = regression || linearRegression(values);
   let sum = 0;
   for (let i = 0; i < values.length; i++) sum += values[i];
   const avg = sum / values.length || 1;
@@ -293,10 +304,14 @@ router.get("/", wrapRoute("forecast usage", (req, res) => {
   let totalPredictedCost = 0;
   let totalPredictedTokens = 0;
 
+  // Coerce to numbers once, reused by regression and trend detection
+  const numTokenValues = tokenValues.map(Number);
+  const numSessionValues = sessionValues.map(Number);
+
   if (method === "linear") {
     const costReg = linearRegression(costValues);
-    const tokenReg = linearRegression(tokenValues.map(Number));
-    const sessionReg = linearRegression(sessionValues.map(Number));
+    const tokenReg = linearRegression(numTokenValues);
+    const sessionReg = linearRegression(numSessionValues);
 
     for (let d = 1; d <= forecastDays; d++) {
       const futureX = n - 1 + d;
@@ -322,8 +337,8 @@ router.get("/", wrapRoute("forecast usage", (req, res) => {
     }
   } else if (method === "ema") {
     const emaCost = ema(costValues);
-    const emaTokens = ema(tokenValues.map(Number));
-    const emaSessions = ema(sessionValues.map(Number));
+    const emaTokens = ema(numTokenValues);
+    const emaSessions = ema(numSessionValues);
     const std = n >= 2 ? stddev(costValues) : emaCost * 0.5;
 
     for (let d = 1; d <= forecastDays; d++) {
@@ -375,7 +390,7 @@ router.get("/", wrapRoute("forecast usage", (req, res) => {
 
   // Trend detection
   const costTrend = detectTrend(costValues);
-  const tokenTrend = detectTrend(tokenValues.map(Number));
+  const tokenTrend = detectTrend(numTokenValues);
 
   // Historical summary
   let histTotalCost = 0, histTotalTokens = 0, histTotalSessions = 0;
