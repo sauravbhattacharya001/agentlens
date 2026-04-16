@@ -432,7 +432,7 @@ class PostmortemGenerator:
         if error_tools:
             top_tool, tool_count = error_tools.most_common(1)[0]
             causes.append(RootCause(
-                cause_id=f"RC-TOOL-{hashlib.md5(top_tool.encode()).hexdigest()[:6]}",
+                cause_id=f"RC-TOOL-{hashlib.md5(top_tool.encode(), usedforsecurity=False).hexdigest()[:6]}",
                 description=f"Tool '{top_tool}' failures",
                 confidence=min(1.0, tool_count / max(len(errors), 1) + 0.1),
                 evidence=[f"Tool '{top_tool}' failed {tool_count} times",
@@ -443,7 +443,7 @@ class PostmortemGenerator:
         if error_models:
             top_model, model_count = error_models.most_common(1)[0]
             causes.append(RootCause(
-                cause_id=f"RC-MODEL-{hashlib.md5(top_model.encode()).hexdigest()[:6]}",
+                cause_id=f"RC-MODEL-{hashlib.md5(top_model.encode(), usedforsecurity=False).hexdigest()[:6]}",
                 description=f"Model '{top_model}' errors",
                 confidence=min(1.0, model_count / max(len(errors), 1) + 0.05),
                 evidence=[f"Model '{top_model}' produced {model_count} errors",
@@ -495,7 +495,7 @@ class PostmortemGenerator:
             top_msg, msg_count = error_messages.most_common(1)[0]
             if msg_count >= 2:
                 causes.append(RootCause(
-                    cause_id=f"RC-REPEAT-{hashlib.md5(top_msg.encode()).hexdigest()[:6]}",
+                    cause_id=f"RC-REPEAT-{hashlib.md5(top_msg.encode(), usedforsecurity=False).hexdigest()[:6]}",
                     description=f"Repeated error: {top_msg[:60]}",
                     confidence=min(1.0, msg_count / len(errors)),
                     evidence=[f"Same error occurred {msg_count} times",
