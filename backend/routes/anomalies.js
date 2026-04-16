@@ -34,6 +34,28 @@ function stddev(arr) {
   return Math.sqrt(arr.reduce((s, v) => s + (v - m) ** 2, 0) / (arr.length - 1));
 }
 
+/**
+ * Compute mean and sample standard deviation from pre-accumulated sums.
+ * Avoids the multi-pass approach (extract arrays → mean → stddev) by
+ * using the algebraic identity: Var = (ΣX² - n·μ²) / (n-1).
+ *
+ * This lets computeBaselines() accumulate sums in a single loop over
+ * all rows instead of 4 array extractions + 8 reduction passes.
+ *
+ * @param {number} sum   - Sum of values (ΣX).
+ * @param {number} sumSq - Sum of squared values (ΣX²).
+ * @param {number} n     - Number of values.
+ * @returns {{ mean: number, stddev: number }}
+ */
+function meanStddevFromSums(sum, sumSq, n) {
+  if (n === 0) return { mean: 0, stddev: 0 };
+  const m = sum / n;
+  if (n < 2) return { mean: m, stddev: 0 };
+  // Var = (sumSq - n * mean^2) / (n - 1)  [Bessel's correction]
+  const variance = Math.max(0, (sumSq - n * m * m) / (n - 1));
+  return { mean: m, stddev: Math.sqrt(variance) };
+}
+
 function zScore(value, m, sd) {
   if (sd === 0) return 0;
   return (value - m) / sd;
@@ -126,23 +148,40 @@ function computeBaselines(db, agentName) {
 
   if (!rows.length) return { rows: [], baselines: null, rowIndex: new Map() };
 
-  const totalTokens = rows.map((r) => r.total_tokens || 0);
-  const durations = rows.map((r) => r.duration_ms || 0);
-  const eventCounts = rows.map((r) => r.event_count || 0);
-  const errorCounts = rows.map((r) => r.error_count || 0);
+  // Single-pass baseline computation: accumulate sums and sum-of-squares
+  // in one iteration instead of 4 array extractions + 8 reduction passes
+  // (mean + stddev each iterate the full array per dimension). Reduces
+  // from ~16 passes to 1 pass over the rows — significant when session
+  // count is large (thousands of sessions).
+  const n = rows.length;
+  let tokSum = 0, tokSumSq = 0;
+  let durSum = 0, durSumSq = 0;
+  let evtSum = 0, evtSumSq = 0;
+  let errSum = 0, errSumSq = 0;
+  const rowIndex = new Map();
+
+  for (let i = 0; i < n; i++) {
+    const r = rows[i];
+    const tok = r.total_tokens || 0;
+    const dur = r.duration_ms || 0;
+    const evt = r.event_count || 0;
+    const err = r.error_count || 0;
+
+    tokSum += tok; tokSumSq += tok * tok;
+    durSum += dur; durSumSq += dur * dur;
+    evtSum += evt; evtSumSq += evt * evt;
+    errSum += err; errSumSq += err * err;
+
+    rowIndex.set(r.session_id, r);
+  }
 
   const baselines = {
-    totalTokens: { mean: mean(totalTokens), stddev: stddev(totalTokens) },
-    duration_ms: { mean: mean(durations), stddev: stddev(durations) },
-    eventCount: { mean: mean(eventCounts), stddev: stddev(eventCounts) },
-    errorCount: { mean: mean(errorCounts), stddev: stddev(errorCounts) },
-    sampleSize: rows.length,
+    totalTokens: meanStddevFromSums(tokSum, tokSumSq, n),
+    duration_ms: meanStddevFromSums(durSum, durSumSq, n),
+    eventCount: meanStddevFromSums(evtSum, evtSumSq, n),
+    errorCount: meanStddevFromSums(errSum, errSumSq, n),
+    sampleSize: n,
   };
-
-  // Build a Map for O(1) session lookup (used by /session/:id endpoint)
-  // instead of O(n) Array.find() on every request.
-  const rowIndex = new Map();
-  for (const r of rows) rowIndex.set(r.session_id, r);
 
   _setCachedBaselines(agentName, rows, baselines, rowIndex);
   return { rows, baselines, rowIndex };
