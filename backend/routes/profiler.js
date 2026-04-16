@@ -114,11 +114,15 @@ function percentile(arr, p) {
 // ── Data fetchers ──────────────────────────────────────────────────
 
 function fetchSessions(db, agentName, cutoff) {
-  let sql = `SELECT id, agent_name, total_tokens, duration_ms, error_count, created_at
-             FROM sessions WHERE created_at >= ?`;
+  let sql = `SELECT session_id, agent_name,
+               COALESCE(total_tokens_in, 0) + COALESCE(total_tokens_out, 0) AS total_tokens,
+               CAST((julianday(COALESCE(ended_at, datetime('now'))) - julianday(started_at)) * 86400000 AS INTEGER) AS duration_ms,
+               0 AS error_count,
+               started_at AS created_at
+             FROM sessions WHERE started_at >= ?`;
   const params = [cutoff];
   if (agentName) { sql += " AND agent_name = ?"; params.push(agentName); }
-  sql += " ORDER BY created_at ASC";
+  sql += " ORDER BY started_at ASC";
   return db.prepare(sql).all(...params);
 }
 
@@ -135,8 +139,17 @@ function fetchEvents(db, sessionIds) {
     const chunk = sessionIds.slice(i, i + CHUNK);
     const placeholders = chunk.map(() => "?").join(",");
     const rows = db.prepare(
-      `SELECT session_id, type, name, tool_name FROM events WHERE session_id IN (${placeholders})`
+      `SELECT session_id, event_type AS type, tool_call FROM events WHERE session_id IN (${placeholders})`
     ).all(...chunk);
+    // Extract tool name from tool_call JSON for tool distribution
+    for (const row of rows) {
+      if (row.tool_call && typeof row.tool_call === 'string') {
+        try {
+          const tc = JSON.parse(row.tool_call);
+          row.name = tc.name || tc.tool_name || null;
+        } catch { row.name = null; }
+      }
+    }
     results.push(...rows);
   }
   return results;
@@ -166,9 +179,9 @@ router.get("/", wrapRoute("list agent profiles", (req, res) => {
       return { agent, status: "building", sessionCount: allSessions.length, message: "Need more historical data" };
     }
 
-    const allIds = allSessions.map(s => s.id);
-    const recentIds = recentSessions.map(s => s.id);
-    const historicalIds = historicalSessions.map(s => s.id);
+    const allIds = allSessions.map(s => s.session_id);
+    const recentIds = recentSessions.map(s => s.session_id);
+    const historicalIds = historicalSessions.map(s => s.session_id);
     const allEvents = fetchEvents(db, allIds);
 
     const baseline = buildProfile(historicalSessions, allEvents.filter(e => historicalIds.includes(e.session_id)));
@@ -230,7 +243,7 @@ router.get("/:agent", wrapRoute("get agent profile", (req, res) => {
   const sessions = fetchSessions(db, agent, cutoff);
   if (!sessions.length) return res.status(404).json({ error: "Agent not found or no sessions in range" });
 
-  const events = fetchEvents(db, sessions.map(s => s.id));
+  const events = fetchEvents(db, sessions.map(s => s.session_id));
   const profile = buildProfile(sessions, events);
 
   // Daily breakdown — index sessions by ID for O(1) lookup instead
@@ -238,7 +251,7 @@ router.get("/:agent", wrapRoute("get agent profile", (req, res) => {
   const dailyMap = {};
   const sessionById = {};
   for (const s of sessions) {
-    sessionById[s.id] = s;
+    sessionById[s.session_id] = s;
     const day = s.created_at.slice(0, 10);
     if (!dailyMap[day]) dailyMap[day] = { sessions: [], events: [] };
     dailyMap[day].sessions.push(s);
@@ -271,12 +284,12 @@ router.get("/:agent/drift", wrapRoute("get drift timeline", (req, res) => {
   const sessions = fetchSessions(db, agent, cutoff);
   if (sessions.length < 5) return res.json({ agent, timeline: [], message: "Insufficient data" });
 
-  const events = fetchEvents(db, sessions.map(s => s.id));
+  const events = fetchEvents(db, sessions.map(s => s.session_id));
 
   // Build baseline from first half
   const midpoint = Math.floor(sessions.length / 2);
   const baselineSessions = sessions.slice(0, midpoint);
-  const baselineIds = new Set(baselineSessions.map(s => s.id));
+  const baselineIds = new Set(baselineSessions.map(s => s.session_id));
   const baseline = buildProfile(baselineSessions, events.filter(e => baselineIds.has(e.session_id)));
 
   // Sliding window drift
@@ -284,7 +297,7 @@ router.get("/:agent/drift", wrapRoute("get drift timeline", (req, res) => {
   for (let i = midpoint; i < sessions.length; i++) {
     const windowStart = Math.max(midpoint, i - windowDays * 10);
     const windowSessions = sessions.slice(windowStart, i + 1);
-    const windowIds = new Set(windowSessions.map(s => s.id));
+    const windowIds = new Set(windowSessions.map(s => s.session_id));
     const windowProfile = buildProfile(windowSessions, events.filter(e => windowIds.has(e.session_id)));
 
     const eventDrift = jensenShannonDivergence(baseline.eventTypeDist, windowProfile.eventTypeDist);
@@ -317,7 +330,7 @@ router.post("/snapshot", wrapRoute("create profile snapshot", (req, res) => {
 
   const snapshots = agents.map(agent => {
     const sessions = fetchSessions(db, agent, cutoff);
-    const events = fetchEvents(db, sessions.map(s => s.id));
+    const events = fetchEvents(db, sessions.map(s => s.session_id));
     return { agent, profile: buildProfile(sessions, events), timestamp: new Date().toISOString() };
   });
 
