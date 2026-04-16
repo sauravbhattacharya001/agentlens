@@ -382,14 +382,28 @@ class AlertRule:
 # ── Engine ─────────────────────────────────────────────────────────────
 
 class AlertRulesEngine:
-    """Central engine that manages rules, evaluates events, and dispatches alerts."""
+    """Central engine that manages rules, evaluates events, and dispatches alerts.
 
-    def __init__(self) -> None:
+    Args:
+        max_events: Maximum events retained in the incremental buffer.
+            Oldest events are evicted when this limit is exceeded.
+            Default: 10 000.
+        max_history: Maximum alert results retained in history.
+            Default: 5 000.
+    """
+
+    def __init__(
+        self,
+        max_events: int = 10_000,
+        max_history: int = 5_000,
+    ) -> None:
         self._rules: dict[str, AlertRule] = {}
         self._handlers: list[Callable[[AlertResult], Any]] = []
         self._history: list[AlertResult] = []
         self._events: list[dict[str, Any]] = []
         self._lock = threading.Lock()
+        self._max_events = max(1, max_events)
+        self._max_history = max(1, max_history)
 
     # ── Rule management ────────────────────────────────────────────────
 
@@ -454,6 +468,8 @@ class AlertRulesEngine:
                 results.append(result)
                 with self._lock:
                     self._history.append(result)
+                    if len(self._history) > self._max_history:
+                        self._history = self._history[-self._max_history:]
                 for handler in self._handlers:
                     try:
                         handler(result)
@@ -462,9 +478,15 @@ class AlertRulesEngine:
         return results
 
     def evaluate_incremental(self, new_events: list[dict[str, Any]]) -> list[AlertResult]:
-        """Append *new_events* to the internal buffer and evaluate all rules."""
+        """Append *new_events* to the internal buffer and evaluate all rules.
+
+        The buffer is capped at ``max_events``; oldest events are dropped
+        when the limit is exceeded to prevent unbounded memory growth.
+        """
         with self._lock:
             self._events.extend(new_events)
+            if len(self._events) > self._max_events:
+                self._events = self._events[-self._max_events:]
             all_events = list(self._events)
         return self.evaluate(all_events)
 
@@ -494,6 +516,23 @@ class AlertRulesEngine:
             return {
                 "rules": [r.to_dict() for r in self._rules.values()],
             }
+
+    @property
+    def event_count(self) -> int:
+        """Number of events in the incremental buffer."""
+        with self._lock:
+            return len(self._events)
+
+    @property
+    def history_count(self) -> int:
+        """Number of alert results in history."""
+        with self._lock:
+            return len(self._history)
+
+    def clear_events(self) -> None:
+        """Clear the incremental event buffer."""
+        with self._lock:
+            self._events.clear()
 
     @classmethod
     def from_dict(cls, data: dict[str, Any]) -> "AlertRulesEngine":
