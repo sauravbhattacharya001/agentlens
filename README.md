@@ -208,6 +208,8 @@ agentlens sla --latency 2000 --error-rate 5 --token-budget 8000 --slo 95 --verbo
 agentlens sla --policy production --json
 ```
 
+> 📖 **Full CLI reference:** See [docs/CLI.md](docs/CLI.md) for all 50+ commands with options and examples.
+
 Configure via environment variables:
 ```bash
 export AGENTLENS_ENDPOINT=http://localhost:3000
