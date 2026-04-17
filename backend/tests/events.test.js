@@ -810,6 +810,31 @@ describe("POST /events", () => {
     expect(row.status).toBe("completed");
   });
 
+  test("normalizes invalid session_end status to 'completed'", async () => {
+    const app = buildApp();
+    await request(app)
+      .post("/events")
+      .send({
+        events: [
+          {
+            session_id: "invalid-status-sess",
+            event_type: "session_start",
+            timestamp: "2026-01-01T00:00:00Z",
+          },
+          {
+            session_id: "invalid-status-sess",
+            event_type: "session_end",
+            status: "hacked",
+          },
+        ],
+      });
+
+    const row = mockDb
+      .prepare("SELECT * FROM sessions WHERE session_id = ?")
+      .get("invalid-status-sess");
+    expect(row.status).toBe("completed");
+  });
+
   test("non-string input/output data is serialized as JSON", async () => {
     const app = buildApp();
     await request(app)
