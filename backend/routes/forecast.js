@@ -332,11 +332,15 @@ router.get("/", wrapRoute("forecast usage", (req, res) => {
   const numTokenValues = tokenValues.map(Number);
   const numSessionValues = sessionValues.map(Number);
 
-  if (method === "linear") {
-    const costReg = linearRegression(costValues);
-    const tokenReg = linearRegression(numTokenValues);
-    const sessionReg = linearRegression(numSessionValues);
+  // Pre-compute regressions when needed — hoisted so trend detection
+  // below can reuse them without a redundant linearRegression() call.
+  // Previously these were const-declared inside the if-block, causing
+  // a ReferenceError when accessed outside that scope for trend detection.
+  const costReg = method === "linear" ? linearRegression(costValues) : null;
+  const tokenReg = method === "linear" ? linearRegression(numTokenValues) : null;
+  const sessionReg = method === "linear" ? linearRegression(numSessionValues) : null;
 
+  if (method === "linear") {
     for (let d = 1; d <= forecastDays; d++) {
       const futureX = n - 1 + d;
       const predCost = Math.max(0, costReg.slope * futureX + costReg.intercept);
