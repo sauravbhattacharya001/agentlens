@@ -25,6 +25,9 @@ const VALID_EVENT_TYPES = new Set([
   "agent_error",
   "error",
   "generic",
+  "span_start",
+  "span_end",
+  "decision",
 ]);
 
 const VALID_SESSION_STATUSES = new Set([
