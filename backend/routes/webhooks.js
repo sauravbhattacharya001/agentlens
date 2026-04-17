@@ -443,7 +443,12 @@ router.put("/:webhookId", wrapRoute("update webhook", (req, res) => {
   const { name, url, secret, format, rule_ids, enabled, retry_count, timeout_ms } = req.body;
   const updates = {};
 
-  if (name !== undefined) updates.name = name.trim().slice(0, MAX_NAME_LENGTH);
+  if (name !== undefined) {
+    if (typeof name !== "string" || !name.trim()) {
+      return res.status(400).json({ error: "name must be a non-empty string" });
+    }
+    updates.name = name.trim().slice(0, MAX_NAME_LENGTH);
+  }
   if (url !== undefined) {
     const urlCheck = validateWebhookUrl(url);
     if (!urlCheck.valid) {
@@ -532,6 +537,12 @@ router.get("/:webhookId/deliveries", wrapRoute("list deliveries", (req, res) => 
 
   const { status } = req.query;
   const limit = parseLimit(req.query.limit, 50, 200);
+
+  // Validate status filter to prevent unexpected SQL values
+  const VALID_DELIVERY_STATUSES = ["pending", "success", "failed"];
+  if (status && !VALID_DELIVERY_STATUSES.includes(status)) {
+    return res.status(400).json({ error: `Invalid status. Valid: ${VALID_DELIVERY_STATUSES.join(", ")}` });
+  }
 
   let sql = "SELECT * FROM webhook_deliveries WHERE webhook_id = ?";
   const params = [webhookId];

@@ -303,7 +303,12 @@ router.put("/rules/:ruleId", validateIdParam("ruleId"), wrapRoute("update alert 
     const updates = {};
     const { name, metric, operator, threshold, window_minutes, agent_filter, enabled, cooldown_minutes } = req.body;
 
-    if (name !== undefined) updates.name = name.trim().slice(0, MAX_NAME_LENGTH);
+    if (name !== undefined) {
+      if (typeof name !== "string" || !name.trim()) {
+        return res.status(400).json({ error: "name must be a non-empty string" });
+      }
+      updates.name = name.trim().slice(0, MAX_NAME_LENGTH);
+    }
     if (metric !== undefined) {
       if (!VALID_METRICS.includes(metric)) {
         return res.status(400).json({ error: `Invalid metric. Valid: ${VALID_METRICS.join(", ")}` });
@@ -316,7 +321,12 @@ router.put("/rules/:ruleId", validateIdParam("ruleId"), wrapRoute("update alert 
       }
       updates.operator = operator;
     }
-    if (threshold !== undefined) updates.threshold = threshold;
+    if (threshold !== undefined) {
+      if (typeof threshold !== "number" || isNaN(threshold)) {
+        return res.status(400).json({ error: "threshold must be a number" });
+      }
+      updates.threshold = threshold;
+    }
     if (window_minutes !== undefined) updates.window_minutes = Math.min(Math.max(1, Number(window_minutes)), MAX_WINDOW_MINUTES);
     if (agent_filter !== undefined) {
       if (agent_filter && (typeof agent_filter !== "string" || agent_filter.length > MAX_AGENT_FILTER_LENGTH)) {
