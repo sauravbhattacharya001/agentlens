@@ -172,6 +172,7 @@ class CostForecaster:
     def __init__(self) -> None:
         self._records: list[UsageRecord] = []
         self._daily_cache: dict[str, dict[str, Any]] | None = None
+        self._model_cache: dict[str, dict[str, Any]] | None = None
 
     @property
     def record_count(self) -> int:
@@ -180,6 +181,7 @@ class CostForecaster:
     def _invalidate_cache(self) -> None:
         """Mark the daily aggregates cache as stale."""
         self._daily_cache = None
+        self._model_cache = None
 
     def add_record(self, record: UsageRecord) -> None:
         """Add a single usage record."""
@@ -231,21 +233,44 @@ class CostForecaster:
         self._daily_cache = daily
         return daily
 
+    def _model_aggregates(self) -> dict[str, dict[str, Any]]:
+        """Aggregate per-model cost and token stats.
+
+        Cached alongside the daily aggregates to avoid re-scanning
+        all records on every call to ``spending_summary()``.
+        """
+        if self._model_cache is not None:
+            return self._model_cache
+        model_stats: dict[str, dict[str, Any]] = {}
+        for r in self._records:
+            m = r.model or "unknown"
+            if m not in model_stats:
+                model_stats[m] = {
+                    "cost": 0.0, "tokens_in": 0, "tokens_out": 0, "count": 0,
+                }
+            model_stats[m]["cost"] += r.cost_usd
+            model_stats[m]["tokens_in"] += r.tokens_in
+            model_stats[m]["tokens_out"] += r.tokens_out
+            model_stats[m]["count"] += 1
+        self._model_cache = model_stats
+        return model_stats
+
+    def _sorted_daily(self) -> list[tuple[str, dict[str, Any]]]:
+        """Return daily aggregates sorted chronologically.
+
+        Returns a single sorted list instead of separate cost/token lists,
+        avoiding redundant sort operations in callers.
+        """
+        agg = self._daily_aggregates()
+        return sorted(agg.items(), key=lambda x: x[0])
+
     def _sorted_daily_costs(self) -> list[tuple[str, float]]:
         """Return (date_str, total_cost) sorted chronologically."""
-        agg = self._daily_aggregates()
-        return sorted(
-            [(k, v["cost"]) for k, v in agg.items()],
-            key=lambda x: x[0],
-        )
+        return [(k, v["cost"]) for k, v in self._sorted_daily()]
 
     def _sorted_daily_tokens(self) -> list[tuple[str, int]]:
         """Return (date_str, total_tokens) sorted chronologically."""
-        agg = self._daily_aggregates()
-        return sorted(
-            [(k, v["tokens"]) for k, v in agg.items()],
-            key=lambda x: x[0],
-        )
+        return [(k, v["tokens"]) for k, v in self._sorted_daily()]
 
     # ── Linear regression ────────────────────────────────────
 
@@ -344,10 +369,10 @@ class CostForecaster:
         if not self._records:
             raise ValueError("No usage records — add data before forecasting")
 
-        daily_costs = self._sorted_daily_costs()
+        sorted_daily = self._sorted_daily()
+        daily_costs = [(k, v["cost"]) for k, v in sorted_daily]
         cost_values = [c for _, c in daily_costs]
-        daily_tokens = self._sorted_daily_tokens()
-        token_values = [t for _, t in daily_tokens]
+        token_values = [v["tokens"] for _, v in sorted_daily]
         n = len(cost_values)
 
         # Auto-select method
@@ -474,18 +499,8 @@ class CostForecaster:
         # Busiest day
         busiest = max(sorted_days, key=lambda x: x[1]["cost"])
 
-        # Model breakdown — must scan records for per-model granularity
-        model_stats: dict[str, dict[str, Any]] = {}
-        for r in self._records:
-            m = r.model or "unknown"
-            if m not in model_stats:
-                model_stats[m] = {
-                    "cost": 0.0, "tokens_in": 0, "tokens_out": 0, "count": 0,
-                }
-            model_stats[m]["cost"] += r.cost_usd
-            model_stats[m]["tokens_in"] += r.tokens_in
-            model_stats[m]["tokens_out"] += r.tokens_out
-            model_stats[m]["count"] += 1
+        # Model breakdown — cached to avoid re-scanning all records
+        model_stats = self._model_aggregates()
 
         # Trend detection
         trend, trend_pct = self._detect_trend(cost_values)
