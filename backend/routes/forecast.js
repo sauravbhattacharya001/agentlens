@@ -29,12 +29,28 @@ function getForecastStatements() {
   const baseWhere = "e.timestamp >= datetime('now', '-' || ? || ' days')";
   const groupOrder = " GROUP BY DATE(e.timestamp), e.model ORDER BY date ASC";
 
+  // Separate session count queries without model grouping — the main
+  // dailyAgg query groups by (date, model), so COUNT(DISTINCT session_id)
+  // per model group doesn't reflect the true daily session count when
+  // sessions use multiple models (taking max across groups undercounts).
+  const sessionCountBase = `
+    SELECT DATE(e.timestamp) AS date, COUNT(DISTINCT e.session_id) AS session_count
+    FROM events e
+    JOIN sessions s ON e.session_id = s.session_id`;
+  const sessionCountGroup = " GROUP BY DATE(e.timestamp)";
+
   _forecastStmts = {
     dailyAgg: {
       none:  db.prepare(`${baseSelect} WHERE ${baseWhere}${groupOrder}`),
       agent: db.prepare(`${baseSelect} WHERE ${baseWhere} AND s.agent_name = ?${groupOrder}`),
       model: db.prepare(`${baseSelect} WHERE ${baseWhere} AND LOWER(e.model) = LOWER(?)${groupOrder}`),
       both:  db.prepare(`${baseSelect} WHERE ${baseWhere} AND s.agent_name = ? AND LOWER(e.model) = LOWER(?)${groupOrder}`),
+    },
+    dailySessionCount: {
+      none:  db.prepare(`${sessionCountBase} WHERE ${baseWhere}${sessionCountGroup}`),
+      agent: db.prepare(`${sessionCountBase} WHERE ${baseWhere} AND s.agent_name = ?${sessionCountGroup}`),
+      model: db.prepare(`${sessionCountBase} WHERE ${baseWhere} AND LOWER(e.model) = LOWER(?)${sessionCountGroup}`),
+      both:  db.prepare(`${sessionCountBase} WHERE ${baseWhere} AND s.agent_name = ? AND LOWER(e.model) = LOWER(?)${sessionCountGroup}`),
     },
     modelBreakdown: {
       none:  db.prepare(`SELECT e.model, SUM(e.tokens_in) AS tokens_in, SUM(e.tokens_out) AS tokens_out, COUNT(*) AS event_count, COUNT(DISTINCT e.session_id) AS session_count FROM events e JOIN sessions s ON e.session_id = s.session_id WHERE e.timestamp >= datetime('now', '-' || ? || ' days') GROUP BY e.model ORDER BY tokens_in + tokens_out DESC`),
@@ -87,6 +103,18 @@ function fetchDailyAggregates(db, days, agent, model, pricingMap) {
 
   const rows = stmt.all(...params);
 
+  // Fetch accurate per-day session counts from a separate query that
+  // counts DISTINCT session_id without model grouping.  The main query
+  // groups by (date, model), so per-group session counts don't reflect
+  // sessions that span multiple models — taking max undercounted, and
+  // summing overcounted.  This dedicated query is the only correct way.
+  const sessionStmt = stmts.dailySessionCount[variant];
+  const sessionRows = sessionStmt.all(...params);
+  const sessionCountByDate = Object.create(null);
+  for (const sr of sessionRows) {
+    sessionCountByDate[sr.date] = sr.session_count;
+  }
+
   // Aggregate per day (across models), computing cost per row
   const dailyMap = {};
   for (const row of rows) {
@@ -98,7 +126,7 @@ function fetchDailyAggregates(db, days, agent, model, pricingMap) {
         tokens_out: 0,
         tokens_total: 0,
         event_count: 0,
-        session_count: 0,
+        session_count: sessionCountByDate[d] || 0,
         cost: 0,
       };
     }
@@ -106,10 +134,6 @@ function fetchDailyAggregates(db, days, agent, model, pricingMap) {
     dailyMap[d].tokens_out += row.tokens_out || 0;
     dailyMap[d].tokens_total += row.tokens_total || 0;
     dailyMap[d].event_count += row.event_count || 0;
-    // session_count is tricky with model grouping — take max per day
-    if (row.session_count > dailyMap[d].session_count) {
-      dailyMap[d].session_count = row.session_count;
-    }
     dailyMap[d].cost += estimateCost(row, pricingMap);
   }
 
@@ -388,9 +412,14 @@ router.get("/", wrapRoute("forecast usage", (req, res) => {
     }
   }
 
-  // Trend detection
-  const costTrend = detectTrend(costValues);
-  const tokenTrend = detectTrend(numTokenValues);
+  // Trend detection — reuse pre-computed regression results when
+  // available (linear method) to avoid redundant linearRegression() calls
+  const costTrend = method === "linear"
+    ? detectTrend(costValues, costReg)
+    : detectTrend(costValues);
+  const tokenTrend = method === "linear"
+    ? detectTrend(numTokenValues, tokenReg)
+    : detectTrend(numTokenValues);
 
   // Historical summary
   let histTotalCost = 0, histTotalTokens = 0, histTotalSessions = 0;
