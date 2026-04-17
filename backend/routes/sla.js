@@ -1,8 +1,23 @@
 const express = require("express");
 const { getDb } = require("../db");
+const { sanitizeString } = require("../lib/validation");
 const { parsePagination, wrapRoute } = require("../lib/request-helpers");
 
 const router = express.Router();
+
+// ── Security limits ─────────────────────────────────────────────────
+const MAX_AGENT_NAME_LENGTH = 128;
+const MAX_WINDOW_HOURS = 720;      // 30 days max to prevent expensive full-table scans
+const MAX_SNAPSHOTS = 10000;       // cap stored snapshots per agent to prevent disk exhaustion
+
+// Validate agent_name: alphanumeric + common separators, sanitized.
+// Rejects empty/null and enforces a length cap to prevent abuse.
+function validateAgentName(name) {
+  if (!name || typeof name !== "string") return null;
+  const sanitized = sanitizeString(name, MAX_AGENT_NAME_LENGTH);
+  if (!sanitized || sanitized.trim().length === 0) return null;
+  return sanitized.trim();
+}
 
 // ── Schema bootstrap ────────────────────────────────────────────────
 
@@ -52,7 +67,12 @@ const VALID_METRICS = [
 const VALID_COMPARISONS = ["lte", "gte", "lt", "gt", "eq"];
 
 function validateTarget(body) {
-  if (!body.agent_name || typeof body.agent_name !== "string" || body.agent_name.length > 128) {
+  const agentName = validateAgentName(body.agent_name);
+  if (!agentName) {
+    return "agent_name is required (string, max 128 chars, no control characters)";
+  }
+  body.agent_name = agentName; // normalize
+  if (body.agent_name.length > MAX_AGENT_NAME_LENGTH) {
     return "agent_name is required (string, max 128 chars)";
   }
   if (!body.metric || !VALID_METRICS.includes(body.metric)) {
@@ -132,7 +152,7 @@ function computeAgentMetrics(db, agentName, windowStart, windowEnd) {
 router.get("/targets", wrapRoute("list SLA targets", (req, res) => {
   ensureSchema();
   const db = getDb();
-  const { agent_name } = req.query;
+  const agent_name = req.query.agent_name ? validateAgentName(req.query.agent_name) : null;
 
   let rows;
   if (agent_name) {
@@ -168,9 +188,13 @@ router.put("/targets", wrapRoute("upsert SLA target", (req, res) => {
 router.delete("/targets", wrapRoute("delete SLA target", (req, res) => {
   ensureSchema();
   const db = getDb();
-  const { agent_name, metric } = req.query;
+  const agent_name = validateAgentName(req.query.agent_name);
+  const metric = req.query.metric;
   if (!agent_name || !metric) {
     return res.status(400).json({ error: "agent_name and metric query params required" });
+  }
+  if (!VALID_METRICS.includes(metric)) {
+    return res.status(400).json({ error: "metric must be one of: " + VALID_METRICS.join(", ") });
   }
 
   const result = db.prepare("DELETE FROM sla_targets WHERE agent_name = ? AND metric = ?").run(agent_name, metric);
@@ -183,12 +207,16 @@ router.delete("/targets", wrapRoute("delete SLA target", (req, res) => {
 router.post("/check", wrapRoute("check SLA compliance", (req, res) => {
   ensureSchema();
   const db = getDb();
-  const { agent_name, window_hours } = req.body;
+  const agent_name = validateAgentName(req.body.agent_name);
+  const { window_hours } = req.body;
 
-  if (!agent_name || typeof agent_name !== "string") {
-    return res.status(400).json({ error: "agent_name required" });
+  if (!agent_name) {
+    return res.status(400).json({ error: "agent_name required (non-empty string)" });
   }
-  const hours = (typeof window_hours === "number" && window_hours > 0) ? window_hours : 24;
+  const hours = Math.min(
+    (typeof window_hours === "number" && window_hours > 0) ? window_hours : 24,
+    MAX_WINDOW_HOURS
+  );
 
   const now = new Date();
   const windowEnd = now.toISOString();
@@ -229,6 +257,21 @@ router.post("/check", wrapRoute("check SLA compliance", (req, res) => {
     ? Math.round(((targets.length - violations.length) / targets.length) * 10000) / 100
     : 100;
 
+  // Cap stored snapshots per agent to prevent unbounded disk growth.
+  // An attacker repeatedly calling /check could otherwise fill the DB.
+  const snapshotCount = db.prepare(
+    "SELECT COUNT(*) as cnt FROM sla_snapshots WHERE agent_name = ?"
+  ).get(agent_name).cnt;
+  if (snapshotCount >= MAX_SNAPSHOTS) {
+    // Delete oldest snapshots to make room (keep most recent MAX_SNAPSHOTS - 100)
+    db.prepare(`
+      DELETE FROM sla_snapshots WHERE id IN (
+        SELECT id FROM sla_snapshots WHERE agent_name = ?
+        ORDER BY created_at ASC LIMIT 100
+      )
+    `).run(agent_name);
+  }
+
   db.prepare(`
     INSERT INTO sla_snapshots (agent_name, window_start, window_end, metrics, violations, compliance_pct)
     VALUES (?, ?, ?, ?, ?, ?)
@@ -250,8 +293,8 @@ router.post("/check", wrapRoute("check SLA compliance", (req, res) => {
 router.get("/history", wrapRoute("list SLA history", (req, res) => {
   ensureSchema();
   const db = getDb();
-  const { agent_name } = req.query;
-  if (!agent_name) return res.status(400).json({ error: "agent_name query param required" });
+  const agent_name = validateAgentName(req.query.agent_name);
+  if (!agent_name) return res.status(400).json({ error: "agent_name query param required (non-empty string)" });
 
   const { limit, offset } = parsePagination(req.query, { defaultLimit: 50, maxLimit: 200 });
 
