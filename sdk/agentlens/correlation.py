@@ -375,6 +375,8 @@ class SessionCorrelator:
             for res, _ in self._event_resources(e):
                 resources.add(res)
         self._session_resources[window.session_id] = resources
+        # Invalidate cached event index when sessions change
+        self._event_index_cache = None
 
     def add_sessions(self, sessions: list) -> None:
         """Add multiple sessions."""
@@ -386,6 +388,7 @@ class SessionCorrelator:
         self._sessions.clear()
         self._windows.clear()
         self._session_resources.clear()
+        self._event_index_cache = None
 
     @staticmethod
     def _build_window(session: Any) -> SessionWindow:
@@ -487,26 +490,83 @@ class SessionCorrelator:
             overlap_pct_b=min(100.0, overlap_ms / b_dur * 100),
         )
 
-    def find_shared_resources(self) -> List[SharedResource]:
-        """Find tools and models shared across sessions."""
-        # Aggregate by resource
+    def _build_event_index(
+        self,
+    ) -> Dict[
+        str,
+        Any,
+    ]:
+        """Build a shared index of resource usage across all sessions.
+
+        Scans every event once and produces aggregated data structures
+        used by find_shared_resources(), detect_contention(), and
+        find_model_hotspots().  Cached and invalidated when sessions
+        change, eliminating 3 redundant full-event scans in correlate().
+
+        Returns a dict with keys:
+        - tool_sessions: Dict[str, Set[str]]
+        - model_sessions: Dict[str, Set[str]]
+        - tool_counts: Counter
+        - model_counts: Counter
+        - resource_intervals: Dict[(resource, type), List[(start, end, sid)]]
+        - model_uses: Dict[str, List[(timestamp, duration)]]
+        """
+        if self._event_index_cache is not None:
+            return self._event_index_cache
+
         tool_sessions: Dict[str, Set[str]] = defaultdict(set)
         model_sessions: Dict[str, Set[str]] = defaultdict(set)
-        tool_counts: Dict[str, int] = Counter()
-        model_counts: Dict[str, int] = Counter()
+        tool_counts: Counter = Counter()
+        model_counts: Counter = Counter()
+        resource_intervals: Dict[
+            Tuple[str, str], List[Tuple[datetime, datetime, str]]
+        ] = defaultdict(list)
+        model_uses: Dict[str, List[Tuple[datetime, float]]] = defaultdict(list)
+
+        now = datetime.now(timezone.utc)
 
         for session, window in zip(self._sessions, self._windows):
-            events = getattr(session, "events", [])
-            for e in events:
+            sid = window.session_id
+            for e in getattr(session, "events", []):
+                ts = getattr(e, "timestamp", now)
+                dur = getattr(e, "duration_ms", 100) or 100
+                end = ts + timedelta(milliseconds=dur)
+
                 m = getattr(e, "model", None)
                 if m:
-                    model_sessions[m].add(window.session_id)
+                    model_sessions[m].add(sid)
                     model_counts[m] += 1
+                    resource_intervals[(m, "model")].append((ts, end, sid))
+                    model_uses[m].append((ts, dur))
+
                 tc = getattr(e, "tool_call", None)
                 if tc:
                     name = getattr(tc, "tool_name", "unknown")
-                    tool_sessions[name].add(window.session_id)
+                    tool_sessions[name].add(sid)
                     tool_counts[name] += 1
+                    resource_intervals[(name, "tool")].append((ts, end, sid))
+
+        index = {
+            "tool_sessions": tool_sessions,
+            "model_sessions": model_sessions,
+            "tool_counts": tool_counts,
+            "model_counts": model_counts,
+            "resource_intervals": resource_intervals,
+            "model_uses": model_uses,
+        }
+        self._event_index_cache = index
+        return index
+
+    def find_shared_resources(self) -> List[SharedResource]:
+        """Find tools and models shared across sessions.
+
+        Uses the shared event index to avoid re-scanning all events.
+        """
+        idx = self._build_event_index()
+        tool_sessions = idx["tool_sessions"]
+        model_sessions = idx["model_sessions"]
+        tool_counts = idx["tool_counts"]
+        model_counts = idx["model_counts"]
 
         results: List[SharedResource] = []
 
@@ -569,20 +629,10 @@ class SessionCorrelator:
 
         Uses a sweep-line algorithm per resource for O(n log n) performance
         instead of the previous O(n²) per-event approach.
+        Reuses the shared event index to avoid re-scanning all events.
         """
-        # Collect all usage intervals grouped by (resource, type)
-        resource_intervals: Dict[
-            Tuple[str, str], List[Tuple[datetime, datetime, str]]
-        ] = defaultdict(list)
-
-        for session in self._sessions:
-            sid = getattr(session, "session_id", "")
-            for e in getattr(session, "events", []):
-                ts = getattr(e, "timestamp", datetime.now(timezone.utc))
-                dur = getattr(e, "duration_ms", 100) or 100
-                end = ts + timedelta(milliseconds=dur)
-                for resource, rtype in self._event_resources(e):
-                    resource_intervals[(resource, rtype)].append((ts, end, sid))
+        idx = self._build_event_index()
+        resource_intervals = idx["resource_intervals"]
 
         contentions: List[ResourceContention] = []
         seen: set = set()
@@ -840,16 +890,12 @@ class SessionCorrelator:
         return sorted(sync_points, key=lambda s: s.timestamp)
 
     def find_model_hotspots(self) -> Dict[str, int]:
-        """Find models with highest concurrent usage across sessions."""
-        model_uses: Dict[str, List[Tuple[datetime, float]]] = defaultdict(list)
+        """Find models with highest concurrent usage across sessions.
 
-        for session in self._sessions:
-            for e in getattr(session, "events", []):
-                m = getattr(e, "model", None)
-                if m:
-                    ts = getattr(e, "timestamp", datetime.now(timezone.utc))
-                    dur = getattr(e, "duration_ms", 100) or 100
-                    model_uses[m].append((ts, dur))
+        Reuses the shared event index to avoid re-scanning all events.
+        """
+        idx = self._build_event_index()
+        model_uses = idx["model_uses"]
 
         hotspots: Dict[str, int] = {}
         for model, uses in model_uses.items():
