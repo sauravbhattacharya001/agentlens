@@ -16,6 +16,18 @@ const PORT = process.env.PORT || 3000;
 app.use(createHelmetMiddleware());
 app.use(createCorsMiddleware());
 
+// ── Static assets (served early, before auth/rate-limit/body-parsing) ──
+// Dashboard files are static HTML/CSS/JS — serving them before the API
+// middleware stack avoids unnecessary JSON body parsing, rate limiting,
+// API key authentication, and no-cache headers on every asset request.
+// This reduces per-request overhead for dashboard users significantly
+// (skips ~5 middleware layers) and allows browsers to cache static assets.
+app.use(express.static(path.join(__dirname, "..", "dashboard"), {
+  maxAge: "1h",
+  etag: true,
+  lastModified: true,
+}));
+
 // ── Rate limiting & authentication ──────────────────────────────────
 const apiLimiter = createApiLimiter();
 const ingestLimiter = createIngestLimiter();
@@ -75,6 +87,8 @@ for (const [mountPath, modulePath, opts = {}] of routeDefs) {
 // Prevent browsers and proxies from caching sensitive API responses.
 // The in-memory cache handles server-side caching; downstream layers
 // must never store token counts, costs, or session data.
+// Note: static assets are served above (before this middleware) so they
+// are NOT affected by these no-cache headers and can be browser-cached.
 app.use((req, res, next) => {
   res.set("Cache-Control", "no-store, no-cache, must-revalidate, private");
   res.set("Pragma", "no-cache");
@@ -84,9 +98,6 @@ app.use((req, res, next) => {
 
 // Body parser with size limit (after rate-limit/auth, before route handlers)
 app.use(express.json({ limit: "10mb" }));
-
-// Serve dashboard static files
-app.use(express.static(path.join(__dirname, "..", "dashboard")));
 
 // Mount all route handlers
 for (const [mountPath, modulePath] of routeDefs) {

@@ -57,6 +57,16 @@ function initSchema() {
     -- Composite index for session-scoped event ordering (used by session detail)
     CREATE INDEX IF NOT EXISTS idx_events_session_ts ON events(session_id, timestamp);
 
+    -- Covering index for /analytics/performance endpoint.
+    -- The performance query fetches (model, event_type, duration_ms) for all
+    -- events with duration_ms > 0 after a timestamp cutoff, joined to sessions.
+    -- This composite index lets SQLite satisfy the WHERE filter and return all
+    -- needed columns directly from the index B-tree without touching the main
+    -- events table rows, reducing I/O from O(rows × row_size) to O(rows × 3_cols).
+    CREATE INDEX IF NOT EXISTS idx_events_perf_covering
+      ON events(timestamp, duration_ms, model, event_type, session_id)
+      WHERE duration_ms IS NOT NULL AND duration_ms > 0;
+
     -- Model pricing for cost estimation
     CREATE TABLE IF NOT EXISTS model_pricing (
       model TEXT PRIMARY KEY,
