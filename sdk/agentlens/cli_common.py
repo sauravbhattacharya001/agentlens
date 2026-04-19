@@ -14,6 +14,8 @@ from typing import Any
 
 import httpx
 
+from agentlens._utils import format_duration  # noqa: F401 — re-exported
+
 __all__ = [
     "get_client",
     "get_client_only",
@@ -58,21 +60,7 @@ def print_json(data: Any) -> None:
     print(json.dumps(data, indent=2, default=str))
 
 
-def format_duration(ms: Any) -> str:
-    """Format milliseconds into a human-readable duration string."""
-    if ms is None:
-        return "\u2014"
-    ms = float(ms)
-    if ms < 1000:
-        return f"{ms:.0f}ms"
-    secs = ms / 1000
-    if secs < 60:
-        return f"{secs:.1f}s"
-    mins = secs / 60
-    if mins < 60:
-        return f"{mins:.1f}m"
-    hours = mins / 60
-    return f"{hours:.1f}h"
+# format_duration is imported from agentlens._utils and re-exported above.
 
 
 def fetch_sessions(client: httpx.Client, limit: int = 200) -> list[dict]:

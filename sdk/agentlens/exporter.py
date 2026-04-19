@@ -80,17 +80,7 @@ def _iso(dt: datetime | None) -> str | None:
     return dt.isoformat() if dt else None
 
 
-def _duration_human(ms: float | None) -> str:
-    """Format milliseconds as human-readable duration."""
-    if ms is None:
-        return "—"
-    if ms < 1000:
-        return f"{ms:.0f}ms"
-    secs = ms / 1000
-    if secs < 60:
-        return f"{secs:.1f}s"
-    mins = secs / 60
-    return f"{mins:.1f}m"
+from agentlens._utils import format_duration as _duration_human  # consolidated
 
 
 def _session_stats(session: Session) -> dict[str, Any]:

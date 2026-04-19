@@ -241,6 +241,23 @@ __all__ = [
 _tracker: AgentTracker | None = None
 
 
+def _get_tracker(operation: str = "this operation") -> AgentTracker:
+    """Return the global tracker, raising if the SDK is not initialized.
+
+    Centralises the guard clause that was previously copy-pasted in every
+    module-level convenience function.
+
+    Args:
+        operation: Name shown in the error message (e.g. ``"track"``).
+
+    Raises:
+        RuntimeError: If :func:`init` has not been called yet.
+    """
+    if _tracker is None:
+        raise RuntimeError(f"Call agentlens.init() before {operation}()")
+    return _tracker
+
+
 def init(api_key: str = "default", endpoint: str = "http://localhost:3000") -> AgentTracker:
     """Initialize the AgentLens SDK.
     
@@ -279,16 +296,12 @@ def start_session(agent_name: str = "default-agent", metadata: dict | None = Non
     Returns:
         A Session object.
     """
-    if _tracker is None:
-        raise RuntimeError("Call agentlens.init() before start_session()")
-    return _tracker.start_session(agent_name=agent_name, metadata=metadata)
+    return _get_tracker("start_session").start_session(agent_name=agent_name, metadata=metadata)
 
 
 def end_session(session_id: str | None = None) -> None:
     """End the current or specified session and flush pending events."""
-    if _tracker is None:
-        raise RuntimeError("Call agentlens.init() before end_session()")
-    _tracker.end_session(session_id=session_id)
+    _get_tracker("end_session").end_session(session_id=session_id)
 
 
 def track(
@@ -309,9 +322,7 @@ def track(
     Returns:
         The created AgentEvent.
     """
-    if _tracker is None:
-        raise RuntimeError("Call agentlens.init() before track()")
-    return _tracker.track(
+    return _get_tracker("track").track(
         event_type=event_type,
         input_data=input_data,
         output_data=output_data,
@@ -332,9 +343,7 @@ def explain(session_id: str | None = None) -> str:
     Returns:
         A string explanation.
     """
-    if _tracker is None:
-        raise RuntimeError("Call agentlens.init() before explain()")
-    return _tracker.explain(session_id=session_id)
+    return _get_tracker("explain").explain(session_id=session_id)
 
 
 def export_session(session_id: str | None = None, format: str = "json"):
@@ -352,9 +361,7 @@ def export_session(session_id: str | None = None, format: str = "json"):
         A dict (for JSON) or a string (for CSV) with session data, events,
         and summary statistics.
     """
-    if _tracker is None:
-        raise RuntimeError("Call agentlens.init() before export_session()")
-    return _tracker.export_session(session_id=session_id, format=format)
+    return _get_tracker("export_session").export_session(session_id=session_id, format=format)
 
 
 def compare_sessions(session_a: str, session_b: str) -> dict:
@@ -371,9 +378,7 @@ def compare_sessions(session_a: str, session_b: str) -> dict:
         A dict with ``session_a`` metrics, ``session_b`` metrics,
         ``deltas``, and ``shared`` breakdowns.
     """
-    if _tracker is None:
-        raise RuntimeError("Call agentlens.init() before compare_sessions()")
-    return _tracker.compare_sessions(session_a=session_a, session_b=session_b)
+    return _get_tracker("compare_sessions").compare_sessions(session_a=session_a, session_b=session_b)
 
 
 def get_costs(session_id: str | None = None) -> dict:
@@ -388,9 +393,7 @@ def get_costs(session_id: str | None = None) -> dict:
         A dict with ``total_cost``, ``total_input_cost``, ``total_output_cost``,
         ``model_costs``, ``event_costs``, ``currency``, and ``unmatched_models``.
     """
-    if _tracker is None:
-        raise RuntimeError("Call agentlens.init() before get_costs()")
-    return _tracker.get_costs(session_id=session_id)
+    return _get_tracker("get_costs").get_costs(session_id=session_id)
 
 
 def get_pricing() -> dict:
@@ -399,9 +402,7 @@ def get_pricing() -> dict:
     Returns:
         A dict with ``pricing`` (current prices) and ``defaults`` (built-in defaults).
     """
-    if _tracker is None:
-        raise RuntimeError("Call agentlens.init() before get_pricing()")
-    return _tracker.get_pricing()
+    return _get_tracker("get_pricing").get_pricing()
 
 
 def set_pricing(pricing: dict) -> dict:
@@ -414,6 +415,4 @@ def set_pricing(pricing: dict) -> dict:
     Returns:
         A dict with ``status`` and ``updated`` count.
     """
-    if _tracker is None:
-        raise RuntimeError("Call agentlens.init() before set_pricing()")
-    return _tracker.set_pricing(pricing=pricing)
+    return _get_tracker("set_pricing").set_pricing(pricing=pricing)
