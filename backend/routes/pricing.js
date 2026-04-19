@@ -10,6 +10,7 @@ const { getDb } = require("../db");
 const { sanitizeString } = require("../lib/validation");
 const { requireSessionId, wrapRoute } = require("../lib/request-helpers");
 const { invalidatePricingCache } = require("../lib/pricing");
+const { createLazyStatements } = require("../lib/lazy-statements");
 
 const router = express.Router();
 
@@ -33,13 +34,7 @@ const DEFAULT_PRICING = {
 };
 
 // ── Cached prepared statements ──────────────────────────────────────
-let _pricingStmts = null;
-
-function getPricingStatements() {
-  if (_pricingStmts) return _pricingStmts;
-  const db = getDb();
-
-  _pricingStmts = {
+const getPricingStatements = createLazyStatements((db) => ({
     getAll: db.prepare("SELECT * FROM model_pricing ORDER BY model ASC"),
     getByModel: db.prepare("SELECT * FROM model_pricing WHERE model = ?"),
     upsert: db.prepare(`
@@ -56,10 +51,7 @@ function getPricingStatements() {
     getSessionEvents: db.prepare(
       "SELECT event_id, event_type, model, tokens_in, tokens_out, duration_ms, timestamp FROM events WHERE session_id = ? ORDER BY timestamp ASC"
     ),
-  };
-
-  return _pricingStmts;
-}
+}));
 
 /**
  * Ensure default pricing entries exist in the DB.

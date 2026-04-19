@@ -1,6 +1,6 @@
 const express = require("express");
-const { getDb } = require("../db");
 const { wrapRoute, parseDays, daysAgoCutoff } = require("../lib/request-helpers");
+const { createLazyStatements } = require("../lib/lazy-statements");
 
 const router = express.Router();
 
@@ -32,15 +32,9 @@ function clamp(v, lo, hi) { return Math.max(lo, Math.min(hi, v)); }
 function round2(v) { return Math.round(v * 100) / 100; }
 
 // ── Cached prepared statements for scorecards ───────────────────────
-// Lazily initialized once, reused across all requests to avoid
-// re-compiling SQL on every call.
-let _scorecardStmts = null;
-
-function getScorecardStatements() {
-  if (_scorecardStmts) return _scorecardStmts;
-  const db = getDb();
-
-  _scorecardStmts = {
+// Uses createLazyStatements for consistent lazy-init pattern across
+// all route files (same approach as analytics.js, sessions.js, etc.).
+const getScorecardStatements = createLazyStatements((db) => ({
     agentStats: db.prepare(`
       SELECT
         agent_name,
@@ -127,10 +121,7 @@ function getScorecardStatements() {
       GROUP BY day
       ORDER BY day
     `),
-  };
-
-  return _scorecardStmts;
-}
+}));
 
 // ── GET /scorecards ─────────────────────────────────────────────────
 // Returns per-agent scorecards with composite score, letter grade,
