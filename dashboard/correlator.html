@@ -1,0 +1,290 @@
+<!DOCTYPE html>
+<html lang="en">
+<head>
+  <meta charset="UTF-8">
+  <meta name="viewport" content="width=device-width, initial-scale=1.0">
+  <title>AgentLens — Smart Alert Correlator</title>
+  <link rel="stylesheet" href="styles.css">
+  <style>
+    .correlator-container { max-width: 1400px; margin: 0 auto; padding: 20px; }
+    .stats-bar { display: flex; gap: 20px; margin-bottom: 24px; flex-wrap: wrap; }
+    .stat-card { background: var(--card-bg, #1e1e2e); border: 1px solid var(--border, #333); border-radius: 12px; padding: 16px 24px; flex: 1; min-width: 180px; text-align: center; }
+    .stat-card .value { font-size: 2rem; font-weight: 700; color: var(--accent, #7c3aed); }
+    .stat-card .label { font-size: 0.85rem; opacity: 0.7; margin-top: 4px; }
+    .stat-card.storm { border-color: #ef4444; }
+    .stat-card.storm .value { color: #ef4444; }
+    .main-grid { display: grid; grid-template-columns: 1fr 320px; gap: 20px; }
+    @media (max-width: 900px) { .main-grid { grid-template-columns: 1fr; } }
+    .groups-panel { display: flex; flex-direction: column; gap: 16px; }
+    .group-card { background: var(--card-bg, #1e1e2e); border: 1px solid var(--border, #333); border-radius: 12px; overflow: hidden; }
+    .group-header { padding: 16px; cursor: pointer; display: flex; justify-content: space-between; align-items: center; }
+    .group-header:hover { background: rgba(124,58,237,0.08); }
+    .group-header .title { font-weight: 600; font-size: 1.05rem; }
+    .group-header .badge { background: var(--accent, #7c3aed); color: #fff; border-radius: 12px; padding: 2px 10px; font-size: 0.8rem; }
+    .group-header .badge.critical { background: #ef4444; }
+    .group-header .badge.warning { background: #f59e0b; }
+    .group-body { display: none; padding: 0 16px 16px; border-top: 1px solid var(--border, #333); }
+    .group-body.open { display: block; }
+    .group-body .alert-item { padding: 8px 0; border-bottom: 1px solid rgba(255,255,255,0.05); font-size: 0.9rem; display: flex; gap: 10px; align-items: center; }
+    .group-body .alert-item:last-child { border-bottom: none; }
+    .alert-dot { width: 8px; height: 8px; border-radius: 50%; flex-shrink: 0; }
+    .alert-dot.critical { background: #ef4444; }
+    .alert-dot.warning { background: #f59e0b; }
+    .alert-dot.info { background: #3b82f6; }
+    .recommendation { margin-top: 12px; padding: 10px; background: rgba(124,58,237,0.1); border-radius: 8px; font-size: 0.85rem; border-left: 3px solid var(--accent, #7c3aed); }
+    .sidebar { display: flex; flex-direction: column; gap: 16px; }
+    .sidebar-card { background: var(--card-bg, #1e1e2e); border: 1px solid var(--border, #333); border-radius: 12px; padding: 16px; }
+    .sidebar-card h3 { margin: 0 0 12px; font-size: 0.95rem; }
+    .config-row { display: flex; justify-content: space-between; align-items: center; margin-bottom: 10px; font-size: 0.85rem; }
+    .config-row input, .config-row select { background: var(--input-bg, #2a2a3e); border: 1px solid var(--border, #333); color: inherit; border-radius: 6px; padding: 4px 8px; width: 80px; }
+    .toggle-btn { background: var(--accent, #7c3aed); border: none; color: #fff; padding: 8px 16px; border-radius: 8px; cursor: pointer; font-size: 0.85rem; width: 100%; }
+    .toggle-btn.active { background: #ef4444; }
+    .timeline-canvas { width: 100%; height: 80px; border-radius: 8px; background: var(--card-bg, #1e1e2e); border: 1px solid var(--border, #333); margin-bottom: 20px; }
+    .back-link { display: inline-block; margin-bottom: 16px; color: var(--accent, #7c3aed); text-decoration: none; font-size: 0.9rem; }
+    .back-link:hover { text-decoration: underline; }
+    .page-title { display: flex; align-items: center; gap: 12px; margin-bottom: 8px; }
+    .page-title h1 { margin: 0; font-size: 1.6rem; }
+    .subtitle { opacity: 0.6; font-size: 0.9rem; margin-bottom: 20px; }
+  </style>
+</head>
+<body>
+  <div class="correlator-container">
+    <a href="index.html" class="back-link">← Back to Dashboard</a>
+    <div class="page-title"><h1>🔗 Smart Alert Correlator</h1></div>
+    <p class="subtitle">Groups related alerts to reduce noise and surface root causes.</p>
+
+    <canvas class="timeline-canvas" id="timelineCanvas"></canvas>
+
+    <div class="stats-bar" id="statsBar"></div>
+
+    <div class="main-grid">
+      <div class="groups-panel" id="groupsPanel"></div>
+      <div class="sidebar">
+        <div class="sidebar-card">
+          <h3>⚙️ Correlation Rules</h3>
+          <div class="config-row"><span>Time window</span><select id="cfgWindow"><option value="30">30s</option><option value="60" selected>1 min</option><option value="300">5 min</option></select></div>
+          <div class="config-row"><span>Storm threshold</span><input id="cfgStorm" type="number" value="5" min="2" max="50"></div>
+          <div class="config-row"><span>Storm window (s)</span><input id="cfgStormWindow" type="number" value="120" min="10" max="600"></div>
+          <div class="config-row"><span>Tag weight: agent_id</span><input id="cfgTagAgent" type="number" value="2" min="0" max="5" step="0.5"></div>
+          <div class="config-row"><span>Tag weight: trace_id</span><input id="cfgTagTrace" type="number" value="5" min="0" max="5" step="0.5"></div>
+          <div class="config-row"><span>Tag weight: error_type</span><input id="cfgTagError" type="number" value="3" min="0" max="5" step="0.5"></div>
+          <button class="toggle-btn" onclick="rerun()">Re-correlate</button>
+        </div>
+        <div class="sidebar-card">
+          <h3>🔄 Auto-Refresh</h3>
+          <button class="toggle-btn" id="autoRefreshBtn" onclick="toggleAutoRefresh()">Start Auto-Refresh</button>
+          <p style="font-size:0.8rem;opacity:0.6;margin-top:8px;">Simulates new alerts arriving every 3 seconds</p>
+        </div>
+        <div class="sidebar-card">
+          <h3>📊 Reduction Summary</h3>
+          <div id="reductionSummary" style="font-size:0.9rem;"></div>
+        </div>
+      </div>
+    </div>
+  </div>
+
+<script>
+// Demo alert generation
+const AGENTS = ['agent-1','agent-2','agent-3','agent-4','agent-5'];
+const SEVERITIES = ['critical','warning','info'];
+let alerts = [];
+let correlationGroups = [];
+let autoRefreshInterval = null;
+
+function now() { return Date.now(); }
+function ago(seconds) { return now() - seconds * 1000; }
+
+function generateDemoAlerts() {
+  const a = [];
+  const baseTime = now();
+  // Storm: agent-1 timeout burst
+  for (let i = 0; i < 8; i++) {
+    a.push({ id: `a1-t${i}`, agent_id: 'agent-1', error_type: 'timeout', trace_id: 'trace-storm-1', severity: 'critical', message: `Request timeout after 30s (attempt ${i+1})`, ts: baseTime - (120 - i*15)*1000 });
+  }
+  // Cascade: agent-2 → agent-3 → agent-4
+  const cascadeTrace = 'trace-cascade-77';
+  a.push({ id: 'c1', agent_id: 'agent-2', error_type: 'connection_refused', trace_id: cascadeTrace, severity: 'critical', message: 'Upstream connection refused to DB pool', ts: baseTime - 300*1000 });
+  a.push({ id: 'c2', agent_id: 'agent-3', error_type: 'dependency_failure', trace_id: cascadeTrace, severity: 'critical', message: 'Dependency agent-2 unavailable', ts: baseTime - 295*1000 });
+  a.push({ id: 'c3', agent_id: 'agent-4', error_type: 'dependency_failure', trace_id: cascadeTrace, severity: 'warning', message: 'Fallback mode: agent-3 unreachable', ts: baseTime - 288*1000 });
+  a.push({ id: 'c4', agent_id: 'agent-4', error_type: 'degraded_performance', trace_id: cascadeTrace, severity: 'warning', message: 'Response time 4x baseline (fallback active)', ts: baseTime - 280*1000 });
+  // Memory leak: agent-5
+  for (let i = 0; i < 6; i++) {
+    a.push({ id: `m${i}`, agent_id: 'agent-5', error_type: 'memory_warning', trace_id: `trace-mem-${i}`, severity: i < 4 ? 'warning' : 'critical', message: `Memory usage at ${65 + i*6}% (threshold 80%)`, ts: baseTime - (600 - i*90)*1000 });
+  }
+  // Noise
+  const noiseTypes = ['rate_limit','auth_failure','parse_error','disk_warning'];
+  for (let i = 0; i < 8; i++) {
+    const agent = AGENTS[Math.floor(Math.random()*5)];
+    a.push({ id: `n${i}`, agent_id: agent, error_type: noiseTypes[i%4], trace_id: `trace-noise-${i}`, severity: SEVERITIES[1 + Math.floor(Math.random()*2)], message: `${noiseTypes[i%4].replace('_',' ')} on ${agent}`, ts: baseTime - Math.random()*700*1000 });
+  }
+  return a.sort((x,y) => x.ts - y.ts);
+}
+
+function correlate(alertList) {
+  const window = parseInt(document.getElementById('cfgWindow').value) * 1000;
+  const stormThresh = parseInt(document.getElementById('cfgStorm').value);
+  const stormWindow = parseInt(document.getElementById('cfgStormWindow').value) * 1000;
+  const wAgent = parseFloat(document.getElementById('cfgTagAgent').value);
+  const wTrace = parseFloat(document.getElementById('cfgTagTrace').value);
+  const wError = parseFloat(document.getElementById('cfgTagError').value);
+
+  // Score-based grouping
+  const groups = [];
+  const assigned = new Set();
+
+  for (let i = 0; i < alertList.length; i++) {
+    if (assigned.has(alertList[i].id)) continue;
+    const group = [alertList[i]];
+    assigned.add(alertList[i].id);
+    for (let j = i + 1; j < alertList.length; j++) {
+      if (assigned.has(alertList[j].id)) continue;
+      let score = 0;
+      if (Math.abs(alertList[j].ts - alertList[i].ts) <= window) score += 1;
+      if (alertList[j].agent_id === alertList[i].agent_id) score += wAgent;
+      if (alertList[j].trace_id === alertList[i].trace_id) score += wTrace;
+      if (alertList[j].error_type === alertList[i].error_type) score += wError;
+      if (score >= 3) { group.push(alertList[j]); assigned.add(alertList[j].id); }
+    }
+    groups.push(group);
+  }
+
+  // Classify groups
+  return groups.map(g => {
+    const types = [...new Set(g.map(a => a.error_type))];
+    const agents = [...new Set(g.map(a => a.agent_id))];
+    const isStorm = g.length >= stormThresh && (g[g.length-1].ts - g[0].ts) <= stormWindow;
+    const maxSev = g.some(a => a.severity === 'critical') ? 'critical' : g.some(a => a.severity === 'warning') ? 'warning' : 'info';
+    let label, recommendation;
+    if (isStorm && types.includes('timeout')) {
+      label = `⚡ Timeout Storm — ${g[0].agent_id}`;
+      recommendation = `This looks like a timeout storm — consider increasing timeout or checking upstream latency for ${g[0].agent_id}.`;
+    } else if (types.includes('dependency_failure') || types.includes('connection_refused')) {
+      label = `🔗 Cascade Failure — ${agents.join(' → ')}`;
+      recommendation = `Cascade failure detected across ${agents.length} agents. Check the upstream dependency (${agents[0]}) first.`;
+    } else if (types.includes('memory_warning')) {
+      label = `📈 Memory Leak Pattern — ${agents[0]}`;
+      recommendation = `Memory warnings increasing linearly for ${agents[0]}. Investigate potential memory leak or increase resource limits.`;
+    } else if (g.length === 1) {
+      label = `📌 Isolated — ${g[0].error_type}`;
+      recommendation = null;
+    } else {
+      label = `🔀 Correlated (${types[0]}) — ${agents.join(', ')}`;
+      recommendation = `${g.length} related alerts grouped by ${types[0]}. Review common patterns.`;
+    }
+    return { alerts: g, label, recommendation, severity: maxSev, isStorm, agents, types };
+  }).sort((a, b) => {
+    const sevOrder = { critical: 0, warning: 1, info: 2 };
+    return (sevOrder[a.severity] - sevOrder[b.severity]) || (b.alerts.length - a.alerts.length);
+  });
+}
+
+function render() {
+  correlationGroups = correlate(alerts);
+  renderStats();
+  renderGroups();
+  renderTimeline();
+  renderReduction();
+}
+
+function renderStats() {
+  const totalAlerts = alerts.length;
+  const totalGroups = correlationGroups.length;
+  const storms = correlationGroups.filter(g => g.isStorm).length;
+  const reduction = totalAlerts > 0 ? Math.round((1 - totalGroups / totalAlerts) * 100) : 0;
+  document.getElementById('statsBar').innerHTML = `
+    <div class="stat-card"><div class="value">${totalAlerts}</div><div class="label">Total Alerts</div></div>
+    <div class="stat-card"><div class="value">${totalGroups}</div><div class="label">Correlation Groups</div></div>
+    <div class="stat-card"><div class="value">${reduction}%</div><div class="label">Noise Reduction</div></div>
+    <div class="stat-card ${storms > 0 ? 'storm' : ''}"><div class="value">${storms}</div><div class="label">Active Storms</div></div>
+  `;
+}
+
+function renderGroups() {
+  const panel = document.getElementById('groupsPanel');
+  panel.innerHTML = correlationGroups.map((g, i) => `
+    <div class="group-card">
+      <div class="group-header" onclick="toggleGroup(${i})">
+        <span class="title">${g.label}</span>
+        <span class="badge ${g.severity}">${g.alerts.length} alert${g.alerts.length>1?'s':''}</span>
+      </div>
+      <div class="group-body" id="group-${i}">
+        ${g.alerts.map(a => `<div class="alert-item"><span class="alert-dot ${a.severity}"></span><span style="opacity:0.5;font-size:0.75rem;min-width:55px">${new Date(a.ts).toLocaleTimeString()}</span><span>${a.message}</span></div>`).join('')}
+        ${g.recommendation ? `<div class="recommendation">💡 ${g.recommendation}</div>` : ''}
+      </div>
+    </div>
+  `).join('');
+}
+
+function toggleGroup(i) {
+  document.getElementById(`group-${i}`).classList.toggle('open');
+}
+
+function renderTimeline() {
+  const canvas = document.getElementById('timelineCanvas');
+  const ctx = canvas.getContext('2d');
+  canvas.width = canvas.offsetWidth * 2;
+  canvas.height = canvas.offsetHeight * 2;
+  ctx.scale(2, 2);
+  const w = canvas.offsetWidth, h = canvas.offsetHeight;
+  ctx.clearRect(0, 0, w, h);
+  if (alerts.length === 0) return;
+  const minT = alerts[0].ts, maxT = alerts[alerts.length - 1].ts;
+  const range = maxT - minT || 1;
+  // Draw density bars
+  const buckets = 60;
+  const bucketSize = range / buckets;
+  const counts = new Array(buckets).fill(0);
+  alerts.forEach(a => { const b = Math.min(Math.floor((a.ts - minT) / bucketSize), buckets - 1); counts[b]++; });
+  const maxCount = Math.max(...counts, 1);
+  const stormThresh = parseInt(document.getElementById('cfgStorm').value);
+  const barW = w / buckets;
+  counts.forEach((c, i) => {
+    const barH = (c / maxCount) * (h - 20);
+    const isHot = c >= stormThresh;
+    ctx.fillStyle = isHot ? 'rgba(239,68,68,0.8)' : 'rgba(124,58,237,0.6)';
+    ctx.fillRect(i * barW + 1, h - 10 - barH, barW - 2, barH);
+  });
+  // Axis
+  ctx.fillStyle = 'rgba(255,255,255,0.3)';
+  ctx.fillRect(0, h - 10, w, 1);
+  ctx.font = '10px sans-serif';
+  ctx.fillStyle = 'rgba(255,255,255,0.5)';
+  ctx.fillText(new Date(minT).toLocaleTimeString(), 4, h - 1);
+  ctx.fillText(new Date(maxT).toLocaleTimeString(), w - 60, h - 1);
+}
+
+function renderReduction() {
+  const total = alerts.length, groups = correlationGroups.length;
+  const pct = total > 0 ? Math.round((1 - groups / total) * 100) : 0;
+  document.getElementById('reductionSummary').innerHTML = `<strong>${total}</strong> alerts → <strong>${groups}</strong> groups<br><span style="color:var(--accent,#7c3aed);font-size:1.2rem;font-weight:700">${pct}% noise reduction</span>`;
+}
+
+function rerun() { render(); }
+
+function toggleAutoRefresh() {
+  const btn = document.getElementById('autoRefreshBtn');
+  if (autoRefreshInterval) {
+    clearInterval(autoRefreshInterval);
+    autoRefreshInterval = null;
+    btn.textContent = 'Start Auto-Refresh';
+    btn.classList.remove('active');
+  } else {
+    btn.textContent = 'Stop Auto-Refresh';
+    btn.classList.add('active');
+    autoRefreshInterval = setInterval(() => {
+      const agent = AGENTS[Math.floor(Math.random() * 5)];
+      const types = ['timeout','rate_limit','memory_warning','auth_failure','parse_error'];
+      const type = types[Math.floor(Math.random() * types.length)];
+      alerts.push({ id: `live-${Date.now()}`, agent_id: agent, error_type: type, trace_id: `trace-live-${Date.now()}`, severity: SEVERITIES[Math.floor(Math.random()*3)], message: `${type.replace(/_/g,' ')} on ${agent}`, ts: Date.now() });
+      render();
+    }, 3000);
+  }
+}
+
+// Init
+alerts = generateDemoAlerts();
+render();
+window.addEventListener('resize', () => renderTimeline());
+</script>
+</body>
+</html>
