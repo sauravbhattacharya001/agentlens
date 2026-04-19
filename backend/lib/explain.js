@@ -29,7 +29,18 @@ function generateExplanation(session, events) {
   lines.push("");
 
   let stepNum = 1;
+  // Accumulate summary counts during the main loop to avoid
+  // 3 separate O(n) filter passes at the end.
+  let llmCalls = 0;
+  let toolCalls = 0;
+  let errorCount = 0;
+
   for (const event of events) {
+    // Track counts for summary
+    const et = event.event_type;
+    if (et === "llm_call") llmCalls++;
+    else if (et === "tool_call") toolCalls++;
+    if (et.includes("error")) errorCount++;
     const trace = safeJsonParse(event.decision_trace);
     const toolCall = safeJsonParse(event.tool_call);
     const input = safeJsonParse(event.input_data);
@@ -80,13 +91,9 @@ function generateExplanation(session, events) {
     }
   }
 
-  // Summary
-  const llmCalls = events.filter((e) => e.event_type === "llm_call").length;
-  const toolCalls = events.filter((e) => e.event_type === "tool_call").length;
-  const errors = events.filter((e) => e.event_type.includes("error")).length;
-
+  // Summary — counts accumulated during the main loop above
   lines.push("### Summary");
-  lines.push(`- ${llmCalls} LLM call(s), ${toolCalls} tool call(s), ${errors} error(s)`);
+  lines.push(`- ${llmCalls} LLM call(s), ${toolCalls} tool call(s), ${errorCount} error(s)`);
   lines.push(`- Total tokens: ${session.total_tokens_in + session.total_tokens_out}`);
   lines.push(`- Session status: ${session.status}`);
 
