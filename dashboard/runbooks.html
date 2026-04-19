@@ -1,0 +1,502 @@
+<!DOCTYPE html>
+<html lang="en">
+<head>
+  <meta charset="UTF-8">
+  <meta name="viewport" content="width=device-width, initial-scale=1.0">
+  <title>AgentLens — Runbook Automator</title>
+  <link rel="stylesheet" href="styles.css">
+  <style>
+    .runbook-layout { display: grid; grid-template-columns: 320px 1fr; gap: 20px; min-height: calc(100vh - 120px); }
+    @media (max-width: 900px) { .runbook-layout { grid-template-columns: 1fr; } }
+    .runbook-sidebar { background: var(--bg-secondary); border: 1px solid var(--border); border-radius: var(--radius); padding: 16px; overflow-y: auto; max-height: calc(100vh - 140px); }
+    .runbook-main { display: flex; flex-direction: column; gap: 16px; }
+    .runbook-list-item { padding: 10px 12px; border-radius: var(--radius-sm); cursor: pointer; border: 1px solid transparent; margin-bottom: 6px; transition: all 0.15s; }
+    .runbook-list-item:hover { background: var(--bg-tertiary); }
+    .runbook-list-item.active { border-color: var(--blue); background: var(--blue-dim, rgba(59,130,246,0.08)); }
+    .runbook-list-item .rb-name { font-weight: 600; font-size: 14px; margin-bottom: 2px; }
+    .runbook-list-item .rb-meta { font-size: 12px; color: var(--text-muted); display: flex; gap: 8px; align-items: center; }
+    .rb-status { display: inline-block; width: 8px; height: 8px; border-radius: 50%; }
+    .rb-status.enabled { background: var(--green); }
+    .rb-status.disabled { background: var(--text-muted); }
+    .rb-status.running { background: var(--yellow); animation: pulse 1s infinite; }
+    @keyframes pulse { 0%,100% { opacity:1; } 50% { opacity:0.4; } }
+    .card { background: var(--bg-secondary); border: 1px solid var(--border); border-radius: var(--radius); padding: 20px; }
+    .card h3 { font-size: 15px; margin-bottom: 14px; display: flex; align-items: center; gap: 8px; }
+    .step-list { list-style: none; padding: 0; margin: 0; }
+    .step-item { display: flex; align-items: flex-start; gap: 12px; padding: 10px 0; border-bottom: 1px solid var(--border); position: relative; }
+    .step-item:last-child { border-bottom: none; }
+    .step-num { width: 28px; height: 28px; border-radius: 50%; display: flex; align-items: center; justify-content: center; font-size: 12px; font-weight: 700; flex-shrink: 0; }
+    .step-num.action { background: var(--blue-dim, rgba(59,130,246,0.12)); color: var(--blue); }
+    .step-num.check { background: var(--green-dim); color: var(--green); }
+    .step-num.gate { background: var(--yellow-dim); color: var(--yellow); }
+    .step-num.notify { background: var(--purple-dim, rgba(168,85,247,0.12)); color: var(--purple, #a855f7); }
+    .step-body { flex: 1; min-width: 0; }
+    .step-body .step-title { font-weight: 600; font-size: 13px; }
+    .step-body .step-desc { font-size: 12px; color: var(--text-muted); margin-top: 2px; }
+    .step-badge { font-size: 11px; padding: 2px 7px; border-radius: 10px; font-weight: 600; }
+    .step-badge.pending { background: var(--bg-tertiary); color: var(--text-muted); }
+    .step-badge.running { background: var(--yellow-dim); color: var(--yellow); }
+    .step-badge.done { background: var(--green-dim); color: var(--green); }
+    .step-badge.failed { background: var(--red-dim); color: var(--red); }
+    .step-badge.skipped { background: var(--bg-tertiary); color: var(--text-muted); }
+    .step-badge.waiting { background: var(--blue-dim, rgba(59,130,246,0.12)); color: var(--blue); }
+    .trigger-tag { display: inline-block; padding: 3px 8px; border-radius: 10px; font-size: 11px; font-weight: 600; background: var(--bg-tertiary); color: var(--text-secondary); margin: 2px; }
+    .exec-row { display: flex; align-items: center; gap: 8px; padding: 8px 10px; border-radius: var(--radius-sm); margin: 4px 0; font-size: 13px; cursor: pointer; transition: background 0.15s; }
+    .exec-row:hover { background: var(--bg-tertiary); }
+    .exec-row .exec-time { color: var(--text-muted); font-size: 12px; min-width: 130px; }
+    .exec-row .exec-result { font-weight: 600; }
+    .exec-row .exec-result.success { color: var(--green); }
+    .exec-row .exec-result.failure { color: var(--red); }
+    .exec-row .exec-result.partial { color: var(--yellow); }
+    .exec-row .exec-trigger { color: var(--text-muted); font-size: 12px; margin-left: auto; }
+    .trigger-config { display: grid; grid-template-columns: 1fr 1fr; gap: 10px; }
+    .trigger-config label { font-size: 12px; color: var(--text-secondary); display: block; margin-bottom: 4px; }
+    .trigger-config select, .trigger-config input { width: 100%; padding: 6px 8px; border-radius: var(--radius-sm); border: 1px solid var(--border); background: var(--bg-primary); color: var(--text-primary); font-size: 13px; }
+    .btn-run { background: var(--green); color: #fff; border: none; padding: 6px 14px; border-radius: var(--radius-sm); cursor: pointer; font-weight: 600; font-size: 13px; }
+    .btn-run:hover { opacity: 0.9; }
+    .btn-create { background: var(--blue); color: #fff; border: none; padding: 8px 14px; border-radius: var(--radius-sm); cursor: pointer; font-weight: 600; font-size: 13px; width: 100%; margin-top: 10px; }
+    .btn-create:hover { opacity: 0.9; }
+    .btn-delete { background: var(--red-dim); color: var(--red); border: none; padding: 4px 10px; border-radius: var(--radius-sm); cursor: pointer; font-size: 12px; font-weight: 600; }
+    .btn-toggle { padding: 4px 10px; border-radius: var(--radius-sm); cursor: pointer; font-size: 12px; font-weight: 600; border: 1px solid var(--border); background: var(--bg-tertiary); color: var(--text-secondary); }
+    .overview-stats { display: grid; grid-template-columns: repeat(4, 1fr); gap: 12px; margin-bottom: 16px; }
+    .stat-card { background: var(--bg-secondary); border: 1px solid var(--border); border-radius: var(--radius); padding: 14px; text-align: center; }
+    .stat-card .stat-val { font-size: 28px; font-weight: 700; }
+    .stat-card .stat-label { font-size: 12px; color: var(--text-muted); margin-top: 2px; }
+    .modal-overlay { position: fixed; inset: 0; background: rgba(0,0,0,0.5); z-index: 1000; display: flex; align-items: center; justify-content: center; }
+    .modal { background: var(--bg-secondary); border: 1px solid var(--border); border-radius: var(--radius); padding: 24px; width: 560px; max-width: 90vw; max-height: 80vh; overflow-y: auto; }
+    .modal h3 { margin-bottom: 16px; }
+    .modal .form-group { margin-bottom: 12px; }
+    .modal .form-group label { font-size: 13px; font-weight: 600; display: block; margin-bottom: 4px; }
+    .modal .form-group input, .modal .form-group select, .modal .form-group textarea { width: 100%; padding: 7px 10px; border: 1px solid var(--border); border-radius: var(--radius-sm); background: var(--bg-primary); color: var(--text-primary); font-size: 13px; box-sizing: border-box; }
+    .modal .form-group textarea { min-height: 60px; resize: vertical; font-family: inherit; }
+    .modal-actions { display: flex; gap: 8px; justify-content: flex-end; margin-top: 16px; }
+    .approval-gate { background: var(--yellow-dim); border: 1px solid var(--yellow); border-radius: var(--radius-sm); padding: 12px; margin: 8px 0; display: flex; align-items: center; gap: 12px; }
+    .approval-gate .gate-msg { flex: 1; font-size: 13px; }
+    .btn-approve { background: var(--green); color: #fff; border: none; padding: 5px 12px; border-radius: var(--radius-sm); cursor: pointer; font-weight: 600; font-size: 12px; }
+    .btn-reject { background: var(--red); color: #fff; border: none; padding: 5px 12px; border-radius: var(--radius-sm); cursor: pointer; font-weight: 600; font-size: 12px; }
+    .timeline-bar { height: 6px; border-radius: 3px; background: var(--bg-tertiary); overflow: hidden; margin-top: 8px; }
+    .timeline-fill { height: 100%; border-radius: 3px; transition: width 0.4s; }
+    .search-input { width: 100%; padding: 7px 10px; border: 1px solid var(--border); border-radius: var(--radius-sm); background: var(--bg-primary); color: var(--text-primary); font-size: 13px; margin-bottom: 10px; box-sizing: border-box; }
+  </style>
+</head>
+<body>
+  <div id="app">
+    <header class="header">
+      <div class="header-left">
+        <a href="index.html" style="text-decoration:none"><h1 class="logo">🔍 AgentLens</h1></a>
+        <span class="tagline">Runbook Automator</span>
+      </div>
+      <div class="header-right">
+        <a href="index.html" class="btn btn-alert-header" style="text-decoration:none">← Dashboard</a>
+        <button class="theme-toggle" onclick="toggleTheme()" id="themeToggleBtn">🌙</button>
+      </div>
+    </header>
+    <main class="main" style="padding: 20px;">
+      <div class="overview-stats" id="overviewStats"></div>
+      <div class="runbook-layout">
+        <div class="runbook-sidebar">
+          <h3 style="margin-bottom:10px;">📋 Runbooks</h3>
+          <input type="text" class="search-input" placeholder="Search runbooks..." id="searchInput" oninput="renderSidebar()">
+          <div id="runbookList"></div>
+          <button class="btn-create" onclick="openCreateModal()">+ New Runbook</button>
+        </div>
+        <div class="runbook-main" id="runbookMain">
+          <div class="card" style="text-align:center;padding:60px 20px;color:var(--text-muted);">
+            <div style="font-size:48px;margin-bottom:12px;">📋</div>
+            <div style="font-size:16px;font-weight:600;">Select a runbook or create a new one</div>
+            <div style="font-size:13px;margin-top:6px;">Runbooks automate incident response with triggers, steps, and approval gates</div>
+          </div>
+        </div>
+      </div>
+    </main>
+  </div>
+  <div id="modalRoot"></div>
+
+  <script>
+    // Theme
+    function toggleTheme() {
+      const t = document.documentElement.getAttribute('data-theme') === 'light' ? 'dark' : 'light';
+      document.documentElement.setAttribute('data-theme', t);
+      localStorage.setItem('agentlens-theme', t);
+      document.getElementById('themeToggleBtn').textContent = t === 'light' ? '🌙' : '☀️';
+    }
+    (function(){
+      const t = localStorage.getItem('agentlens-theme') || 'dark';
+      document.documentElement.setAttribute('data-theme', t);
+      document.getElementById('themeToggleBtn').textContent = t === 'light' ? '🌙' : '☀️';
+    })();
+
+    // Data
+    const STEP_TYPES = ['action','check','gate','notify'];
+    const TRIGGER_METRICS = ['error_rate','latency_p99','token_cost','failure_count','anomaly_score','sla_breach','memory_usage','queue_depth'];
+    const TRIGGER_OPS = ['>','>=','<','<=','==','!='];
+    const AGENTS = ['agent-alpha','agent-beta','agent-gamma','agent-delta','agent-epsilon','agent-zeta'];
+
+    function defaultRunbooks() {
+      return [
+        {
+          id:'rb-1', name:'High Error Rate Response', description:'Automatically investigate and mitigate when error rate exceeds threshold',
+          enabled:true, triggers:[{metric:'error_rate',op:'>',value:5,window:'5m'}],
+          steps:[
+            {type:'check',title:'Verify Error Spike',description:'Confirm error rate sustained above threshold for 2+ minutes',status:'pending'},
+            {type:'action',title:'Capture Diagnostics',description:'Snapshot agent logs, recent traces, and memory state',status:'pending'},
+            {type:'action',title:'Isolate Affected Agent',description:'Route traffic away from failing agent instance',status:'pending'},
+            {type:'gate',title:'Approve Restart',description:'Human approval required before restarting agent',status:'pending'},
+            {type:'action',title:'Restart Agent',description:'Graceful restart with state preservation',status:'pending'},
+            {type:'check',title:'Verify Recovery',description:'Confirm error rate returned to normal within 5 minutes',status:'pending'},
+            {type:'notify',title:'Send Incident Report',description:'Post summary to #incidents channel with timeline and root cause',status:'pending'}
+          ],
+          executions:generateExecutions('rb-1',8)
+        },
+        {
+          id:'rb-2', name:'Cost Overrun Mitigation', description:'Proactive cost control when token spend exceeds budget',
+          enabled:true, triggers:[{metric:'token_cost',op:'>',value:50,window:'1h'}],
+          steps:[
+            {type:'check',title:'Analyze Spend Pattern',description:'Identify which agents/sessions are driving cost spike',status:'pending'},
+            {type:'action',title:'Enable Token Budgets',description:'Apply per-session token limits to top spenders',status:'pending'},
+            {type:'notify',title:'Alert Team',description:'Notify cost owners with breakdown and forecast',status:'pending'},
+            {type:'gate',title:'Approve Throttling',description:'Approval to reduce throughput for cost control',status:'pending'},
+            {type:'action',title:'Apply Rate Limits',description:'Reduce concurrent sessions by 30%',status:'pending'},
+            {type:'check',title:'Monitor Savings',description:'Track spend reduction over next 30 minutes',status:'pending'}
+          ],
+          executions:generateExecutions('rb-2',5)
+        },
+        {
+          id:'rb-3', name:'Latency Degradation Playbook', description:'Investigate and fix latency issues before SLA breach',
+          enabled:true, triggers:[{metric:'latency_p99',op:'>',value:2000,window:'3m'}],
+          steps:[
+            {type:'check',title:'Profile Slow Requests',description:'Identify bottleneck: model API, tool calls, or queue wait',status:'pending'},
+            {type:'action',title:'Scale Worker Pool',description:'Add 2 additional worker instances',status:'pending'},
+            {type:'check',title:'Check Upstream APIs',description:'Verify external API response times are within norms',status:'pending'},
+            {type:'action',title:'Enable Response Cache',description:'Activate semantic cache for repeated queries',status:'pending'},
+            {type:'check',title:'Validate Improvement',description:'Confirm p99 latency dropped below 1500ms',status:'pending'},
+            {type:'notify',title:'Post Metrics Update',description:'Share before/after latency charts with team',status:'pending'}
+          ],
+          executions:generateExecutions('rb-3',12)
+        },
+        {
+          id:'rb-4', name:'Anomaly Investigation', description:'Auto-investigate detected behavioral anomalies',
+          enabled:false, triggers:[{metric:'anomaly_score',op:'>',value:0.8,window:'10m'}],
+          steps:[
+            {type:'check',title:'Classify Anomaly',description:'Determine if anomaly is performance, behavioral, or data-related',status:'pending'},
+            {type:'action',title:'Capture Behavioral Snapshot',description:'Record agent decision patterns, tool usage, and output samples',status:'pending'},
+            {type:'action',title:'Compare with Baseline',description:'Diff current behavior against last known-good profile',status:'pending'},
+            {type:'gate',title:'Escalation Decision',description:'Human decides: investigate further, roll back, or dismiss',status:'pending'},
+            {type:'notify',title:'File Anomaly Report',description:'Create structured report with evidence and recommended actions',status:'pending'}
+          ],
+          executions:generateExecutions('rb-4',3)
+        },
+        {
+          id:'rb-5', name:'SLA Breach Prevention', description:'Proactive steps when SLA metrics approach danger zone',
+          enabled:true, triggers:[{metric:'sla_breach',op:'>=',value:0.85,window:'15m'}],
+          steps:[
+            {type:'check',title:'Identify At-Risk SLOs',description:'Determine which specific SLOs are approaching breach',status:'pending'},
+            {type:'action',title:'Activate Fallback Models',description:'Switch to faster/cheaper models for non-critical paths',status:'pending'},
+            {type:'action',title:'Prioritize Critical Requests',description:'Reorder queue to prioritize SLA-bound requests',status:'pending'},
+            {type:'check',title:'Recalculate Forecast',description:'Re-forecast SLA compliance with mitigations applied',status:'pending'},
+            {type:'gate',title:'Approve Emergency Scaling',description:'Approval for burst capacity to recover SLA',status:'pending'},
+            {type:'action',title:'Burst Scale',description:'Temporarily 3x capacity for SLA recovery sprint',status:'pending'},
+            {type:'notify',title:'SLA Status Update',description:'Update stakeholders on SLA status and recovery ETA',status:'pending'}
+          ],
+          executions:generateExecutions('rb-5',6)
+        }
+      ];
+    }
+
+    function generateExecutions(rbId, count) {
+      const results = ['success','success','success','failure','partial','success','success','partial'];
+      const triggers = ['auto','auto','manual','auto','auto','manual','auto','auto'];
+      const execs = [];
+      const now = Date.now();
+      for (let i = 0; i < count; i++) {
+        const t = now - (i * 3600000 * (2 + Math.random() * 10));
+        const r = results[i % results.length];
+        const dur = Math.floor(15 + Math.random() * 180);
+        execs.push({
+          id: `${rbId}-exec-${i}`,
+          timestamp: t,
+          result: r,
+          trigger: triggers[i % triggers.length],
+          duration: dur,
+          stepsCompleted: r === 'success' ? 'all' : r === 'partial' ? Math.floor(2 + Math.random() * 3) + '/' + (4 + Math.floor(Math.random() * 3)) : 'failed at step ' + (1 + Math.floor(Math.random() * 3)),
+          agent: AGENTS[Math.floor(Math.random() * AGENTS.length)]
+        });
+      }
+      return execs.sort((a, b) => b.timestamp - a.timestamp);
+    }
+
+    let runbooks = JSON.parse(localStorage.getItem('agentlens-runbooks') || 'null') || defaultRunbooks();
+    let selectedId = null;
+    let runningSimulations = {};
+
+    function save() { localStorage.setItem('agentlens-runbooks', JSON.stringify(runbooks)); }
+
+    function renderOverview() {
+      const total = runbooks.length;
+      const enabled = runbooks.filter(r => r.enabled).length;
+      const totalExecs = runbooks.reduce((s, r) => s + r.executions.length, 0);
+      const successRate = totalExecs ? Math.round(runbooks.reduce((s, r) => s + r.executions.filter(e => e.result === 'success').length, 0) / totalExecs * 100) : 0;
+      document.getElementById('overviewStats').innerHTML = `
+        <div class="stat-card"><div class="stat-val">${total}</div><div class="stat-label">Total Runbooks</div></div>
+        <div class="stat-card"><div class="stat-val" style="color:var(--green)">${enabled}</div><div class="stat-label">Active</div></div>
+        <div class="stat-card"><div class="stat-val">${totalExecs}</div><div class="stat-label">Total Executions</div></div>
+        <div class="stat-card"><div class="stat-val" style="color:${successRate >= 80 ? 'var(--green)' : successRate >= 60 ? 'var(--yellow)' : 'var(--red)'}">${successRate}%</div><div class="stat-label">Success Rate</div></div>
+      `;
+    }
+
+    function renderSidebar() {
+      const q = document.getElementById('searchInput').value.toLowerCase();
+      const filtered = runbooks.filter(r => r.name.toLowerCase().includes(q) || r.description.toLowerCase().includes(q));
+      document.getElementById('runbookList').innerHTML = filtered.map(r => `
+        <div class="runbook-list-item ${selectedId === r.id ? 'active' : ''}" onclick="selectRunbook('${r.id}')">
+          <div class="rb-name"><span class="rb-status ${r.enabled ? (runningSimulations[r.id] ? 'running' : 'enabled') : 'disabled'}"></span> ${esc(r.name)}</div>
+          <div class="rb-meta"><span>${r.steps.length} steps</span><span>${r.executions.length} runs</span>${r.enabled ? '<span style="color:var(--green)">enabled</span>' : '<span>disabled</span>'}</div>
+        </div>
+      `).join('');
+    }
+
+    function selectRunbook(id) {
+      selectedId = id;
+      renderSidebar();
+      renderMain();
+    }
+
+    function renderMain() {
+      const rb = runbooks.find(r => r.id === selectedId);
+      if (!rb) return;
+      const sim = runningSimulations[rb.id];
+      document.getElementById('runbookMain').innerHTML = `
+        <div class="card">
+          <div style="display:flex;align-items:flex-start;justify-content:space-between;gap:12px;flex-wrap:wrap;">
+            <div>
+              <h3 style="margin-bottom:4px;">${esc(rb.name)}</h3>
+              <div style="font-size:13px;color:var(--text-muted);margin-bottom:10px;">${esc(rb.description)}</div>
+            </div>
+            <div style="display:flex;gap:6px;align-items:center;">
+              <button class="btn-toggle" onclick="toggleEnabled('${rb.id}')">${rb.enabled ? '⏸ Disable' : '▶ Enable'}</button>
+              <button class="btn-run" onclick="simulateRun('${rb.id}')" ${sim ? 'disabled' : ''}>${sim ? '⏳ Running...' : '▶ Run Now'}</button>
+              <button class="btn-delete" onclick="deleteRunbook('${rb.id}')">🗑 Delete</button>
+            </div>
+          </div>
+          <div style="margin-bottom:14px;">
+            <strong style="font-size:13px;">Triggers:</strong>
+            ${rb.triggers.map(t => `<span class="trigger-tag">${t.metric} ${t.op} ${t.value} (${t.window})</span>`).join(' ')}
+          </div>
+          ${sim && sim.gate !== null ? `
+            <div class="approval-gate">
+              <div style="font-size:20px;">⚠️</div>
+              <div class="gate-msg"><strong>Approval Required:</strong> ${esc(sim.gateTitle)}<br><span style="font-size:12px;color:var(--text-muted)">${esc(sim.gateDesc)}</span></div>
+              <button class="btn-approve" onclick="approveGate('${rb.id}')">✅ Approve</button>
+              <button class="btn-reject" onclick="rejectGate('${rb.id}')">❌ Reject</button>
+            </div>
+          ` : ''}
+          ${sim ? `<div class="timeline-bar"><div class="timeline-fill" style="width:${sim.progress}%;background:var(--blue);"></div></div>` : ''}
+        </div>
+        <div class="card">
+          <h3>📝 Steps (${rb.steps.length})</h3>
+          <ul class="step-list">
+            ${rb.steps.map((s, i) => {
+              const simStatus = sim ? sim.stepStatuses[i] : 'pending';
+              return `<li class="step-item">
+                <div class="step-num ${s.type}">${i + 1}</div>
+                <div class="step-body">
+                  <div class="step-title">${typeIcon(s.type)} ${esc(s.title)}</div>
+                  <div class="step-desc">${esc(s.description)}</div>
+                </div>
+                <span class="step-badge ${simStatus}">${simStatus}</span>
+              </li>`;
+            }).join('')}
+          </ul>
+        </div>
+        <div class="card">
+          <h3>📜 Execution History (${rb.executions.length})</h3>
+          ${rb.executions.length === 0 ? '<div style="color:var(--text-muted);font-size:13px;padding:12px 0;">No executions yet</div>' :
+            rb.executions.map(e => `
+              <div class="exec-row">
+                <span class="exec-time">${new Date(e.timestamp).toLocaleString()}</span>
+                <span class="exec-result ${e.result}">${e.result === 'success' ? '✅' : e.result === 'failure' ? '❌' : '⚠️'} ${e.result}</span>
+                <span style="font-size:12px;color:var(--text-secondary);margin-left:8px;">${e.stepsCompleted} steps · ${e.duration}s · ${esc(e.agent)}</span>
+                <span class="exec-trigger">${e.trigger}</span>
+              </div>
+            `).join('')}
+        </div>
+      `;
+    }
+
+    function typeIcon(t) {
+      return {action:'⚡',check:'🔍',gate:'🔒',notify:'📣'}[t] || '•';
+    }
+
+    function toggleEnabled(id) {
+      const rb = runbooks.find(r => r.id === id);
+      if (rb) { rb.enabled = !rb.enabled; save(); renderSidebar(); renderMain(); }
+    }
+
+    function deleteRunbook(id) {
+      if (!confirm('Delete this runbook?')) return;
+      runbooks = runbooks.filter(r => r.id !== id);
+      if (selectedId === id) selectedId = null;
+      save(); renderOverview(); renderSidebar();
+      document.getElementById('runbookMain').innerHTML = '<div class="card" style="text-align:center;padding:60px 20px;color:var(--text-muted);"><div style="font-size:48px;margin-bottom:12px;">📋</div><div>Select a runbook</div></div>';
+    }
+
+    // Simulate execution with approval gates
+    function simulateRun(id) {
+      const rb = runbooks.find(r => r.id === id);
+      if (!rb || runningSimulations[id]) return;
+      const stepStatuses = rb.steps.map(() => 'pending');
+      runningSimulations[id] = { step: 0, progress: 0, stepStatuses, gate: null, gateTitle: '', gateDesc: '', gateResolve: null };
+      renderSidebar(); renderMain();
+      advanceSimulation(id);
+    }
+
+    function advanceSimulation(id) {
+      const rb = runbooks.find(r => r.id === id);
+      const sim = runningSimulations[id];
+      if (!rb || !sim) return;
+      if (sim.step >= rb.steps.length) {
+        // Done
+        const allDone = sim.stepStatuses.every(s => s === 'done');
+        const anyFailed = sim.stepStatuses.some(s => s === 'failed');
+        rb.executions.unshift({
+          id: `${id}-exec-${Date.now()}`, timestamp: Date.now(),
+          result: anyFailed ? 'partial' : 'success',
+          trigger: 'manual', duration: Math.floor(10 + Math.random() * 60),
+          stepsCompleted: anyFailed ? sim.stepStatuses.filter(s => s === 'done').length + '/' + rb.steps.length : 'all',
+          agent: 'manual'
+        });
+        delete runningSimulations[id];
+        save(); renderOverview(); renderSidebar(); renderMain();
+        return;
+      }
+      const step = rb.steps[sim.step];
+      sim.stepStatuses[sim.step] = 'running';
+      sim.progress = Math.round((sim.step / rb.steps.length) * 100);
+      renderMain();
+
+      if (step.type === 'gate') {
+        sim.gate = sim.step;
+        sim.gateTitle = step.title;
+        sim.gateDesc = step.description;
+        sim.stepStatuses[sim.step] = 'waiting';
+        renderMain();
+        return; // Wait for user
+      }
+
+      setTimeout(() => {
+        const fail = Math.random() < 0.08;
+        sim.stepStatuses[sim.step] = fail ? 'failed' : 'done';
+        sim.step++;
+        if (fail) {
+          for (let i = sim.step; i < rb.steps.length; i++) sim.stepStatuses[i] = 'skipped';
+          sim.step = rb.steps.length;
+        }
+        advanceSimulation(id);
+      }, 800 + Math.random() * 1200);
+    }
+
+    function approveGate(id) {
+      const sim = runningSimulations[id];
+      if (!sim || sim.gate === null) return;
+      sim.stepStatuses[sim.gate] = 'done';
+      sim.gate = null;
+      sim.step++;
+      renderMain();
+      setTimeout(() => advanceSimulation(id), 400);
+    }
+
+    function rejectGate(id) {
+      const sim = runningSimulations[id];
+      if (!sim || sim.gate === null) return;
+      sim.stepStatuses[sim.gate] = 'failed';
+      for (let i = sim.gate + 1; i < runbooks.find(r => r.id === id).steps.length; i++) sim.stepStatuses[i] = 'skipped';
+      sim.step = runbooks.find(r => r.id === id).steps.length;
+      sim.gate = null;
+      advanceSimulation(id);
+    }
+
+    // Create modal
+    function openCreateModal() {
+      const html = `
+        <div class="modal-overlay" onclick="if(event.target===this)closeModal()">
+          <div class="modal">
+            <h3>Create New Runbook</h3>
+            <div class="form-group"><label>Name</label><input id="mName" placeholder="e.g. Memory Leak Response"></div>
+            <div class="form-group"><label>Description</label><textarea id="mDesc" placeholder="What does this runbook do?"></textarea></div>
+            <h4 style="font-size:13px;margin:12px 0 8px;">Trigger Condition</h4>
+            <div class="trigger-config">
+              <div><label>Metric</label><select id="mMetric">${TRIGGER_METRICS.map(m => `<option>${m}</option>`).join('')}</select></div>
+              <div><label>Operator</label><select id="mOp">${TRIGGER_OPS.map(o => `<option>${esc(o)}</option>`).join('')}</select></div>
+              <div><label>Threshold</label><input id="mVal" type="number" value="5"></div>
+              <div><label>Window</label><input id="mWin" value="5m" placeholder="e.g. 5m, 1h"></div>
+            </div>
+            <h4 style="font-size:13px;margin:12px 0 8px;">Steps</h4>
+            <div id="mSteps"></div>
+            <button class="btn-toggle" style="margin-top:6px;" onclick="addStepField()">+ Add Step</button>
+            <div class="modal-actions">
+              <button class="btn-toggle" onclick="closeModal()">Cancel</button>
+              <button class="btn-run" onclick="createRunbook()">Create</button>
+            </div>
+          </div>
+        </div>
+      `;
+      document.getElementById('modalRoot').innerHTML = html;
+      addStepField(); addStepField(); addStepField();
+    }
+
+    let stepFieldCount = 0;
+    function addStepField() {
+      const i = stepFieldCount++;
+      const div = document.createElement('div');
+      div.style.cssText = 'display:grid;grid-template-columns:100px 1fr 1fr;gap:6px;margin-bottom:6px;';
+      div.innerHTML = `
+        <select id="mSType${i}">${STEP_TYPES.map(t => `<option>${t}</option>`).join('')}</select>
+        <input id="mSTitle${i}" placeholder="Step title">
+        <input id="mSDesc${i}" placeholder="Description">
+      `;
+      document.getElementById('mSteps').appendChild(div);
+    }
+
+    function closeModal() { document.getElementById('modalRoot').innerHTML = ''; stepFieldCount = 0; }
+
+    function createRunbook() {
+      const name = document.getElementById('mName').value.trim();
+      if (!name) return alert('Name required');
+      const steps = [];
+      for (let i = 0; i < stepFieldCount; i++) {
+        const te = document.getElementById(`mSTitle${i}`);
+        if (!te || !te.value.trim()) continue;
+        steps.push({
+          type: document.getElementById(`mSType${i}`).value,
+          title: te.value.trim(),
+          description: document.getElementById(`mSDesc${i}`).value.trim(),
+          status: 'pending'
+        });
+      }
+      if (steps.length === 0) return alert('Add at least one step');
+      const rb = {
+        id: 'rb-' + Date.now(),
+        name,
+        description: document.getElementById('mDesc').value.trim(),
+        enabled: true,
+        triggers: [{
+          metric: document.getElementById('mMetric').value,
+          op: document.getElementById('mOp').value,
+          value: parseFloat(document.getElementById('mVal').value) || 0,
+          window: document.getElementById('mWin').value || '5m'
+        }],
+        steps,
+        executions: []
+      };
+      runbooks.push(rb);
+      save(); closeModal(); renderOverview(); renderSidebar();
+      selectRunbook(rb.id);
+    }
+
+    function esc(s) { const d = document.createElement('div'); d.textContent = s; return d.innerHTML; }
+
+    // Init
+    renderOverview(); renderSidebar();
+  </script>
+</body>
+</html>
