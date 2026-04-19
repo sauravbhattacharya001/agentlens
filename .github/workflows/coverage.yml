@@ -78,6 +78,17 @@ jobs:
             sdk/coverage.xml
           retention-days: 14
 
+      - name: Upload SDK coverage to Codecov
+        if: always()
+        uses: codecov/codecov-action@v5
+        with:
+          files: sdk/coverage.xml
+          flags: sdk
+          name: sdk-python
+          fail_ci_if_error: false
+        env:
+          CODECOV_TOKEN: ${{ secrets.CODECOV_TOKEN }}
+
   # ── Node.js Backend Coverage ───────────────────────────────────────
   backend-coverage:
     name: Backend Coverage (Node.js 22)
@@ -132,6 +143,17 @@ jobs:
           path: |
             backend/coverage/
           retention-days: 14
+
+      - name: Upload backend coverage to Codecov
+        if: always()
+        uses: codecov/codecov-action@v5
+        with:
+          files: backend/coverage/lcov.info
+          flags: backend
+          name: backend-node
+          fail_ci_if_error: false
+        env:
+          CODECOV_TOKEN: ${{ secrets.CODECOV_TOKEN }}
 
   # ── Coverage Gate ──────────────────────────────────────────────────
   coverage-gate:

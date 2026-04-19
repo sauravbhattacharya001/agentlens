@@ -9,6 +9,7 @@
 [![CI](https://github.com/sauravbhattacharya001/agentlens/actions/workflows/ci.yml/badge.svg)](https://github.com/sauravbhattacharya001/agentlens/actions/workflows/ci.yml)
 [![CodeQL](https://github.com/sauravbhattacharya001/agentlens/actions/workflows/codeql.yml/badge.svg)](https://github.com/sauravbhattacharya001/agentlens/actions/workflows/codeql.yml)
 [![Coverage](https://github.com/sauravbhattacharya001/agentlens/actions/workflows/coverage.yml/badge.svg)](https://github.com/sauravbhattacharya001/agentlens/actions/workflows/coverage.yml)
+[![codecov](https://codecov.io/gh/sauravbhattacharya001/agentlens/graph/badge.svg)](https://codecov.io/gh/sauravbhattacharya001/agentlens)
 [![License: MIT](https://img.shields.io/badge/License-MIT-blue.svg)](LICENSE)
 [![PyPI version](https://img.shields.io/pypi/v/agentlens?logo=pypi&logoColor=white)](https://pypi.org/project/agentlens/)
 [![npm version](https://img.shields.io/npm/v/agentlens-backend?logo=npm&logoColor=white)](https://www.npmjs.com/package/agentlens-backend)
