@@ -1,0 +1,176 @@
+<!DOCTYPE html>
+<html lang="en">
+<head>
+  <meta charset="UTF-8">
+  <meta name="viewport" content="width=device-width, initial-scale=1.0">
+  <title>AgentLens — Chaos Testing</title>
+  <link rel="stylesheet" href="styles.css">
+  <style>
+    .chaos-layout { display: grid; grid-template-columns: 280px 1fr 320px; gap: 16px; height: calc(100vh - 80px); }
+    @media (max-width: 1100px) { .chaos-layout { grid-template-columns: 1fr; height: auto; } }
+    .chaos-panel { background: var(--bg-secondary); border: 1px solid var(--border); border-radius: var(--radius); padding: 16px; overflow-y: auto; }
+    .chaos-panel h3 { font-size: 14px; margin-bottom: 12px; color: var(--text-primary); }
+    .experiment-btn { display: block; width: 100%; padding: 10px 12px; margin: 6px 0; border: 1px solid var(--border); border-radius: var(--radius-sm); background: var(--bg-tertiary); color: var(--text-primary); cursor: pointer; text-align: left; font-size: 13px; transition: all 0.2s; }
+    .experiment-btn:hover { border-color: var(--accent); background: var(--bg-primary); }
+    .experiment-btn.active { border-color: var(--accent); background: var(--accent-dim, rgba(99,102,241,0.1)); }
+    .experiment-btn .exp-icon { font-size: 16px; margin-right: 6px; }
+    .preset-btn { display: inline-block; padding: 6px 10px; margin: 3px; border: 1px solid var(--border); border-radius: var(--radius-sm); background: var(--bg-tertiary); color: var(--text-secondary); cursor: pointer; font-size: 12px; transition: all 0.2s; }
+    .preset-btn:hover { border-color: var(--accent); color: var(--text-primary); }
+    .controls-bar { display: flex; gap: 8px; align-items: center; margin: 12px 0; flex-wrap: wrap; }
+    .ctrl-btn { padding: 8px 16px; border: 1px solid var(--border); border-radius: var(--radius-sm); background: var(--bg-tertiary); color: var(--text-primary); cursor: pointer; font-size: 13px; font-weight: 600; transition: all 0.2s; }
+    .ctrl-btn:hover { border-color: var(--accent); }
+    .ctrl-btn.start { border-color: var(--green); color: var(--green); }
+    .ctrl-btn.pause { border-color: var(--yellow); color: var(--yellow); }
+    .ctrl-btn.reset { border-color: var(--red); color: var(--red); }
+    .speed-control { display: flex; align-items: center; gap: 6px; font-size: 12px; color: var(--text-secondary); }
+    .speed-control input { width: 80px; }
+    .canvas-container { position: relative; width: 100%; height: 100%; min-height: 400px; background: var(--bg-primary); border-radius: var(--radius); border: 1px solid var(--border); }
+    .canvas-container canvas { width: 100%; height: 100%; display: block; border-radius: var(--radius); }
+    .metrics-grid { display: grid; grid-template-columns: 1fr 1fr; gap: 8px; margin-bottom: 16px; }
+    .metric-card { background: var(--bg-tertiary); border-radius: var(--radius-sm); padding: 10px; text-align: center; }
+    .metric-card .m-label { font-size: 11px; color: var(--text-muted); text-transform: uppercase; letter-spacing: 0.5px; }
+    .metric-card .m-value { font-size: 20px; font-weight: 700; margin-top: 4px; color: var(--text-primary); }
+    .metric-card .m-value.good { color: var(--green); }
+    .metric-card .m-value.warn { color: var(--yellow); }
+    .metric-card .m-value.bad { color: var(--red); }
+    .event-log { max-height: 200px; overflow-y: auto; font-size: 12px; font-family: monospace; }
+    .log-entry { padding: 4px 0; border-bottom: 1px solid var(--border); color: var(--text-secondary); }
+    .log-entry .log-time { color: var(--text-muted); margin-right: 6px; }
+    .log-entry.error { color: var(--red); }
+    .log-entry.warn { color: var(--yellow); }
+    .log-entry.ok { color: var(--green); }
+    .report-overlay { position: fixed; top: 0; left: 0; right: 0; bottom: 0; background: rgba(0,0,0,0.6); display: none; align-items: center; justify-content: center; z-index: 1000; }
+    .report-overlay.show { display: flex; }
+    .report-card { background: var(--bg-secondary); border: 1px solid var(--border); border-radius: var(--radius); padding: 32px; max-width: 500px; width: 90%; max-height: 80vh; overflow-y: auto; }
+    .report-card h2 { margin-bottom: 16px; }
+    .grade-circle { width: 80px; height: 80px; border-radius: 50%; display: flex; align-items: center; justify-content: center; font-size: 36px; font-weight: 800; margin: 0 auto 16px; border: 4px solid var(--border); }
+    .grade-A { border-color: var(--green); color: var(--green); }
+    .grade-B { border-color: #4ade80; color: #4ade80; }
+    .grade-C { border-color: var(--yellow); color: var(--yellow); }
+    .grade-D { border-color: #f97316; color: #f97316; }
+    .grade-F { border-color: var(--red); color: var(--red); }
+    .rec-list { list-style: none; padding: 0; margin: 12px 0; }
+    .rec-list li { padding: 8px 12px; margin: 4px 0; background: var(--bg-tertiary); border-radius: var(--radius-sm); font-size: 13px; color: var(--text-secondary); }
+    .rec-list li::before { content: "💡 "; }
+    .fleet-list { margin-bottom: 12px; }
+    .fleet-agent { display: flex; align-items: center; gap: 8px; padding: 4px 0; font-size: 12px; }
+    .fleet-agent .health-bar { flex: 1; height: 6px; background: var(--bg-tertiary); border-radius: 3px; overflow: hidden; }
+    .fleet-agent .health-fill { height: 100%; border-radius: 3px; transition: width 0.3s, background 0.3s; }
+    .duration-select { padding: 4px 8px; border: 1px solid var(--border); border-radius: var(--radius-sm); background: var(--bg-tertiary); color: var(--text-primary); font-size: 12px; }
+  </style>
+</head>
+<body>
+  <div id="app">
+    <header class="header">
+      <div class="header-left">
+        <h1 class="logo">🔍 AgentLens</h1>
+        <span class="tagline">Chaos Testing</span>
+      </div>
+      <div class="header-right">
+        <a href="index.html" class="btn btn-alert-header" style="text-decoration:none">🔍 Dashboard</a>
+        <a href="timeline.html" class="btn btn-alert-header" style="text-decoration:none">📅 Timeline</a>
+        <a href="command-center.html" class="btn btn-alert-header" style="text-decoration:none">🎯 Command Center</a>
+        <a href="errors.html" class="btn btn-alert-header" style="text-decoration:none">🐛 Errors</a>
+        <a href="costs.html" class="btn btn-alert-header" style="text-decoration:none">💰 Costs</a>
+        <a href="sla.html" class="btn btn-alert-header" style="text-decoration:none">📏 SLA</a>
+        <a href="alerts.html" class="btn btn-alert-header" style="text-decoration:none">🚨 Alert Rules</a>
+        <a href="runbooks.html" class="btn btn-alert-header" style="text-decoration:none">📋 Runbooks</a>
+        <a href="chaos.html" class="btn btn-alert-header" style="text-decoration:none;font-weight:700">🔥 Chaos</a>
+      </div>
+    </header>
+    <main class="main" style="padding:16px;">
+      <div class="chaos-layout">
+        <div class="chaos-panel">
+          <h3>🧪 Chaos Experiments</h3>
+          <button class="experiment-btn" data-type="latency" onclick="selectExperiment(this)"><span class="exp-icon">🕐</span> Latency Spike</button>
+          <button class="experiment-btn" data-type="errors" onclick="selectExperiment(this)"><span class="exp-icon">💥</span> Error Burst</button>
+          <button class="experiment-btn" data-type="memory" onclick="selectExperiment(this)"><span class="exp-icon">🧠</span> Memory Pressure</button>
+          <button class="experiment-btn" data-type="partition" onclick="selectExperiment(this)"><span class="exp-icon">🔌</span> Network Partition</button>
+          <button class="experiment-btn" data-type="load" onclick="selectExperiment(this)"><span class="exp-icon">📈</span> Load Surge</button>
+          <button class="experiment-btn" data-type="cascade" onclick="selectExperiment(this)"><span class="exp-icon">⚡</span> Cascade Failure</button>
+          <h3 style="margin-top:20px;">📦 Presets</h3>
+          <button class="preset-btn" onclick="loadPreset('gentle')">Gentle Nudge</button>
+          <button class="preset-btn" onclick="loadPreset('storm')">Storm</button>
+          <button class="preset-btn" onclick="loadPreset('cascade')">Cascading Doom</button>
+          <button class="preset-btn" onclick="loadPreset('full')">Full Chaos</button>
+          <h3 style="margin-top:20px;">⚙️ Fleet Size</h3>
+          <input type="range" min="5" max="20" value="10" id="fleetSize" oninput="updateFleetSize(this.value)" style="width:100%;">
+          <div style="font-size:12px;color:var(--text-muted);text-align:center;" id="fleetLabel">10 agents</div>
+          <h3 style="margin-top:20px;">⏱️ Duration</h3>
+          <select class="duration-select" id="durationSelect">
+            <option value="30">30 seconds</option>
+            <option value="60" selected>60 seconds</option>
+            <option value="120">2 minutes</option>
+            <option value="300">5 minutes</option>
+          </select>
+        </div>
+        <div style="display:flex;flex-direction:column;gap:12px;">
+          <div class="controls-bar">
+            <button class="ctrl-btn start" onclick="startExperiment()">▶ Start</button>
+            <button class="ctrl-btn pause" onclick="pauseExperiment()">⏸ Pause</button>
+            <button class="ctrl-btn reset" onclick="resetExperiment()">↺ Reset</button>
+            <div class="speed-control">
+              <span>Speed:</span>
+              <input type="range" min="1" max="10" value="1" id="speedSlider" oninput="updateSpeed(this.value)">
+              <span id="speedLabel">1x</span>
+            </div>
+          </div>
+          <div class="canvas-container">
+            <canvas id="chaosCanvas"></canvas>
+          </div>
+        </div>
+        <div class="chaos-panel">
+          <h3>📊 Resilience Metrics</h3>
+          <div class="metrics-grid">
+            <div class="metric-card"><div class="m-label">MTTR</div><div class="m-value" id="metricMTTR">—</div></div>
+            <div class="metric-card"><div class="m-label">Propagation</div><div class="m-value" id="metricProp">—</div></div>
+            <div class="metric-card"><div class="m-label">Availability</div><div class="m-value good" id="metricAvail">100%</div></div>
+            <div class="metric-card"><div class="m-label">Blast Radius</div><div class="m-value" id="metricBlast">0%</div></div>
+            <div class="metric-card"><div class="m-label">Recovery</div><div class="m-value" id="metricRecovery">—</div></div>
+            <div class="metric-card"><div class="m-label">Elapsed</div><div class="m-value" id="metricTime">0s</div></div>
+          </div>
+          <h3>🖥️ Fleet Status</h3>
+          <div class="fleet-list" id="fleetList"></div>
+          <h3>📜 Event Log</h3>
+          <div class="event-log" id="eventLog"></div>
+        </div>
+      </div>
+    </main>
+  </div>
+  <div class="report-overlay" id="reportOverlay">
+    <div class="report-card">
+      <h2 style="text-align:center;">🔥 Chaos Report</h2>
+      <div class="grade-circle" id="reportGrade">—</div>
+      <div id="reportMetrics" style="margin:16px 0;"></div>
+      <h3>💡 Recommendations</h3>
+      <ul class="rec-list" id="reportRecs"></ul>
+      <button class="ctrl-btn" onclick="closeReport()" style="display:block;margin:16px auto 0;">Close</button>
+    </div>
+  </div>
+  <script>
+    let agents=[],connections=[],activeExperiments=new Set(),running=false,paused=false,simTime=0,speed=1,duration=60,animFrame=null,lastTick=0,fleetSize=10,logs=[],metrics={mttr:0,propagation:0,availability:100,blastRadius:0,recovery:100,failures:0,recoveries:0};
+    const NAMES=['Alpha','Beta','Gamma','Delta','Epsilon','Zeta','Eta','Theta','Iota','Kappa','Lambda','Mu','Nu','Xi','Omicron','Pi','Rho','Sigma','Tau','Upsilon'];
+    const TYPES=['Router','Worker','Planner','Executor','Monitor','Validator','Cache','Scheduler','Aggregator','Dispatcher'];
+    function initFleet(){agents=[];connections=[];const c=document.getElementById('chaosCanvas'),w=c.width,h=c.height,cx=w/2,cy=h/2,r=Math.min(w,h)*0.35;for(let i=0;i<fleetSize;i++){const a=2*Math.PI*i/fleetSize-Math.PI/2;agents.push({id:i,name:NAMES[i],type:TYPES[i%TYPES.length],x:cx+r*Math.cos(a),y:cy+r*Math.sin(a),health:100,status:'healthy',recovering:false,recoverAt:0,latency:0,errorRate:0,memPressure:0,isolated:false,load:1});}for(let i=0;i<fleetSize;i++){connections.push([i,(i+1)%fleetSize]);if(i%2===0)connections.push([i,(i+2)%fleetSize]);}renderFleetList();}
+    function renderFleetList(){const el=document.getElementById('fleetList');el.innerHTML=agents.map(a=>{const c=a.health>70?'var(--green)':a.health>30?'var(--yellow)':'var(--red)';return`<div class="fleet-agent"><span>${a.name}</span><div class="health-bar"><div class="health-fill" style="width:${a.health}%;background:${c}"></div></div><span>${Math.round(a.health)}%</span></div>`;}).join('');}
+    function selectExperiment(btn){const t=btn.dataset.type;if(activeExperiments.has(t)){activeExperiments.delete(t);btn.classList.remove('active');}else{activeExperiments.add(t);btn.classList.add('active');}}
+    function loadPreset(name){document.querySelectorAll('.experiment-btn').forEach(b=>b.classList.remove('active'));activeExperiments.clear();const p={gentle:['latency'],storm:['latency','errors','load'],cascade:['cascade','errors'],full:['latency','errors','memory','partition','load','cascade']};(p[name]||[]).forEach(t=>{activeExperiments.add(t);document.querySelector(`[data-type="${t}"]`)?.classList.add('active');});}
+    function updateFleetSize(v){fleetSize=parseInt(v);document.getElementById('fleetLabel').textContent=v+' agents';if(!running){initFleet();draw();}}
+    function updateSpeed(v){speed=parseInt(v);document.getElementById('speedLabel').textContent=v+'x';}
+    function addLog(msg,type=''){const t=simTime.toFixed(1);logs.unshift({time:t,msg,type});if(logs.length>100)logs.pop();document.getElementById('eventLog').innerHTML=logs.slice(0,50).map(l=>`<div class="log-entry ${l.type}"><span class="log-time">[${l.time}s]</span>${l.msg}</div>`).join('');}
+    function startExperiment(){if(running&&!paused)return;if(paused){paused=false;lastTick=performance.now();loop();return;}if(activeExperiments.size===0){addLog('Select at least one experiment!','warn');return;}duration=parseInt(document.getElementById('durationSelect').value);resetExperiment();running=true;paused=false;addLog('🚀 Chaos experiment started','ok');activeExperiments.forEach(e=>addLog(`Injecting: ${e}`,'warn'));lastTick=performance.now();loop();}
+    function pauseExperiment(){if(running){paused=true;addLog('⏸ Paused');}}
+    function resetExperiment(){running=false;paused=false;simTime=0;if(animFrame)cancelAnimationFrame(animFrame);metrics={mttr:0,propagation:0,availability:100,blastRadius:0,recovery:100,failures:0,recoveries:0};logs=[];document.getElementById('eventLog').innerHTML='';initFleet();updateMetricsUI();draw();}
+    function loop(){if(!running||paused)return;const now=performance.now(),dt=((now-lastTick)/1000)*speed;lastTick=now;simTime+=dt;if(simTime>=duration){endExperiment();return;}tick(dt);draw();updateMetricsUI();renderFleetList();animFrame=requestAnimationFrame(loop);}
+    function tick(dt){agents.forEach(a=>{if(a.recovering&&simTime>=a.recoverAt){a.recovering=false;a.status='healthy';a.health=Math.min(100,a.health+30);a.latency=0;a.errorRate=0;a.memPressure=0;a.isolated=false;a.load=1;metrics.recoveries++;addLog(`✅ ${a.name} recovered`,'ok');}if(a.status==='healthy'&&!a.recovering){if(activeExperiments.has('latency')&&Math.random()<0.02*dt){a.latency=500+Math.random()*2000;a.health-=15;addLog(`🕐 ${a.name}: latency ${Math.round(a.latency)}ms`,'warn');}if(activeExperiments.has('errors')&&Math.random()<0.015*dt){a.errorRate=0.3+Math.random()*0.5;a.health-=25;a.status='degraded';addLog(`💥 ${a.name}: errors ${(a.errorRate*100).toFixed(0)}%`,'error');metrics.failures++;scheduleRecovery(a,3+Math.random()*5);}if(activeExperiments.has('memory')&&Math.random()<0.01*dt){a.memPressure=0.8+Math.random()*0.2;a.health-=30;a.status='critical';addLog(`🧠 ${a.name}: OOM ${(a.memPressure*100).toFixed(0)}%`,'error');metrics.failures++;scheduleRecovery(a,5+Math.random()*8);}if(activeExperiments.has('partition')&&Math.random()<0.008*dt){a.isolated=true;a.health-=20;a.status='isolated';addLog(`🔌 ${a.name}: partitioned`,'error');metrics.failures++;scheduleRecovery(a,4+Math.random()*6);}if(activeExperiments.has('load')&&Math.random()<0.012*dt){a.load=5+Math.random()*5;a.health-=20;a.status='overloaded';addLog(`📈 ${a.name}: ${a.load.toFixed(1)}x load`,'warn');metrics.failures++;scheduleRecovery(a,3+Math.random()*4);}}if(activeExperiments.has('cascade')&&a.status!=='healthy'&&!a.isolated){connections.forEach(([f,t])=>{const n=(f===a.id)?agents[t]:(t===a.id)?agents[f]:null;if(n&&n.status==='healthy'&&Math.random()<0.01*dt){n.health-=20;n.status='degraded';addLog(`⚡ Cascade: ${a.name}→${n.name}`,'error');metrics.failures++;scheduleRecovery(n,4+Math.random()*6);}});}if(a.status==='healthy')a.health=Math.min(100,a.health+2*dt);a.health=Math.max(0,a.health);});const healthy=agents.filter(a=>a.status==='healthy').length;metrics.availability=(healthy/agents.length)*100;metrics.blastRadius=((agents.length-healthy)/agents.length)*100;if(metrics.failures>0)metrics.mttr=simTime/Math.max(1,metrics.recoveries);metrics.propagation=activeExperiments.has('cascade')?Math.min(100,metrics.failures*5):0;metrics.recovery=Math.max(0,100-metrics.blastRadius-(metrics.mttr>10?20:0));}
+    function scheduleRecovery(a,d){a.recovering=true;a.recoverAt=simTime+d;}
+    function updateMetricsUI(){document.getElementById('metricMTTR').textContent=metrics.mttr>0?metrics.mttr.toFixed(1)+'s':'—';document.getElementById('metricProp').textContent=metrics.propagation.toFixed(0)+'%';const av=document.getElementById('metricAvail');av.textContent=metrics.availability.toFixed(0)+'%';av.className='m-value '+(metrics.availability>80?'good':metrics.availability>50?'warn':'bad');const bl=document.getElementById('metricBlast');bl.textContent=metrics.blastRadius.toFixed(0)+'%';bl.className='m-value '+(metrics.blastRadius<20?'good':metrics.blastRadius<50?'warn':'bad');document.getElementById('metricRecovery').textContent=metrics.recovery.toFixed(0);document.getElementById('metricTime').textContent=simTime.toFixed(0)+'s';}
+    function draw(){const c=document.getElementById('chaosCanvas'),ctx=c.getContext('2d');ctx.clearRect(0,0,c.width,c.height);connections.forEach(([i,j])=>{const a=agents[i],b=agents[j];ctx.beginPath();ctx.moveTo(a.x,a.y);ctx.lineTo(b.x,b.y);if(a.isolated||b.isolated){ctx.strokeStyle='rgba(239,68,68,0.3)';ctx.setLineDash([4,4]);}else{ctx.strokeStyle='rgba(148,163,184,0.3)';ctx.setLineDash([]);}ctx.lineWidth=1.5;ctx.stroke();ctx.setLineDash([]);});agents.forEach(a=>{const col=a.health>70?'#22c55e':a.health>30?'#eab308':'#ef4444';if(a.health<50){ctx.beginPath();ctx.arc(a.x,a.y,24,0,Math.PI*2);ctx.fillStyle=a.health<30?'rgba(239,68,68,0.15)':'rgba(234,179,8,0.1)';ctx.fill();}ctx.beginPath();ctx.arc(a.x,a.y,16,0,Math.PI*2);ctx.fillStyle=col;ctx.globalAlpha=0.2;ctx.fill();ctx.globalAlpha=1;ctx.strokeStyle=col;ctx.lineWidth=2;ctx.stroke();ctx.beginPath();ctx.arc(a.x,a.y,16,-Math.PI/2,-Math.PI/2+Math.PI*2*a.health/100);ctx.strokeStyle=col;ctx.lineWidth=3;ctx.stroke();ctx.fillStyle=getComputedStyle(document.body).getPropertyValue('--text-primary')||'#e2e8f0';ctx.font='10px sans-serif';ctx.textAlign='center';ctx.fillText(a.name,a.x,a.y+28);});}
+    function endExperiment(){running=false;if(animFrame)cancelAnimationFrame(animFrame);addLog('🏁 Experiment complete','ok');showReport();}
+    function showReport(){const score=metrics.recovery,grade=score>=90?'A':score>=75?'B':score>=55?'C':score>=35?'D':'F';const el=document.getElementById('reportGrade');el.textContent=grade;el.className='grade-circle grade-'+grade;document.getElementById('reportMetrics').innerHTML=`<div style="display:grid;grid-template-columns:1fr 1fr;gap:8px;font-size:13px;"><div><strong>Availability:</strong> ${metrics.availability.toFixed(1)}%</div><div><strong>MTTR:</strong> ${metrics.mttr.toFixed(1)}s</div><div><strong>Blast Radius:</strong> ${metrics.blastRadius.toFixed(0)}%</div><div><strong>Failures:</strong> ${metrics.failures}</div><div><strong>Recoveries:</strong> ${metrics.recoveries}</div><div><strong>Score:</strong> ${score.toFixed(0)}/100</div></div>`;const recs=[];if(metrics.mttr>8)recs.push('Add circuit breakers to reduce recovery time');if(metrics.blastRadius>40)recs.push('Deploy redundant agents to limit blast radius');if(activeExperiments.has('cascade'))recs.push('Implement bulkheads to prevent cascade failures');if(activeExperiments.has('latency'))recs.push('Increase timeout buffers and add retry backoff');if(activeExperiments.has('partition'))recs.push('Add graceful degradation for network partitions');if(activeExperiments.has('memory'))recs.push('Set memory limits and enable auto-scaling');if(activeExperiments.has('load'))recs.push('Implement load shedding and queue-based throttling');if(metrics.availability<60)recs.push('Consider active-active multi-region deployment');if(!recs.length)recs.push('Fleet shows strong resilience — maintain current architecture');document.getElementById('reportRecs').innerHTML=recs.map(r=>`<li>${r}</li>`).join('');document.getElementById('reportOverlay').classList.add('show');}
+    function closeReport(){document.getElementById('reportOverlay').classList.remove('show');}
+    function resizeCanvas(){const c=document.getElementById('chaosCanvas'),p=c.parentElement;c.width=p.clientWidth;c.height=p.clientHeight;if(!running){initFleet();draw();}}
+    window.addEventListener('resize',resizeCanvas);window.addEventListener('load',resizeCanvas);
+  </script>
+</body>
+</html>
