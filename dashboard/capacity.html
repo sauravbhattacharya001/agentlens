@@ -1,0 +1,147 @@
+<!DOCTYPE html>
+<html lang="en">
+<head>
+  <meta charset="UTF-8">
+  <meta name="viewport" content="width=device-width, initial-scale=1.0">
+  <title>AgentLens — Smart Capacity Planner</title>
+  <link rel="stylesheet" href="styles.css">
+  <style>
+    .cap-container { padding: 24px; max-width: 1400px; margin: 0 auto; }
+    .cap-cards { display: grid; grid-template-columns: repeat(4, 1fr); gap: 16px; margin-bottom: 24px; }
+    .cap-card { background: var(--bg-secondary); border: 1px solid var(--border); border-radius: var(--radius); padding: 20px; }
+    .cap-card h3 { font-size: 0.8rem; color: var(--text-secondary); text-transform: uppercase; letter-spacing: 0.5px; margin-bottom: 8px; }
+    .cap-card .value { font-size: 2rem; font-weight: 700; }
+    .cap-card .sub { font-size: 0.8rem; color: var(--text-secondary); margin-top: 4px; }
+    .cap-green { color: var(--green); }
+    .cap-yellow { color: var(--yellow); }
+    .cap-red { color: var(--red); }
+    .cap-row { display: grid; grid-template-columns: 2fr 1fr; gap: 16px; margin-bottom: 24px; }
+    .cap-panel { background: var(--bg-secondary); border: 1px solid var(--border); border-radius: var(--radius); padding: 20px; }
+    .cap-panel h2 { font-size: 1rem; margin-bottom: 16px; display: flex; align-items: center; gap: 8px; }
+    .cap-full { grid-column: 1 / -1; }
+    .chart-wrap { position: relative; width: 100%; height: 340px; }
+    .chart-wrap canvas { width: 100% !important; height: 100% !important; }
+    .tooltip-box { position: absolute; background: var(--bg-secondary); border: 1px solid var(--border); border-radius: 6px; padding: 8px 12px; font-size: 0.8rem; pointer-events: none; display: none; z-index: 10; }
+    .breakdown-list { list-style: none; padding: 0; margin: 0; }
+    .breakdown-list li { display: flex; justify-content: space-between; align-items: center; padding: 10px 0; border-bottom: 1px solid var(--border); }
+    .breakdown-list li:last-child { border-bottom: none; }
+    .bd-name { display: flex; align-items: center; gap: 8px; }
+    .bd-dot { width: 12px; height: 12px; border-radius: 50%; display: inline-block; }
+    .bd-stats { text-align: right; font-size: 0.85rem; }
+    .bd-pct { font-weight: 700; font-size: 1.1rem; }
+    .bd-trend { margin-left: 6px; font-size: 0.8rem; }
+    .rec-list { list-style: none; padding: 0; margin: 0; }
+    .rec-item { padding: 12px; border-radius: var(--radius); margin-bottom: 8px; border-left: 4px solid; }
+    .rec-critical { border-color: var(--red); background: rgba(239,68,68,0.08); }
+    .rec-warning { border-color: var(--yellow); background: rgba(234,179,8,0.08); }
+    .rec-info { border-color: var(--blue, #3b82f6); background: rgba(59,130,246,0.08); }
+    .rec-badge { font-size: 0.7rem; padding: 2px 8px; border-radius: 9999px; font-weight: 600; text-transform: uppercase; margin-right: 8px; }
+    .rec-badge.critical { background: var(--red); color: #fff; }
+    .rec-badge.warning { background: var(--yellow); color: #000; }
+    .rec-badge.info { background: var(--blue, #3b82f6); color: #fff; }
+    .sim-controls { display: flex; gap: 24px; flex-wrap: wrap; align-items: flex-start; margin-bottom: 16px; }
+    .sim-control { flex: 1; min-width: 200px; }
+    .sim-control label { display: block; font-size: 0.8rem; color: var(--text-secondary); margin-bottom: 4px; }
+    .sim-control input[type=range] { width: 100%; }
+    .sim-control .sim-val { font-size: 1.1rem; font-weight: 700; }
+    .sim-result { font-size: 1.4rem; font-weight: 700; text-align: center; padding: 16px; border-radius: var(--radius); background: var(--bg-primary, #111); }
+    @media (max-width: 900px) { .cap-cards { grid-template-columns: repeat(2, 1fr); } .cap-row { grid-template-columns: 1fr; } }
+    @media (max-width: 500px) { .cap-cards { grid-template-columns: 1fr; } }
+  </style>
+</head>
+<body>
+  <div id="app">
+    <header class="header">
+      <div class="header-left">
+        <h1 class="logo">🔍 AgentLens</h1>
+        <span class="tagline">Observability for AI Agents</span>
+      </div>
+      <div class="header-right">
+        <a href="index.html" class="btn btn-alert-header" style="text-decoration:none">📈 Dashboard</a>
+        <a href="timeline.html" class="btn btn-alert-header" style="text-decoration:none">📅 Timeline</a>
+        <a href="costs.html" class="btn btn-alert-header" style="text-decoration:none">💰 Costs</a>
+        <a href="sla.html" class="btn btn-alert-header" style="text-decoration:none">📏 SLA</a>
+        <a href="alerts.html" class="btn btn-alert-header" style="text-decoration:none">🚨 Alerts</a>
+        <a href="profiler.html" class="btn btn-alert-header" style="text-decoration:none">🧬 Profiler</a>
+        <a href="capacity.html" class="btn btn-alert-header" style="text-decoration:none; background: var(--blue, #3b82f6); color: #fff;">📊 Capacity</a>
+      </div>
+    </header>
+    <div class="cap-container">
+      <h1 style="margin-bottom:4px;">📊 Smart Capacity Planner</h1>
+      <p style="color:var(--text-secondary);margin-bottom:24px;">Proactive workload prediction, saturation forecasting, and scaling recommendations</p>
+      <div class="cap-cards" id="summaryCards"></div>
+      <div class="cap-row">
+        <div class="cap-panel">
+          <h2>📈 Capacity Trend & Forecast</h2>
+          <div class="chart-wrap"><canvas id="trendCanvas"></canvas><div class="tooltip-box" id="chartTooltip"></div></div>
+        </div>
+        <div class="cap-panel">
+          <h2>🧩 Workload Breakdown</h2>
+          <ul class="breakdown-list" id="breakdownList"></ul>
+        </div>
+      </div>
+      <div class="cap-row" style="grid-template-columns:1fr;">
+        <div class="cap-panel">
+          <h2>🤖 Scaling Recommendations</h2>
+          <ul class="rec-list" id="recList"></ul>
+        </div>
+      </div>
+      <div class="cap-row" style="grid-template-columns:1fr;">
+        <div class="cap-panel">
+          <h2>🔮 What-If Simulator</h2>
+          <div class="sim-controls">
+            <div class="sim-control"><label>Expected Traffic Growth (%/week)</label><input type="range" id="simGrowth" min="0" max="20" value="3" step="0.5"><span class="sim-val" id="simGrowthVal">3%</span></div>
+            <div class="sim-control"><label>New Agents to Deploy</label><input type="range" id="simAgents" min="0" max="50" value="0" step="1"><span class="sim-val" id="simAgentsVal">0</span></div>
+            <div class="sim-control"><label>Max Capacity Limit</label><input type="range" id="simCap" min="50" max="500" value="100" step="10"><span class="sim-val" id="simCapVal">100</span></div>
+          </div>
+          <div class="sim-result" id="simResult">Calculating...</div>
+        </div>
+      </div>
+    </div>
+  </div>
+<script>
+(function(){
+  const NOW=Date.now(),DAY=864e5;
+  const TYPES=[{name:'GPT-4 Agents',color:'#8b5cf6',base:35,growth:.4},{name:'Tool Agents',color:'#3b82f6',base:20,growth:.25},{name:'RAG Agents',color:'#10b981',base:15,growth:.35},{name:'Custom Agents',color:'#f59e0b',base:8,growth:.15}];
+  function srand(i){let x=Math.sin(i*9301+49297)*49297;return x-Math.floor(x);}
+  const HD=30,FD=14;let hist=[];
+  for(let d=0;d<HD;d++){let t=0,bd={};TYPES.forEach((a,i)=>{let v=a.base+a.growth*d+(srand(d*10+i)-.5)*4;v=Math.max(1,v);bd[a.name]=v;t+=v;});hist.push({date:new Date(NOW-(HD-d)*DAY),util:t,bd});}
+  function linReg(data){const n=data.length;let sx=0,sy=0,sxy=0,sxx=0;data.forEach((d,i)=>{sx+=i;sy+=d.util;sxy+=i*d.util;sxx+=i*i;});const sl=(n*sxy-sx*sy)/(n*sxx-sx*sx);return{slope:sl,intercept:(sy-sl*sx)/n};}
+  const reg=linReg(hist),curUtil=hist[HD-1].util,maxCap=100,curPct=curUtil/maxCap*100;
+  function pc(p){return p<60?'cap-green':p<80?'cap-yellow':'cap-red';}
+  function d2s(mc,sl){sl=sl||reg.slope;if(sl<=0)return Infinity;const d=(mc-curUtil)/sl;return d>0?Math.ceil(d):0;}
+  const satD=d2s(maxCap),satDt=satD===Infinity?'Never':new Date(NOW+satD*DAY).toLocaleDateString('en-US',{month:'short',day:'numeric',year:'numeric'});
+  const head=Math.max(0,Math.round(maxCap-curUtil)),scScore=Math.min(100,Math.round(curPct*.5+(satD<14?50:satD<30?30:10)));
+  document.getElementById('summaryCards').innerHTML=`<div class="cap-card"><h3>Current Load</h3><div class="value ${pc(curPct)}">${curPct.toFixed(1)}%</div><div class="sub">${curUtil.toFixed(1)} / ${maxCap} units</div></div><div class="cap-card"><h3>Predicted Saturation</h3><div class="value ${satD<14?'cap-red':satD<30?'cap-yellow':'cap-green'}">${satD===Infinity?'∞':satD+'d'}</div><div class="sub">${satDt}</div></div><div class="cap-card"><h3>Headroom</h3><div class="value">${head}</div><div class="sub">additional units available</div></div><div class="cap-card"><h3>Scaling Score</h3><div class="value ${scScore>70?'cap-red':scScore>50?'cap-yellow':'cap-green'}">${scScore}/100</div><div class="sub">${scScore>70?'Urgent':scScore>50?'Monitor':'Healthy'}</div></div>`;
+  const lastBd=hist[HD-1].bd,prevBd=hist[HD-8].bd;let bdH='';
+  TYPES.forEach(a=>{const c=lastBd[a.name],p=prevBd[a.name],pct=(c/curUtil*100).toFixed(1),wg=((c-p)/p*100).toFixed(1),ar=wg>1?'↑':wg<-1?'↓':'→';bdH+=`<li><span class="bd-name"><span class="bd-dot" style="background:${a.color}"></span>${a.name}</span><span class="bd-stats"><span class="bd-pct">${pct}%</span><span class="bd-trend">${ar} ${wg>0?'+':''}${wg}%/wk</span></span></li>`;});
+  document.getElementById('breakdownList').innerHTML=bdH;
+  function genR(pct,sd,bd,tot,mc){const r=[];if(pct>80)r.push({s:'critical',t:`⚠️ Scale up: Utilization at ${pct.toFixed(0)}%. Add capacity to restore healthy headroom.`});if(sd<14&&sd>0)r.push({s:'critical',t:`📈 Pre-emptive scaling needed within ${sd} days — capacity will be exhausted.`});else if(sd<30&&sd>0)r.push({s:'warning',t:`📈 Pre-emptive scaling recommended within ${sd} days.`});let mx='',mp=0;Object.entries(bd).forEach(([k,v])=>{const p=v/tot*100;if(p>mp){mp=p;mx=k;}});if(mp>45)r.push({s:'warning',t:`🔄 Rebalance: ${mx} consuming ${mp.toFixed(0)}% of capacity.`});if(pct<40)r.push({s:'info',t:`📉 Scale down: Over-provisioned. Reduce to save costs.`});if(!r.length)r.push({s:'info',t:`✅ Capacity healthy. No action needed.`});return r;}
+  function renR(r){document.getElementById('recList').innerHTML=r.map(x=>`<li class="rec-item rec-${x.s}"><span class="rec-badge ${x.s}">${x.s}</span>${x.t}</li>`).join('');}
+  renR(genR(curPct,satD,lastBd,curUtil,maxCap));
+  const cv=document.getElementById('trendCanvas'),cx=cv.getContext('2d'),tt=document.getElementById('chartTooltip');
+  function draw(simSl,simMc){const dpr=window.devicePixelRatio||1,rect=cv.parentElement.getBoundingClientRect();cv.width=rect.width*dpr;cv.height=rect.height*dpr;cx.setTransform(dpr,0,0,dpr,0,0);const W=rect.width,H=rect.height,pad={t:20,r:20,b:40,l:50},cW=W-pad.l-pad.r,cH=H-pad.t-pad.b,td=HD+FD,yM=Math.max(simMc||maxCap,120)*1.1;
+  function xp(d){return pad.l+d/(td-1)*cW;}function yp(v){return pad.t+cH-v/yM*cH;}
+  cx.clearRect(0,0,W,H);const mc=simMc||maxCap;
+  [[0,mc*.6,'rgba(16,185,129,0.06)'],[mc*.6,mc*.8,'rgba(234,179,8,0.06)'],[mc*.8,mc,'rgba(239,68,68,0.06)']].forEach(([lo,hi,c])=>{cx.fillStyle=c;cx.fillRect(pad.l,yp(Math.min(hi,yM)),cW,yp(lo)-yp(Math.min(hi,yM)));});
+  [mc*.6,mc*.8,mc].forEach((th,i)=>{cx.strokeStyle=['rgba(16,185,129,0.4)','rgba(234,179,8,0.4)','rgba(239,68,68,0.4)'][i];cx.setLineDash([6,4]);cx.beginPath();cx.moveTo(pad.l,yp(th));cx.lineTo(pad.l+cW,yp(th));cx.stroke();cx.setLineDash([]);cx.fillStyle=cx.strokeStyle;cx.font='10px system-ui';cx.fillText(['60%','80%','100%'][i],pad.l+cW+2,yp(th)+4);});
+  cx.strokeStyle='#8b5cf6';cx.lineWidth=2;cx.beginPath();hist.forEach((d,i)=>{i===0?cx.moveTo(xp(i),yp(d.util)):cx.lineTo(xp(i),yp(d.util));});cx.stroke();
+  hist.forEach((d,i)=>{cx.fillStyle='#8b5cf6';cx.beginPath();cx.arc(xp(i),yp(d.util),3,0,Math.PI*2);cx.fill();});
+  const sl=simSl!==undefined?simSl:reg.slope;cx.strokeStyle='#f59e0b';cx.lineWidth=2;cx.setLineDash([6,4]);cx.beginPath();for(let d=0;d<=FD;d++){const idx=HD-1+d,v=curUtil+sl*d;d===0?cx.moveTo(xp(idx),yp(v)):cx.lineTo(xp(idx),yp(v));}cx.stroke();cx.setLineDash([]);cx.lineWidth=1;
+  cx.fillStyle=getComputedStyle(document.body).getPropertyValue('--text-secondary')||'#888';cx.font='10px system-ui';cx.textAlign='center';for(let d=0;d<td;d+=7){cx.fillText(new Date(NOW-(HD-d)*DAY).toLocaleDateString('en-US',{month:'short',day:'numeric'}),xp(d),H-pad.b+16);}
+  cx.textAlign='right';for(let v=0;v<=yM;v+=20)cx.fillText(v.toFixed(0),pad.l-6,yp(v)+4);
+  cx.textAlign='left';cx.font='11px system-ui';cx.fillStyle='#8b5cf6';cx.fillRect(pad.l,pad.t-14,14,3);cx.fillText('Historical',pad.l+18,pad.t-8);cx.fillStyle='#f59e0b';cx.setLineDash([4,3]);cx.beginPath();cx.moveTo(pad.l+100,pad.t-12);cx.lineTo(pad.l+114,pad.t-12);cx.stroke();cx.setLineDash([]);cx.fillText('Forecast',pad.l+118,pad.t-8);
+  return{xp,yp,pad,td,yM};}
+  let cm=draw();
+  cv.addEventListener('mousemove',function(e){const r=cv.getBoundingClientRect(),mx=e.clientX-r.left,cW=r.width-cm.pad.l-cm.pad.r,di=Math.round((mx-cm.pad.l)/cW*(cm.td-1));if(di<0||di>=cm.td){tt.style.display='none';return;}let v,dt;if(di<HD){v=hist[di].util;dt=hist[di].date;}else{v=curUtil+reg.slope*(di-HD+1);dt=new Date(NOW+(di-HD+1)*DAY);}tt.innerHTML=`<strong>${dt.toLocaleDateString('en-US',{month:'short',day:'numeric'})}</strong><br>${v.toFixed(1)} units (${(v/maxCap*100).toFixed(1)}%)`;tt.style.display='block';tt.style.left=Math.min(mx+12,r.width-140)+'px';tt.style.top='40px';});
+  cv.addEventListener('mouseleave',()=>{tt.style.display='none';});
+  const sG=document.getElementById('simGrowth'),sA=document.getElementById('simAgents'),sC=document.getElementById('simCap');
+  function upSim(){const gp=parseFloat(sG.value),na=parseInt(sA.value),cl=parseInt(sC.value);document.getElementById('simGrowthVal').textContent=gp+'%';document.getElementById('simAgentsVal').textContent=na;document.getElementById('simCapVal').textContent=cl;
+  const dg=curUtil*(gp/100)/7,el=na*2,eu=curUtil+el,es=dg>0?dg:reg.slope,ds=es>0?Math.ceil((cl-eu)/es):Infinity;
+  const dt=ds<=0?'<span class="cap-red">Already exceeded!</span>':ds===Infinity?'<span class="cap-green">Never (flat/declining)</span>':ds<14?`<span class="cap-red">${ds} days</span>`:ds<30?`<span class="cap-yellow">${ds} days</span>`:`<span class="cap-green">${ds} days</span>`;
+  document.getElementById('simResult').innerHTML='Days until saturation: '+dt;cm=draw(es,cl);renR(genR(eu/cl*100,ds>0?ds:0,lastBd,eu,cl));}
+  [sG,sA,sC].forEach(e=>e.addEventListener('input',upSim));upSim();window.addEventListener('resize',upSim);
+})();
+</script>
+</body>
+</html>
