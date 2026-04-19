@@ -7,6 +7,7 @@ const {
   validateSessionId,
   safeJsonStringify,
   isValidEventType,
+  isValidStatus,
   clampNonNegInt,
   clampNonNegFloat,
 } = require("../lib/validation");
@@ -113,7 +114,7 @@ router.post("/", wrapRoute("ingest events", (req, res) => {
         const totalTokOut = clampNonNegInt(event.total_tokens_out);
         endSession.run(
           sanitizeString(event.ended_at || nowIso, 64),
-          sanitizeString(event.status || "completed", 32),
+          sanitizeString(isValidStatus(event.status) ? event.status : "completed", 32),
           totalTokIn,
           totalTokIn,
           totalTokOut,
