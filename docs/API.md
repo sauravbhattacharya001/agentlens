@@ -35,6 +35,8 @@ All endpoints require API key authentication via the `x-api-key` header unless o
 - [Session Diff](#session-diff)
 - [Cost Forecasting](#cost-forecasting)
 - [Agent Scorecards](#agent-scorecards)
+- [Agent Profiler](#agent-profiler)
+- [Command Center](#command-center)
 
 ---
 
@@ -1260,3 +1262,221 @@ Detailed scorecard for a single agent, including model usage breakdown and tool 
 | Status | Condition |
 |--------|-----------|
 | `404` | No data for the specified agent in the given time range |
+
+---
+
+## Agent Profiler
+
+Builds behavioral fingerprints for agents and detects drift from established patterns. Tracks tool-call distribution, response-time patterns, error affinity, token-usage shape, and event-type mix. Compares recent windows against historical baselines using Jensen-Shannon divergence.
+
+**Base path:** `/profiler`
+
+### List All Agent Profiles
+
+```
+GET /profiler
+```
+
+Returns behavioral profiles for all agents with drift severity classification.
+
+**Query Parameters:**
+
+| Parameter | Type | Default | Description |
+|-----------|------|---------|-------------|
+| `days` | number | 30 | Historical lookback window (max 90) |
+| `recent` | number | 7 | Recent window for drift comparison (max `days`) |
+
+**Response:**
+
+```json
+{
+  "profiles": [
+    {
+      "agent": "my-agent",
+      "status": "medium",
+      "overallDrift": 0.1523,
+      "dimensions": {
+        "eventMix": { "drift": 0.0812, "severity": "stable" },
+        "toolUsage": { "drift": 0.2341, "severity": "medium" },
+        "tokenUsage": { "drift": 0.1205, "severity": "medium" },
+        "duration": { "drift": 0.0543, "severity": "stable" },
+        "errorRate": { "drift": 0.0100, "severity": "stable" }
+      },
+      "sessionCount": 150,
+      "recentSessionCount": 28,
+      "baseline": { "avgTokens": 4200, "avgDuration": 12500, "errorRate": 0.0200 },
+      "recent": { "avgTokens": 4800, "avgDuration": 11800, "errorRate": 0.0350 }
+    }
+  ],
+  "meta": { "days": 30, "recentDays": 7, "agentCount": 5 }
+}
+```
+
+**Drift Severity Levels:**
+
+| Level | JSD Threshold | Meaning |
+|-------|--------------|----------|
+| `stable` | < 0.10 | Behavior consistent with baseline |
+| `medium` | 0.10 – 0.25 | Notable behavioral shift |
+| `high` | 0.25 – 0.40 | Significant drift, investigate |
+| `critical` | ≥ 0.40 | Major behavioral change |
+
+### Get Agent Profile Detail
+
+```
+GET /profiler/:agent
+```
+
+Returns a detailed behavioral profile for one agent, including daily breakdowns.
+
+**Query Parameters:**
+
+| Parameter | Type | Default | Description |
+|-----------|------|---------|-------------|
+| `days` | number | 30 | Historical lookback window (max 90) |
+
+**Response:**
+
+```json
+{
+  "agent": "my-agent",
+  "profile": {
+    "sessionCount": 150,
+    "avgTokens": 4500,
+    "avgDuration": 12000,
+    "errorRate": 0.025,
+    "eventTypeDist": { "llm_call": 0.6, "tool_call": 0.3, "error": 0.1 },
+    "toolCallDist": { "web_search": 0.5, "file_read": 0.3, "code_exec": 0.2 },
+    "p50Duration": 10000,
+    "p95Duration": 35000,
+    "p50Tokens": 3800,
+    "p95Tokens": 12000
+  },
+  "daily": [
+    { "date": "2026-04-15", "sessionCount": 12, "avgTokens": 4300, "..." : "..." }
+  ],
+  "meta": { "days": 30, "totalSessions": 150 }
+}
+```
+
+**Error Responses:**
+
+| Status | Condition |
+|--------|-----------||
+| `400` | Invalid agent name format |
+| `404` | Agent not found or no sessions in range |
+
+### Get Drift Timeline
+
+```
+GET /profiler/:agent/drift
+```
+
+Returns a time series of drift scores using a sliding window compared against the historical baseline.
+
+**Query Parameters:**
+
+| Parameter | Type | Default | Description |
+|-----------|------|---------|-------------|
+| `days` | number | 30 | Historical lookback window (max 90) |
+| `window` | number | 3 | Sliding window size in days (1-14) |
+
+**Response:**
+
+```json
+{
+  "agent": "my-agent",
+  "baseline": { "avgTokens": 4200, "avgDuration": 12500 },
+  "timeline": [
+    { "date": "2026-04-10", "eventDrift": 0.0523, "toolDrift": 0.0812, "severity": "stable", "windowSize": 15 },
+    { "date": "2026-04-11", "eventDrift": 0.1205, "toolDrift": 0.2341, "severity": "medium", "windowSize": 18 }
+  ]
+}
+```
+
+### Force Profile Snapshot
+
+```
+POST /profiler/snapshot
+```
+
+Forces an immediate profile snapshot for all agents (last 30 days).
+
+**Response:**
+
+```json
+{
+  "snapshots": [
+    { "agent": "my-agent", "profile": { "..." : "..." }, "timestamp": "2026-04-18T17:00:00.000Z" }
+  ],
+  "count": 5
+}
+```
+
+---
+
+## Command Center
+
+Unified activity feed aggregating alerts, anomalies, budget warnings, and session health into a single prioritized stream.
+
+**Base path:** `/command-center`
+
+### Activity Feed
+
+```
+GET /command-center/feed
+```
+
+Returns a prioritized stream of recent activity across all subsystems.
+
+**Query Parameters:**
+
+| Parameter | Type | Default | Description |
+|-----------|------|---------|-------------|
+| `limit` | number | 50 | Maximum items to return |
+| `days` | number | 7 | Lookback window in days |
+
+**Response:**
+
+```json
+{
+  "feed": [
+    {
+      "type": "alert",
+      "severity": "high",
+      "title": "Error rate spike",
+      "timestamp": "2026-04-18T16:30:00.000Z",
+      "details": { "..." : "..." }
+    }
+  ],
+  "meta": { "total": 23, "days": 7 }
+}
+```
+
+### Summary
+
+```
+GET /command-center/summary
+```
+
+Returns a quick stats overview of system health.
+
+**Query Parameters:**
+
+| Parameter | Type | Default | Description |
+|-----------|------|---------|-------------|
+| `days` | number | 7 | Lookback window in days |
+
+**Response:**
+
+```json
+{
+  "activeSessions": 12,
+  "totalAlerts": 3,
+  "unacknowledgedAlerts": 1,
+  "anomalyCount": 2,
+  "budgetWarnings": 0,
+  "errorRate": 0.035,
+  "period": { "days": 7, "from": "2026-04-11", "to": "2026-04-18" }
+}
+```
