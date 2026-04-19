@@ -270,12 +270,20 @@ router.get("/search", wrapRoute("search sessions", (req, res) => {
     if (sessionIds.length > 0) {
       const db = getDb();
       const TAG_CHUNK = 50;
+      // Cache prepared statements per chunk size to avoid re-compiling
+      // db.prepare() on every request. Most calls use the full chunk size,
+      // with at most one smaller trailing chunk.
+      const tagStmtCache = Object.create(null);
       for (let i = 0; i < sessionIds.length; i += TAG_CHUNK) {
         const chunk = sessionIds.slice(i, i + TAG_CHUNK);
-        const placeholders = chunk.map(() => "?").join(",");
-        const tagRows = db.prepare(
-          `SELECT session_id, tag FROM session_tags WHERE session_id IN (${placeholders}) ORDER BY created_at ASC`
-        ).all(...chunk);
+        const len = chunk.length;
+        if (!tagStmtCache[len]) {
+          const placeholders = chunk.map(() => "?").join(",");
+          tagStmtCache[len] = db.prepare(
+            `SELECT session_id, tag FROM session_tags WHERE session_id IN (${placeholders}) ORDER BY created_at ASC`
+          );
+        }
+        const tagRows = tagStmtCache[len].all(...chunk);
         for (const row of tagRows) {
           if (!tagMap[row.session_id]) tagMap[row.session_id] = [];
           tagMap[row.session_id].push(row.tag);

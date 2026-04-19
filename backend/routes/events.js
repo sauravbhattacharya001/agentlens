@@ -127,7 +127,7 @@ router.post("/", wrapRoute("ingest events", (req, res) => {
       // Regular event
       const eventId =
         sanitizeString(event.event_id, 64) ||
-        crypto.randomUUID().replace(/-/g, "").slice(0, 16);
+        crypto.randomBytes(8).toString("hex");
 
       // Ensure session exists (only once per session per batch)
       if (!ensuredSessions.has(sessionId)) {

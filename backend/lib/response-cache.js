@@ -147,10 +147,10 @@ function createCache(options) {
     // Collect keys first to avoid deleting during iteration,
     // which can cause skipped entries in some Map implementations
     // (same pattern as invalidatePrefix).
+    // Iterate entries() to avoid a redundant store.get() per key.
     var toDelete = [];
-    for (var key of store.keys()) {
-      var entry = store.get(key);
-      if (entry && now > entry.expiresAt) {
+    for (var [key, entry] of store.entries()) {
+      if (now > entry.expiresAt) {
         toDelete.push(key);
       }
     }
