@@ -14,10 +14,8 @@ from __future__ import annotations
 import argparse
 import json
 import os
-import sys
 import webbrowser
-from collections import defaultdict
-from datetime import datetime, timedelta, timezone
+from datetime import datetime, timezone
 from typing import Any
 
 from agentlens.cli_common import get_client, fetch_sessions, print_json

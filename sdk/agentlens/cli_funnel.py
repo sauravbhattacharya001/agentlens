@@ -18,8 +18,6 @@ import html as html_mod
 import json
 import os
 import webbrowser
-from collections import Counter
-from typing import Any
 
 import httpx
 

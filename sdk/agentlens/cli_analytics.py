@@ -8,7 +8,6 @@ from __future__ import annotations
 
 import argparse
 import json
-import sys
 from typing import Any
 
 import httpx
@@ -236,7 +235,7 @@ def cmd_outlier(args: argparse.Namespace) -> None:
     """
 
     import statistics
-    from datetime import datetime, timezone
+    from datetime import datetime
 
     client, _ = _get_client(args)
     resp = client.get("/sessions", params={"limit": args.limit})

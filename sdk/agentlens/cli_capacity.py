@@ -16,7 +16,6 @@ from collections import defaultdict
 from datetime import datetime, timedelta, timezone
 from typing import Any
 
-import httpx
 
 from agentlens.cli_common import get_client
 

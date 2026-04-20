@@ -5,7 +5,6 @@ from __future__ import annotations
 import argparse
 from collections import defaultdict
 from datetime import datetime, timedelta, timezone
-from typing import Any
 
 from agentlens.cli_common import get_client
 

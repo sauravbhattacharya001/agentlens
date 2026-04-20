@@ -213,4 +213,4 @@ def register(subparsers: Any) -> None:
     p.add_argument("--output", help="Write output to file")
     p.add_argument("--endpoint", help="Backend URL")
     p.add_argument("--api-key", help="API key")
-    p.set_defaults(func=run)
+    p.set_defaults(func=cmd_bottleneck)

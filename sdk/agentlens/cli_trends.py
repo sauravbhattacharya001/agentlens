@@ -4,13 +4,11 @@ from __future__ import annotations
 
 import argparse
 import json
-import os
 import sys
 from collections import defaultdict
 from datetime import datetime, timedelta, timezone
 from typing import Any
 
-import httpx
 
 from agentlens.cli_common import get_client_only as _get_client
 

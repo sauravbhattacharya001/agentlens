@@ -7,16 +7,14 @@ from __future__ import annotations
 
 import argparse
 import json
-import sys
 from typing import Any
 
-from agentlens.cli_common import get_client as _get_client, print_json as _print_json
+from agentlens.cli_common import get_client as _get_client
 
 
 def cmd_dashboard(args: argparse.Namespace) -> None:
     """Generate a self-contained HTML dashboard with interactive charts."""
     import webbrowser as _webbrowser
-    from datetime import datetime, timezone
 
     client, endpoint = _get_client(args)
     limit = getattr(args, "limit", 100) or 100
@@ -28,13 +26,6 @@ def cmd_dashboard(args: argparse.Namespace) -> None:
     resp.raise_for_status()
     raw = resp.json()
     sessions = raw if isinstance(raw, list) else raw.get("sessions", [raw])
-
-    try:
-        resp2 = client.get("/analytics")
-        resp2.raise_for_status()
-        analytics = resp2.json()
-    except Exception:
-        analytics = {}
 
     summary = _aggregate_sessions(sessions)
     html = _render_html(sessions, summary, endpoint)

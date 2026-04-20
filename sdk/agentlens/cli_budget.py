@@ -12,11 +12,10 @@ from __future__ import annotations
 import argparse
 import json
 import sys
-from typing import Any
 
 import httpx
 
-from agentlens.cli_common import get_client_only, print_json
+from agentlens.cli_common import get_client_only
 
 
 def _bar(pct: float, width: int = 20) -> str:

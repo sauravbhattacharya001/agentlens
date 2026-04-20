@@ -14,7 +14,6 @@ import json
 import os
 import sys
 import webbrowser
-from typing import Any
 
 import httpx
 

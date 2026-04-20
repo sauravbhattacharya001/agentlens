@@ -73,7 +73,6 @@ from __future__ import annotations
 
 import argparse
 import json
-import os
 import sys
 from typing import Any
 
@@ -98,7 +97,7 @@ from agentlens.cli_trace import cmd_trace  # terminal waterfall timeline
 from agentlens.cli_heatmap import cmd_heatmap  # GitHub-style activity heatmap
 from agentlens.cli_correlate import run as cmd_correlate, setup_parser as register_correlate_parser  # metric correlations
 from agentlens.cli_dashboard import cmd_dashboard  # self-contained HTML dashboard
-from agentlens.cli_replay import cmd_replay, build_session_from_api as _build_session_from_api  # session replay
+from agentlens.cli_replay import cmd_replay  # session replay
 from agentlens.cli_capacity import cmd_capacity
 from agentlens.cli_baseline import cmd_baseline, register_baseline_parser  # fleet capacity planning
 from agentlens.cli_retention import cmd_retention, register_retention_parser  # data retention analysis

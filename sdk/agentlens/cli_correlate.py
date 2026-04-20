@@ -24,10 +24,10 @@ import io
 import json
 import math
 import sys
-from datetime import datetime, timezone
+from datetime import datetime
 from typing import Any
 
-from agentlens.cli_common import get_client, print_json, fetch_sessions
+from agentlens.cli_common import get_client, fetch_sessions
 
 ALL_METRICS = ["cost", "tokens", "duration", "events", "errors", "tool_calls", "models"]
 

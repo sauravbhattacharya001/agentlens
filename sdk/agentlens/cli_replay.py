@@ -6,12 +6,10 @@ Extracted from cli.py to keep the main CLI dispatcher lean.
 from __future__ import annotations
 
 import argparse
-import json
-import sys
 from datetime import datetime, timezone
 from typing import Any
 
-from agentlens.cli_common import get_client as _get_client, print_json as _print_json
+from agentlens.cli_common import get_client as _get_client
 from agentlens.models import AgentEvent, Session, ToolCall
 
 
