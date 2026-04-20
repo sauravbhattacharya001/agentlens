@@ -280,15 +280,28 @@ class CapacityPlanner:
         return (ss[-1].timestamp - ss[0].timestamp).total_seconds() / 3600
 
     def _compute_trend(self, values: List[float]) -> Tuple[TrendDirection, float]:
-        """Simple linear regression slope and trend direction."""
+        """Single-pass linear regression slope and trend direction.
+
+        Since x = 0..n-1 (evenly spaced integers), x_mean = (n-1)/2 and
+        Σ(x - x_mean)² = n(n²-1)/12 (closed form).  This lets us compute
+        slope in one pass over values instead of three.
+        """
         n = len(values)
         if n < 2:
             return TrendDirection.STABLE, 0.0
-        xs = list(range(n))
-        x_mean = sum(xs) / n
-        y_mean = sum(values) / n
-        num = sum((x - x_mean) * (y - y_mean) for x, y in zip(xs, values))
-        den = sum((x - x_mean) ** 2 for x in xs)
+        x_mean = (n - 1) * 0.5
+        # Single pass: accumulate y_sum and Σ(x - x_mean)(y - y_mean)
+        # Note: Σ(x - x_mean)(y - y_mean) = Σ x·y - n·x_mean·y_mean
+        #       = Σ i·values[i] - n·x_mean·y_mean
+        y_sum = 0.0
+        xy_sum = 0.0
+        for i in range(n):
+            v = values[i]
+            y_sum += v
+            xy_sum += i * v
+        y_mean = y_sum / n
+        num = xy_sum - n * x_mean * y_mean
+        den = n * (n * n - 1) / 12.0  # closed-form Σ(x - x_mean)²
         if den == 0:
             return TrendDirection.STABLE, 0.0
         slope = num / den
