@@ -443,7 +443,12 @@ class AlertRulesEngine:
     # ── Evaluation ─────────────────────────────────────────────────────
 
     def evaluate(self, events: list[dict[str, Any]]) -> list[AlertResult]:
-        """Evaluate all enabled rules against the given events."""
+        """Evaluate all enabled rules against the given events.
+
+        Uses a single lock acquisition for history update instead of
+        re-acquiring per fired alert. Handler callbacks dispatch outside
+        the lock to avoid holding it during user code.
+        """
         with self._lock:
             rules = list(self._rules.values())
 
@@ -452,13 +457,20 @@ class AlertRulesEngine:
             result = rule.check(events)
             if result is not None:
                 results.append(result)
-                with self._lock:
-                    self._history.append(result)
+
+        # Batch-append all results under one lock acquisition
+        if results:
+            with self._lock:
+                self._history.extend(results)
+
+            # Dispatch handlers outside the lock
+            for result in results:
                 for handler in self._handlers:
                     try:
                         handler(result)
                     except Exception:
                         pass
+
         return results
 
     def evaluate_incremental(self, new_events: list[dict[str, Any]]) -> list[AlertResult]:
