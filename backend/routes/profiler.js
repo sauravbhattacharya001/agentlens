@@ -180,12 +180,29 @@ router.get("/", wrapRoute("list agent profiles", (req, res) => {
     }
 
     const allIds = allSessions.map(s => s.session_id);
-    const recentIds = recentSessions.map(s => s.session_id);
-    const historicalIds = historicalSessions.map(s => s.session_id);
+    // Use Sets for O(1) membership tests instead of Array.includes() O(n).
+    // With hundreds of sessions and thousands of events, the old code was
+    // O(events × sessions) per filter — quadratic in practice.  Two Set
+    // lookups + a single-pass partition reduces this to O(events).
+    const recentIdSet = new Set(recentSessions.map(s => s.session_id));
+    const historicalIdSet = new Set(historicalSessions.map(s => s.session_id));
     const allEvents = fetchEvents(db, allIds);
 
-    const baseline = buildProfile(historicalSessions, allEvents.filter(e => historicalIds.includes(e.session_id)));
-    const recent = buildProfile(recentSessions, allEvents.filter(e => recentIds.includes(e.session_id)));
+    // Single-pass partition: split events into historical vs recent
+    // instead of two separate .filter() passes over the full array.
+    const historicalEvents = [];
+    const recentEvents = [];
+    for (let ei = 0; ei < allEvents.length; ei++) {
+      const ev = allEvents[ei];
+      if (recentIdSet.has(ev.session_id)) {
+        recentEvents.push(ev);
+      } else if (historicalIdSet.has(ev.session_id)) {
+        historicalEvents.push(ev);
+      }
+    }
+
+    const baseline = buildProfile(historicalSessions, historicalEvents);
+    const recent = buildProfile(recentSessions, recentEvents);
 
     const eventDrift = jensenShannonDivergence(baseline.eventTypeDist, recent.eventTypeDist);
     const toolDrift = jensenShannonDivergence(baseline.toolCallDist, recent.toolCallDist);
