@@ -15,6 +15,7 @@
 const express = require("express");
 const { getDb } = require("../db");
 const { parseLimit, wrapRoute } = require("../lib/request-helpers");
+const { isValidSessionId } = require("../lib/validation");
 
 const router = express.Router();
 
@@ -227,8 +228,12 @@ function detectAnomalies(db, { threshold = 2, agentName, limit = 50 } = {}) {
 
 router.get("/", wrapRoute("detect anomalies", (req, res) => {
   const db = getDb();
-  const threshold = parseFloat(req.query.threshold) || 2;
-  const agentName = req.query.agent || undefined;
+  const threshold = Math.min(Math.max(0.5, parseFloat(req.query.threshold) || 2), 10);
+  const rawAgent = req.query.agent || undefined;
+  const agentName = rawAgent ? validateAgentParam(rawAgent) : undefined;
+  if (rawAgent && agentName === null) {
+    return res.status(400).json({ error: "Invalid agent name format" });
+  }
   const limit = parseLimit(req.query.limit, 50, 500);
 
   const result = detectAnomalies(db, { threshold, agentName, limit });
@@ -237,16 +242,44 @@ router.get("/", wrapRoute("detect anomalies", (req, res) => {
 
 router.get("/stats", wrapRoute("compute baseline stats", (req, res) => {
   const db = getDb();
-  const agentName = req.query.agent || undefined;
+  const rawAgent = req.query.agent || undefined;
+  const agentName = rawAgent ? validateAgentParam(rawAgent) : undefined;
+  if (rawAgent && agentName === null) {
+    return res.status(400).json({ error: "Invalid agent name format" });
+  }
   const { baselines } = computeBaselines(db, agentName);
   if (!baselines) return res.json({ baselines: null, message: "No sessions found" });
   res.json({ baselines });
 }));
 
+// ── Input validation ────────────────────────────────────────────────
+// Agent names from query parameters are user-controlled and must be
+// bounded to prevent DoS via excessively long strings that inflate
+// memory usage in cache keys and SQL parameter buffers.
+const MAX_AGENT_NAME_LENGTH = 128;
+const SAFE_AGENT_RE = /^[\w .:\-@/]{1,128}$/;
+
+function validateAgentParam(agent) {
+  if (!agent) return undefined;
+  if (typeof agent !== "string" || agent.length > MAX_AGENT_NAME_LENGTH) return null;
+  return SAFE_AGENT_RE.test(agent) ? agent : null;
+}
+
 router.get("/session/:id", wrapRoute("check session anomaly", (req, res) => {
   const db = getDb();
   const sessionId = req.params.id;
-  const agentName = req.query.agent || undefined;
+
+  // Validate session ID format to prevent arbitrary strings from
+  // reaching the database layer and polluting baseline cache keys.
+  if (!isValidSessionId(sessionId)) {
+    return res.status(400).json({ error: "Invalid session ID format" });
+  }
+
+  const rawAgent = req.query.agent || undefined;
+  const agentName = rawAgent ? validateAgentParam(rawAgent) : undefined;
+  if (rawAgent && agentName === null) {
+    return res.status(400).json({ error: "Invalid agent name format" });
+  }
 
   const { rows, baselines, rowIndex } = computeBaselines(db, agentName);
   if (!baselines || baselines.sampleSize < 3) {
@@ -272,8 +305,12 @@ router.get("/session/:id", wrapRoute("check session anomaly", (req, res) => {
 
 router.post("/scan", wrapRoute("scan for anomalies", (req, res) => {
   const db = getDb();
-  const threshold = parseFloat(req.body?.threshold) || 2;
-  const agentName = req.body?.agent || undefined;
+  const threshold = Math.min(Math.max(0.5, parseFloat(req.body?.threshold) || 2), 10);
+  const rawAgent = req.body?.agent || undefined;
+  const agentName = rawAgent ? validateAgentParam(rawAgent) : undefined;
+  if (rawAgent && agentName === null) {
+    return res.status(400).json({ error: "Invalid agent name format" });
+  }
   // Explicit scan should bypass cache for fresh results
   _baselineCache.delete(_baselineCacheKey(agentName));
   const limit = parseLimit(String(req.body?.limit || 100), 100, 500);

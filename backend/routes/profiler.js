@@ -167,7 +167,7 @@ router.get("/", wrapRoute("list agent profiles", (req, res) => {
 
   // Get all agents
   const agents = db.prepare(
-    "SELECT DISTINCT agent_name FROM sessions WHERE agent_name IS NOT NULL AND created_at >= ?"
+    "SELECT DISTINCT agent_name FROM sessions WHERE agent_name IS NOT NULL AND started_at >= ?"
   ).all(cutoff).map(r => r.agent_name);
 
   const profiles = agents.map(agent => {
@@ -325,7 +325,7 @@ router.post("/snapshot", wrapRoute("create profile snapshot", (req, res) => {
   const db = getDb();
   const cutoff = daysAgoCutoff(30);
   const agents = db.prepare(
-    "SELECT DISTINCT agent_name FROM sessions WHERE agent_name IS NOT NULL AND created_at >= ?"
+    "SELECT DISTINCT agent_name FROM sessions WHERE agent_name IS NOT NULL AND started_at >= ?"
   ).all(cutoff).map(r => r.agent_name);
 
   const snapshots = agents.map(agent => {
