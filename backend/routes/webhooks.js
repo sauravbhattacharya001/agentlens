@@ -250,11 +250,35 @@ async function validateResolvedIps(hostname) {
 
 // ── Helper: deliver webhook (with retries) ──────────────────────────
 
+/**
+ * Record a failed webhook delivery and return the failure result object.
+ * Consolidates 3 identical INSERT blocks into a single reusable helper.
+ *
+ * @param {Object}      db          - Database connection
+ * @param {string}      deliveryId  - Unique delivery ID
+ * @param {Object}      webhook     - Webhook record
+ * @param {string|null} alertId     - Alert ID (nullable)
+ * @param {string}      body        - Serialized request body
+ * @param {string}      errorMsg    - Human-readable error description
+ * @param {number}      [statusCode=null] - HTTP status code (null for non-HTTP failures)
+ * @param {string|null} [responseBody=null] - Response body if available
+ * @param {number}      [attempts=0] - Number of delivery attempts made
+ * @returns {{ delivery_id: string, status: string, error: string, attempts: number }}
+ */
+function recordFailedDelivery(db, deliveryId, webhook, alertId, body, errorMsg, statusCode, responseBody, attempts) {
+  db.prepare(`
+    INSERT INTO webhook_deliveries (delivery_id, webhook_id, alert_id, status, status_code, request_body, response_body, error, attempts, delivered_at)
+    VALUES (?, ?, ?, 'failed', ?, ?, ?, ?, ?, ?)
+  `).run(deliveryId, webhook.webhook_id, alertId, statusCode != null ? statusCode : null, body, responseBody != null ? responseBody : null, errorMsg, attempts || 0, new Date().toISOString());
+  return { delivery_id: deliveryId, status: "failed", error: errorMsg, attempts: attempts || 0 };
+}
+
 async function deliverWebhook(webhook, alertData) {
   const db = getDb();
   const payload = formatPayload(webhook.format, alertData);
   const body = JSON.stringify(payload);
   const deliveryId = generateId();
+  const alertId = alertData.alert_id || null;
 
   // DNS rebinding protection: resolve the hostname and validate IPs
   // at delivery time, not just at URL registration time.
@@ -265,22 +289,12 @@ async function deliverWebhook(webhook, alertData) {
     const parsed = new URL(webhook.url);
     const dnsCheck = await validateResolvedIps(parsed.hostname);
     if (!dnsCheck.safe) {
-      const errorMsg = `SSRF blocked: ${dnsCheck.error}`;
-      db.prepare(`
-        INSERT INTO webhook_deliveries (delivery_id, webhook_id, alert_id, status, status_code, request_body, response_body, error, attempts, delivered_at)
-        VALUES (?, ?, ?, 'failed', NULL, ?, NULL, ?, 0, ?)
-      `).run(deliveryId, webhook.webhook_id, alertData.alert_id || null, body, errorMsg, new Date().toISOString());
-      return { delivery_id: deliveryId, status: "failed", error: errorMsg, attempts: 0 };
+      return recordFailedDelivery(db, deliveryId, webhook, alertId, body, `SSRF blocked: ${dnsCheck.error}`);
     }
   } catch (dnsErr) {
     // Block delivery when DNS validation itself fails — proceeding without
     // the check would allow SSRF via DNS rebinding or transient resolution errors.
-    const errorMsg = `SSRF check failed: ${dnsErr.message || "DNS validation error"}`;
-    db.prepare(`
-      INSERT INTO webhook_deliveries (delivery_id, webhook_id, alert_id, status, status_code, request_body, response_body, error, attempts, delivered_at)
-      VALUES (?, ?, ?, 'failed', NULL, ?, NULL, ?, 0, ?)
-    `).run(deliveryId, webhook.webhook_id, alertData.alert_id || null, body, errorMsg, new Date().toISOString());
-    return { delivery_id: deliveryId, status: "failed", error: errorMsg, attempts: 0 };
+    return recordFailedDelivery(db, deliveryId, webhook, alertId, body, `SSRF check failed: ${dnsErr.message || "DNS validation error"}`);
   }
 
   let lastError = null;
@@ -335,12 +349,7 @@ async function deliverWebhook(webhook, alertData) {
   }
 
   // All retries exhausted
-  db.prepare(`
-    INSERT INTO webhook_deliveries (delivery_id, webhook_id, alert_id, status, status_code, request_body, response_body, error, attempts, delivered_at)
-    VALUES (?, ?, ?, 'failed', ?, ?, ?, ?, ?, ?)
-  `).run(deliveryId, webhook.webhook_id, alertData.alert_id || null, statusCode, body, responseBody, lastError, webhook.retry_count, new Date().toISOString());
-
-  return { delivery_id: deliveryId, status: "failed", error: lastError, attempts: webhook.retry_count };
+  return recordFailedDelivery(db, deliveryId, webhook, alertId, body, lastError, statusCode, responseBody, webhook.retry_count);
 }
 
 // ── Fire webhooks for a triggered alert ─────────────────────────────
