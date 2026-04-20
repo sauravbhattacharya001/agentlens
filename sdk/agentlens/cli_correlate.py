@@ -33,18 +33,26 @@ ALL_METRICS = ["cost", "tokens", "duration", "events", "errors", "tool_calls", "
 
 
 def _pearson(xs: list[float], ys: list[float]) -> float | None:
-    """Compute Pearson correlation coefficient. Returns None if undefined."""
+    """Compute Pearson correlation coefficient in a single pass.
+
+    Uses the algebraically equivalent sum-of-products formula to avoid
+    the previous 4-pass approach (2× mean, numerator, 2× denominator).
+    """
     n = len(xs)
     if n < 3:
         return None
-    mean_x = sum(xs) / n
-    mean_y = sum(ys) / n
-    num = sum((x - mean_x) * (y - mean_y) for x, y in zip(xs, ys))
-    den_x = math.sqrt(sum((x - mean_x) ** 2 for x in xs))
-    den_y = math.sqrt(sum((y - mean_y) ** 2 for y in ys))
-    if den_x == 0 or den_y == 0:
+    sum_x = sum_y = sum_xx = sum_yy = sum_xy = 0.0
+    for x, y in zip(xs, ys):
+        sum_x += x
+        sum_y += y
+        sum_xx += x * x
+        sum_yy += y * y
+        sum_xy += x * y
+    den_x_sq = n * sum_xx - sum_x * sum_x
+    den_y_sq = n * sum_yy - sum_y * sum_y
+    if den_x_sq <= 0 or den_y_sq <= 0:
         return None
-    return num / (den_x * den_y)
+    return (n * sum_xy - sum_x * sum_y) / math.sqrt(den_x_sq * den_y_sq)
 
 
 def _extract_metric(session: dict, metric: str) -> float | None:
@@ -148,26 +156,29 @@ def run(args: argparse.Namespace) -> None:
         )
         sys.exit(1)
 
-    # Extract metric vectors
-    vectors: dict[str, list[tuple[int, float]]] = {}
+    # Extract metric vectors — build index dicts once up front
+    vectors: dict[str, dict[int, float]] = {}
     for metric in metrics:
-        vals = []
+        idx_map: dict[int, float] = {}
         for i, s in enumerate(sessions):
             v = _extract_metric(s, metric)
             if v is not None:
-                vals.append((i, v))
-        vectors[metric] = vals
+                idx_map[i] = v
+        vectors[metric] = idx_map
+
+    # Pre-build key-sets to avoid repeated dict.keys() calls
+    key_sets = {m: set(v.keys()) for m, v in vectors.items()}
 
     # Compute pairwise correlations
     results: list[dict] = []
     for i, ma in enumerate(metrics):
+        map_a = vectors[ma]
+        keys_a = key_sets[ma]
         for mb in metrics[i + 1 :]:
-            # Align on common session indices
-            set_a = {idx: v for idx, v in vectors[ma]}
-            set_b = {idx: v for idx, v in vectors[mb]}
-            common = sorted(set_a.keys() & set_b.keys())
-            xs = [set_a[k] for k in common]
-            ys = [set_b[k] for k in common]
+            map_b = vectors[mb]
+            common = keys_a & key_sets[mb]
+            xs = [map_a[k] for k in common]
+            ys = [map_b[k] for k in common]
             r = _pearson(xs, ys)
             results.append({
                 "metric_a": ma,
