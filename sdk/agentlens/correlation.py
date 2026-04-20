@@ -361,6 +361,7 @@ class SessionCorrelator:
         self._sessions: list = []
         self._windows: List[SessionWindow] = []
         self._session_resources: Dict[str, Set[str]] = {}  # sid -> resource names
+        self._event_index_cache: Optional[Dict[str, Any]] = None
 
     # -- Ingestion --------------------------------------------------------
 
@@ -595,31 +596,28 @@ class SessionCorrelator:
         return sorted(results, key=lambda r: -r.total_uses)
 
     def _max_concurrent_usage(self, resource: str, rtype: str) -> int:
-        """Estimate max concurrent uses of a resource across sessions."""
-        # Collect all usage intervals
-        intervals: List[Tuple[datetime, int]] = []  # (timestamp, +1/-1)
-        for session in self._sessions:
-            for e in getattr(session, "events", []):
-                match = False
-                if rtype == "model" and getattr(e, "model", None) == resource:
-                    match = True
-                elif rtype == "tool":
-                    tc = getattr(e, "tool_call", None)
-                    if tc and getattr(tc, "tool_name", "") == resource:
-                        match = True
-                if match:
-                    ts = getattr(e, "timestamp", datetime.now(timezone.utc))
-                    dur = getattr(e, "duration_ms", 100) or 100
-                    intervals.append((ts, 1))
-                    intervals.append((ts + timedelta(milliseconds=dur), -1))
+        """Estimate max concurrent uses of a resource across sessions.
 
-        if not intervals:
+        Reuses the shared event index (resource_intervals) built by
+        _build_event_index() instead of re-scanning all events per
+        resource.  This reduces find_shared_resources() from
+        O(resources × total_events) to O(total_events).
+        """
+        idx = self._build_event_index()
+        raw_intervals = idx["resource_intervals"].get((resource, rtype), [])
+        if not raw_intervals:
             return 0
 
-        intervals.sort(key=lambda x: x[0])
+        # Build sweep-line events from pre-collected intervals
+        sweep: List[Tuple[datetime, int]] = []
+        for start, end, _sid in raw_intervals:
+            sweep.append((start, 1))
+            sweep.append((end, -1))
+
+        sweep.sort(key=lambda x: x[0])
         max_concurrent = 0
         current = 0
-        for _, delta in intervals:
+        for _, delta in sweep:
             current += delta
             max_concurrent = max(max_concurrent, current)
         return max_concurrent
