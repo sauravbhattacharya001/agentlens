@@ -208,6 +208,13 @@ class ErrorFingerprinter:
         self._session_error_counts: dict[str, int] = defaultdict(int)
         self._total_sessions: int = 0               # for error_rate
 
+        # Caches to avoid redundant work on repeated errors
+        self._template_cache: dict[str, str] = {}          # raw message -> normalised template
+        self._stack_cache: dict[str, str] = {}              # raw stack -> frame signature
+        self._fingerprint_cache: dict[tuple[str, str, str], str] = {}  # (type, template, sig) -> fp_id
+        self._trends_valid: bool = False                    # dirty flag for trend computation
+        self._trends_occ_count: int = 0                     # occurrence count when trends were last computed
+
     # ------------------------------------------------------------------
     # Public API
     # ------------------------------------------------------------------
@@ -255,9 +262,26 @@ class ErrorFingerprinter:
         )
         self._occurrences.append(occ)
 
-        template = self._normalise_message(message)
-        frame_sig = self._normalise_stack(stack_trace, self._top_frames)
-        fp_id = self._compute_fingerprint(error_type, template, frame_sig)
+        # Use caches to skip expensive regex + hashing for repeated errors.
+        # In production, the same error message recurs thousands of times;
+        # caching the normalised template avoids 7 regex substitutions per
+        # duplicate, and caching the fingerprint avoids a SHA-256 hash.
+        template = self._template_cache.get(message)
+        if template is None:
+            template = self._normalise_message(message)
+            self._template_cache[message] = template
+
+        stack_key = stack_trace or ""
+        frame_sig = self._stack_cache.get(stack_key)
+        if frame_sig is None:
+            frame_sig = self._normalise_stack(stack_trace, self._top_frames)
+            self._stack_cache[stack_key] = frame_sig
+
+        fp_key = (error_type, template, frame_sig)
+        fp_id = self._fingerprint_cache.get(fp_key)
+        if fp_id is None:
+            fp_id = self._compute_fingerprint(error_type, template, frame_sig)
+            self._fingerprint_cache[fp_key] = fp_id
         occ.fingerprint_id = fp_id
 
         if fp_id not in self._clusters:
@@ -285,6 +309,9 @@ class ErrorFingerprinter:
 
         if session_id:
             self._session_error_counts[session_id] += 1
+
+        # Invalidate trend cache since new data arrived
+        self._trends_valid = False
 
         return fp_id
 
@@ -385,8 +412,11 @@ class ErrorFingerprinter:
         include_resolved : bool
             Whether to include resolved fingerprints in the report.
         """
-        # Compute trends
-        self._compute_trends()
+        # Compute trends only when data has changed since last computation
+        if not self._trends_valid:
+            self._compute_trends()
+            self._trends_valid = True
+            self._trends_occ_count = len(self._occurrences)
 
         # Filter clusters
         clusters = list(self._clusters.values())
@@ -448,6 +478,11 @@ class ErrorFingerprinter:
         self._resolved.clear()
         self._session_error_counts.clear()
         self._total_sessions = 0
+        self._template_cache.clear()
+        self._stack_cache.clear()
+        self._fingerprint_cache.clear()
+        self._trends_valid = False
+        self._trends_occ_count = 0
 
     # ------------------------------------------------------------------
     # Internals
