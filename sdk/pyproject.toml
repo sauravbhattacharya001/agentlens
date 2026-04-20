@@ -35,7 +35,7 @@ classifiers = [
     "Topic :: System :: Monitoring",
 ]
 dependencies = [
-    "pydantic>=2.13.0",
+    "pydantic>=2.13.3",
     "httpx>=0.28.1",
 ]
 
