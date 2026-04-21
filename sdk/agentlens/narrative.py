@@ -196,11 +196,22 @@ class NarrativeGenerator:
             last_ts = events[-1].timestamp
             duration_s = (last_ts - first_ts).total_seconds()
 
-        # Classify events
-        llm_events = [e for e in events if e.event_type == "llm_call"]
-        tool_events = [e for e in events if e.event_type == "tool_call"]
-        decision_events = [e for e in events if e.event_type == "decision"]
-        error_events = [e for e in events if e.event_type == "error"]
+        # Classify events in a single pass instead of 4 separate
+        # list comprehensions (O(4·E) → O(E)).
+        llm_events: list[AgentEvent] = []
+        tool_events: list[AgentEvent] = []
+        decision_events: list[AgentEvent] = []
+        error_events: list[AgentEvent] = []
+        for _evt in events:
+            _et = _evt.event_type
+            if _et == "llm_call":
+                llm_events.append(_evt)
+            elif _et == "tool_call":
+                tool_events.append(_evt)
+            elif _et == "decision":
+                decision_events.append(_evt)
+            elif _et == "error":
+                error_events.append(_evt)
 
         # Token totals
         total_in = sum(e.tokens_in for e in events)
@@ -268,18 +279,23 @@ class NarrativeGenerator:
                 order=order,
             ))
 
-        # Models section
-        models_used = set()
+        # Models section — single-pass aggregation instead of
+        # O(models × llm_events) nested scan per model.
+        model_agg: dict[str, list[int]] = {}  # model -> [calls, tokens]
         for e in llm_events:
             if e.model:
-                models_used.add(e.model)
-        if models_used:
+                bucket = model_agg.get(e.model)
+                if bucket is None:
+                    bucket = [0, 0]
+                    model_agg[e.model] = bucket
+                bucket[0] += 1
+                bucket[1] += e.tokens_in + e.tokens_out
+        if model_agg:
             order += 1
             model_lines = []
-            for m in sorted(models_used):
-                m_events = [e for e in llm_events if e.model == m]
-                m_tokens = sum(e.tokens_in + e.tokens_out for e in m_events)
-                model_lines.append(f"- **{m}**: {len(m_events)} calls, {m_tokens:,} tokens")
+            for m in sorted(model_agg):
+                calls, m_tokens = model_agg[m]
+                model_lines.append(f"- **{m}**: {calls} calls, {m_tokens:,} tokens")
             sections.append(NarrativeSection(
                 title="Models Used",
                 content="\n".join(model_lines),
