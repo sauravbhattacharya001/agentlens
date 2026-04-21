@@ -1,0 +1,470 @@
+<!DOCTYPE html>
+<html lang="en">
+<head>
+  <meta charset="UTF-8">
+  <meta name="viewport" content="width=device-width, initial-scale=1.0">
+  <title>AgentLens — Regression Tracker</title>
+  <link rel="stylesheet" href="styles.css">
+  <style>
+    .reg-container { padding: 24px; max-width: 1400px; margin: 0 auto; }
+    .reg-header { margin-bottom: 24px; }
+    .reg-header h1 { font-size: 1.5rem; display: flex; align-items: center; gap: 10px; }
+    .reg-header p { color: var(--text-secondary); font-size: 0.85rem; margin-top: 4px; }
+
+    .stats-grid { display: grid; grid-template-columns: repeat(4, 1fr); gap: 16px; margin-bottom: 24px; }
+    .stat-card { background: var(--bg-secondary); border: 1px solid var(--border); border-radius: var(--radius); padding: 20px; }
+    .stat-card h3 { font-size: 0.75rem; color: var(--text-secondary); text-transform: uppercase; letter-spacing: 0.5px; margin-bottom: 8px; }
+    .stat-card .value { font-size: 2rem; font-weight: 700; }
+    .stat-card .sub { font-size: 0.8rem; color: var(--text-secondary); margin-top: 4px; }
+
+    .panel-row { display: grid; grid-template-columns: 2fr 1fr; gap: 16px; margin-bottom: 24px; }
+    .panel-row.equal { grid-template-columns: 1fr 1fr; }
+    .panel { background: var(--bg-secondary); border: 1px solid var(--border); border-radius: var(--radius); padding: 20px; }
+    .panel h2 { font-size: 1rem; margin-bottom: 16px; display: flex; align-items: center; gap: 8px; }
+
+    .chart-area { position: relative; width: 100%; height: 280px; }
+    .chart-area canvas { width: 100% !important; height: 100% !important; }
+
+    .config-row { display: flex; align-items: center; gap: 12px; margin-bottom: 12px; }
+    .config-row label { font-size: 0.85rem; color: var(--text-secondary); min-width: 130px; }
+    .config-row select, .config-row input { background: var(--bg-tertiary); border: 1px solid var(--border); color: var(--text-primary); padding: 6px 10px; border-radius: var(--radius-sm); }
+
+    .timeline-bar { display: flex; gap: 4px; align-items: flex-end; height: 60px; margin-bottom: 16px; overflow-x: auto; }
+    .timeline-block { min-width: 36px; flex: 1; border-radius: 4px 4px 0 0; cursor: pointer; position: relative; transition: opacity 0.2s; text-align: center; font-size: 0.6rem; color: var(--text-secondary); }
+    .timeline-block:hover { opacity: 0.8; }
+    .timeline-block .ver { writing-mode: vertical-rl; transform: rotate(180deg); font-size: 0.55rem; position: absolute; bottom: -18px; left: 50%; translate: -50% 0; white-space: nowrap; }
+    .timeline-block.selected { outline: 2px solid var(--accent); outline-offset: 1px; }
+
+    .finding-list { max-height: 420px; overflow-y: auto; }
+    .finding-item { padding: 12px; border-bottom: 1px solid var(--bg-tertiary); }
+    .finding-item:hover { background: var(--bg-hover); }
+    .finding-title { font-size: 0.85rem; font-weight: 600; display: flex; align-items: center; gap: 8px; }
+    .finding-meta { font-size: 0.75rem; color: var(--text-secondary); margin-top: 4px; }
+    .finding-rec { font-size: 0.8rem; color: var(--text-tertiary); margin-top: 4px; font-style: italic; }
+    .badge { padding: 2px 8px; border-radius: 10px; font-size: 0.7rem; font-weight: 700; }
+    .badge.critical { background: rgba(255,80,80,0.2); color: var(--red); }
+    .badge.warning { background: rgba(255,200,50,0.2); color: var(--yellow); }
+    .badge.info { background: rgba(80,180,255,0.2); color: var(--accent); }
+
+    .insight-card { background: var(--bg-tertiary); border: 1px solid var(--border); border-radius: var(--radius-sm); padding: 16px; margin-bottom: 12px; }
+    .insight-card .ic-title { font-size: 0.85rem; font-weight: 600; margin-bottom: 6px; }
+    .insight-card .ic-body { font-size: 0.8rem; color: var(--text-secondary); margin-bottom: 6px; }
+    .insight-card .ic-conf { font-size: 0.75rem; color: var(--accent); }
+    .insight-card .ic-steps { font-size: 0.75rem; color: var(--text-tertiary); margin-top: 6px; }
+
+    .monitor-toggle { display: flex; align-items: center; gap: 10px; }
+    .monitor-toggle .dot { width: 10px; height: 10px; border-radius: 50%; background: var(--text-secondary); }
+    .monitor-toggle .dot.active { background: var(--green); box-shadow: 0 0 8px var(--green); animation: pulse 1.5s infinite; }
+    @keyframes pulse { 0%,100%{opacity:1} 50%{opacity:0.4} }
+
+    .toast-container { position: fixed; top: 20px; right: 20px; z-index: 999; display: flex; flex-direction: column; gap: 8px; }
+    .toast { background: var(--bg-secondary); border: 1px solid var(--border); border-radius: var(--radius-sm); padding: 12px 16px; font-size: 0.8rem; box-shadow: 0 4px 16px rgba(0,0,0,0.4); animation: slideIn 0.3s ease; max-width: 360px; }
+    .toast.critical { border-left: 4px solid var(--red); }
+    .toast.warning { border-left: 4px solid var(--yellow); }
+    @keyframes slideIn { from{transform:translateX(100%);opacity:0} to{transform:translateX(0);opacity:1} }
+
+    .sparkline-row { display: flex; align-items: center; gap: 12px; padding: 8px 0; border-bottom: 1px solid var(--bg-tertiary); font-size: 0.8rem; }
+    .sparkline-row .metric-name { min-width: 100px; color: var(--text-secondary); }
+
+    @media (max-width: 900px) {
+      .stats-grid { grid-template-columns: repeat(2, 1fr); }
+      .panel-row { grid-template-columns: 1fr; }
+    }
+  </style>
+</head>
+<body>
+  <div id="app">
+    <header class="header">
+      <div class="header-left">
+        <h1 class="logo">🔍 AgentLens</h1>
+        <span class="tagline">Observability for AI Agents</span>
+      </div>
+      <div class="header-right">
+        <a href="index.html" class="btn btn-alert-header" style="text-decoration:none">📊 Dashboard</a>
+        <a href="costs.html" class="btn btn-alert-header" style="text-decoration:none">💰 Costs</a>
+        <a href="cost-anomaly.html" class="btn btn-alert-header" style="text-decoration:none">🔮 Cost Anomaly</a>
+        <a href="alerts.html" class="btn btn-alert-header" style="text-decoration:none">🚨 Alerts</a>
+        <a href="correlator.html" class="btn btn-alert-header" style="text-decoration:none">🔗 Correlator</a>
+        <a href="regression.html" class="btn btn-alert-header" style="text-decoration:none;background:var(--accent);color:#000">📉 Regression</a>
+      </div>
+    </header>
+
+    <main class="reg-container">
+      <div class="reg-header">
+        <h1>📉 Agent Regression Tracker</h1>
+        <p>Detect performance regressions across deployments using Welch's t-test, Cohen's d effect sizes, and proactive root cause analysis</p>
+      </div>
+
+      <div class="stats-grid" id="statsGrid"></div>
+
+      <div class="panel-row">
+        <div class="panel">
+          <h2>🚀 Deployment Timeline</h2>
+          <div class="timeline-bar" id="timeline"></div>
+          <div style="height:8px"></div>
+          <div class="chart-area"><canvas id="metricChart"></canvas></div>
+        </div>
+        <div class="panel">
+          <h2>⚙️ Settings</h2>
+          <div class="config-row">
+            <label>Significance (α)</label>
+            <select id="alphaSelect"><option value="0.01">0.01</option><option value="0.05" selected>0.05</option><option value="0.10">0.10</option></select>
+          </div>
+          <div class="config-row">
+            <label>Effect Size Cutoff</label>
+            <select id="effectCutoff"><option value="0.2">Small (0.2)</option><option value="0.5" selected>Medium (0.5)</option><option value="0.8">Large (0.8)</option></select>
+          </div>
+          <div class="config-row">
+            <label>Metric Focus</label>
+            <select id="metricSelect"></select>
+          </div>
+          <div style="margin-top:20px">
+            <h2 style="font-size:1rem;display:flex;align-items:center;gap:8px">🤖 Auto-Monitor</h2>
+            <div class="monitor-toggle">
+              <div class="dot" id="monitorDot"></div>
+              <button id="monitorBtn" class="btn btn-alert-header" style="cursor:pointer">Start Monitoring</button>
+            </div>
+            <p style="font-size:0.75rem;color:var(--text-secondary);margin-top:8px">Simulates new deployments and detects regressions in real time</p>
+          </div>
+          <div style="margin-top:20px">
+            <h2 style="font-size:1rem">📊 Metric Sparklines</h2>
+            <div id="sparklines"></div>
+          </div>
+        </div>
+      </div>
+
+      <div class="panel-row equal">
+        <div class="panel">
+          <h2>🔎 Regression Findings <span id="findingCount" class="badge info" style="margin-left:auto"></span></h2>
+          <div class="finding-list" id="findings"></div>
+        </div>
+        <div class="panel">
+          <h2>💡 Proactive Insights</h2>
+          <div id="insights"></div>
+        </div>
+      </div>
+    </main>
+  </div>
+
+  <div class="toast-container" id="toasts"></div>
+
+  <script>
+  (function(){
+    var METRICS = [
+      { key:'latency_p50', label:'Latency p50 (ms)', base:120, noise:15, unit:'ms', lower:true },
+      { key:'latency_p95', label:'Latency p95 (ms)', base:350, noise:40, unit:'ms', lower:true },
+      { key:'error_rate', label:'Error Rate (%)', base:2.5, noise:0.8, unit:'%', lower:true },
+      { key:'token_usage', label:'Tokens/Request', base:1800, noise:200, unit:'tok', lower:true },
+      { key:'cost_per_req', label:'Cost/Request ($)', base:0.012, noise:0.002, unit:'$', lower:true },
+      { key:'success_rate', label:'Success Rate (%)', base:96, noise:1.5, unit:'%', lower:false }
+    ];
+
+    function genDeployments(n){
+      var deps = [];
+      var major=2, minor=0, patch=0;
+      for(var i=0;i<n;i++){
+        patch++;
+        if(patch>4){ patch=0; minor++; }
+        if(minor>6){ minor=0; major++; }
+        var ver = 'v'+major+'.'+minor+'.'+patch;
+        var date = new Date(2026,0,15+i*3);
+        var samples = {};
+        METRICS.forEach(function(m){
+          var drift = (i/n)*0.1*m.base*(Math.random()>0.7?1:-0.3);
+          var regression = (i>3 && Math.random()<0.15) ? m.noise*2*(m.lower?1:-1) : 0;
+          var arr = [];
+          for(var s=0;s<30;s++){
+            arr.push(m.base + drift + regression + (Math.random()-0.5)*2*m.noise);
+          }
+          samples[m.key] = arr;
+        });
+        deps.push({ ver:ver, date:date, samples:samples });
+      }
+      return deps;
+    }
+
+    var deployments = genDeployments(18);
+    var selectedIdx = deployments.length - 1;
+    var monitoring = false;
+    var monitorTimer = null;
+
+    function mean(a){ var s=0; for(var i=0;i<a.length;i++) s+=a[i]; return s/a.length; }
+    function variance(a){ var m=mean(a),s=0; for(var i=0;i<a.length;i++) s+=(a[i]-m)*(a[i]-m); return s/(a.length-1); }
+
+    function normalCDF(x){
+      var a1=0.254829592,a2=-0.284496736,a3=1.421413741,a4=-1.453152027,a5=1.061405429,p=0.3275911;
+      var sign=x<0?-1:1;
+      x=Math.abs(x)/Math.SQRT2;
+      var t=1/(1+p*x);
+      var y=1-((((a5*t+a4)*t+a3)*t+a2)*t+a1)*t*Math.exp(-x*x);
+      return 0.5*(1+sign*y);
+    }
+
+    function welchT(a,b){
+      var ma=mean(a),mb=mean(b),va=variance(a),vb=variance(b);
+      var na=a.length,nb=b.length;
+      var se=Math.sqrt(va/na+vb/nb);
+      if(se===0) return {t:0,df:na+nb-2,p:1};
+      var t=(ma-mb)/se;
+      var p=2*normalCDF(-Math.abs(t));
+      return {t:t,df:0,p:p};
+    }
+
+    function cohenD(a,b){
+      var pooled=Math.sqrt((variance(a)*(a.length-1)+variance(b)*(b.length-1))/(a.length+b.length-2));
+      return pooled===0?0:(mean(a)-mean(b))/pooled;
+    }
+
+    function analyze(){
+      var alpha=parseFloat(document.getElementById('alphaSelect').value);
+      var dCut=parseFloat(document.getElementById('effectCutoff').value);
+      var findings=[];
+      for(var i=1;i<deployments.length;i++){
+        var prev=deployments[i-1],curr=deployments[i];
+        METRICS.forEach(function(m){
+          var a=prev.samples[m.key],b=curr.samples[m.key];
+          var res=welchT(a,b);
+          var d=cohenD(b,a);
+          var mA=mean(a),mB=mean(b);
+          var pctChange=mA===0?0:((mB-mA)/Math.abs(mA))*100;
+          var isWorse=m.lower?pctChange>0:pctChange<0;
+          if(res.p<alpha && Math.abs(d)>=dCut && isWorse){
+            var severity='info';
+            if(Math.abs(d)>=0.8 && Math.abs(pctChange)>=15) severity='critical';
+            else if(Math.abs(d)>=0.5 || Math.abs(pctChange)>=10) severity='warning';
+            findings.push({metric:m.label,key:m.key,ver:curr.ver,idx:i,oldMean:mA,newMean:mB,pctChange:pctChange,pValue:res.p,effectSize:d,severity:severity,unit:m.unit});
+          }
+        });
+      }
+      findings.sort(function(a,b){
+        var ord={critical:0,warning:1,info:2};
+        return (ord[a.severity]-ord[b.severity])||(a.pValue-b.pValue);
+      });
+      return findings;
+    }
+
+    function getRecommendation(f){
+      var recs={
+        'Latency p50 (ms)':'Check for model endpoint changes or increased prompt complexity.',
+        'Latency p95 (ms)':'Investigate tail latency — possible timeout or retry storm. Consider rolling back.',
+        'Error Rate (%)':'Review error logs for new failure modes. Check API key quotas and model availability.',
+        'Tokens/Request':'Prompt may have grown. Review template changes and system message length.',
+        'Cost/Request ($)':'Cost spike correlates with token or model changes. Audit model routing.',
+        'Success Rate (%)':'Fewer successful completions. Check guardrail changes or input distribution shift.'
+      };
+      return recs[f.metric]||'Investigate deployment changes.';
+    }
+
+    function generateInsights(findings){
+      var byVer={};
+      findings.forEach(function(f){ if(!byVer[f.ver]) byVer[f.ver]=[]; byVer[f.ver].push(f); });
+      var insights=[];
+      for(var ver in byVer){
+        var fs=byVer[ver];
+        if(fs.length<2) continue;
+        var mets=fs.map(function(f){return f.key;});
+        var hypothesis='',confidence=0,steps='';
+        if(mets.indexOf('token_usage')>=0 && (mets.indexOf('latency_p50')>=0||mets.indexOf('latency_p95')>=0)){
+          hypothesis='Token usage and latency both regressed in '+ver+' — likely a prompt template change or model switch.';
+          confidence=0.85;
+          steps='1. Diff prompt templates  2. Check model routing config  3. Compare token distributions';
+        } else if(mets.indexOf('error_rate')>=0 && mets.indexOf('success_rate')>=0){
+          hypothesis='Error rate and success rate both degraded in '+ver+' — possible API or guardrail misconfiguration.';
+          confidence=0.78;
+          steps='1. Review error categories  2. Check guardrail rule changes  3. Verify API endpoint health';
+        } else if(mets.indexOf('cost_per_req')>=0 && mets.indexOf('token_usage')>=0){
+          hypothesis='Cost and token usage co-regressed in '+ver+' — prompt bloat or model tier escalation.';
+          confidence=0.82;
+          steps='1. Audit prompt length  2. Check model tier routing  3. Review fallback chain';
+        } else {
+          hypothesis='Multiple metrics ('+fs.map(function(f){return f.metric;}).join(', ')+') regressed simultaneously in '+ver+'.';
+          confidence=0.6+fs.length*0.05;
+          steps='1. Review changelog for '+ver+'  2. Compare configs  3. Run A/B test against previous version';
+        }
+        insights.push({ver:ver,hypothesis:hypothesis,confidence:Math.min(confidence,0.95),steps:steps,count:fs.length,severity:fs.some(function(f){return f.severity==='critical';})?'critical':'warning'});
+      }
+      insights.sort(function(a,b){return b.confidence-a.confidence;});
+      return insights;
+    }
+
+    function render(){
+      var findings=analyze();
+      var insights=generateInsights(findings);
+      renderStats(findings);
+      renderTimeline(findings);
+      renderChart();
+      renderFindings(findings);
+      renderInsights(insights);
+      renderSparklines();
+    }
+
+    function renderStats(findings){
+      var total=deployments.length;
+      var regVers={};findings.forEach(function(f){regVers[f.ver]=true;});
+      var regressed=Object.keys(regVers).length;
+      var critical=findings.filter(function(f){return f.severity==='critical';}).length;
+      var clean=total-regressed;
+      document.getElementById('statsGrid').innerHTML=[
+        {label:'DEPLOYMENTS',value:total,sub:'tracked',cls:''},
+        {label:'REGRESSIONS',value:findings.length,sub:regressed+' deploys affected',cls:findings.length>0?'color:var(--red)':'color:var(--green)'},
+        {label:'CRITICAL',value:critical,sub:'need attention',cls:critical>0?'color:var(--red)':'color:var(--green)'},
+        {label:'CLEAN DEPLOYS',value:clean,sub:Math.round((clean/total)*100)+'% clean',cls:'color:var(--green)'}
+      ].map(function(s){return '<div class="stat-card"><h3>'+s.label+'</h3><div class="value" style="'+s.cls+'">'+s.value+'</div><div class="sub">'+s.sub+'</div></div>';}).join('');
+    }
+
+    function renderTimeline(findings){
+      var regVers={},critVers={};
+      findings.forEach(function(f){if(f.severity==='critical')critVers[f.ver]=true;if(f.severity!=='info')regVers[f.ver]=true;});
+      document.getElementById('timeline').innerHTML=deployments.map(function(d,i){
+        var h=20+Math.random()*40;
+        var color='var(--green)';
+        if(critVers[d.ver])color='var(--red)';else if(regVers[d.ver])color='var(--yellow)';
+        var sel=i===selectedIdx?'selected':'';
+        return '<div class="timeline-block '+sel+'" style="height:'+h+'px;background:'+color+'" onclick="window._selectDeploy('+i+')" title="'+d.ver+'"><span class="ver">'+d.ver+'</span></div>';
+      }).join('');
+    }
+
+    function renderChart(){
+      var canvas=document.getElementById('metricChart');
+      var ctx=canvas.getContext('2d');
+      var W=canvas.parentElement.clientWidth;
+      var H=canvas.parentElement.clientHeight;
+      canvas.width=W*devicePixelRatio;
+      canvas.height=H*devicePixelRatio;
+      canvas.style.width=W+'px';
+      canvas.style.height=H+'px';
+      ctx.scale(devicePixelRatio,devicePixelRatio);
+      ctx.clearRect(0,0,W,H);
+
+      var metricKey=document.getElementById('metricSelect').value||METRICS[0].key;
+      var values=deployments.map(function(d){return mean(d.samples[metricKey]);});
+      var mn=Math.min.apply(null,values)*0.9;
+      var mx=Math.max.apply(null,values)*1.1;
+      var range=mx-mn||1;
+      var padL=50,padR=20,padT=20,padB=30;
+      var plotW=W-padL-padR,plotH=H-padT-padB;
+
+      ctx.strokeStyle='rgba(255,255,255,0.06)';ctx.lineWidth=1;
+      for(var i=0;i<=4;i++){
+        var y=padT+plotH*(i/4);
+        ctx.beginPath();ctx.moveTo(padL,y);ctx.lineTo(W-padR,y);ctx.stroke();
+        ctx.fillStyle='rgba(255,255,255,0.3)';ctx.font='10px sans-serif';ctx.textAlign='right';
+        ctx.fillText((mx-range*(i/4)).toFixed(1),padL-6,y+4);
+      }
+
+      ctx.beginPath();ctx.strokeStyle='#6c9fff';ctx.lineWidth=2;
+      values.forEach(function(v,i){
+        var x=padL+(i/(values.length-1))*plotW;
+        var y=padT+((mx-v)/range)*plotH;
+        i===0?ctx.moveTo(x,y):ctx.lineTo(x,y);
+      });
+      ctx.stroke();
+
+      values.forEach(function(v,i){
+        var x=padL+(i/(values.length-1))*plotW;
+        var y=padT+((mx-v)/range)*plotH;
+        ctx.beginPath();ctx.arc(x,y,i===selectedIdx?6:3,0,Math.PI*2);
+        ctx.fillStyle=i===selectedIdx?'#6c9fff':'rgba(255,255,255,0.5)';ctx.fill();
+      });
+
+      if(selectedIdx>0){
+        var x=padL+(selectedIdx/(values.length-1))*plotW;
+        ctx.strokeStyle='rgba(255,255,255,0.15)';ctx.lineWidth=1;
+        ctx.beginPath();ctx.moveTo(x,padT);ctx.lineTo(x,padT+plotH);ctx.stroke();
+      }
+    }
+
+    function renderFindings(findings){
+      document.getElementById('findingCount').textContent=findings.length+' found';
+      document.getElementById('findings').innerHTML=findings.length===0
+        ?'<p style="color:var(--text-secondary);font-size:0.85rem;padding:16px">✅ No regressions detected with current settings</p>'
+        :findings.map(function(f){return '<div class="finding-item"><div class="finding-title"><span class="badge '+f.severity+'">'+f.severity.toUpperCase()+'</span> '+f.metric+' — '+f.ver+'</div><div class="finding-meta">'+f.oldMean.toFixed(3)+' → '+f.newMean.toFixed(3)+' '+f.unit+' ('+(f.pctChange>0?'+':'')+f.pctChange.toFixed(1)+'%) · p='+f.pValue.toFixed(4)+' · d='+f.effectSize.toFixed(2)+'</div><div class="finding-rec">💡 '+getRecommendation(f)+'</div></div>';}).join('');
+    }
+
+    function renderInsights(insights){
+      document.getElementById('insights').innerHTML=insights.length===0
+        ?'<p style="color:var(--text-secondary);font-size:0.85rem">No cross-metric correlations detected.</p>'
+        :insights.map(function(ins){return '<div class="insight-card"><div class="ic-title">'+(ins.severity==='critical'?'🔴':'🟡')+' '+ins.ver+' — '+ins.count+' correlated regressions</div><div class="ic-body">'+ins.hypothesis+'</div><div class="ic-conf">Confidence: '+Math.round(ins.confidence*100)+'%</div><div class="ic-steps">📋 '+ins.steps+'</div></div>';}).join('');
+    }
+
+    function renderSparklines(){
+      var el=document.getElementById('sparklines');
+      el.innerHTML=METRICS.map(function(m){return '<div class="sparkline-row"><span class="metric-name">'+m.label.split('(')[0].trim()+'</span><canvas id="spark_'+m.key+'" width="140" height="30"></canvas></div>';}).join('');
+      METRICS.forEach(function(m){
+        var c=document.getElementById('spark_'+m.key);
+        if(!c)return;
+        var ctx=c.getContext('2d');
+        var vals=deployments.map(function(d){return mean(d.samples[m.key]);});
+        var mn=Math.min.apply(null,vals),mx=Math.max.apply(null,vals),r=mx-mn||1;
+        ctx.beginPath();ctx.strokeStyle='#6c9fff';ctx.lineWidth=1.5;
+        vals.forEach(function(v,i){
+          var x=(i/(vals.length-1))*140;
+          var y=28-((v-mn)/r)*26;
+          i===0?ctx.moveTo(x,y):ctx.lineTo(x,y);
+        });
+        ctx.stroke();
+      });
+    }
+
+    function showToast(msg,severity){
+      var el=document.getElementById('toasts');
+      var t=document.createElement('div');
+      t.className='toast '+severity;
+      t.textContent=msg;
+      el.appendChild(t);
+      setTimeout(function(){t.remove();},5000);
+    }
+
+    window._selectDeploy=function(i){selectedIdx=i;render();};
+
+    document.getElementById('alphaSelect').onchange=render;
+    document.getElementById('effectCutoff').onchange=render;
+    document.getElementById('metricSelect').onchange=function(){renderChart();};
+
+    var msel=document.getElementById('metricSelect');
+    METRICS.forEach(function(m){
+      var o=document.createElement('option');o.value=m.key;o.textContent=m.label;msel.appendChild(o);
+    });
+
+    document.getElementById('monitorBtn').onclick=function(){
+      monitoring=!monitoring;
+      this.textContent=monitoring?'Stop Monitoring':'Start Monitoring';
+      document.getElementById('monitorDot').className='dot'+(monitoring?' active':'');
+      if(monitoring){
+        monitorTimer=setInterval(function(){
+          var last=deployments[deployments.length-1];
+          var vParts=last.ver.replace('v','').split('.').map(Number);
+          vParts[2]++;if(vParts[2]>4){vParts[2]=0;vParts[1]++;}
+          var newDep={ver:'v'+vParts.join('.'),date:new Date(),samples:{}};
+          METRICS.forEach(function(m){
+            var arr=[];
+            var regression=Math.random()<0.25?m.noise*2.5*(m.lower?1:-1):0;
+            for(var s=0;s<30;s++) arr.push(m.base+regression+(Math.random()-0.5)*2*m.noise);
+            newDep.samples[m.key]=arr;
+          });
+          deployments.push(newDep);
+          selectedIdx=deployments.length-1;
+          var alpha=parseFloat(document.getElementById('alphaSelect').value);
+          var dCut=parseFloat(document.getElementById('effectCutoff').value);
+          var prev=deployments[deployments.length-2],curr=deployments[deployments.length-1];
+          METRICS.forEach(function(m){
+            var res=welchT(prev.samples[m.key],curr.samples[m.key]);
+            var d=cohenD(curr.samples[m.key],prev.samples[m.key]);
+            var pct=((mean(curr.samples[m.key])-mean(prev.samples[m.key]))/Math.abs(mean(prev.samples[m.key])))*100;
+            var isWorse=m.lower?pct>0:pct<0;
+            if(res.p<alpha && Math.abs(d)>=dCut && isWorse){
+              var sev=Math.abs(d)>=0.8?'critical':'warning';
+              showToast('🚨 '+sev.toUpperCase()+': '+m.label+' regressed '+(pct>0?'+':'')+pct.toFixed(1)+'% in '+curr.ver,sev);
+            }
+          });
+          render();
+        },4000);
+      } else { clearInterval(monitorTimer); }
+    };
+
+    render();
+    window.addEventListener('resize',render);
+  })();
+  </script>
+</body>
+</html>
