@@ -1,0 +1,674 @@
+<!DOCTYPE html>
+<html lang="en">
+<head>
+  <meta charset="UTF-8">
+  <meta name="viewport" content="width=device-width, initial-scale=1.0">
+  <title>AgentLens — Incident Postmortem</title>
+  <link rel="stylesheet" href="styles.css">
+  <style>
+    .postmortem-container { max-width: 1200px; margin: 0 auto; padding: 20px; }
+    .pm-section { background: var(--card-bg, #1e1e2e); border-radius: 12px; padding: 24px; margin-bottom: 20px; border: 1px solid var(--border, #333); }
+    .pm-section h3 { margin: 0 0 16px; font-size: 1.2em; }
+    .pm-grid { display: grid; grid-template-columns: 1fr 1fr; gap: 16px; }
+    .pm-field { display: flex; flex-direction: column; gap: 6px; }
+    .pm-field label { font-size: 0.85em; font-weight: 600; color: var(--text-muted, #888); text-transform: uppercase; letter-spacing: 0.5px; }
+    .pm-field input, .pm-field select, .pm-field textarea { background: var(--input-bg, #2a2a3e); border: 1px solid var(--border, #444); border-radius: 8px; padding: 10px 14px; color: var(--text, #e0e0e0); font-size: 0.95em; font-family: inherit; }
+    .pm-field textarea { min-height: 80px; resize: vertical; }
+    .pm-field input:focus, .pm-field select:focus, .pm-field textarea:focus { outline: none; border-color: var(--accent, #7c5cfc); box-shadow: 0 0 0 2px rgba(124,92,252,0.2); }
+    .severity-badge { display: inline-block; padding: 4px 12px; border-radius: 20px; font-size: 0.8em; font-weight: 700; }
+    .sev-critical { background: #ff4757; color: #fff; }
+    .sev-high { background: #ff6b35; color: #fff; }
+    .sev-medium { background: #ffa502; color: #1a1a2e; }
+    .sev-low { background: #2ed573; color: #1a1a2e; }
+    .timeline-track { position: relative; padding-left: 30px; }
+    .timeline-track::before { content: ''; position: absolute; left: 10px; top: 0; bottom: 0; width: 2px; background: var(--border, #444); }
+    .tl-event { position: relative; margin-bottom: 16px; padding: 12px 16px; background: var(--input-bg, #2a2a3e); border-radius: 8px; border-left: 3px solid var(--accent, #7c5cfc); }
+    .tl-event::before { content: ''; position: absolute; left: -24px; top: 16px; width: 10px; height: 10px; border-radius: 50%; background: var(--accent, #7c5cfc); }
+    .tl-event .tl-time { font-size: 0.8em; color: var(--text-muted, #888); }
+    .tl-event .tl-desc { margin-top: 4px; }
+    .tl-add { cursor: pointer; padding: 8px 16px; border: 2px dashed var(--border, #444); border-radius: 8px; text-align: center; color: var(--text-muted, #888); transition: all 0.2s; }
+    .tl-add:hover { border-color: var(--accent, #7c5cfc); color: var(--accent, #7c5cfc); }
+    .tag { display: inline-block; padding: 3px 10px; border-radius: 12px; font-size: 0.78em; margin: 2px 4px 2px 0; background: rgba(124,92,252,0.15); color: var(--accent, #7c5cfc); }
+    .analysis-card { background: var(--input-bg, #2a2a3e); border-radius: 10px; padding: 16px; margin-bottom: 12px; }
+    .analysis-card h4 { margin: 0 0 8px; font-size: 1em; }
+    .analysis-card .score-bar { height: 6px; border-radius: 3px; background: var(--border, #333); margin: 8px 0; }
+    .analysis-card .score-fill { height: 100%; border-radius: 3px; transition: width 0.6s ease; }
+    .action-item { display: flex; align-items: flex-start; gap: 10px; padding: 10px; border-radius: 8px; background: var(--input-bg, #2a2a3e); margin-bottom: 8px; }
+    .action-item input[type=checkbox] { margin-top: 4px; accent-color: var(--accent, #7c5cfc); }
+    .action-priority { font-size: 0.75em; padding: 2px 8px; border-radius: 10px; font-weight: 700; }
+    .pri-p0 { background: #ff4757; color: #fff; }
+    .pri-p1 { background: #ff6b35; color: #fff; }
+    .pri-p2 { background: #ffa502; color: #1a1a2e; }
+    .pri-p3 { background: #70a1ff; color: #1a1a2e; }
+    .btn-primary { background: var(--accent, #7c5cfc); color: #fff; border: none; padding: 10px 20px; border-radius: 8px; cursor: pointer; font-weight: 600; transition: transform 0.1s; }
+    .btn-primary:hover { transform: scale(1.02); }
+    .btn-secondary { background: transparent; color: var(--accent, #7c5cfc); border: 1px solid var(--accent, #7c5cfc); padding: 8px 16px; border-radius: 8px; cursor: pointer; font-weight: 600; }
+    .btn-danger { background: #ff4757; color: #fff; border: none; padding: 8px 16px; border-radius: 8px; cursor: pointer; }
+    .btn-row { display: flex; gap: 10px; flex-wrap: wrap; margin-top: 16px; }
+    .insight-box { background: linear-gradient(135deg, rgba(124,92,252,0.1), rgba(46,213,115,0.1)); border: 1px solid rgba(124,92,252,0.3); border-radius: 10px; padding: 16px; margin-bottom: 12px; }
+    .insight-box .insight-icon { font-size: 1.3em; margin-right: 8px; }
+    .canvas-wrap { background: #0d0d1a; border-radius: 10px; padding: 10px; margin: 12px 0; }
+    canvas { width: 100%; height: 200px; display: block; }
+    .tabs { display: flex; gap: 4px; margin-bottom: 16px; }
+    .tab-btn { padding: 8px 18px; border-radius: 8px 8px 0 0; border: 1px solid var(--border, #444); border-bottom: none; background: transparent; color: var(--text-muted, #888); cursor: pointer; font-weight: 600; }
+    .tab-btn.active { background: var(--card-bg, #1e1e2e); color: var(--text, #e0e0e0); }
+    .tab-content { display: none; }
+    .tab-content.active { display: block; }
+    .presets-row { display: flex; gap: 8px; flex-wrap: wrap; margin-bottom: 16px; }
+    .preset-chip { padding: 6px 14px; border-radius: 20px; border: 1px solid var(--border, #444); background: transparent; color: var(--text, #e0e0e0); cursor: pointer; font-size: 0.85em; transition: all 0.2s; }
+    .preset-chip:hover, .preset-chip.active { background: var(--accent, #7c5cfc); color: #fff; border-color: var(--accent, #7c5cfc); }
+    .stat-row { display: flex; gap: 16px; margin-bottom: 16px; flex-wrap: wrap; }
+    .stat-card { flex: 1; min-width: 140px; background: var(--input-bg, #2a2a3e); border-radius: 10px; padding: 16px; text-align: center; }
+    .stat-card .stat-val { font-size: 1.8em; font-weight: 700; }
+    .stat-card .stat-label { font-size: 0.8em; color: var(--text-muted, #888); margin-top: 4px; }
+    .export-modal { position: fixed; top: 0; left: 0; right: 0; bottom: 0; background: rgba(0,0,0,0.7); display: none; align-items: center; justify-content: center; z-index: 1000; }
+    .export-modal.show { display: flex; }
+    .export-modal-content { background: var(--card-bg, #1e1e2e); border-radius: 12px; padding: 24px; max-width: 700px; width: 90%; max-height: 80vh; overflow-y: auto; }
+    .export-modal-content pre { background: var(--input-bg, #2a2a3e); padding: 16px; border-radius: 8px; overflow-x: auto; font-size: 0.85em; white-space: pre-wrap; }
+  </style>
+</head>
+<body>
+  <div id="app">
+    <header class="header">
+      <div class="header-left">
+        <h1 class="logo">🔍 AgentLens</h1>
+        <span class="tagline">Incident Postmortem</span>
+      </div>
+      <div class="header-right">
+        <a href="index.html" class="btn btn-alert-header" style="text-decoration:none">📊 Dashboard</a>
+        <a href="topology.html" class="btn btn-alert-header" style="text-decoration:none">🗺️ Topology</a>
+        <a href="runbooks.html" class="btn btn-alert-header" style="text-decoration:none">📋 Runbooks</a>
+        <button class="theme-toggle" onclick="toggleTheme()" title="Toggle theme" id="themeToggleBtn">🌙</button>
+      </div>
+    </header>
+
+    <main class="main">
+      <div class="postmortem-container">
+        <!-- Presets -->
+        <div class="pm-section">
+          <h3>📋 Quick Start — Load a Scenario</h3>
+          <div class="presets-row">
+            <button class="preset-chip" onclick="loadPreset('cascade')">🔥 Cascade Failure</button>
+            <button class="preset-chip" onclick="loadPreset('budget')">💸 Budget Blowout</button>
+            <button class="preset-chip" onclick="loadPreset('hallucination')">🤖 Hallucination Storm</button>
+            <button class="preset-chip" onclick="loadPreset('latency')">🐢 Latency Spike</button>
+            <button class="preset-chip" onclick="loadPreset('blank')">🆕 Blank Template</button>
+          </div>
+        </div>
+
+        <!-- Incident Summary -->
+        <div class="pm-section">
+          <h3>📝 Incident Summary</h3>
+          <div class="pm-grid">
+            <div class="pm-field">
+              <label>Incident Title</label>
+              <input type="text" id="pmTitle" placeholder="e.g., Agent fleet timeout cascade">
+            </div>
+            <div class="pm-field">
+              <label>Severity</label>
+              <select id="pmSeverity">
+                <option value="critical">🔴 Critical (SEV-1)</option>
+                <option value="high">🟠 High (SEV-2)</option>
+                <option value="medium" selected>🟡 Medium (SEV-3)</option>
+                <option value="low">🟢 Low (SEV-4)</option>
+              </select>
+            </div>
+            <div class="pm-field">
+              <label>Incident Commander</label>
+              <input type="text" id="pmCommander" placeholder="Name or team">
+            </div>
+            <div class="pm-field">
+              <label>Affected Agents</label>
+              <input type="text" id="pmAgents" placeholder="agent-1, agent-2, ...">
+            </div>
+            <div class="pm-field">
+              <label>Start Time</label>
+              <input type="datetime-local" id="pmStart">
+            </div>
+            <div class="pm-field">
+              <label>End Time</label>
+              <input type="datetime-local" id="pmEnd">
+            </div>
+          </div>
+          <div class="pm-field" style="margin-top:16px">
+            <label>Impact Description</label>
+            <textarea id="pmImpact" placeholder="What was the user-facing impact?"></textarea>
+          </div>
+        </div>
+
+        <!-- Stats -->
+        <div class="stat-row" id="statRow">
+          <div class="stat-card"><div class="stat-val" id="statDuration">--</div><div class="stat-label">Duration</div></div>
+          <div class="stat-card"><div class="stat-val" id="statAgents">0</div><div class="stat-label">Agents Affected</div></div>
+          <div class="stat-card"><div class="stat-val" id="statActions">0</div><div class="stat-label">Action Items</div></div>
+          <div class="stat-card"><div class="stat-val" id="statScore">--</div><div class="stat-label">Response Score</div></div>
+        </div>
+
+        <!-- Tabs -->
+        <div class="tabs">
+          <button class="tab-btn active" onclick="switchTab('timeline')">⏱️ Timeline</button>
+          <button class="tab-btn" onclick="switchTab('analysis')">🧠 Auto-Analysis</button>
+          <button class="tab-btn" onclick="switchTab('actions')">✅ Action Items</button>
+          <button class="tab-btn" onclick="switchTab('insights')">💡 Insights</button>
+        </div>
+
+        <!-- Timeline Tab -->
+        <div class="tab-content active" id="tab-timeline">
+          <div class="pm-section">
+            <h3>⏱️ Incident Timeline</h3>
+            <p style="color:var(--text-muted);font-size:0.9em;margin-bottom:16px">Reconstruct the incident chronologically. The auto-analyzer will identify gaps and patterns.</p>
+            <div class="timeline-track" id="timelineTrack"></div>
+            <div class="tl-add" onclick="addTimelineEvent()">+ Add Timeline Event</div>
+            <div class="canvas-wrap"><canvas id="timelineCanvas"></canvas></div>
+          </div>
+        </div>
+
+        <!-- Analysis Tab -->
+        <div class="tab-content" id="tab-analysis">
+          <div class="pm-section">
+            <h3>🧠 Autonomous Root Cause Analysis</h3>
+            <p style="color:var(--text-muted);font-size:0.9em;margin-bottom:16px">Auto-generated analysis based on your incident data. Updates as you add details.</p>
+            <div class="btn-row" style="margin-bottom:16px">
+              <button class="btn-primary" onclick="runAnalysis()">🔍 Run Analysis</button>
+            </div>
+            <div id="analysisResults"></div>
+          </div>
+        </div>
+
+        <!-- Actions Tab -->
+        <div class="tab-content" id="tab-actions">
+          <div class="pm-section">
+            <h3>✅ Action Items</h3>
+            <p style="color:var(--text-muted);font-size:0.9em;margin-bottom:16px">Auto-generated remediation actions. Check items off as completed.</p>
+            <div class="btn-row" style="margin-bottom:16px">
+              <button class="btn-primary" onclick="generateActions()">🤖 Auto-Generate Actions</button>
+              <button class="btn-secondary" onclick="addManualAction()">+ Add Manual</button>
+            </div>
+            <div id="actionsList"></div>
+          </div>
+        </div>
+
+        <!-- Insights Tab -->
+        <div class="tab-content" id="tab-insights">
+          <div class="pm-section">
+            <h3>💡 Proactive Insights</h3>
+            <p style="color:var(--text-muted);font-size:0.9em;margin-bottom:16px">Pattern-matched recommendations based on incident characteristics.</p>
+            <div id="insightsList"></div>
+          </div>
+        </div>
+
+        <!-- Export -->
+        <div class="pm-section">
+          <h3>📤 Export & Share</h3>
+          <div class="btn-row">
+            <button class="btn-primary" onclick="exportPostmortem('markdown')">📄 Markdown</button>
+            <button class="btn-secondary" onclick="exportPostmortem('json')">🔧 JSON</button>
+            <button class="btn-secondary" onclick="exportPostmortem('html')">🌐 HTML Report</button>
+            <button class="btn-secondary" onclick="saveToLocalStorage()">💾 Save Draft</button>
+            <button class="btn-secondary" onclick="loadFromLocalStorage()">📂 Load Draft</button>
+          </div>
+        </div>
+      </div>
+    </main>
+  </div>
+
+  <!-- Export Modal -->
+  <div class="export-modal" id="exportModal" onclick="if(event.target===this)this.classList.remove('show')">
+    <div class="export-modal-content">
+      <h3 id="exportTitle">Export</h3>
+      <pre id="exportContent"></pre>
+      <div class="btn-row">
+        <button class="btn-primary" onclick="copyExport()">📋 Copy</button>
+        <button class="btn-secondary" onclick="document.getElementById('exportModal').classList.remove('show')">Close</button>
+      </div>
+    </div>
+  </div>
+
+  <script>
+    // Theme
+    function toggleTheme() {
+      document.body.classList.toggle('light-theme');
+      const btn = document.getElementById('themeToggleBtn');
+      btn.textContent = document.body.classList.contains('light-theme') ? '☀️' : '🌙';
+    }
+
+    // State
+    let state = {
+      title: '', severity: 'medium', commander: '', agents: '', start: '', end: '',
+      impact: '', timeline: [], actions: [], analysis: null
+    };
+
+    // Tabs
+    function switchTab(name) {
+      document.querySelectorAll('.tab-btn').forEach(b => b.classList.remove('active'));
+      document.querySelectorAll('.tab-content').forEach(c => c.classList.remove('active'));
+      document.getElementById('tab-' + name).classList.add('active');
+      document.querySelectorAll('.tab-btn').forEach(b => { if (b.textContent.toLowerCase().includes(name.slice(0,4))) b.classList.add('active'); });
+    }
+
+    // Sync form → state
+    function syncState() {
+      state.title = document.getElementById('pmTitle').value;
+      state.severity = document.getElementById('pmSeverity').value;
+      state.commander = document.getElementById('pmCommander').value;
+      state.agents = document.getElementById('pmAgents').value;
+      state.start = document.getElementById('pmStart').value;
+      state.end = document.getElementById('pmEnd').value;
+      state.impact = document.getElementById('pmImpact').value;
+      updateStats();
+    }
+
+    document.querySelectorAll('#pmTitle,#pmSeverity,#pmCommander,#pmAgents,#pmStart,#pmEnd,#pmImpact').forEach(el => {
+      el.addEventListener('input', syncState);
+      el.addEventListener('change', syncState);
+    });
+
+    function updateStats() {
+      const agents = state.agents.split(',').filter(a => a.trim()).length;
+      document.getElementById('statAgents').textContent = agents;
+      document.getElementById('statActions').textContent = state.actions.length;
+      if (state.start && state.end) {
+        const ms = new Date(state.end) - new Date(state.start);
+        if (ms > 0) {
+          const mins = Math.round(ms / 60000);
+          document.getElementById('statDuration').textContent = mins < 60 ? mins + 'm' : Math.round(mins / 6) / 10 + 'h';
+        }
+      }
+      // Response score based on completeness
+      let score = 0;
+      if (state.title) score += 15;
+      if (state.impact) score += 15;
+      if (state.timeline.length >= 3) score += 25;
+      if (state.actions.length >= 2) score += 25;
+      if (state.commander) score += 10;
+      if (state.start && state.end) score += 10;
+      document.getElementById('statScore').textContent = score + '%';
+      document.getElementById('statScore').style.color = score >= 80 ? '#2ed573' : score >= 50 ? '#ffa502' : '#ff4757';
+    }
+
+    // Timeline
+    function renderTimeline() {
+      const track = document.getElementById('timelineTrack');
+      track.innerHTML = '';
+      state.timeline.sort((a, b) => a.time.localeCompare(b.time));
+      state.timeline.forEach((ev, i) => {
+        const div = document.createElement('div');
+        div.className = 'tl-event';
+        div.innerHTML = `
+          <div class="tl-time">${ev.time || 'No time'} — <span class="tag">${ev.type}</span>
+            <button onclick="removeTimelineEvent(${i})" style="float:right;background:none;border:none;color:#ff4757;cursor:pointer;font-size:1.1em">✕</button>
+          </div>
+          <div class="tl-desc">${ev.description}</div>`;
+        track.appendChild(div);
+      });
+      drawTimelineCanvas();
+      updateStats();
+    }
+
+    function addTimelineEvent() {
+      const time = prompt('Event time (e.g., 14:32 or 2024-01-15T14:32):', new Date().toTimeString().slice(0,5));
+      if (!time) return;
+      const type = prompt('Event type (detection / escalation / mitigation / resolution / communication):', 'detection');
+      if (!type) return;
+      const desc = prompt('What happened?');
+      if (!desc) return;
+      state.timeline.push({ time, type: type.toLowerCase(), description: desc });
+      renderTimeline();
+    }
+
+    function removeTimelineEvent(i) {
+      state.timeline.splice(i, 1);
+      renderTimeline();
+    }
+
+    function drawTimelineCanvas() {
+      const canvas = document.getElementById('timelineCanvas');
+      const ctx = canvas.getContext('2d');
+      canvas.width = canvas.offsetWidth * 2;
+      canvas.height = 400;
+      ctx.scale(2, 2);
+      const w = canvas.offsetWidth, h = 200;
+      ctx.clearRect(0, 0, w, h);
+      if (state.timeline.length < 2) {
+        ctx.fillStyle = '#888'; ctx.font = '13px sans-serif';
+        ctx.fillText('Add 2+ timeline events to see visualization', w / 2 - 140, h / 2);
+        return;
+      }
+      const typeColors = { detection: '#ff6b35', escalation: '#ff4757', mitigation: '#ffa502', resolution: '#2ed573', communication: '#70a1ff' };
+      const padding = 40;
+      const eventW = (w - padding * 2) / (state.timeline.length - 1 || 1);
+      // Draw line
+      ctx.strokeStyle = '#444'; ctx.lineWidth = 2;
+      ctx.beginPath(); ctx.moveTo(padding, h / 2); ctx.lineTo(w - padding, h / 2); ctx.stroke();
+      // Draw events
+      state.timeline.forEach((ev, i) => {
+        const x = padding + i * eventW;
+        const color = typeColors[ev.type] || '#7c5cfc';
+        ctx.fillStyle = color;
+        ctx.beginPath(); ctx.arc(x, h / 2, 8, 0, Math.PI * 2); ctx.fill();
+        ctx.fillStyle = '#ccc'; ctx.font = '11px sans-serif'; ctx.textAlign = 'center';
+        ctx.fillText(ev.time, x, h / 2 + 24);
+        ctx.fillText(ev.type, x, h / 2 - 16);
+      });
+      // Legend
+      ctx.textAlign = 'left'; let lx = padding;
+      Object.entries(typeColors).forEach(([k, c]) => {
+        ctx.fillStyle = c; ctx.fillRect(lx, h - 20, 10, 10);
+        ctx.fillStyle = '#aaa'; ctx.font = '10px sans-serif'; ctx.fillText(k, lx + 14, h - 11);
+        lx += ctx.measureText(k).width + 30;
+      });
+    }
+
+    // Auto-Analysis
+    function runAnalysis() {
+      syncState();
+      const results = document.getElementById('analysisResults');
+      results.innerHTML = '';
+      const analyses = [];
+
+      // 1. Duration analysis
+      if (state.start && state.end) {
+        const mins = (new Date(state.end) - new Date(state.start)) / 60000;
+        const rating = mins < 15 ? 95 : mins < 30 ? 80 : mins < 60 ? 60 : mins < 120 ? 40 : 20;
+        analyses.push({ title: '⏱️ Time to Resolution', score: rating, detail: `${Math.round(mins)} minutes. ${rating >= 80 ? 'Excellent response time.' : rating >= 50 ? 'Acceptable but room for improvement.' : 'Slow resolution — investigate bottlenecks.'}` });
+      }
+
+      // 2. Detection gap
+      const detectionEvents = state.timeline.filter(e => e.type === 'detection');
+      const mitigationEvents = state.timeline.filter(e => e.type === 'mitigation');
+      if (detectionEvents.length === 0 && state.timeline.length > 0) {
+        analyses.push({ title: '🚨 Detection Gap', score: 20, detail: 'No detection event found in timeline. This suggests the incident was discovered reactively. Add alerting for earlier detection.' });
+      } else if (detectionEvents.length > 0) {
+        analyses.push({ title: '🚨 Detection', score: 85, detail: `Detection recorded at ${detectionEvents[0].time}. Proactive monitoring captured this incident.` });
+      }
+
+      // 3. Escalation analysis
+      const escalations = state.timeline.filter(e => e.type === 'escalation');
+      if (state.severity === 'critical' && escalations.length === 0) {
+        analyses.push({ title: '📢 Escalation', score: 25, detail: 'Critical incident with no escalation events. Ensure proper escalation procedures are followed.' });
+      }
+
+      // 4. Communication
+      const comms = state.timeline.filter(e => e.type === 'communication');
+      const commScore = comms.length === 0 ? 30 : comms.length === 1 ? 60 : 90;
+      analyses.push({ title: '📣 Communication', score: commScore, detail: `${comms.length} communication event(s). ${commScore >= 80 ? 'Good stakeholder communication.' : 'Consider more frequent status updates during incidents.'}` });
+
+      // 5. Blast radius
+      const agentCount = state.agents.split(',').filter(a => a.trim()).length;
+      const blastScore = agentCount <= 1 ? 90 : agentCount <= 3 ? 70 : agentCount <= 5 ? 50 : 25;
+      analyses.push({ title: '💥 Blast Radius', score: blastScore, detail: `${agentCount} agent(s) affected. ${blastScore >= 70 ? 'Contained blast radius.' : 'Wide impact — investigate isolation boundaries.'}` });
+
+      // 6. Pattern detection
+      const sevPatterns = {
+        critical: ['circuit breaker', 'kill switch', 'rollback', 'failover'],
+        high: ['rate limit', 'retry', 'fallback', 'cache'],
+        medium: ['config change', 'threshold', 'alert rule'],
+        low: ['documentation', 'runbook', 'monitoring']
+      };
+      const impactLower = state.impact.toLowerCase();
+      const matchedPatterns = (sevPatterns[state.severity] || []).filter(p => impactLower.includes(p));
+      if (matchedPatterns.length > 0) {
+        analyses.push({ title: '🔗 Pattern Match', score: 70, detail: `Detected patterns: ${matchedPatterns.join(', ')}. Consider automating response for these patterns.` });
+      }
+
+      // Render
+      if (analyses.length === 0) {
+        results.innerHTML = '<p style="color:var(--text-muted)">Fill in incident details and add timeline events, then run analysis.</p>';
+        return;
+      }
+
+      state.analysis = analyses;
+      analyses.forEach(a => {
+        const color = a.score >= 80 ? '#2ed573' : a.score >= 50 ? '#ffa502' : '#ff4757';
+        results.innerHTML += `
+          <div class="analysis-card">
+            <h4>${a.title} <span style="float:right;color:${color};font-size:0.9em">${a.score}%</span></h4>
+            <div class="score-bar"><div class="score-fill" style="width:${a.score}%;background:${color}"></div></div>
+            <p style="font-size:0.9em;color:var(--text-muted);margin:0">${a.detail}</p>
+          </div>`;
+      });
+      generateInsights();
+    }
+
+    // Auto-generate actions
+    function generateActions() {
+      syncState();
+      const newActions = [];
+      const sev = state.severity;
+
+      // Always recommend
+      newActions.push({ priority: 'P1', text: 'Update runbooks with lessons learned from this incident', done: false });
+      newActions.push({ priority: 'P2', text: 'Review and update alerting thresholds based on this incident', done: false });
+
+      if (sev === 'critical' || sev === 'high') {
+        newActions.push({ priority: 'P0', text: 'Implement circuit breaker / kill switch for affected agents', done: false });
+        newActions.push({ priority: 'P0', text: 'Add automated rollback capability', done: false });
+        newActions.push({ priority: 'P1', text: 'Conduct blameless review meeting with all stakeholders', done: false });
+      }
+
+      const detections = state.timeline.filter(e => e.type === 'detection');
+      if (detections.length === 0) {
+        newActions.push({ priority: 'P0', text: 'Add proactive monitoring / anomaly detection for this failure mode', done: false });
+      }
+
+      if (state.agents.split(',').filter(a => a.trim()).length > 3) {
+        newActions.push({ priority: 'P1', text: 'Improve agent isolation to reduce blast radius', done: false });
+        newActions.push({ priority: 'P2', text: 'Implement bulkhead pattern for agent fleet', done: false });
+      }
+
+      const comms = state.timeline.filter(e => e.type === 'communication');
+      if (comms.length < 2) {
+        newActions.push({ priority: 'P2', text: 'Create incident communication template for faster stakeholder updates', done: false });
+      }
+
+      newActions.push({ priority: 'P3', text: 'Schedule follow-up review in 2 weeks to verify action item completion', done: false });
+
+      state.actions = [...newActions, ...state.actions];
+      renderActions();
+    }
+
+    function addManualAction() {
+      const text = prompt('Action item description:');
+      if (!text) return;
+      const priority = prompt('Priority (P0/P1/P2/P3):', 'P2');
+      state.actions.push({ priority: priority || 'P2', text, done: false });
+      renderActions();
+    }
+
+    function renderActions() {
+      const list = document.getElementById('actionsList');
+      list.innerHTML = '';
+      const sorted = [...state.actions].sort((a, b) => a.priority.localeCompare(b.priority));
+      sorted.forEach((a, i) => {
+        const priClass = { P0: 'pri-p0', P1: 'pri-p1', P2: 'pri-p2', P3: 'pri-p3' }[a.priority] || 'pri-p3';
+        list.innerHTML += `
+          <div class="action-item" style="${a.done ? 'opacity:0.5' : ''}">
+            <input type="checkbox" ${a.done ? 'checked' : ''} onchange="toggleAction(${i})">
+            <span class="action-priority ${priClass}">${a.priority}</span>
+            <span style="${a.done ? 'text-decoration:line-through' : ''}">${a.text}</span>
+            <button onclick="removeAction(${i})" style="margin-left:auto;background:none;border:none;color:#ff4757;cursor:pointer">✕</button>
+          </div>`;
+      });
+      updateStats();
+    }
+
+    function toggleAction(i) { state.actions[i].done = !state.actions[i].done; renderActions(); }
+    function removeAction(i) { state.actions.splice(i, 1); renderActions(); }
+
+    // Insights
+    function generateInsights() {
+      const list = document.getElementById('insightsList');
+      list.innerHTML = '';
+      const insights = [];
+
+      if (state.severity === 'critical') {
+        insights.push({ icon: '🛡️', text: 'Critical incidents should trigger automatic safety mode. Consider implementing an autonomous safety circuit breaker that degrades gracefully.' });
+      }
+
+      if (state.timeline.length > 0) {
+        const types = state.timeline.map(e => e.type);
+        if (!types.includes('mitigation')) {
+          insights.push({ icon: '⚡', text: 'No mitigation step recorded. Pre-defined mitigation playbooks (runbooks) can cut response time by 40-60%.' });
+        }
+        if (types.indexOf('communication') > types.indexOf('resolution')) {
+          insights.push({ icon: '📢', text: 'Communication happened after resolution. Keeping stakeholders informed during incidents builds trust.' });
+        }
+      }
+
+      const agentCount = state.agents.split(',').filter(a => a.trim()).length;
+      if (agentCount > 2) {
+        insights.push({ icon: '🔮', text: `${agentCount} agents affected suggests correlated failure. Consider adding cross-agent anomaly correlation to detect cascade patterns early.` });
+      }
+
+      insights.push({ icon: '🧠', text: 'Build an incident knowledge base from postmortems. Pattern matching across past incidents can predict future failures.' });
+      insights.push({ icon: '🤖', text: 'Trend toward autonomous incident response: start with auto-detection → auto-triage → auto-mitigate with human approval gates.' });
+
+      insights.forEach(ins => {
+        list.innerHTML += `<div class="insight-box"><span class="insight-icon">${ins.icon}</span>${ins.text}</div>`;
+      });
+    }
+
+    // Presets
+    const presets = {
+      cascade: {
+        title: 'Agent Fleet Cascade Failure', severity: 'critical', commander: 'SRE On-Call',
+        agents: 'agent-alpha, agent-beta, agent-gamma, agent-delta, agent-epsilon',
+        impact: 'Complete agent fleet went unresponsive due to cascading timeout failures. 100% of automated tasks halted for 47 minutes.',
+        timeline: [
+          { time: '14:23', type: 'detection', description: 'Anomaly detector flagged agent-alpha latency spike (p99 > 30s)' },
+          { time: '14:25', type: 'escalation', description: 'Auto-escalation triggered — 3+ agents showing degraded health' },
+          { time: '14:28', type: 'communication', description: 'Status page updated: Investigating agent fleet degradation' },
+          { time: '14:35', type: 'detection', description: 'Root cause identified: upstream API rate limit hit, causing retry storm' },
+          { time: '14:42', type: 'mitigation', description: 'Circuit breaker activated — halted retry loops' },
+          { time: '14:55', type: 'communication', description: 'All-clear sent — agents recovering' },
+          { time: '15:10', type: 'resolution', description: 'Full fleet recovered. Retry backoff config updated.' }
+        ]
+      },
+      budget: {
+        title: 'Token Budget Exceeded — Runaway Agent', severity: 'high', commander: 'Platform Team',
+        agents: 'agent-researcher',
+        impact: 'Single agent consumed 3x daily token budget in 2 hours due to infinite reasoning loop. $847 in unexpected API costs.',
+        timeline: [
+          { time: '09:15', type: 'detection', description: 'Cost anomaly detector flagged 200% budget spike on agent-researcher' },
+          { time: '09:20', type: 'escalation', description: 'Manual escalation to platform team' },
+          { time: '09:30', type: 'mitigation', description: 'Agent killed via kill switch. Token budget hard cap added.' },
+          { time: '09:45', type: 'resolution', description: 'Root cause: recursive tool call loop with no depth limit' }
+        ]
+      },
+      hallucination: {
+        title: 'Hallucination Storm — Incorrect Data Propagation', severity: 'high', commander: 'ML Ops',
+        agents: 'agent-writer, agent-publisher',
+        impact: 'Agent-writer generated 15 reports with fabricated statistics. Agent-publisher auto-distributed 8 before detection.',
+        timeline: [
+          { time: '11:00', type: 'detection', description: 'User reported incorrect statistics in published report' },
+          { time: '11:15', type: 'escalation', description: 'All auto-publish pipelines paused' },
+          { time: '11:30', type: 'communication', description: 'Affected stakeholders notified of data quality issue' },
+          { time: '12:00', type: 'mitigation', description: 'Fact-check gate added between writer and publisher agents' },
+          { time: '12:30', type: 'resolution', description: 'Retracted 8 published reports, re-generated with verification' }
+        ]
+      },
+      latency: {
+        title: 'API Latency Spike — Degraded User Experience', severity: 'medium', commander: 'Backend Team',
+        agents: 'agent-api-gateway',
+        impact: 'P95 latency jumped from 200ms to 4.2s for 25 minutes. ~340 user requests timed out.',
+        timeline: [
+          { time: '16:40', type: 'detection', description: 'SLA monitor triggered — p95 > 2s threshold breached' },
+          { time: '16:50', type: 'mitigation', description: 'Enabled response caching, scaled up replicas' },
+          { time: '17:05', type: 'resolution', description: 'Latency normalized after cache warm-up' }
+        ]
+      },
+      blank: { title: '', severity: 'medium', commander: '', agents: '', impact: '', timeline: [] }
+    };
+
+    function loadPreset(name) {
+      const p = presets[name];
+      document.getElementById('pmTitle').value = p.title;
+      document.getElementById('pmSeverity').value = p.severity;
+      document.getElementById('pmCommander').value = p.commander;
+      document.getElementById('pmAgents').value = p.agents;
+      document.getElementById('pmImpact').value = p.impact;
+      state.timeline = JSON.parse(JSON.stringify(p.timeline));
+      state.actions = [];
+      syncState();
+      renderTimeline();
+      renderActions();
+      document.querySelectorAll('.preset-chip').forEach(c => c.classList.remove('active'));
+      event.target.classList.add('active');
+    }
+
+    // Export
+    function exportPostmortem(format) {
+      syncState();
+      let content = '';
+      const modal = document.getElementById('exportModal');
+      const titleEl = document.getElementById('exportTitle');
+      const contentEl = document.getElementById('exportContent');
+
+      if (format === 'markdown') {
+        titleEl.textContent = '📄 Markdown Export';
+        content = `# Incident Postmortem: ${state.title}\n\n`;
+        content += `**Severity:** ${state.severity.toUpperCase()} | **Commander:** ${state.commander}\n`;
+        content += `**Affected Agents:** ${state.agents}\n`;
+        content += `**Duration:** ${document.getElementById('statDuration').textContent}\n\n`;
+        content += `## Impact\n${state.impact}\n\n`;
+        content += `## Timeline\n`;
+        state.timeline.forEach(e => content += `- **${e.time}** [${e.type}] ${e.description}\n`);
+        content += `\n## Analysis\n`;
+        if (state.analysis) state.analysis.forEach(a => content += `- **${a.title}** (${a.score}%): ${a.detail}\n`);
+        content += `\n## Action Items\n`;
+        state.actions.forEach(a => content += `- [${a.done ? 'x' : ' '}] (${a.priority}) ${a.text}\n`);
+      } else if (format === 'json') {
+        titleEl.textContent = '🔧 JSON Export';
+        content = JSON.stringify(state, null, 2);
+      } else {
+        titleEl.textContent = '🌐 HTML Report';
+        content = `<!DOCTYPE html><html><head><title>Postmortem: ${state.title}</title>` +
+          `<style>body{font-family:system-ui;max-width:800px;margin:40px auto;padding:20px;background:#1a1a2e;color:#e0e0e0}h1{color:#7c5cfc}.sev{display:inline-block;padding:4px 12px;border-radius:20px;font-weight:700}</style></head>` +
+          `<body><h1>📋 ${state.title}</h1><p><span class="sev" style="background:${state.severity==='critical'?'#ff4757':state.severity==='high'?'#ff6b35':'#ffa502'}">${state.severity.toUpperCase()}</span></p>` +
+          `<p><strong>Commander:</strong> ${state.commander} | <strong>Agents:</strong> ${state.agents}</p>` +
+          `<h2>Impact</h2><p>${state.impact}</p><h2>Timeline</h2><ul>` +
+          state.timeline.map(e => `<li><strong>${e.time}</strong> [${e.type}] ${e.description}</li>`).join('') +
+          `</ul><h2>Action Items</h2><ul>` +
+          state.actions.map(a => `<li>${a.done?'✅':'⬜'} (${a.priority}) ${a.text}</li>`).join('') +
+          `</ul></body></html>`;
+      }
+
+      contentEl.textContent = content;
+      modal.classList.add('show');
+    }
+
+    function copyExport() {
+      navigator.clipboard.writeText(document.getElementById('exportContent').textContent);
+      const btn = event.target; btn.textContent = '✅ Copied!'; setTimeout(() => btn.textContent = '📋 Copy', 1500);
+    }
+
+    // Local storage
+    function saveToLocalStorage() {
+      syncState();
+      localStorage.setItem('agentlens-postmortem-draft', JSON.stringify(state));
+      alert('Draft saved!');
+    }
+
+    function loadFromLocalStorage() {
+      const data = localStorage.getItem('agentlens-postmortem-draft');
+      if (!data) { alert('No saved draft found.'); return; }
+      const s = JSON.parse(data);
+      document.getElementById('pmTitle').value = s.title || '';
+      document.getElementById('pmSeverity').value = s.severity || 'medium';
+      document.getElementById('pmCommander').value = s.commander || '';
+      document.getElementById('pmAgents').value = s.agents || '';
+      document.getElementById('pmImpact').value = s.impact || '';
+      state.timeline = s.timeline || [];
+      state.actions = s.actions || [];
+      state.analysis = s.analysis || null;
+      syncState(); renderTimeline(); renderActions();
+    }
+
+    // Init
+    renderTimeline();
+    renderActions();
+    updateStats();
+    generateInsights();
+  </script>
+</body>
+</html>
