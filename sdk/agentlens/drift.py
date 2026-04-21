@@ -291,7 +291,12 @@ def _cohens_d(mean1: float, std1: float, n1: int,
 
 
 def _extract_session_metrics(session: Any) -> dict[str, float]:
-    """Extract drift-relevant metrics from a session."""
+    """Extract drift-relevant metrics from a session.
+
+    Uses a single pass over all events to collect durations, token
+    counts, error counts, and tool-call counts simultaneously,
+    replacing the previous 4 separate iterations.
+    """
     events = getattr(session, "events", []) or []
     event_count = len(events)
 
@@ -303,33 +308,26 @@ def _extract_session_metrics(session: Any) -> dict[str, float]:
             metrics[k] = 0.0
         return metrics
 
-    # Latency
-    durations = [
-        e.duration_ms for e in events
-        if hasattr(e, "duration_ms") and e.duration_ms is not None
-    ]
-    metrics["avg_latency_ms"] = _mean(durations) if durations else 0.0
+    # Single pass: collect durations, tokens, error count, tool count
+    durations: list[float] = []
+    total_tokens = 0
+    error_count = 0
+    tool_count = 0
 
-    # Tokens
-    total_tokens = sum(
-        (getattr(e, "tokens_in", 0) or 0) + (getattr(e, "tokens_out", 0) or 0)
-        for e in events
-    )
+    for e in events:
+        dur = getattr(e, "duration_ms", None)
+        if dur is not None:
+            durations.append(dur)
+        total_tokens += (getattr(e, "tokens_in", 0) or 0) + (getattr(e, "tokens_out", 0) or 0)
+        if getattr(e, "event_type", "") == "error":
+            error_count += 1
+        if getattr(e, "tool_call", None) is not None:
+            tool_count += 1
+
+    metrics["avg_latency_ms"] = (sum(durations) / len(durations)) if durations else 0.0
     metrics["total_tokens"] = float(total_tokens)
     metrics["tokens_per_event"] = total_tokens / event_count
-
-    # Error rate
-    error_count = sum(
-        1 for e in events
-        if getattr(e, "event_type", "") == "error"
-    )
     metrics["error_rate"] = error_count / event_count
-
-    # Tool call rate
-    tool_count = sum(
-        1 for e in events
-        if getattr(e, "tool_call", None) is not None
-    )
     metrics["tool_call_rate"] = tool_count / event_count
 
     return metrics
