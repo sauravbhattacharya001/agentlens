@@ -1,0 +1,519 @@
+<!DOCTYPE html>
+<html lang="en">
+<head>
+  <meta charset="UTF-8">
+  <meta name="viewport" content="width=device-width, initial-scale=1.0">
+  <title>AgentLens — Fleet Topology Map</title>
+  <link rel="stylesheet" href="styles.css">
+  <style>
+    .topology-container { display: flex; height: calc(100vh - 80px); gap: 0; }
+    .topo-canvas-wrap { flex: 1; position: relative; background: var(--bg-secondary, #1a1a2e); border-radius: 8px; overflow: hidden; margin: 12px; }
+    .topo-canvas-wrap canvas { width: 100%; height: 100%; cursor: grab; }
+    .topo-canvas-wrap canvas.dragging { cursor: grabbing; }
+    .topo-sidebar { width: 340px; padding: 16px; overflow-y: auto; background: var(--bg-primary, #0d0d1a); border-left: 1px solid var(--border, #2a2a4a); }
+    .topo-sidebar h3 { margin: 0 0 12px; color: var(--text-primary, #e0e0ff); font-size: 14px; }
+    .topo-sidebar .section { margin-bottom: 20px; }
+    .topo-sidebar label { display: block; font-size: 12px; color: var(--text-secondary, #8888aa); margin-bottom: 4px; }
+    .topo-sidebar select, .topo-sidebar input[type=range] { width: 100%; margin-bottom: 8px; }
+    .topo-sidebar select { background: var(--bg-secondary, #1a1a2e); color: var(--text-primary, #e0e0ff); border: 1px solid var(--border, #2a2a4a); padding: 6px; border-radius: 4px; }
+    .legend-row { display: flex; align-items: center; gap: 8px; margin-bottom: 6px; font-size: 12px; color: var(--text-secondary, #8888aa); }
+    .legend-dot { width: 12px; height: 12px; border-radius: 50%; }
+    .stat-card { background: var(--bg-secondary, #1a1a2e); border-radius: 8px; padding: 12px; margin-bottom: 8px; }
+    .stat-card .val { font-size: 24px; font-weight: 700; color: var(--text-primary, #e0e0ff); }
+    .stat-card .lbl { font-size: 11px; color: var(--text-secondary, #8888aa); }
+    .insight-card { background: var(--bg-secondary, #1a1a2e); border-left: 3px solid #f59e0b; border-radius: 0 8px 8px 0; padding: 10px 12px; margin-bottom: 8px; font-size: 12px; color: var(--text-secondary, #8888aa); }
+    .insight-card.critical { border-left-color: #ef4444; }
+    .insight-card.good { border-left-color: #10b981; }
+    .insight-card strong { color: var(--text-primary, #e0e0ff); }
+    .node-tooltip { position: absolute; background: rgba(13,13,26,0.95); border: 1px solid var(--border, #2a2a4a); border-radius: 8px; padding: 12px; font-size: 12px; color: var(--text-primary, #e0e0ff); pointer-events: none; display: none; z-index: 10; min-width: 200px; }
+    .node-tooltip .tt-name { font-weight: 700; font-size: 14px; margin-bottom: 6px; }
+    .node-tooltip .tt-row { display: flex; justify-content: space-between; margin-bottom: 3px; }
+    .node-tooltip .tt-label { color: var(--text-secondary, #8888aa); }
+    .toolbar { position: absolute; top: 12px; left: 12px; display: flex; gap: 6px; z-index: 5; }
+    .toolbar button { background: rgba(13,13,26,0.8); border: 1px solid var(--border, #2a2a4a); color: var(--text-primary, #e0e0ff); padding: 6px 10px; border-radius: 6px; cursor: pointer; font-size: 13px; }
+    .toolbar button:hover { background: rgba(42,42,74,0.9); }
+    .toolbar button.active { background: rgba(99,102,241,0.3); border-color: #6366f1; }
+    .topo-search { position: absolute; top: 12px; right: 12px; z-index: 5; }
+    .topo-search input { background: rgba(13,13,26,0.8); border: 1px solid var(--border, #2a2a4a); color: var(--text-primary, #e0e0ff); padding: 6px 10px; border-radius: 6px; width: 180px; font-size: 12px; }
+    @media (max-width: 900px) { .topo-sidebar { display: none; } }
+  </style>
+</head>
+<body>
+  <div id="app">
+    <header class="header">
+      <div class="header-left">
+        <h1 class="logo">🔍 AgentLens</h1>
+        <span class="tagline">Fleet Topology Map</span>
+      </div>
+      <div class="header-right">
+        <a href="index.html" class="btn btn-alert-header" style="text-decoration:none">← Dashboard</a>
+        <button class="theme-toggle" onclick="toggleTheme()" title="Toggle theme" id="themeToggleBtn">🌙</button>
+      </div>
+    </header>
+    <div class="topology-container">
+      <div class="topo-canvas-wrap">
+        <div class="toolbar">
+          <button onclick="resetView()" title="Reset zoom">🏠</button>
+          <button onclick="toggleLabels()" id="btnLabels" class="active" title="Toggle labels">🏷️</button>
+          <button onclick="toggleParticles()" id="btnParticles" class="active" title="Toggle message particles">✨</button>
+          <button onclick="toggleLatencyHeat()" id="btnHeat" class="active" title="Latency heatmap">🌡️</button>
+          <button onclick="cycleLayout()" id="btnLayout" title="Change layout">📐</button>
+          <button onclick="toggleAutoDetect()" id="btnAutoDetect" class="active" title="Auto-detect bottlenecks">🤖</button>
+        </div>
+        <div class="topo-search"><input type="text" placeholder="Search agents..." oninput="searchAgent(this.value)" /></div>
+        <canvas id="topoCanvas"></canvas>
+        <div class="node-tooltip" id="tooltip"></div>
+      </div>
+      <div class="topo-sidebar">
+        <div class="section">
+          <h3>🗺️ Topology Stats</h3>
+          <div class="stat-card"><div class="val" id="statNodes">0</div><div class="lbl">Agents</div></div>
+          <div class="stat-card"><div class="val" id="statEdges">0</div><div class="lbl">Communication Links</div></div>
+          <div class="stat-card"><div class="val" id="statMsgRate">0</div><div class="lbl">Messages / sec</div></div>
+          <div class="stat-card"><div class="val" id="statAvgLatency">0ms</div><div class="lbl">Avg Latency</div></div>
+        </div>
+        <div class="section">
+          <h3>🎨 Color By</h3>
+          <select id="colorMode" onchange="updateColorMode()">
+            <option value="role">Role</option>
+            <option value="health">Health Score</option>
+            <option value="load">Message Load</option>
+            <option value="latency">Avg Latency</option>
+          </select>
+        </div>
+        <div class="section">
+          <h3>📐 Layout</h3>
+          <select id="layoutMode" onchange="changeLayout(this.value)">
+            <option value="force">Force-Directed</option>
+            <option value="radial">Radial</option>
+            <option value="hierarchical">Hierarchical</option>
+            <option value="grid">Grid</option>
+          </select>
+        </div>
+        <div class="section">
+          <h3>🔍 Latency Filter</h3>
+          <label>Min: <span id="latFilterVal">0ms</span></label>
+          <input type="range" id="latFilter" min="0" max="500" value="0" oninput="updateLatFilter()" />
+        </div>
+        <div class="section">
+          <h3>🎯 Legend</h3>
+          <div id="legendContainer"></div>
+        </div>
+        <div class="section">
+          <h3>🤖 Proactive Insights</h3>
+          <div id="insightsContainer"><div class="insight-card good"><strong>Scanning...</strong><br>Analyzing topology for bottlenecks</div></div>
+        </div>
+      </div>
+    </div>
+  </div>
+
+<script>
+// --- Theme ---
+function toggleTheme() {
+  document.body.classList.toggle('light-theme');
+  const btn = document.getElementById('themeToggleBtn');
+  btn.textContent = document.body.classList.contains('light-theme') ? '☀️' : '🌙';
+}
+
+// --- Data Generation ---
+const ROLES = ['orchestrator','worker','monitor','gateway','scheduler','cache','logger'];
+const ROLE_COLORS = { orchestrator:'#6366f1', worker:'#10b981', monitor:'#f59e0b', gateway:'#ef4444', scheduler:'#8b5cf6', cache:'#06b6d4', logger:'#ec4899' };
+const NAMES = ['alpha','beta','gamma','delta','epsilon','zeta','eta','theta','iota','kappa','lambda','mu','nu','xi','omicron','pi','rho','sigma','tau','upsilon'];
+
+let nodes = [], edges = [], particles = [];
+let showLabels = true, showParticles = true, showHeat = true, autoDetect = true;
+let currentLayout = 'force', colorMode = 'role', latencyMin = 0;
+let dragNode = null, panX = 0, panY = 0, zoom = 1, isPanning = false, panStart = {x:0,y:0};
+let searchTerm = '', hoveredNode = null;
+
+function generateFleet() {
+  const n = 12 + Math.floor(Math.random() * 8);
+  nodes = [];
+  edges = [];
+  for (let i = 0; i < n; i++) {
+    const role = ROLES[i < ROLES.length ? i : Math.floor(Math.random() * ROLES.length)];
+    nodes.push({
+      id: i, name: NAMES[i % NAMES.length] + '-' + (Math.floor(i / NAMES.length) + 1),
+      role, health: 50 + Math.random() * 50, load: Math.random() * 100,
+      avgLatency: 5 + Math.random() * 200, msgIn: Math.floor(Math.random() * 500),
+      msgOut: Math.floor(Math.random() * 500), errors: Math.floor(Math.random() * 20),
+      x: 0, y: 0, vx: 0, vy: 0, fx: 0, fy: 0
+    });
+  }
+  // Create edges — ensure connectivity
+  for (let i = 1; i < n; i++) {
+    const src = Math.floor(Math.random() * i);
+    addEdge(src, i);
+  }
+  // Add extra edges
+  const extra = Math.floor(n * 0.8);
+  for (let e = 0; e < extra; e++) {
+    const a = Math.floor(Math.random() * n), b = Math.floor(Math.random() * n);
+    if (a !== b && !edges.find(ed => (ed.src === a && ed.dst === b) || (ed.src === b && ed.dst === a))) addEdge(a, b);
+  }
+  initLayout();
+}
+
+function addEdge(a, b) {
+  edges.push({ src: a, dst: b, latency: 5 + Math.random() * 300, msgRate: Math.random() * 50, particles: [] });
+}
+
+// --- Layouts ---
+function initLayout() {
+  const W = canvas.width, H = canvas.height;
+  const cx = W / 2, cy = H / 2;
+  if (currentLayout === 'force') {
+    nodes.forEach(n => { n.x = cx + (Math.random() - 0.5) * 400; n.y = cy + (Math.random() - 0.5) * 400; n.vx = 0; n.vy = 0; });
+  } else if (currentLayout === 'radial') {
+    const orch = nodes.filter(n => n.role === 'orchestrator');
+    const rest = nodes.filter(n => n.role !== 'orchestrator');
+    orch.forEach((n, i) => { n.x = cx; n.y = cy; });
+    rest.forEach((n, i) => { const a = (2 * Math.PI * i) / rest.length; n.x = cx + 250 * Math.cos(a); n.y = cy + 250 * Math.sin(a); });
+  } else if (currentLayout === 'hierarchical') {
+    const layers = {};
+    ROLES.forEach((r, i) => layers[r] = i);
+    const groups = {};
+    nodes.forEach(n => { if (!groups[n.role]) groups[n.role] = []; groups[n.role].push(n); });
+    let ly = 0;
+    ROLES.forEach(r => {
+      if (!groups[r]) return;
+      const row = groups[r];
+      const startX = cx - (row.length - 1) * 80 / 2;
+      row.forEach((n, i) => { n.x = startX + i * 80; n.y = 80 + ly * 80; });
+      ly++;
+    });
+  } else if (currentLayout === 'grid') {
+    const cols = Math.ceil(Math.sqrt(nodes.length));
+    nodes.forEach((n, i) => { n.x = 120 + (i % cols) * 100; n.y = 120 + Math.floor(i / cols) * 100; });
+  }
+}
+
+// --- Force simulation ---
+function forceTick() {
+  if (currentLayout !== 'force') return;
+  const k = 0.005, repulse = 8000, damping = 0.85;
+  nodes.forEach(n => { n.fx = 0; n.fy = 0; });
+  // Repulsion
+  for (let i = 0; i < nodes.length; i++) {
+    for (let j = i + 1; j < nodes.length; j++) {
+      let dx = nodes[j].x - nodes[i].x, dy = nodes[j].y - nodes[i].y;
+      let d2 = dx * dx + dy * dy || 1;
+      let f = repulse / d2;
+      let fx = dx / Math.sqrt(d2) * f, fy = dy / Math.sqrt(d2) * f;
+      nodes[i].fx -= fx; nodes[i].fy -= fy;
+      nodes[j].fx += fx; nodes[j].fy += fy;
+    }
+  }
+  // Attraction
+  edges.forEach(e => {
+    const a = nodes[e.src], b = nodes[e.dst];
+    let dx = b.x - a.x, dy = b.y - a.y, d = Math.sqrt(dx * dx + dy * dy) || 1;
+    let f = (d - 150) * k;
+    a.fx += dx / d * f; a.fy += dy / d * f;
+    b.fx -= dx / d * f; b.fy -= dy / d * f;
+  });
+  // Center gravity
+  const cx = canvas.width / 2, cy = canvas.height / 2;
+  nodes.forEach(n => { n.fx += (cx - n.x) * 0.001; n.fy += (cy - n.y) * 0.001; });
+  // Integrate
+  nodes.forEach(n => {
+    if (n === dragNode) return;
+    n.vx = (n.vx + n.fx) * damping;
+    n.vy = (n.vy + n.fy) * damping;
+    n.x += n.vx; n.y += n.vy;
+  });
+}
+
+// --- Particles ---
+function spawnParticles() {
+  if (!showParticles) return;
+  edges.forEach(e => {
+    if (e.latency < latencyMin) return;
+    if (Math.random() < e.msgRate / 200) {
+      e.particles.push({ t: 0, speed: 0.005 + Math.random() * 0.01 });
+    }
+  });
+}
+
+function updateParticles() {
+  edges.forEach(e => {
+    e.particles = e.particles.filter(p => { p.t += p.speed; return p.t < 1; });
+  });
+}
+
+// --- Color ---
+function nodeColor(n) {
+  if (colorMode === 'role') return ROLE_COLORS[n.role] || '#888';
+  if (colorMode === 'health') return n.health > 80 ? '#10b981' : n.health > 50 ? '#f59e0b' : '#ef4444';
+  if (colorMode === 'load') return n.load > 80 ? '#ef4444' : n.load > 40 ? '#f59e0b' : '#10b981';
+  if (colorMode === 'latency') return n.avgLatency > 150 ? '#ef4444' : n.avgLatency > 50 ? '#f59e0b' : '#10b981';
+  return '#6366f1';
+}
+
+function edgeColor(e) {
+  if (!showHeat) return 'rgba(100,100,180,0.3)';
+  const l = e.latency;
+  if (l > 200) return 'rgba(239,68,68,0.6)';
+  if (l > 100) return 'rgba(245,158,11,0.6)';
+  return 'rgba(16,185,129,0.3)';
+}
+
+// --- Rendering ---
+const canvas = document.getElementById('topoCanvas');
+const ctx = canvas.getContext('2d');
+
+function resize() { canvas.width = canvas.parentElement.clientWidth; canvas.height = canvas.parentElement.clientHeight; }
+window.addEventListener('resize', resize);
+
+function draw() {
+  resize();
+  forceTick();
+  spawnParticles();
+  updateParticles();
+
+  ctx.clearRect(0, 0, canvas.width, canvas.height);
+  ctx.save();
+  ctx.translate(panX, panY);
+  ctx.scale(zoom, zoom);
+
+  // Edges
+  edges.forEach(e => {
+    if (e.latency < latencyMin) return;
+    const a = nodes[e.src], b = nodes[e.dst];
+    ctx.beginPath();
+    ctx.moveTo(a.x, a.y);
+    ctx.lineTo(b.x, b.y);
+    ctx.strokeStyle = edgeColor(e);
+    ctx.lineWidth = Math.max(1, Math.min(4, e.msgRate / 15));
+    ctx.stroke();
+
+    // Particles
+    if (showParticles) {
+      e.particles.forEach(p => {
+        const px = a.x + (b.x - a.x) * p.t;
+        const py = a.y + (b.y - a.y) * p.t;
+        ctx.beginPath();
+        ctx.arc(px, py, 2.5, 0, Math.PI * 2);
+        ctx.fillStyle = '#fbbf24';
+        ctx.fill();
+      });
+    }
+  });
+
+  // Nodes
+  const highlighted = searchTerm ? nodes.filter(n => n.name.includes(searchTerm.toLowerCase())) : null;
+  nodes.forEach(n => {
+    const r = 12 + (n.role === 'orchestrator' ? 6 : 0);
+    const dim = highlighted && !highlighted.includes(n);
+
+    // Glow
+    if (!dim && (hoveredNode === n || (highlighted && highlighted.includes(n)))) {
+      ctx.beginPath();
+      ctx.arc(n.x, n.y, r + 8, 0, Math.PI * 2);
+      ctx.fillStyle = nodeColor(n).replace(')', ',0.2)').replace('rgb', 'rgba');
+      ctx.fill();
+    }
+
+    ctx.beginPath();
+    ctx.arc(n.x, n.y, r, 0, Math.PI * 2);
+    ctx.fillStyle = dim ? 'rgba(80,80,100,0.3)' : nodeColor(n);
+    ctx.fill();
+    ctx.strokeStyle = dim ? 'rgba(80,80,100,0.2)' : 'rgba(255,255,255,0.3)';
+    ctx.lineWidth = 1.5;
+    ctx.stroke();
+
+    // Health ring
+    if (!dim) {
+      ctx.beginPath();
+      ctx.arc(n.x, n.y, r + 3, -Math.PI / 2, -Math.PI / 2 + (2 * Math.PI * n.health / 100));
+      ctx.strokeStyle = n.health > 80 ? '#10b981' : n.health > 50 ? '#f59e0b' : '#ef4444';
+      ctx.lineWidth = 2;
+      ctx.stroke();
+    }
+
+    // Label
+    if (showLabels && !dim) {
+      ctx.font = '10px system-ui, sans-serif';
+      ctx.fillStyle = 'rgba(224,224,255,0.9)';
+      ctx.textAlign = 'center';
+      ctx.fillText(n.name, n.x, n.y + r + 14);
+      ctx.font = '8px system-ui, sans-serif';
+      ctx.fillStyle = 'rgba(136,136,170,0.8)';
+      ctx.fillText(n.role, n.x, n.y + r + 24);
+    }
+  });
+
+  ctx.restore();
+  requestAnimationFrame(draw);
+}
+
+// --- Tooltip ---
+const tooltip = document.getElementById('tooltip');
+canvas.addEventListener('mousemove', e => {
+  const rect = canvas.getBoundingClientRect();
+  const mx = (e.clientX - rect.left - panX) / zoom;
+  const my = (e.clientY - rect.top - panY) / zoom;
+  hoveredNode = null;
+  for (const n of nodes) {
+    if (Math.hypot(n.x - mx, n.y - my) < 18) { hoveredNode = n; break; }
+  }
+  if (hoveredNode) {
+    const n = hoveredNode;
+    tooltip.style.display = 'block';
+    tooltip.style.left = (e.clientX - canvas.parentElement.getBoundingClientRect().left + 15) + 'px';
+    tooltip.style.top = (e.clientY - canvas.parentElement.getBoundingClientRect().top - 10) + 'px';
+    tooltip.innerHTML = `<div class="tt-name">${n.name}</div>
+      <div class="tt-row"><span class="tt-label">Role</span><span>${n.role}</span></div>
+      <div class="tt-row"><span class="tt-label">Health</span><span>${n.health.toFixed(1)}%</span></div>
+      <div class="tt-row"><span class="tt-label">Load</span><span>${n.load.toFixed(1)}%</span></div>
+      <div class="tt-row"><span class="tt-label">Avg Latency</span><span>${n.avgLatency.toFixed(0)}ms</span></div>
+      <div class="tt-row"><span class="tt-label">Msgs In</span><span>${n.msgIn}</span></div>
+      <div class="tt-row"><span class="tt-label">Msgs Out</span><span>${n.msgOut}</span></div>
+      <div class="tt-row"><span class="tt-label">Errors</span><span style="color:${n.errors > 10 ? '#ef4444' : '#10b981'}">${n.errors}</span></div>`;
+  } else {
+    tooltip.style.display = 'none';
+  }
+});
+
+// --- Interaction ---
+canvas.addEventListener('mousedown', e => {
+  const rect = canvas.getBoundingClientRect();
+  const mx = (e.clientX - rect.left - panX) / zoom;
+  const my = (e.clientY - rect.top - panY) / zoom;
+  for (const n of nodes) {
+    if (Math.hypot(n.x - mx, n.y - my) < 18) { dragNode = n; canvas.classList.add('dragging'); return; }
+  }
+  isPanning = true; panStart = { x: e.clientX - panX, y: e.clientY - panY };
+  canvas.classList.add('dragging');
+});
+
+canvas.addEventListener('mousemove', e => {
+  if (dragNode) {
+    const rect = canvas.getBoundingClientRect();
+    dragNode.x = (e.clientX - rect.left - panX) / zoom;
+    dragNode.y = (e.clientY - rect.top - panY) / zoom;
+  } else if (isPanning) {
+    panX = e.clientX - panStart.x;
+    panY = e.clientY - panStart.y;
+  }
+});
+
+canvas.addEventListener('mouseup', () => { dragNode = null; isPanning = false; canvas.classList.remove('dragging'); });
+canvas.addEventListener('wheel', e => {
+  e.preventDefault();
+  const scale = e.deltaY > 0 ? 0.9 : 1.1;
+  const rect = canvas.getBoundingClientRect();
+  const mx = e.clientX - rect.left, my = e.clientY - rect.top;
+  panX = mx - (mx - panX) * scale;
+  panY = my - (my - panY) * scale;
+  zoom *= scale;
+  zoom = Math.max(0.2, Math.min(5, zoom));
+}, { passive: false });
+
+// --- Controls ---
+function resetView() { panX = 0; panY = 0; zoom = 1; }
+function toggleLabels() { showLabels = !showLabels; document.getElementById('btnLabels').classList.toggle('active'); }
+function toggleParticles() { showParticles = !showParticles; document.getElementById('btnParticles').classList.toggle('active'); }
+function toggleLatencyHeat() { showHeat = !showHeat; document.getElementById('btnHeat').classList.toggle('active'); }
+function toggleAutoDetect() { autoDetect = !autoDetect; document.getElementById('btnAutoDetect').classList.toggle('active'); updateInsights(); }
+function cycleLayout() {
+  const layouts = ['force', 'radial', 'hierarchical', 'grid'];
+  const i = (layouts.indexOf(currentLayout) + 1) % layouts.length;
+  currentLayout = layouts[i];
+  document.getElementById('layoutMode').value = currentLayout;
+  document.getElementById('btnLayout').title = 'Layout: ' + currentLayout;
+  initLayout();
+}
+function changeLayout(v) { currentLayout = v; initLayout(); }
+function updateColorMode() { colorMode = document.getElementById('colorMode').value; updateLegend(); }
+function updateLatFilter() { latencyMin = +document.getElementById('latFilter').value; document.getElementById('latFilterVal').textContent = latencyMin + 'ms'; }
+function searchAgent(v) { searchTerm = v.trim().toLowerCase(); }
+
+// --- Legend ---
+function updateLegend() {
+  const c = document.getElementById('legendContainer');
+  if (colorMode === 'role') {
+    c.innerHTML = Object.entries(ROLE_COLORS).map(([r, col]) =>
+      `<div class="legend-row"><div class="legend-dot" style="background:${col}"></div>${r}</div>`
+    ).join('');
+  } else {
+    c.innerHTML = `<div class="legend-row"><div class="legend-dot" style="background:#10b981"></div>Good</div>
+      <div class="legend-row"><div class="legend-dot" style="background:#f59e0b"></div>Warning</div>
+      <div class="legend-row"><div class="legend-dot" style="background:#ef4444"></div>Critical</div>`;
+  }
+}
+
+// --- Proactive Insights ---
+function updateInsights() {
+  const c = document.getElementById('insightsContainer');
+  if (!autoDetect) { c.innerHTML = '<div class="insight-card">Auto-detection paused</div>'; return; }
+  const insights = [];
+
+  // Bottleneck: high fan-in
+  const inDeg = new Map();
+  edges.forEach(e => inDeg.set(e.dst, (inDeg.get(e.dst) || 0) + 1));
+  inDeg.forEach((d, id) => { if (d >= 4) insights.push({ level: 'critical', text: `<strong>${nodes[id].name}</strong> is a potential bottleneck (${d} incoming links). Consider load balancing.` }); });
+
+  // High latency edges
+  const highLat = edges.filter(e => e.latency > 200);
+  if (highLat.length) insights.push({ level: 'critical', text: `<strong>${highLat.length} high-latency links</strong> (>200ms) detected. Investigate network or add caching.` });
+
+  // Unhealthy agents
+  const sick = nodes.filter(n => n.health < 60);
+  if (sick.length) insights.push({ level: '', text: `<strong>${sick.length} agents</strong> below 60% health: ${sick.map(n => n.name).join(', ')}` });
+
+  // Single point of failure
+  const orch = nodes.filter(n => n.role === 'orchestrator');
+  if (orch.length === 1) insights.push({ level: '', text: `Single orchestrator (<strong>${orch[0].name}</strong>) — consider adding a standby for resilience.` });
+
+  // Overloaded agents
+  const hot = nodes.filter(n => n.load > 85);
+  if (hot.length) insights.push({ level: 'critical', text: `<strong>${hot.length} overloaded agents</strong> (>85% load): ${hot.map(n => n.name).join(', ')}. Scale out or throttle.` });
+
+  // Good news
+  if (!insights.length) insights.push({ level: 'good', text: '<strong>Topology looks healthy!</strong> No bottlenecks or anomalies detected.' });
+
+  // Connectivity ratio
+  const maxEdges = nodes.length * (nodes.length - 1) / 2;
+  const density = edges.length / maxEdges;
+  if (density > 0.5) insights.push({ level: '', text: `High connectivity density (${(density * 100).toFixed(0)}%). Consider reducing redundant links.` });
+  else if (density < 0.15) insights.push({ level: '', text: `Low connectivity (${(density * 100).toFixed(0)}%). Some agents may be isolated.` });
+
+  c.innerHTML = insights.map(i => `<div class="insight-card ${i.level}">${i.text}</div>`).join('');
+}
+
+// --- Stats ---
+function updateStats() {
+  document.getElementById('statNodes').textContent = nodes.length;
+  document.getElementById('statEdges').textContent = edges.length;
+  const totalRate = edges.reduce((s, e) => s + e.msgRate, 0);
+  document.getElementById('statMsgRate').textContent = totalRate.toFixed(1);
+  const avgLat = edges.reduce((s, e) => s + e.latency, 0) / (edges.length || 1);
+  document.getElementById('statAvgLatency').textContent = avgLat.toFixed(0) + 'ms';
+}
+
+// --- Live data variation ---
+function liveUpdate() {
+  nodes.forEach(n => {
+    n.health = Math.max(10, Math.min(100, n.health + (Math.random() - 0.5) * 3));
+    n.load = Math.max(0, Math.min(100, n.load + (Math.random() - 0.5) * 5));
+    n.avgLatency = Math.max(1, n.avgLatency + (Math.random() - 0.5) * 10);
+  });
+  edges.forEach(e => {
+    e.latency = Math.max(1, e.latency + (Math.random() - 0.5) * 15);
+    e.msgRate = Math.max(0, Math.min(80, e.msgRate + (Math.random() - 0.5) * 3));
+  });
+  updateStats();
+  updateInsights();
+}
+
+// --- Init ---
+generateFleet();
+updateLegend();
+updateStats();
+updateInsights();
+setInterval(liveUpdate, 2000);
+draw();
+</script>
+</body>
+</html>
