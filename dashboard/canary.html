@@ -1,0 +1,445 @@
+<!DOCTYPE html>
+<html lang="en">
+<head>
+  <meta charset="UTF-8">
+  <meta name="viewport" content="width=device-width, initial-scale=1.0">
+  <title>AgentLens — Canary Deployer</title>
+  <link rel="stylesheet" href="styles.css">
+  <style>
+    .canary-container { padding: 24px; max-width: 1400px; margin: 0 auto; }
+    .canary-header { margin-bottom: 24px; }
+    .canary-header h1 { font-size: 1.5rem; display: flex; align-items: center; gap: 10px; }
+    .canary-header p { color: var(--text-secondary); font-size: 0.85rem; margin-top: 4px; }
+
+    .stats-grid { display: grid; grid-template-columns: repeat(4, 1fr); gap: 16px; margin-bottom: 24px; }
+    .stat-card { background: var(--bg-secondary); border: 1px solid var(--border); border-radius: var(--radius); padding: 20px; }
+    .stat-card h3 { font-size: 0.75rem; color: var(--text-secondary); text-transform: uppercase; letter-spacing: 0.5px; margin-bottom: 8px; }
+    .stat-card .value { font-size: 2rem; font-weight: 700; }
+    .stat-card .sub { font-size: 0.8rem; color: var(--text-secondary); margin-top: 4px; }
+
+    .panel-row { display: grid; grid-template-columns: 1fr 1fr; gap: 16px; margin-bottom: 24px; }
+    .panel { background: var(--bg-secondary); border: 1px solid var(--border); border-radius: var(--radius); padding: 20px; }
+    .panel h2 { font-size: 1rem; margin-bottom: 16px; display: flex; align-items: center; gap: 8px; }
+
+    .config-row { display: flex; align-items: center; gap: 12px; margin-bottom: 12px; }
+    .config-row label { font-size: 0.85rem; color: var(--text-secondary); min-width: 140px; }
+    .config-row input, .config-row select { background: var(--bg-tertiary); border: 1px solid var(--border); color: var(--text-primary); padding: 6px 10px; border-radius: var(--radius-sm); flex: 1; }
+    .config-row input[type=range] { flex: 2; }
+    .range-val { font-size: 0.85rem; font-weight: 600; min-width: 40px; text-align: right; }
+
+    .preset-btns { display: flex; gap: 8px; margin-bottom: 16px; }
+    .preset-btn { padding: 6px 14px; border-radius: var(--radius-sm); border: 1px solid var(--border); background: var(--bg-tertiary); color: var(--text-primary); cursor: pointer; font-size: 0.8rem; }
+    .preset-btn:hover { border-color: var(--accent); }
+
+    .deploy-btn { width: 100%; padding: 10px; border: none; border-radius: var(--radius-sm); font-weight: 700; font-size: 0.95rem; cursor: pointer; }
+    .deploy-btn.start { background: var(--accent); color: #fff; }
+    .deploy-btn.stop { background: var(--danger); color: #fff; }
+    .deploy-btn:disabled { opacity: 0.5; cursor: not-allowed; }
+
+    .metrics-grid { display: grid; grid-template-columns: 1fr 1fr; gap: 12px; }
+    .metric-card { background: var(--bg-tertiary); border: 1px solid var(--border); border-radius: var(--radius-sm); padding: 12px; }
+    .metric-card .metric-label { font-size: 0.7rem; text-transform: uppercase; color: var(--text-secondary); letter-spacing: 0.5px; margin-bottom: 4px; }
+    .metric-card .metric-values { display: flex; justify-content: space-between; align-items: baseline; }
+    .metric-card .metric-val { font-size: 1.1rem; font-weight: 700; }
+    .metric-card .metric-val.baseline { color: #5b8def; }
+    .metric-card .metric-val.canary { color: #f0a04b; }
+    .metric-card .metric-trend { font-size: 0.85rem; margin-left: 4px; }
+    .metric-card.ok { border-left: 3px solid var(--success); }
+    .metric-card.warn { border-left: 3px solid var(--warning); }
+    .metric-card.bad { border-left: 3px solid var(--danger); }
+
+    .chart-area { position: relative; width: 100%; height: 260px; margin-bottom: 24px; background: var(--bg-secondary); border: 1px solid var(--border); border-radius: var(--radius); padding: 16px; }
+    .chart-area canvas { width: 100% !important; height: 100% !important; }
+
+    .decision-panel { background: var(--bg-secondary); border: 1px solid var(--border); border-radius: var(--radius); padding: 20px; margin-bottom: 24px; }
+    .decision-panel h2 { font-size: 1rem; margin-bottom: 12px; display: flex; align-items: center; gap: 8px; }
+    .decision-badge { display: inline-block; padding: 6px 16px; border-radius: var(--radius-sm); font-weight: 700; font-size: 1rem; }
+    .decision-badge.promote { background: rgba(34,197,94,0.15); color: var(--success); }
+    .decision-badge.observe { background: rgba(234,179,8,0.15); color: var(--warning); }
+    .decision-badge.rollback { background: rgba(239,68,68,0.15); color: var(--danger); }
+    .confidence-bar { height: 8px; background: var(--bg-tertiary); border-radius: 4px; margin: 12px 0 8px; overflow: hidden; }
+    .confidence-fill { height: 100%; border-radius: 4px; transition: width 0.3s; background: var(--accent); }
+    .reasoning { font-size: 0.85rem; color: var(--text-secondary); margin-top: 8px; line-height: 1.5; }
+
+    .history-table { width: 100%; border-collapse: collapse; font-size: 0.85rem; }
+    .history-table th { text-align: left; padding: 10px 12px; border-bottom: 2px solid var(--border); color: var(--text-secondary); font-size: 0.75rem; text-transform: uppercase; letter-spacing: 0.5px; cursor: pointer; user-select: none; }
+    .history-table th:hover { color: var(--text-primary); }
+    .history-table td { padding: 10px 12px; border-bottom: 1px solid var(--border); }
+    .outcome-badge { padding: 3px 10px; border-radius: 12px; font-size: 0.75rem; font-weight: 600; }
+    .outcome-badge.promoted { background: rgba(34,197,94,0.15); color: var(--success); }
+    .outcome-badge.rolledback { background: rgba(239,68,68,0.15); color: var(--danger); }
+    .outcome-badge.aborted { background: rgba(234,179,8,0.15); color: var(--warning); }
+
+    .export-btn { padding: 6px 14px; border-radius: var(--radius-sm); border: 1px solid var(--border); background: var(--bg-tertiary); color: var(--text-primary); cursor: pointer; font-size: 0.8rem; float: right; }
+    .export-btn:hover { border-color: var(--accent); }
+
+    @media (max-width: 900px) {
+      .stats-grid { grid-template-columns: repeat(2, 1fr); }
+      .panel-row { grid-template-columns: 1fr; }
+      .metrics-grid { grid-template-columns: 1fr; }
+    }
+  </style>
+</head>
+<body>
+  <div class="canary-container">
+    <div class="canary-header">
+      <a href="index.html" style="color:var(--text-secondary);text-decoration:none;font-size:0.85rem">← Back to Dashboard</a>
+      <h1>🐤 Agent Canary Deployer</h1>
+      <p>Deploy agent updates to a fraction of traffic, monitor in real-time, and get autonomous promote/rollback recommendations.</p>
+    </div>
+
+    <!-- Stats -->
+    <div class="stats-grid">
+      <div class="stat-card"><h3>Total Deploys</h3><div class="value" id="statTotal">18</div><div class="sub">All-time canary deployments</div></div>
+      <div class="stat-card"><h3>Promote Rate</h3><div class="value" id="statPromote">72%</div><div class="sub">Successfully promoted</div></div>
+      <div class="stat-card"><h3>Avg Duration</h3><div class="value" id="statDuration">22m</div><div class="sub">Average observation window</div></div>
+      <div class="stat-card"><h3>Current Status</h3><div class="value" id="statStatus">Idle</div><div class="sub" id="statStatusSub">No active canary</div></div>
+    </div>
+
+    <!-- Config + Live Metrics -->
+    <div class="panel-row">
+      <div class="panel">
+        <h2>⚙️ Canary Configuration</h2>
+        <div class="preset-btns">
+          <button class="preset-btn" onclick="applyPreset('conservative')">🛡️ Conservative</button>
+          <button class="preset-btn" onclick="applyPreset('standard')">⚖️ Standard</button>
+          <button class="preset-btn" onclick="applyPreset('aggressive')">🚀 Aggressive</button>
+        </div>
+        <div class="config-row"><label>Agent Name</label><input id="cfgAgent" value="chat-assistant"></div>
+        <div class="config-row"><label>Baseline Version</label><input id="cfgBaseline" value="v2.3.1"></div>
+        <div class="config-row"><label>Canary Version</label><input id="cfgCanary" value="v2.4.0"></div>
+        <div class="config-row"><label>Traffic Split</label><input type="range" id="cfgTraffic" min="1" max="50" value="10"><span class="range-val" id="cfgTrafficVal">10%</span></div>
+        <div class="config-row"><label>Duration</label>
+          <select id="cfgDuration"><option value="5">5 min</option><option value="15" selected>15 min</option><option value="30">30 min</option><option value="60">1 hour</option></select>
+        </div>
+        <div class="config-row"><label>Max Error Rate</label><input type="number" id="cfgMaxErr" value="5" min="0" max="100" step="0.5"><span class="range-val">%</span></div>
+        <div class="config-row"><label>Max Latency Increase</label><input type="number" id="cfgMaxLat" value="20" min="0" max="200" step="1"><span class="range-val">%</span></div>
+        <div class="config-row"><label>Min Success Rate</label><input type="number" id="cfgMinSuccess" value="95" min="0" max="100" step="0.5"><span class="range-val">%</span></div>
+        <button class="deploy-btn start" id="deployBtn" onclick="toggleDeploy()">🚀 Deploy Canary</button>
+      </div>
+      <div class="panel">
+        <h2>📊 Live Metrics</h2>
+        <p style="font-size:0.8rem;color:var(--text-secondary);margin-bottom:12px"><span style="color:#5b8def">■</span> Baseline &nbsp; <span style="color:#f0a04b">■</span> Canary</p>
+        <div class="metrics-grid" id="metricsGrid">
+          <div class="metric-card" id="mc-success"><div class="metric-label">Success Rate</div><div class="metric-values"><span class="metric-val baseline">—</span><span class="metric-val canary">—</span></div></div>
+          <div class="metric-card" id="mc-error"><div class="metric-label">Error Rate</div><div class="metric-values"><span class="metric-val baseline">—</span><span class="metric-val canary">—</span></div></div>
+          <div class="metric-card" id="mc-p50"><div class="metric-label">P50 Latency (ms)</div><div class="metric-values"><span class="metric-val baseline">—</span><span class="metric-val canary">—</span></div></div>
+          <div class="metric-card" id="mc-p95"><div class="metric-label">P95 Latency (ms)</div><div class="metric-values"><span class="metric-val baseline">—</span><span class="metric-val canary">—</span></div></div>
+          <div class="metric-card" id="mc-p99"><div class="metric-label">P99 Latency (ms)</div><div class="metric-values"><span class="metric-val baseline">—</span><span class="metric-val canary">—</span></div></div>
+          <div class="metric-card" id="mc-tokens"><div class="metric-label">Avg Tokens/Req</div><div class="metric-values"><span class="metric-val baseline">—</span><span class="metric-val canary">—</span></div></div>
+          <div class="metric-card" id="mc-cost"><div class="metric-label">Cost/Req ($)</div><div class="metric-values"><span class="metric-val baseline">—</span><span class="metric-val canary">—</span></div></div>
+        </div>
+      </div>
+    </div>
+
+    <!-- Chart -->
+    <div class="chart-area">
+      <canvas id="chartCanvas"></canvas>
+    </div>
+
+    <!-- Decision Engine -->
+    <div class="decision-panel">
+      <h2>🧠 Autonomous Decision Engine</h2>
+      <div style="display:flex;align-items:center;gap:16px;flex-wrap:wrap">
+        <span class="decision-badge observe" id="decBadge">🟡 WAITING</span>
+        <span style="font-size:0.85rem;color:var(--text-secondary)" id="decConfLabel">Confidence: 0%</span>
+        <button class="export-btn" onclick="exportReport()">📥 Export Report</button>
+      </div>
+      <div class="confidence-bar"><div class="confidence-fill" id="confFill" style="width:0%"></div></div>
+      <div class="reasoning" id="decReasoning">Deploy a canary to begin analysis.</div>
+    </div>
+
+    <!-- History -->
+    <div class="panel" style="margin-bottom:24px">
+      <h2>📜 Deployment History</h2>
+      <table class="history-table" id="historyTable">
+        <thead><tr>
+          <th data-col="date" onclick="sortHistory('date')">Date</th>
+          <th data-col="agent" onclick="sortHistory('agent')">Agent</th>
+          <th data-col="versions" onclick="sortHistory('versions')">Versions</th>
+          <th data-col="duration" onclick="sortHistory('duration')">Duration</th>
+          <th data-col="traffic" onclick="sortHistory('traffic')">Traffic %</th>
+          <th data-col="outcome" onclick="sortHistory('outcome')">Outcome</th>
+          <th data-col="finding" onclick="sortHistory('finding')">Key Finding</th>
+        </tr></thead>
+        <tbody id="historyBody"></tbody>
+      </table>
+    </div>
+  </div>
+
+  <script>
+    // --- State ---
+    let running = false, timer = null, dataPoints = [], scenario = '', tick = 0, totalTicks = 0;
+    let baseMetrics = {}, canaryMetrics = {};
+    let sortCol = 'date', sortAsc = false;
+
+    const history = [
+      { date: '2026-04-20', agent: 'chat-assistant', versions: 'v2.2.0 → v2.3.0', duration: '15m', traffic: 10, outcome: 'Promoted', finding: 'Latency improved 8%, error rate stable' },
+      { date: '2026-04-18', agent: 'search-agent', versions: 'v1.5.2 → v1.6.0', duration: '30m', traffic: 5, outcome: 'Rolled Back', finding: 'P99 latency spiked 45% after 12 min' },
+      { date: '2026-04-15', agent: 'chat-assistant', versions: 'v2.1.1 → v2.2.0', duration: '15m', traffic: 10, outcome: 'Promoted', finding: 'Token usage reduced 12%' },
+      { date: '2026-04-12', agent: 'summarizer', versions: 'v3.0.0 → v3.1.0', duration: '30m', traffic: 25, outcome: 'Aborted', finding: 'Manual abort — external API outage during test' },
+      { date: '2026-04-10', agent: 'classifier', versions: 'v1.9.0 → v2.0.0', duration: '60m', traffic: 5, outcome: 'Promoted', finding: 'Success rate +2.1%, cost neutral' },
+    ];
+
+    // --- Presets ---
+    function applyPreset(name) {
+      const p = { conservative: [5,5,10,98], standard: [10,5,20,95], aggressive: [25,8,35,90] }[name];
+      document.getElementById('cfgTraffic').value = p[0]; document.getElementById('cfgTrafficVal').textContent = p[0]+'%';
+      document.getElementById('cfgMaxErr').value = p[1]; document.getElementById('cfgMaxLat').value = p[2]; document.getElementById('cfgMinSuccess').value = p[3];
+    }
+
+    document.getElementById('cfgTraffic').addEventListener('input', e => {
+      document.getElementById('cfgTrafficVal').textContent = e.target.value + '%';
+    });
+
+    // --- Deploy ---
+    function toggleDeploy() {
+      if (running) { stopDeploy('Aborted'); return; }
+      startDeploy();
+    }
+
+    function startDeploy() {
+      running = true; tick = 0; dataPoints = [];
+      const dur = parseInt(document.getElementById('cfgDuration').value);
+      totalTicks = Math.max(30, dur * 2); // each tick = 500ms real time
+      scenario = ['canary-wins','canary-neutral','canary-fails'][Math.floor(Math.random()*3)];
+
+      // Baseline anchors
+      baseMetrics = { success: 97.5, error: 2.5, p50: 120, p95: 280, p99: 450, tokens: 820, cost: 0.0032 };
+      canaryMetrics = { ...baseMetrics };
+
+      document.getElementById('deployBtn').textContent = '⛔ Stop & Rollback';
+      document.getElementById('deployBtn').className = 'deploy-btn stop';
+      document.getElementById('statStatus').textContent = 'Active';
+      document.getElementById('statStatusSub').textContent = scenario.replace('-',' ') + ' scenario';
+      document.getElementById('decBadge').textContent = '🟡 OBSERVING';
+      document.getElementById('decBadge').className = 'decision-badge observe';
+
+      timer = setInterval(tickSim, 500);
+    }
+
+    function stopDeploy(outcome) {
+      running = false; clearInterval(timer);
+      document.getElementById('deployBtn').textContent = '🚀 Deploy Canary';
+      document.getElementById('deployBtn').className = 'deploy-btn start';
+      document.getElementById('statStatus').textContent = 'Idle';
+      document.getElementById('statStatusSub').textContent = outcome || 'Completed';
+
+      // Add to history
+      const h = {
+        date: new Date().toISOString().slice(0,10),
+        agent: document.getElementById('cfgAgent').value,
+        versions: document.getElementById('cfgBaseline').value + ' → ' + document.getElementById('cfgCanary').value,
+        duration: document.getElementById('cfgDuration').value + 'm',
+        traffic: parseInt(document.getElementById('cfgTraffic').value),
+        outcome: outcome || 'Promoted',
+        finding: document.getElementById('decReasoning').textContent.slice(0, 80)
+      };
+      history.unshift(h);
+      renderHistory();
+    }
+
+    // --- Simulation ---
+    function tickSim() {
+      tick++;
+      const progress = tick / totalTicks;
+      const noise = () => (Math.random() - 0.5) * 2;
+
+      // Baseline: stable with small noise
+      const bErr = Math.max(0, baseMetrics.error + noise() * 0.3);
+      const bSuccess = 100 - bErr;
+      const bP50 = baseMetrics.p50 + noise() * 5;
+      const bP95 = baseMetrics.p95 + noise() * 10;
+      const bP99 = baseMetrics.p99 + noise() * 15;
+      const bTok = baseMetrics.tokens + noise() * 20;
+      const bCost = baseMetrics.cost + noise() * 0.0001;
+
+      // Canary: depends on scenario
+      let drift = 0, latDrift = 0;
+      if (scenario === 'canary-wins') { drift = -0.3 * progress; latDrift = -8 * progress; }
+      else if (scenario === 'canary-fails') { drift = 2.5 * progress * progress; latDrift = 40 * progress; }
+      else { drift = noise() * 0.1; latDrift = noise() * 2; }
+
+      const cErr = Math.max(0, baseMetrics.error + drift + noise() * 0.4);
+      const cSuccess = 100 - cErr;
+      const cP50 = baseMetrics.p50 + latDrift + noise() * 6;
+      const cP95 = baseMetrics.p95 + latDrift * 1.5 + noise() * 12;
+      const cP99 = baseMetrics.p99 + latDrift * 2 + noise() * 18;
+      const cTok = baseMetrics.tokens + (scenario === 'canary-wins' ? -30 * progress : 10 * progress) + noise() * 25;
+      const cCost = baseMetrics.cost + (cTok - baseMetrics.tokens) * 0.000004;
+
+      dataPoints.push({ tick, bErr, cErr });
+
+      // Update metric cards
+      updateMetric('mc-success', bSuccess, cSuccess, '%', true);
+      updateMetric('mc-error', bErr, cErr, '%', false);
+      updateMetric('mc-p50', bP50, cP50, '', false);
+      updateMetric('mc-p95', bP95, cP95, '', false);
+      updateMetric('mc-p99', bP99, cP99, '', false);
+      updateMetric('mc-tokens', bTok, cTok, '', false);
+      updateMetric('mc-cost', bCost, cCost, '', false, 4);
+
+      drawChart();
+      updateDecision(progress, cErr, cSuccess, cP50);
+
+      if (tick >= totalTicks) {
+        const badge = document.getElementById('decBadge');
+        const outcome = badge.textContent.includes('PROMOTE') ? 'Promoted' : badge.textContent.includes('ROLLBACK') ? 'Rolled Back' : 'Completed';
+        stopDeploy(outcome);
+      }
+    }
+
+    function updateMetric(id, bVal, cVal, suffix, higherBetter, decimals) {
+      const card = document.getElementById(id);
+      const vals = card.querySelectorAll('.metric-val');
+      const d = decimals || (suffix === '%' ? 1 : 0);
+      vals[0].textContent = bVal.toFixed(d) + suffix;
+      vals[1].textContent = cVal.toFixed(d) + suffix;
+      const diff = cVal - bVal;
+      const good = higherBetter ? diff >= 0 : diff <= 0;
+      const pct = bVal !== 0 ? Math.abs(diff / bVal) * 100 : 0;
+      card.className = 'metric-card ' + (good ? 'ok' : pct < 5 ? 'warn' : 'bad');
+    }
+
+    // --- Chart ---
+    function drawChart() {
+      const canvas = document.getElementById('chartCanvas');
+      const ctx = canvas.getContext('2d');
+      const rect = canvas.parentElement.getBoundingClientRect();
+      canvas.width = rect.width - 32; canvas.height = rect.height - 32;
+      const w = canvas.width, h = canvas.height;
+      const pad = { l: 50, r: 20, t: 10, b: 30 };
+      const cw = w - pad.l - pad.r, ch = h - pad.t - pad.b;
+
+      ctx.clearRect(0, 0, w, h);
+
+      if (dataPoints.length < 2) { ctx.fillStyle = 'var(--text-secondary)'; ctx.font = '14px sans-serif'; ctx.fillText('Awaiting data...', w/2 - 50, h/2); return; }
+
+      const maxErr = Math.max(parseFloat(document.getElementById('cfgMaxErr').value) * 1.5, ...dataPoints.map(d => Math.max(d.bErr, d.cErr))) || 10;
+      const xScale = cw / (totalTicks - 1);
+      const yScale = ch / maxErr;
+
+      // Threshold line
+      const threshY = pad.t + ch - parseFloat(document.getElementById('cfgMaxErr').value) * yScale;
+      ctx.setLineDash([6, 4]); ctx.strokeStyle = 'rgba(239,68,68,0.5)'; ctx.lineWidth = 1;
+      ctx.beginPath(); ctx.moveTo(pad.l, threshY); ctx.lineTo(pad.l + cw, threshY); ctx.stroke();
+      ctx.setLineDash([]); ctx.fillStyle = 'rgba(239,68,68,0.6)'; ctx.font = '10px sans-serif';
+      ctx.fillText('threshold', pad.l + cw - 50, threshY - 4);
+
+      // Axes
+      ctx.strokeStyle = 'rgba(128,128,128,0.3)'; ctx.lineWidth = 1;
+      ctx.beginPath(); ctx.moveTo(pad.l, pad.t); ctx.lineTo(pad.l, pad.t + ch); ctx.lineTo(pad.l + cw, pad.t + ch); ctx.stroke();
+      ctx.fillStyle = 'var(--text-secondary)'; ctx.font = '10px sans-serif';
+      for (let i = 0; i <= 4; i++) {
+        const v = (maxErr * i / 4).toFixed(1);
+        const y = pad.t + ch - (i / 4) * ch;
+        ctx.fillText(v + '%', 4, y + 3);
+      }
+
+      // Lines
+      function drawLine(key, color) {
+        ctx.strokeStyle = color; ctx.lineWidth = 2; ctx.beginPath();
+        dataPoints.forEach((d, i) => {
+          const x = pad.l + d.tick * xScale;
+          const y = pad.t + ch - d[key] * yScale;
+          i === 0 ? ctx.moveTo(x, y) : ctx.lineTo(x, y);
+        });
+        ctx.stroke();
+        // Fill
+        ctx.globalAlpha = 0.08;
+        ctx.lineTo(pad.l + dataPoints[dataPoints.length-1].tick * xScale, pad.t + ch);
+        ctx.lineTo(pad.l + dataPoints[0].tick * xScale, pad.t + ch);
+        ctx.closePath(); ctx.fillStyle = color; ctx.fill();
+        ctx.globalAlpha = 1;
+      }
+      drawLine('bErr', '#5b8def');
+      drawLine('cErr', '#f0a04b');
+    }
+
+    // --- Decision Engine ---
+    function updateDecision(progress, cErr, cSuccess, cP50) {
+      const maxErr = parseFloat(document.getElementById('cfgMaxErr').value);
+      const maxLat = parseFloat(document.getElementById('cfgMaxLat').value);
+      const minSuccess = parseFloat(document.getElementById('cfgMinSuccess').value);
+
+      const errOk = cErr <= maxErr;
+      const latIncrease = ((cP50 - baseMetrics.p50) / baseMetrics.p50) * 100;
+      const latOk = latIncrease <= maxLat;
+      const successOk = cSuccess >= minSuccess;
+
+      let confidence = Math.min(98, Math.round(progress * 100 * 1.1));
+      let decision, cls, reasons = [];
+
+      if (!errOk) { reasons.push(`Error rate ${cErr.toFixed(1)}% exceeds ${maxErr}% threshold`); }
+      if (!latOk) { reasons.push(`Latency increase ${latIncrease.toFixed(0)}% exceeds ${maxLat}% threshold`); }
+      if (!successOk) { reasons.push(`Success rate ${cSuccess.toFixed(1)}% below ${minSuccess}% minimum`); }
+
+      if (progress < 0.25) {
+        decision = '🟡 OBSERVING'; cls = 'observe'; confidence = Math.min(confidence, 30);
+        reasons.unshift('Collecting initial data points — need more observations for reliable analysis');
+      } else if (!errOk || !latOk || !successOk) {
+        decision = '🔴 ROLLBACK'; cls = 'rollback';
+      } else {
+        decision = '🟢 PROMOTE'; cls = 'promote';
+        if (scenario === 'canary-wins') reasons.push('Canary outperforming baseline on key metrics');
+        else reasons.push('Canary performing within acceptable thresholds');
+      }
+
+      if (progress > 0.7 && confidence > 85 && cls !== 'observe') {
+        reasons.push('⚡ Auto-action recommended — high confidence with sufficient data');
+      }
+
+      document.getElementById('decBadge').textContent = decision;
+      document.getElementById('decBadge').className = 'decision-badge ' + cls;
+      document.getElementById('decConfLabel').textContent = 'Confidence: ' + confidence + '%';
+      document.getElementById('confFill').style.width = confidence + '%';
+      document.getElementById('decReasoning').textContent = reasons.join('. ') + '.';
+    }
+
+    // --- History ---
+    function renderHistory() {
+      const sorted = [...history].sort((a, b) => {
+        let va = a[sortCol], vb = b[sortCol];
+        if (sortCol === 'traffic') { va = +va; vb = +vb; }
+        if (va < vb) return sortAsc ? -1 : 1;
+        if (va > vb) return sortAsc ? 1 : -1;
+        return 0;
+      });
+      document.getElementById('historyBody').innerHTML = sorted.map(h => `<tr>
+        <td>${h.date}</td><td>${h.agent}</td><td>${h.versions}</td><td>${h.duration}</td><td>${h.traffic}%</td>
+        <td><span class="outcome-badge ${h.outcome.toLowerCase().replace(/\s+/g,'')}">${h.outcome}</span></td>
+        <td>${h.finding}</td>
+      </tr>`).join('');
+    }
+    function sortHistory(col) { if (sortCol === col) sortAsc = !sortAsc; else { sortCol = col; sortAsc = true; } renderHistory(); }
+
+    // --- Export ---
+    function exportReport() {
+      const report = {
+        timestamp: new Date().toISOString(),
+        config: {
+          agent: document.getElementById('cfgAgent').value,
+          baseline: document.getElementById('cfgBaseline').value,
+          canary: document.getElementById('cfgCanary').value,
+          trafficPct: parseInt(document.getElementById('cfgTraffic').value),
+          durationMin: parseInt(document.getElementById('cfgDuration').value),
+          maxErrorRate: parseFloat(document.getElementById('cfgMaxErr').value),
+          maxLatencyIncrease: parseFloat(document.getElementById('cfgMaxLat').value),
+          minSuccessRate: parseFloat(document.getElementById('cfgMinSuccess').value)
+        },
+        decision: document.getElementById('decBadge').textContent,
+        confidence: document.getElementById('decConfLabel').textContent,
+        reasoning: document.getElementById('decReasoning').textContent,
+        dataPoints: dataPoints,
+        history: history
+      };
+      const blob = new Blob([JSON.stringify(report, null, 2)], { type: 'application/json' });
+      const a = document.createElement('a'); a.href = URL.createObjectURL(blob);
+      a.download = `canary-report-${new Date().toISOString().slice(0,10)}.json`; a.click();
+    }
+
+    // --- Init ---
+    renderHistory();
+  </script>
+</body>
+</html>
