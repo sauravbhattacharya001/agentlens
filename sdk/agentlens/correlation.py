@@ -843,17 +843,25 @@ class SessionCorrelator:
 
     def find_sync_points(self) -> List[SyncPoint]:
         """Find moments where multiple sessions use the same resource
-        within a tight window (potential synchronization points)."""
+        within a tight window (potential synchronization points).
+
+        Reuses the shared event index built by _build_event_index()
+        to avoid re-scanning all session events.  The index already
+        stores per-resource intervals with (start, end, session_id),
+        so we extract (start, session_id) tuples directly instead of
+        iterating every event across every session.
+        """
         sync_points: List[SyncPoint] = []
 
-        # Collect all resource usage timestamps
+        # Reuse the shared event index instead of re-scanning all events.
+        # resource_intervals maps (resource_name, type) -> [(start, end, sid)].
+        idx = self._build_event_index()
+        resource_intervals = idx["resource_intervals"]
+
         resource_uses: Dict[str, List[Tuple[datetime, str]]] = defaultdict(list)
-        for session in self._sessions:
-            sid = getattr(session, "session_id", "")
-            for e in getattr(session, "events", []):
-                ts = getattr(e, "timestamp", datetime.now(timezone.utc))
-                for res, _ in self._event_resources(e):
-                    resource_uses[res].append((ts, sid))
+        for (res, _rtype), intervals in resource_intervals.items():
+            for start, _end, sid in intervals:
+                resource_uses[res].append((start, sid))
 
         window = timedelta(milliseconds=self.sync_window_ms)
 
