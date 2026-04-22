@@ -19,6 +19,7 @@ Typical usage::
 
 from __future__ import annotations
 
+import bisect
 import hashlib
 import statistics
 from collections import Counter
@@ -290,16 +291,34 @@ class PostmortemGenerator:
         if not errors:
             return self._empty_report(session_id)
 
-        timeline = self._build_timeline(sorted_events, errors)
-        root_causes = self._identify_root_causes(sorted_events, errors)
+        # Pre-parse all timestamps once to avoid redundant string→datetime
+        # conversions in _build_timeline, _classify_phase, and
+        # _identify_root_causes.  Each _parse_ts call involves string
+        # manipulation; previously these were re-parsed O(events × errors)
+        # times across the analysis pipeline.
+        parsed_ts_map: dict[int, datetime | None] = {}
+        for e in sorted_events:
+            parsed_ts_map[id(e)] = self._parse_ts(e.get("timestamp", ""))
+
+        # Pre-parse and sort error timestamps for O(log E) phase
+        # classification via bisect (was O(E) per call with redundant
+        # _parse_ts on every error).
+        error_parsed_ts = [
+            parsed_ts_map[id(e)] for e in errors
+            if parsed_ts_map[id(e)] is not None
+        ]
+        # Already sorted since errors were extracted from sorted_events
+
+        timeline = self._build_timeline(sorted_events, errors, parsed_ts_map, error_parsed_ts)
+        root_causes = self._identify_root_causes(sorted_events, errors, parsed_ts_map)
         impact = self._assess_impact(sorted_events, errors)
         remediations = self._generate_remediations(root_causes, impact)
         lessons = self._extract_lessons(root_causes, impact)
         contributing = self._find_contributing_factors(sorted_events, errors)
         went_well = self._find_what_went_well(sorted_events, errors)
 
-        first_ts = self._parse_ts(sorted_events[0].get("timestamp", ""))
-        last_ts = self._parse_ts(sorted_events[-1].get("timestamp", ""))
+        first_ts = parsed_ts_map[id(sorted_events[0])]
+        last_ts = parsed_ts_map[id(sorted_events[-1])]
         duration_ms = (last_ts - first_ts).total_seconds() * 1000 if first_ts and last_ts else 0
 
         content_hash = hashlib.sha256(
@@ -320,19 +339,33 @@ class PostmortemGenerator:
             session_id=session_id, event_count=len(sorted_events),
         )
 
-    def _build_timeline(self, events: list[dict], errors: list[dict]) -> list[TimelineEntry]:
+    def _build_timeline(
+        self,
+        events: list[dict],
+        errors: list[dict],
+        parsed_ts_map: dict[int, datetime | None],
+        error_parsed_ts: list[datetime],
+    ) -> list[TimelineEntry]:
         """Build a filtered timeline of significant events.
 
         Only events that are errors, abnormally slow, or the first/last
         event in the session are included.  Each entry is annotated with
         elapsed time from the first event, severity, and incident phase.
+
+        Uses pre-parsed timestamps (parsed_ts_map) and a sorted list of
+        error timestamps (error_parsed_ts) to avoid redundant _parse_ts
+        calls — previously O(significant × errors) string→datetime
+        conversions.
         """
         timeline: list[TimelineEntry] = []
-        first_ts = self._parse_ts(events[0].get("timestamp", ""))
+        first_ts = parsed_ts_map.get(id(events[0]))
         error_ids = {id(e) for e in errors}
+        first_error_ts = error_parsed_ts[0] if error_parsed_ts else None
+        last_error_ts = error_parsed_ts[-1] if error_parsed_ts else None
+        num_errors = len(error_parsed_ts)
 
         for event in events:
-            ts = self._parse_ts(event.get("timestamp", ""))
+            ts = parsed_ts_map.get(id(event))
             elapsed = (ts - first_ts).total_seconds() * 1000 if ts and first_ts else 0
             is_error = id(event) in error_ids
             is_slow = (event.get("duration_ms") or 0) > self.config.slow_event_ms
@@ -341,7 +374,10 @@ class PostmortemGenerator:
 
             if is_error or is_slow or is_first or is_last:
                 severity = "error" if is_error else ("warning" if is_slow else "info")
-                phase = self._classify_phase(event, events, errors)
+                phase = self._classify_phase_fast(
+                    event, ts, is_error, first_error_ts, last_error_ts,
+                    error_parsed_ts, num_errors,
+                )
                 description = self._describe_event(event)
                 timeline.append(TimelineEntry(
                     timestamp=str(event.get("timestamp", "")),
@@ -351,27 +387,35 @@ class PostmortemGenerator:
                 ))
         return timeline
 
-    def _classify_phase(self, event: dict, all_events: list[dict], errors: list[dict]) -> IncidentPhase:
+    def _classify_phase_fast(
+        self,
+        event: dict,
+        event_ts: datetime | None,
+        is_error: bool,
+        first_error_ts: datetime | None,
+        last_error_ts: datetime | None,
+        error_parsed_ts: list[datetime],
+        num_errors: int,
+    ) -> IncidentPhase:
         """Assign an :class:`IncidentPhase` to *event* based on its
-        temporal position relative to the error window."""
-        if not errors:
+        temporal position relative to the error window.
+
+        Uses pre-parsed timestamps and bisect for O(log E) error
+        counting instead of the previous O(E) scan with redundant
+        _parse_ts calls per comparison (2 calls × E errors per
+        significant event → O(significant × E) total string parses
+        eliminated).
+        """
+        if not error_parsed_ts:
             return IncidentPhase.POST_INCIDENT
-        first_error_ts = self._parse_ts(errors[0].get("timestamp", ""))
-        last_error_ts = self._parse_ts(errors[-1].get("timestamp", ""))
-        event_ts = self._parse_ts(event.get("timestamp", ""))
         if not event_ts or not first_error_ts:
             return IncidentPhase.DETECTION
-        if event_ts < first_error_ts:
+        if event_ts <= first_error_ts:
             return IncidentPhase.DETECTION
-        elif event_ts == first_error_ts:
-            return IncidentPhase.DETECTION
-        elif self._is_error(event):
-            error_count_before = sum(
-                1 for e in errors
-                if self._parse_ts(e.get("timestamp", "")) and
-                self._parse_ts(e.get("timestamp", "")) <= event_ts
-            )
-            return IncidentPhase.MITIGATION if error_count_before > len(errors) // 2 else IncidentPhase.ESCALATION
+        elif is_error:
+            # O(log E) bisect instead of O(E) linear scan
+            error_count_before = bisect.bisect_right(error_parsed_ts, event_ts)
+            return IncidentPhase.MITIGATION if error_count_before > num_errors // 2 else IncidentPhase.ESCALATION
         elif last_error_ts and event_ts > last_error_ts:
             return IncidentPhase.RESOLUTION
         else:
@@ -403,7 +447,12 @@ class PostmortemGenerator:
             parts.append(f"(slow: {dur:.0f}ms)")
         return " ".join(parts)
 
-    def _identify_root_causes(self, events: list[dict], errors: list[dict]) -> list[RootCause]:
+    def _identify_root_causes(
+        self,
+        events: list[dict],
+        errors: list[dict],
+        parsed_ts_map: dict[int, datetime | None] | None = None,
+    ) -> list[RootCause]:
         """Correlate errors to identify probable root causes.
 
         Analyses error events across several dimensions — failing tools,
@@ -411,6 +460,11 @@ class PostmortemGenerator:
         timeouts, rate limits, and repeated error messages — and returns
         a list of :class:`RootCause` entries sorted by confidence
         (highest first).
+
+        Accepts an optional *parsed_ts_map* of pre-parsed timestamps
+        to avoid redundant _parse_ts calls on error events (previously
+        O(E) string→datetime conversions that were already done in
+        generate()).
         """
         causes: list[RootCause] = []
         error_tools: Counter[str] = Counter()
@@ -452,8 +506,15 @@ class PostmortemGenerator:
             ))
 
         if len(errors) >= 3:
-            timestamps = [self._parse_ts(e.get("timestamp", "")) for e in errors]
-            timestamps = [t for t in timestamps if t is not None]
+            # Reuse pre-parsed timestamps when available
+            if parsed_ts_map is not None:
+                timestamps = [
+                    parsed_ts_map[id(e)] for e in errors
+                    if parsed_ts_map.get(id(e)) is not None
+                ]
+            else:
+                timestamps = [self._parse_ts(e.get("timestamp", "")) for e in errors]
+                timestamps = [t for t in timestamps if t is not None]
             if len(timestamps) >= 3:
                 intervals = [(timestamps[i+1] - timestamps[i]).total_seconds() for i in range(len(timestamps)-1)]
                 accelerating = all(intervals[i] <= intervals[i-1] for i in range(1, len(intervals))) if len(intervals) >= 2 else False
