@@ -43,6 +43,8 @@ from datetime import datetime, timezone
 from enum import Enum
 from typing import Any, Generator
 
+from agentlens.cli_common import percentile as _percentile
+
 
 def _utcnow() -> datetime:
     return datetime.now(timezone.utc)
@@ -222,12 +224,6 @@ def compute_percentiles(values_ms: list[float]) -> PercentileStats | None:
         return None
     sorted_v = sorted(values_ms)
     n = len(sorted_v)
-
-    def _percentile(data: list[float], pct: float) -> float:
-        k = (n - 1) * pct / 100.0
-        f = int(k)
-        c = f + 1 if f + 1 < n else f
-        return data[f] + (k - f) * (data[c] - data[f])
 
     return PercentileStats(
         count=n,

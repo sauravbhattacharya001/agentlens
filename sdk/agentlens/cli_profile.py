@@ -17,20 +17,8 @@ from collections import defaultdict
 from datetime import datetime, timedelta, timezone
 from typing import Any
 
-from agentlens.cli_common import get_client, print_json
+from agentlens.cli_common import get_client, print_json, percentile as _percentile
 
-
-def _percentile(values: list[float], p: float) -> float:
-    """Simple percentile without numpy."""
-    if not values:
-        return 0.0
-    sorted_v = sorted(values)
-    k = (len(sorted_v) - 1) * (p / 100.0)
-    f = int(k)
-    c = f + 1
-    if c >= len(sorted_v):
-        return sorted_v[f]
-    return sorted_v[f] + (k - f) * (sorted_v[c] - sorted_v[f])
 
 
 def _format_duration(ms: float) -> str:

@@ -18,7 +18,7 @@ from typing import Any
 
 import httpx
 
-from agentlens.cli_common import get_client
+from agentlens.cli_common import get_client, percentile as _percentile
 
 
 def _utcnow() -> datetime:
@@ -48,17 +48,6 @@ def _linear_regression(xs: list[float], ys: list[float]) -> tuple[float, float]:
     intercept = y_mean - slope * x_mean
     return slope, intercept
 
-
-def _percentile(values: list[float], p: float) -> float:
-    """Compute p-th percentile (0-100)."""
-    if not values:
-        return 0.0
-    s = sorted(values)
-    k = (len(s) - 1) * p / 100.0
-    f = int(k)
-    c = f + 1 if f + 1 < len(s) else f
-    d = k - f
-    return s[f] + d * (s[c] - s[f])
 
 
 def _aggregate_hourly(sessions: list[dict]) -> dict[str, list[float]]:

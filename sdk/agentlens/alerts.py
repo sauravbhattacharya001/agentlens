@@ -13,6 +13,8 @@ from dataclasses import dataclass, field
 from enum import Enum
 from typing import Any, Callable
 
+from agentlens.cli_common import percentile as _ext_percentile
+
 
 class Severity(str, Enum):
     """Alert severity levels."""
@@ -196,7 +198,7 @@ class MetricAggregator:
             if not durations:
                 return 0.0
             p = {"latency_p50": 50, "latency_p95": 95, "latency_p99": 99}[metric]
-            return self._percentile(durations, p)
+            return _ext_percentile(durations, p)
 
         if metric == "avg_duration_ms":
             durations = [e.get("duration_ms", 0.0) for e in events if e.get("duration_ms") is not None]
@@ -206,19 +208,6 @@ class MetricAggregator:
 
         raise ValueError(f"Unknown metric: {metric}")
 
-    @staticmethod
-    def _percentile(sorted_values: list[float], p: int) -> float:
-        """Compute the p-th percentile using linear interpolation."""
-        n = len(sorted_values)
-        if n == 0:
-            return 0.0
-        if n == 1:
-            return sorted_values[0]
-        k = (p / 100.0) * (n - 1)
-        lo = int(k)
-        hi = min(lo + 1, n - 1)
-        frac = k - lo
-        return sorted_values[lo] + frac * (sorted_values[hi] - sorted_values[lo])
 
     def clear(self) -> None:
         """Clear all recorded events."""

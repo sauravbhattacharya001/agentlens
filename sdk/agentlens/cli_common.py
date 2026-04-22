@@ -20,7 +20,23 @@ __all__ = [
     "print_json",
     "fetch_sessions",
     "format_duration",
+    "percentile",
 ]
+
+
+def percentile(values: list[float], p: float) -> float:
+    """Compute the *p*-th percentile (0–100) of *values* without numpy.
+
+    Returns ``0.0`` for empty input.  Uses linear interpolation between
+    the two nearest ranks.
+    """
+    if not values:
+        return 0.0
+    s = sorted(values)
+    k = (len(s) - 1) * p / 100.0
+    f = int(k)
+    c = min(f + 1, len(s) - 1)
+    return s[f] + (s[c] - s[f]) * (k - f)
 
 
 def get_client(args: argparse.Namespace) -> tuple[httpx.Client, str]:

@@ -39,6 +39,8 @@ from difflib import unified_diff
 from enum import Enum
 from typing import Any
 
+from agentlens.cli_common import percentile as _percentile
+
 
 class DiffKind(Enum):
     """Kind of change between two prompt versions."""
@@ -189,14 +191,6 @@ def _hash_template(template: str) -> str:
 def _now_iso() -> str:
     return datetime.now(timezone.utc).isoformat()
 
-
-def _percentile(data: list[float], pct: float) -> float:
-    """Simple percentile (nearest-rank)."""
-    if not data:
-        return 0.0
-    sorted_data = sorted(data)
-    k = max(0, min(int(len(sorted_data) * pct / 100), len(sorted_data) - 1))
-    return sorted_data[k]
 
 
 class PromptVersionTracker:
