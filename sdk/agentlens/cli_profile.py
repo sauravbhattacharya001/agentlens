@@ -16,28 +16,7 @@ from collections import defaultdict
 from datetime import datetime, timedelta, timezone
 from typing import Any
 
-from agentlens.cli_common import get_client, print_json, format_duration as _format_duration
-
-
-def _percentile(values: list[float], p: float) -> float:
-    """Simple percentile without numpy."""
-    if not values:
-        return 0.0
-    sorted_v = sorted(values)
-    k = (len(sorted_v) - 1) * (p / 100.0)
-    f = int(k)
-    c = f + 1
-    if c >= len(sorted_v):
-        return sorted_v[f]
-    return sorted_v[f] + (k - f) * (sorted_v[c] - sorted_v[f])
-
-
-def _bar(value: float, max_val: float, width: int = 20) -> str:
-    if max_val <= 0:
-        return " " * width
-    filled = int(round(value / max_val * width))
-    filled = min(filled, width)
-    return "\u2588" * filled + "\u2591" * (width - filled)
+from agentlens.cli_common import get_client, print_json, format_duration as _format_duration, percentile as _percentile, bar_chart as _bar
 
 
 def cmd_profile(args: argparse.Namespace) -> None:

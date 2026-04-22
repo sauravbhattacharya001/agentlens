@@ -22,6 +22,10 @@ __all__ = [
     "print_json",
     "fetch_sessions",
     "format_duration",
+    "percentile",
+    "linear_regression",
+    "sparkline",
+    "bar_chart",
 ]
 
 
@@ -69,3 +73,61 @@ def fetch_sessions(client: httpx.Client, limit: int = 200) -> list[dict]:
     resp.raise_for_status()
     data = resp.json()
     return data if isinstance(data, list) else data.get("sessions", [])
+
+
+# ---------------------------------------------------------------------------
+# Shared numeric / display helpers (previously duplicated across cli modules)
+# ---------------------------------------------------------------------------
+
+
+def percentile(values: list[float], p: float) -> float:
+    """Compute the *p*-th percentile (0–100) of *values* without numpy.
+
+    Returns ``0.0`` for empty input.  Uses linear interpolation between
+    the two nearest ranks.
+    """
+    if not values:
+        return 0.0
+    s = sorted(values)
+    k = (len(s) - 1) * p / 100.0
+    f = int(k)
+    c = min(f + 1, len(s) - 1)
+    return s[f] + (s[c] - s[f]) * (k - f)
+
+
+def linear_regression(xs: list[float], ys: list[float]) -> tuple[float, float]:
+    """Simple OLS linear regression.  Returns ``(slope, intercept)``.
+
+    Falls back to ``(0.0, ys[0])`` when fewer than two data points.
+    """
+    n = len(xs)
+    if n < 2:
+        return 0.0, (ys[0] if ys else 0.0)
+    x_mean = sum(xs) / n
+    y_mean = sum(ys) / n
+    ss_xy = sum((x - x_mean) * (y - y_mean) for x, y in zip(xs, ys))
+    ss_xx = sum((x - x_mean) ** 2 for x in xs)
+    slope = ss_xy / ss_xx if ss_xx else 0.0
+    intercept = y_mean - slope * x_mean
+    return slope, intercept
+
+
+def sparkline(values: list[float], width: int = 30) -> str:
+    """Render a sparkline string from *values* using Unicode bar chars."""
+    if not values:
+        return ""
+    bars = "▁▂▃▄▅▆▇█"
+    mn, mx = min(values), max(values)
+    rng = mx - mn if mx != mn else 1.0
+    return "".join(
+        bars[min(int((v - mn) / rng * (len(bars) - 1)), len(bars) - 1)]
+        for v in values
+    )
+
+
+def bar_chart(value: float, max_val: float, width: int = 20) -> str:
+    """Return a fixed-width Unicode bar chart segment."""
+    if max_val <= 0:
+        return "░" * width
+    filled = min(int(round(value / max_val * width)), width)
+    return "█" * filled + "░" * (width - filled)

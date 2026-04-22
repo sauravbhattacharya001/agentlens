@@ -17,47 +17,11 @@ from datetime import datetime, timedelta, timezone
 from typing import Any
 
 
-from agentlens.cli_common import get_client
+from agentlens.cli_common import get_client, sparkline as _spark, linear_regression as _linear_regression, percentile as _percentile
 
 
 def _utcnow() -> datetime:
     return datetime.now(timezone.utc)
-
-
-def _spark(values: list[float], width: int = 30) -> str:
-    """Render a sparkline string from values."""
-    if not values:
-        return ""
-    bars = "▁▂▃▄▅▆▇█"
-    mn, mx = min(values), max(values)
-    rng = mx - mn if mx != mn else 1.0
-    return "".join(bars[min(int((v - mn) / rng * (len(bars) - 1)), len(bars) - 1)] for v in values)
-
-
-def _linear_regression(xs: list[float], ys: list[float]) -> tuple[float, float]:
-    """Simple OLS. Returns (slope, intercept)."""
-    n = len(xs)
-    if n < 2:
-        return 0.0, (ys[0] if ys else 0.0)
-    x_mean = sum(xs) / n
-    y_mean = sum(ys) / n
-    ss_xy = sum((x - x_mean) * (y - y_mean) for x, y in zip(xs, ys))
-    ss_xx = sum((x - x_mean) ** 2 for x in xs)
-    slope = ss_xy / ss_xx if ss_xx else 0.0
-    intercept = y_mean - slope * x_mean
-    return slope, intercept
-
-
-def _percentile(values: list[float], p: float) -> float:
-    """Compute p-th percentile (0-100)."""
-    if not values:
-        return 0.0
-    s = sorted(values)
-    k = (len(s) - 1) * p / 100.0
-    f = int(k)
-    c = f + 1 if f + 1 < len(s) else f
-    d = k - f
-    return s[f] + d * (s[c] - s[f])
 
 
 def _aggregate_hourly(sessions: list[dict]) -> dict[str, list[float]]:

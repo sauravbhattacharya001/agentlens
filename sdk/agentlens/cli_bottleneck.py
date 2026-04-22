@@ -20,24 +20,7 @@ from typing import Any
 
 import httpx
 
-from agentlens.cli_common import get_client
-
-
-def _percentile(values: list[float], p: float) -> float:
-    if not values:
-        return 0.0
-    s = sorted(values)
-    k = (len(s) - 1) * p / 100.0
-    f = int(k)
-    c = min(f + 1, len(s) - 1)
-    return s[f] + (s[c] - s[f]) * (k - f)
-
-
-def _bar(value: float, max_val: float, width: int = 20) -> str:
-    if max_val <= 0:
-        return ""
-    filled = int(value / max_val * width)
-    return "█" * filled + "░" * (width - filled)
+from agentlens.cli_common import get_client, percentile as _percentile, bar_chart as _bar
 
 
 def _severity(pct: float) -> str:

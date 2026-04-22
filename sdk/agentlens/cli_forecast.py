@@ -15,25 +15,11 @@ from collections import defaultdict
 from datetime import datetime, timedelta, timezone
 
 
-from agentlens.cli_common import get_client
+from agentlens.cli_common import get_client, sparkline as _spark, linear_regression as _linear_regression
 
 
 def _utcnow() -> datetime:
     return datetime.now(timezone.utc)
-
-
-def _linear_regression(xs: list[float], ys: list[float]) -> tuple[float, float]:
-    """Simple OLS linear regression.  Returns (slope, intercept)."""
-    n = len(xs)
-    if n < 2:
-        return 0.0, (ys[0] if ys else 0.0)
-    x_mean = sum(xs) / n
-    y_mean = sum(ys) / n
-    ss_xy = sum((x - x_mean) * (y - y_mean) for x, y in zip(xs, ys))
-    ss_xx = sum((x - x_mean) ** 2 for x in xs)
-    slope = ss_xy / ss_xx if ss_xx else 0.0
-    intercept = y_mean - slope * x_mean
-    return slope, intercept
 
 
 def _exponential_smoothing(ys: list[float], alpha: float = 0.3) -> list[float]:
@@ -44,16 +30,6 @@ def _exponential_smoothing(ys: list[float], alpha: float = 0.3) -> list[float]:
     for y in ys[1:]:
         smoothed.append(alpha * y + (1 - alpha) * smoothed[-1])
     return smoothed
-
-
-def _spark(values: list[float], width: int = 30) -> str:
-    """Render a sparkline string from values."""
-    if not values:
-        return ""
-    bars = "▁▂▃▄▅▆▇█"
-    mn, mx = min(values), max(values)
-    rng = mx - mn if mx != mn else 1.0
-    return "".join(bars[min(int((v - mn) / rng * (len(bars) - 1)), len(bars) - 1)] for v in values)
 
 
 def _aggregate_daily(sessions: list[dict], metric: str) -> list[tuple[str, float]]:
