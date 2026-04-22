@@ -16,7 +16,7 @@ from collections import defaultdict
 from datetime import datetime, timedelta, timezone
 from typing import Any
 
-from agentlens.cli_common import get_client, print_json
+from agentlens.cli_common import get_client, print_json, format_duration as _format_duration
 
 
 def _percentile(values: list[float], p: float) -> float:
@@ -30,18 +30,6 @@ def _percentile(values: list[float], p: float) -> float:
     if c >= len(sorted_v):
         return sorted_v[f]
     return sorted_v[f] + (k - f) * (sorted_v[c] - sorted_v[f])
-
-
-def _format_duration(ms: float) -> str:
-    if ms < 1000:
-        return f"{ms:.0f}ms"
-    secs = ms / 1000
-    if secs < 60:
-        return f"{secs:.1f}s"
-    mins = secs / 60
-    if mins < 60:
-        return f"{mins:.1f}m"
-    return f"{mins / 60:.1f}h"
 
 
 def _bar(value: float, max_val: float, width: int = 20) -> str:
