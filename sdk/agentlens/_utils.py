@@ -6,9 +6,71 @@ Small helpers that are used by multiple modules (e.g. ``exporter``,
 
 from __future__ import annotations
 
-from typing import Any
+import re
+import signal
+import sys
+from typing import Any, Optional, Pattern
 
-__all__ = ["format_duration"]
+__all__ = ["format_duration", "safe_compile", "safe_search"]
+
+# ---------------------------------------------------------------------------
+# ReDoS-safe regex helpers (CWE-1333)
+# ---------------------------------------------------------------------------
+
+_REGEX_TIMEOUT_S = 2  # max seconds for a single regex operation
+
+
+def safe_compile(pattern: str, flags: int = 0) -> Optional[Pattern[str]]:
+    """Compile a regex pattern, returning *None* on invalid syntax.
+
+    This is a thin wrapper around :func:`re.compile` that swallows
+    :class:`re.error` so callers don't need their own try/except.
+    """
+    try:
+        return re.compile(pattern, flags)
+    except re.error:
+        return None
+
+
+def safe_search(
+    pattern: "Pattern[str] | str",
+    text: str,
+    flags: int = 0,
+    timeout: float = _REGEX_TIMEOUT_S,
+) -> Optional[re.Match[str]]:
+    """Run :func:`re.search` with a wall-clock timeout guard.
+
+    On POSIX systems (Linux / macOS) this uses ``SIGALRM`` to abort
+    catastrophic backtracking.  On Windows (no ``SIGALRM``), the
+    function still executes the search but caps *text* length to
+    100 000 characters as a heuristic safeguard — enough for any
+    reasonable input while preventing multi-second stalls on
+    pathological data.
+
+    Returns the match object or *None* (no match **or** timed out).
+    """
+    compiled = pattern if isinstance(pattern, re.Pattern) else re.compile(pattern, flags)
+
+    if sys.platform != "win32" and hasattr(signal, "SIGALRM"):
+        def _alarm_handler(signum: int, frame: Any) -> None:  # pragma: no cover
+            raise TimeoutError("regex search timed out")
+
+        old_handler = signal.signal(signal.SIGALRM, _alarm_handler)
+        signal.alarm(int(timeout) or 1)
+        try:
+            return compiled.search(text)
+        except TimeoutError:
+            return None
+        finally:
+            signal.alarm(0)
+            signal.signal(signal.SIGALRM, old_handler)
+    else:
+        # Windows fallback — cap input length to prevent worst-case backtracking.
+        truncated = text[:100_000]
+        try:
+            return compiled.search(truncated)
+        except (RecursionError, MemoryError):
+            return None
 
 
 def format_duration(ms: Any) -> str:

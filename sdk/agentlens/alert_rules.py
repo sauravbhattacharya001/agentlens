@@ -18,6 +18,8 @@ from dataclasses import dataclass, field
 from enum import Enum
 from typing import Any, Callable
 
+from agentlens._utils import safe_compile, safe_search
+
 
 # ── Enums ──────────────────────────────────────────────────────────────
 
@@ -173,16 +175,13 @@ class PatternCondition(AlertCondition):
     def __init__(self, field: str, pattern: str) -> None:
         self.field = field
         self.pattern = pattern
-        try:
-            self._regex = re.compile(pattern)
-        except re.error:
-            self._regex = None
+        self._regex = safe_compile(pattern)
 
     def evaluate(self, events: list[dict[str, Any]]) -> bool:
         if self._regex is None:
             return False
         return any(
-            self._regex.search(str(e.get(self.field, "")))
+            safe_search(self._regex, str(e.get(self.field, ""))) is not None
             for e in events
             if self.field in e
         )
@@ -192,7 +191,7 @@ class PatternCondition(AlertCondition):
             return []
         return [
             e for e in events
-            if self.field in e and self._regex.search(str(e.get(self.field, "")))
+            if self.field in e and safe_search(self._regex, str(e.get(self.field, ""))) is not None
         ]
 
     def to_dict(self) -> dict[str, Any]:

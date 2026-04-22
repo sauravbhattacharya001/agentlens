@@ -33,6 +33,8 @@ from enum import Enum
 from typing import Any
 from uuid import uuid4
 
+from agentlens._utils import safe_search
+
 
 # ── Data Types ────────────────────────────────────────────────────
 
@@ -266,7 +268,7 @@ def _score_safety(
     lower = response_text.lower()
     matches: list[str] = []
     for pat in patterns:
-        if re.search(pat, lower):
+        if safe_search(pat, lower) is not None:
             matches.append(pat)
 
     if not matches:
