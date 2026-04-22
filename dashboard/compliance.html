@@ -1,0 +1,684 @@
+<!DOCTYPE html>
+<html lang="en">
+<head>
+  <meta charset="UTF-8">
+  <meta name="viewport" content="width=device-width, initial-scale=1.0">
+  <title>AgentLens — Compliance Auditor</title>
+  <link rel="stylesheet" href="styles.css">
+  <style>
+    .audit-container { padding: 20px; max-width: 1400px; margin: 0 auto; }
+    .audit-header { display: flex; justify-content: space-between; align-items: center; margin-bottom: 20px; flex-wrap: wrap; gap: 10px; }
+    .audit-header h2 { margin: 0; font-size: 1.5rem; }
+    .audit-controls { display: flex; gap: 8px; align-items: center; flex-wrap: wrap; }
+
+    /* Policy Cards */
+    .policy-grid { display: grid; grid-template-columns: repeat(auto-fill, minmax(320px, 1fr)); gap: 16px; margin-bottom: 24px; }
+    .policy-card { background: var(--card-bg, #1e1e2e); border: 1px solid var(--border, #333); border-radius: 12px; padding: 16px; transition: border-color 0.2s; }
+    .policy-card:hover { border-color: var(--primary, #7c3aed); }
+    .policy-card .policy-name { font-weight: 600; font-size: 1.1rem; margin-bottom: 4px; }
+    .policy-card .policy-desc { color: var(--text-muted, #888); font-size: 0.85rem; margin-bottom: 12px; }
+    .policy-toggle { display: flex; align-items: center; gap: 8px; }
+    .policy-toggle input[type="checkbox"] { width: 18px; height: 18px; accent-color: var(--primary, #7c3aed); }
+    .policy-severity { display: inline-block; padding: 2px 8px; border-radius: 4px; font-size: 0.75rem; font-weight: 600; text-transform: uppercase; }
+    .severity-critical { background: #dc262633; color: #f87171; }
+    .severity-high { background: #ea580c33; color: #fb923c; }
+    .severity-medium { background: #ca8a0433; color: #fbbf24; }
+    .severity-low { background: #16a34a33; color: #4ade80; }
+    .severity-info { background: #2563eb33; color: #60a5fa; }
+
+    /* Audit Results */
+    .audit-summary { display: grid; grid-template-columns: repeat(auto-fill, minmax(180px, 1fr)); gap: 12px; margin-bottom: 24px; }
+    .summary-card { background: var(--card-bg, #1e1e2e); border: 1px solid var(--border, #333); border-radius: 12px; padding: 16px; text-align: center; }
+    .summary-card .number { font-size: 2rem; font-weight: 700; }
+    .summary-card .label { color: var(--text-muted, #888); font-size: 0.85rem; }
+
+    /* Score Gauge */
+    .gauge-container { display: flex; justify-content: center; margin-bottom: 24px; }
+    .gauge-canvas { background: var(--card-bg, #1e1e2e); border: 1px solid var(--border, #333); border-radius: 12px; padding: 20px; }
+
+    /* Violation Table */
+    .violations-section { background: var(--card-bg, #1e1e2e); border: 1px solid var(--border, #333); border-radius: 12px; padding: 16px; margin-bottom: 24px; }
+    .violations-section h3 { margin: 0 0 12px 0; }
+    .violation-table { width: 100%; border-collapse: collapse; font-size: 0.9rem; }
+    .violation-table th { text-align: left; padding: 8px 12px; border-bottom: 2px solid var(--border, #333); color: var(--text-muted, #888); font-weight: 600; }
+    .violation-table td { padding: 8px 12px; border-bottom: 1px solid var(--border, #222); }
+    .violation-table tr:hover { background: #ffffff08; }
+    .violation-table .agent-name { font-weight: 600; }
+
+    /* Timeline */
+    .timeline-section { background: var(--card-bg, #1e1e2e); border: 1px solid var(--border, #333); border-radius: 12px; padding: 16px; margin-bottom: 24px; }
+    .timeline-section h3 { margin: 0 0 12px 0; }
+
+    /* Export */
+    .export-bar { display: flex; gap: 8px; justify-content: flex-end; margin-bottom: 16px; }
+
+    /* Proactive Panel */
+    .proactive-panel { background: linear-gradient(135deg, #7c3aed22, #2563eb22); border: 1px solid var(--primary, #7c3aed); border-radius: 12px; padding: 16px; margin-bottom: 24px; }
+    .proactive-panel h3 { margin: 0 0 8px 0; color: var(--primary-text, #a78bfa); }
+    .proactive-item { padding: 6px 0; border-bottom: 1px solid #ffffff11; display: flex; gap: 8px; align-items: flex-start; }
+    .proactive-item:last-child { border-bottom: none; }
+    .proactive-icon { font-size: 1.1rem; flex-shrink: 0; }
+    .proactive-text { font-size: 0.9rem; }
+
+    /* Auto-audit */
+    .auto-audit-bar { display: flex; align-items: center; gap: 12px; background: var(--card-bg, #1e1e2e); border: 1px solid var(--border, #333); border-radius: 8px; padding: 10px 16px; margin-bottom: 16px; }
+    .auto-audit-bar .pulse { width: 10px; height: 10px; border-radius: 50%; background: #4ade80; animation: pulse-glow 2s infinite; }
+    .auto-audit-bar.paused .pulse { background: #888; animation: none; }
+    @keyframes pulse-glow { 0%, 100% { box-shadow: 0 0 0 0 #4ade8066; } 50% { box-shadow: 0 0 0 6px #4ade8000; } }
+
+    .filter-row { display: flex; gap: 8px; margin-bottom: 16px; flex-wrap: wrap; }
+    .filter-row select, .filter-row input { background: var(--input-bg, #161622); color: var(--text, #eee); border: 1px solid var(--border, #333); border-radius: 6px; padding: 6px 10px; font-size: 0.85rem; }
+  </style>
+</head>
+<body>
+  <div id="app">
+    <header class="header">
+      <div class="header-left">
+        <h1 class="logo">🔍 AgentLens</h1>
+        <span class="tagline">Compliance Auditor</span>
+      </div>
+      <div class="header-right">
+        <a href="index.html" class="btn btn-alert-header" style="text-decoration:none">🏠 Dashboard</a>
+        <a href="alerts.html" class="btn btn-alert-header" style="text-decoration:none">🚨 Alert Rules</a>
+        <a href="runbooks.html" class="btn btn-alert-header" style="text-decoration:none">📋 Runbooks</a>
+        <a href="regression.html" class="btn btn-alert-header" style="text-decoration:none">📉 Regression</a>
+        <button class="theme-toggle" onclick="toggleTheme()" title="Toggle theme" id="themeToggleBtn">🌙</button>
+      </div>
+    </header>
+
+    <main class="audit-container">
+      <div class="audit-header">
+        <h2>🛡️ Agent Compliance Auditor</h2>
+        <div class="audit-controls">
+          <button class="btn btn-primary" onclick="runAudit()">▶ Run Audit</button>
+          <button class="btn btn-secondary" onclick="toggleAutoAudit()">⏱ Auto-Audit</button>
+          <button class="btn btn-secondary" onclick="resetPolicies()">↻ Reset Policies</button>
+        </div>
+      </div>
+
+      <!-- Auto-Audit Bar -->
+      <div class="auto-audit-bar paused" id="autoAuditBar" style="display:none">
+        <div class="pulse"></div>
+        <span id="autoAuditStatus">Auto-audit active — next scan in <strong id="autoCountdown">30</strong>s</span>
+        <button class="btn btn-secondary" onclick="toggleAutoAudit()" style="margin-left:auto">⏸ Pause</button>
+      </div>
+
+      <!-- Summary Cards -->
+      <div class="audit-summary" id="summaryCards" style="display:none"></div>
+
+      <!-- Score Gauge -->
+      <div class="gauge-container" id="gaugeContainer" style="display:none">
+        <div class="gauge-canvas">
+          <canvas id="gaugeCanvas" width="400" height="220"></canvas>
+        </div>
+      </div>
+
+      <!-- Proactive Insights -->
+      <div class="proactive-panel" id="proactivePanel" style="display:none">
+        <h3>🧠 Proactive Insights</h3>
+        <div id="proactiveList"></div>
+      </div>
+
+      <!-- Filters -->
+      <div class="filter-row" id="filterRow" style="display:none">
+        <select id="filterSeverity" onchange="applyFilters()">
+          <option value="">All Severities</option>
+          <option value="critical">Critical</option>
+          <option value="high">High</option>
+          <option value="medium">Medium</option>
+          <option value="low">Low</option>
+          <option value="info">Info</option>
+        </select>
+        <select id="filterAgent" onchange="applyFilters()">
+          <option value="">All Agents</option>
+        </select>
+        <select id="filterPolicy" onchange="applyFilters()">
+          <option value="">All Policies</option>
+        </select>
+        <input type="text" id="filterSearch" placeholder="Search violations..." oninput="applyFilters()">
+      </div>
+
+      <!-- Violations Table -->
+      <div class="violations-section" id="violationsSection" style="display:none">
+        <div style="display:flex; justify-content:space-between; align-items:center; margin-bottom:12px">
+          <h3>⚠️ Violations (<span id="violationCount">0</span>)</h3>
+          <div class="export-bar">
+            <button class="btn btn-secondary" onclick="exportAudit('json')">📄 JSON</button>
+            <button class="btn btn-secondary" onclick="exportAudit('csv')">📊 CSV</button>
+            <button class="btn btn-secondary" onclick="exportAudit('html')">🌐 HTML Report</button>
+          </div>
+        </div>
+        <div style="overflow-x:auto">
+          <table class="violation-table">
+            <thead>
+              <tr>
+                <th>Severity</th>
+                <th>Agent</th>
+                <th>Policy</th>
+                <th>Rule</th>
+                <th>Details</th>
+                <th>Timestamp</th>
+              </tr>
+            </thead>
+            <tbody id="violationBody"></tbody>
+          </table>
+        </div>
+      </div>
+
+      <!-- Violation Timeline Canvas -->
+      <div class="timeline-section" id="timelineSection" style="display:none">
+        <h3>📈 Violation Timeline</h3>
+        <canvas id="timelineCanvas" width="1200" height="250"></canvas>
+      </div>
+
+      <!-- Policy Configuration -->
+      <h3 style="margin-bottom:12px">📋 Compliance Policies</h3>
+      <div class="policy-grid" id="policyGrid"></div>
+
+      <!-- Audit History -->
+      <div class="violations-section" id="historySection" style="display:none">
+        <h3>📜 Audit History</h3>
+        <div id="historyList"></div>
+      </div>
+    </main>
+  </div>
+
+  <script>
+    // =========================================================
+    // AgentLens Compliance Auditor
+    // =========================================================
+
+    // Theme
+    function toggleTheme() {
+      document.body.classList.toggle('light-theme');
+      const btn = document.getElementById('themeToggleBtn');
+      btn.textContent = document.body.classList.contains('light-theme') ? '☀️' : '🌙';
+      localStorage.setItem('agentlens-theme', document.body.classList.contains('light-theme') ? 'light' : 'dark');
+    }
+    if (localStorage.getItem('agentlens-theme') === 'light') { document.body.classList.add('light-theme'); document.getElementById('themeToggleBtn').textContent = '☀️'; }
+
+    // --- Compliance Policies ---
+    const DEFAULT_POLICIES = [
+      {
+        id: 'rate-limit', name: 'Rate Limit Compliance', severity: 'high',
+        desc: 'Agents must not exceed configured API calls per minute.',
+        enabled: true, threshold: 60, unit: 'calls/min',
+        check: (agent) => agent.apiCalls > 60 ? { violated: true, detail: `${agent.apiCalls} calls/min (limit: 60)` } : { violated: false }
+      },
+      {
+        id: 'token-budget', name: 'Token Budget Enforcement', severity: 'critical',
+        desc: 'Total token usage must stay within session budget.',
+        enabled: true, threshold: 100000, unit: 'tokens',
+        check: (agent) => agent.totalTokens > 100000 ? { violated: true, detail: `${agent.totalTokens.toLocaleString()} tokens (budget: 100,000)` } : { violated: false }
+      },
+      {
+        id: 'error-rate', name: 'Error Rate Threshold', severity: 'high',
+        desc: 'Agent error rate must not exceed 5% of total requests.',
+        enabled: true, threshold: 5, unit: '%',
+        check: (agent) => agent.errorRate > 5 ? { violated: true, detail: `${agent.errorRate.toFixed(1)}% error rate (limit: 5%)` } : { violated: false }
+      },
+      {
+        id: 'response-time', name: 'Response Time SLA', severity: 'medium',
+        desc: 'P95 response time must be under 10 seconds.',
+        enabled: true, threshold: 10000, unit: 'ms',
+        check: (agent) => agent.p95Latency > 10000 ? { violated: true, detail: `P95: ${(agent.p95Latency/1000).toFixed(1)}s (limit: 10s)` } : { violated: false }
+      },
+      {
+        id: 'data-access', name: 'Data Access Boundaries', severity: 'critical',
+        desc: 'Agents must not access unauthorized data scopes.',
+        enabled: true,
+        check: (agent) => agent.unauthorizedAccess > 0 ? { violated: true, detail: `${agent.unauthorizedAccess} unauthorized access attempt(s)` } : { violated: false }
+      },
+      {
+        id: 'tool-usage', name: 'Tool Usage Policy', severity: 'medium',
+        desc: 'Agents may only invoke whitelisted tools.',
+        enabled: true,
+        check: (agent) => agent.blockedToolCalls > 0 ? { violated: true, detail: `${agent.blockedToolCalls} blocked tool call(s): ${agent.blockedTools.join(', ')}` } : { violated: false }
+      },
+      {
+        id: 'hallucination', name: 'Hallucination Guard', severity: 'high',
+        desc: 'Factual grounding score must be above 0.8.',
+        enabled: true, threshold: 0.8,
+        check: (agent) => agent.groundingScore < 0.8 ? { violated: true, detail: `Grounding: ${agent.groundingScore.toFixed(2)} (min: 0.80)` } : { violated: false }
+      },
+      {
+        id: 'pii-leak', name: 'PII Leak Prevention', severity: 'critical',
+        desc: 'No PII (emails, SSNs, phone numbers) in agent output.',
+        enabled: true,
+        check: (agent) => agent.piiDetections > 0 ? { violated: true, detail: `${agent.piiDetections} PII leak(s) detected` } : { violated: false }
+      },
+      {
+        id: 'session-duration', name: 'Session Duration Limit', severity: 'low',
+        desc: 'Agent sessions should not exceed 30 minutes.',
+        enabled: true, threshold: 30, unit: 'min',
+        check: (agent) => agent.sessionMinutes > 30 ? { violated: true, detail: `${agent.sessionMinutes} min session (limit: 30)` } : { violated: false }
+      },
+      {
+        id: 'cost-cap', name: 'Cost Cap Enforcement', severity: 'high',
+        desc: 'Per-session cost must not exceed $2.00.',
+        enabled: true, threshold: 2.0, unit: '$',
+        check: (agent) => agent.sessionCost > 2.0 ? { violated: true, detail: `$${agent.sessionCost.toFixed(2)} (cap: $2.00)` } : { violated: false }
+      },
+      {
+        id: 'retry-storm', name: 'Retry Storm Detection', severity: 'medium',
+        desc: 'Consecutive retries on the same operation must not exceed 5.',
+        enabled: true, threshold: 5,
+        check: (agent) => agent.maxRetries > 5 ? { violated: true, detail: `${agent.maxRetries} consecutive retries (limit: 5)` } : { violated: false }
+      },
+      {
+        id: 'output-size', name: 'Output Size Limit', severity: 'low',
+        desc: 'Single response output must not exceed 50KB.',
+        enabled: true, threshold: 50, unit: 'KB',
+        check: (agent) => agent.maxOutputKB > 50 ? { violated: true, detail: `${agent.maxOutputKB}KB output (limit: 50KB)` } : { violated: false }
+      }
+    ];
+
+    let policies = JSON.parse(JSON.stringify(DEFAULT_POLICIES));
+    let violations = [];
+    let filteredViolations = [];
+    let auditHistory = [];
+    let autoAuditInterval = null;
+    let autoCountdown = 30;
+    let countdownTimer = null;
+
+    // --- Simulated Agent Fleet ---
+    const AGENT_NAMES = ['Planner-α', 'Coder-β', 'Reviewer-γ', 'Deployer-δ', 'Monitor-ε', 'Analyst-ζ', 'Triage-η', 'Optimizer-θ'];
+
+    function generateAgentData() {
+      return AGENT_NAMES.map(name => ({
+        name,
+        apiCalls: Math.floor(Math.random() * 120),
+        totalTokens: Math.floor(Math.random() * 200000),
+        errorRate: Math.random() * 12,
+        p95Latency: Math.random() * 20000,
+        unauthorizedAccess: Math.random() < 0.1 ? Math.floor(Math.random() * 3) + 1 : 0,
+        blockedToolCalls: Math.random() < 0.15 ? Math.floor(Math.random() * 4) + 1 : 0,
+        blockedTools: ['shell_exec', 'file_delete', 'network_scan', 'db_drop'].slice(0, Math.floor(Math.random() * 3)),
+        groundingScore: 0.5 + Math.random() * 0.5,
+        piiDetections: Math.random() < 0.08 ? Math.floor(Math.random() * 3) + 1 : 0,
+        sessionMinutes: Math.floor(Math.random() * 60),
+        sessionCost: Math.random() * 5,
+        maxRetries: Math.floor(Math.random() * 10),
+        maxOutputKB: Math.floor(Math.random() * 80)
+      }));
+    }
+
+    // --- Render Policies ---
+    function renderPolicies() {
+      const grid = document.getElementById('policyGrid');
+      grid.innerHTML = policies.map((p, i) => `
+        <div class="policy-card">
+          <div style="display:flex;justify-content:space-between;align-items:start">
+            <div>
+              <div class="policy-name">${p.name}</div>
+              <div class="policy-desc">${p.desc}</div>
+            </div>
+            <span class="policy-severity severity-${p.severity}">${p.severity}</span>
+          </div>
+          <div class="policy-toggle">
+            <input type="checkbox" ${p.enabled ? 'checked' : ''} onchange="policies[${i}].enabled=this.checked" id="pol-${p.id}">
+            <label for="pol-${p.id}">Enabled</label>
+            ${p.threshold !== undefined ? `<input type="number" value="${p.threshold}" style="width:80px;background:var(--input-bg,#161622);color:var(--text,#eee);border:1px solid var(--border,#333);border-radius:4px;padding:4px 6px;margin-left:auto" onchange="policies[${i}].threshold=Number(this.value)"> <span style="color:var(--text-muted,#888);font-size:0.8rem">${p.unit || ''}</span>` : ''}
+          </div>
+        </div>
+      `).join('');
+    }
+
+    // --- Run Audit ---
+    function runAudit() {
+      const agents = generateAgentData();
+      const now = new Date();
+      violations = [];
+
+      for (const agent of agents) {
+        for (const policy of policies) {
+          if (!policy.enabled) continue;
+          // Re-check with current thresholds
+          let result;
+          try {
+            // Update thresholds in check functions dynamically
+            result = runPolicyCheck(policy, agent);
+          } catch (e) {
+            result = policy.check(agent);
+          }
+          if (result.violated) {
+            violations.push({
+              severity: policy.severity,
+              agent: agent.name,
+              policyId: policy.id,
+              policyName: policy.name,
+              rule: policy.id,
+              detail: result.detail,
+              timestamp: new Date(now.getTime() - Math.random() * 3600000)
+            });
+          }
+        }
+      }
+
+      violations.sort((a, b) => severityRank(a.severity) - severityRank(b.severity));
+      filteredViolations = [...violations];
+
+      // Save to history
+      const complianceScore = calcComplianceScore();
+      auditHistory.unshift({ time: now, violations: violations.length, score: complianceScore });
+      if (auditHistory.length > 20) auditHistory.pop();
+
+      renderSummary();
+      renderGauge(complianceScore);
+      renderViolations();
+      renderTimeline();
+      renderProactiveInsights();
+      renderHistory();
+      populateFilters();
+
+      document.getElementById('summaryCards').style.display = '';
+      document.getElementById('gaugeContainer').style.display = '';
+      document.getElementById('violationsSection').style.display = '';
+      document.getElementById('timelineSection').style.display = '';
+      document.getElementById('filterRow').style.display = '';
+      document.getElementById('proactivePanel').style.display = '';
+      document.getElementById('historySection').style.display = '';
+    }
+
+    function runPolicyCheck(policy, agent) {
+      // Use dynamic thresholds
+      switch (policy.id) {
+        case 'rate-limit': return agent.apiCalls > policy.threshold ? { violated: true, detail: `${agent.apiCalls} calls/min (limit: ${policy.threshold})` } : { violated: false };
+        case 'token-budget': return agent.totalTokens > policy.threshold ? { violated: true, detail: `${agent.totalTokens.toLocaleString()} tokens (budget: ${policy.threshold.toLocaleString()})` } : { violated: false };
+        case 'error-rate': return agent.errorRate > policy.threshold ? { violated: true, detail: `${agent.errorRate.toFixed(1)}% error rate (limit: ${policy.threshold}%)` } : { violated: false };
+        case 'response-time': return agent.p95Latency > policy.threshold ? { violated: true, detail: `P95: ${(agent.p95Latency/1000).toFixed(1)}s (limit: ${(policy.threshold/1000).toFixed(0)}s)` } : { violated: false };
+        case 'session-duration': return agent.sessionMinutes > policy.threshold ? { violated: true, detail: `${agent.sessionMinutes} min (limit: ${policy.threshold})` } : { violated: false };
+        case 'cost-cap': return agent.sessionCost > policy.threshold ? { violated: true, detail: `$${agent.sessionCost.toFixed(2)} (cap: $${policy.threshold.toFixed(2)})` } : { violated: false };
+        case 'retry-storm': return agent.maxRetries > policy.threshold ? { violated: true, detail: `${agent.maxRetries} retries (limit: ${policy.threshold})` } : { violated: false };
+        case 'output-size': return agent.maxOutputKB > policy.threshold ? { violated: true, detail: `${agent.maxOutputKB}KB (limit: ${policy.threshold}KB)` } : { violated: false };
+        default: return policy.check(agent);
+      }
+    }
+
+    function severityRank(s) { return { critical: 0, high: 1, medium: 2, low: 3, info: 4 }[s] || 5; }
+
+    function calcComplianceScore() {
+      const weights = { critical: 20, high: 10, medium: 5, low: 2, info: 1 };
+      const totalWeight = violations.reduce((sum, v) => sum + (weights[v.severity] || 1), 0);
+      return Math.max(0, Math.min(100, Math.round(100 - totalWeight * 1.5)));
+    }
+
+    // --- Render Summary ---
+    function renderSummary() {
+      const counts = { critical: 0, high: 0, medium: 0, low: 0 };
+      violations.forEach(v => { if (counts[v.severity] !== undefined) counts[v.severity]++; });
+      const uniqueAgents = new Set(violations.map(v => v.agent)).size;
+
+      document.getElementById('summaryCards').innerHTML = `
+        <div class="summary-card"><div class="number" style="color:#f87171">${counts.critical}</div><div class="label">Critical</div></div>
+        <div class="summary-card"><div class="number" style="color:#fb923c">${counts.high}</div><div class="label">High</div></div>
+        <div class="summary-card"><div class="number" style="color:#fbbf24">${counts.medium}</div><div class="label">Medium</div></div>
+        <div class="summary-card"><div class="number" style="color:#4ade80">${counts.low}</div><div class="label">Low</div></div>
+        <div class="summary-card"><div class="number">${violations.length}</div><div class="label">Total Violations</div></div>
+        <div class="summary-card"><div class="number">${uniqueAgents}/${AGENT_NAMES.length}</div><div class="label">Agents Flagged</div></div>
+        <div class="summary-card"><div class="number">${policies.filter(p=>p.enabled).length}</div><div class="label">Active Policies</div></div>
+      `;
+    }
+
+    // --- Gauge ---
+    function renderGauge(score) {
+      const canvas = document.getElementById('gaugeCanvas');
+      const ctx = canvas.getContext('2d');
+      ctx.clearRect(0, 0, canvas.width, canvas.height);
+      const cx = canvas.width / 2, cy = 180, r = 140;
+      const startAngle = Math.PI, endAngle = 2 * Math.PI;
+
+      // Background arc
+      ctx.beginPath(); ctx.arc(cx, cy, r, startAngle, endAngle); ctx.lineWidth = 24; ctx.strokeStyle = '#333'; ctx.stroke();
+
+      // Score arc
+      const scoreAngle = startAngle + (endAngle - startAngle) * (score / 100);
+      const color = score >= 80 ? '#4ade80' : score >= 60 ? '#fbbf24' : score >= 40 ? '#fb923c' : '#f87171';
+      ctx.beginPath(); ctx.arc(cx, cy, r, startAngle, scoreAngle); ctx.lineWidth = 24; ctx.strokeStyle = color; ctx.lineCap = 'round'; ctx.stroke();
+
+      // Text
+      ctx.fillStyle = color; ctx.font = 'bold 48px system-ui'; ctx.textAlign = 'center'; ctx.textBaseline = 'middle';
+      ctx.fillText(score, cx, cy - 20);
+      ctx.fillStyle = '#888'; ctx.font = '16px system-ui';
+      ctx.fillText('Compliance Score', cx, cy + 20);
+
+      const label = score >= 80 ? 'Excellent' : score >= 60 ? 'Fair' : score >= 40 ? 'Poor' : 'Critical';
+      ctx.fillStyle = color; ctx.font = 'bold 14px system-ui';
+      ctx.fillText(label, cx, cy + 45);
+    }
+
+    // --- Violations ---
+    function renderViolations() {
+      document.getElementById('violationCount').textContent = filteredViolations.length;
+      const body = document.getElementById('violationBody');
+      body.innerHTML = filteredViolations.map(v => `
+        <tr>
+          <td><span class="policy-severity severity-${v.severity}">${v.severity}</span></td>
+          <td class="agent-name">${v.agent}</td>
+          <td>${v.policyName}</td>
+          <td><code>${v.rule}</code></td>
+          <td>${v.detail}</td>
+          <td>${v.timestamp.toLocaleTimeString()}</td>
+        </tr>
+      `).join('');
+    }
+
+    // --- Timeline Canvas ---
+    function renderTimeline() {
+      const canvas = document.getElementById('timelineCanvas');
+      const ctx = canvas.getContext('2d');
+      const W = canvas.width, H = canvas.height;
+      ctx.clearRect(0, 0, W, H);
+
+      // Bucket violations into 12 time slices (last hour, 5 min each)
+      const now = Date.now();
+      const buckets = Array(12).fill(null).map(() => ({ critical: 0, high: 0, medium: 0, low: 0 }));
+      violations.forEach(v => {
+        const age = now - v.timestamp.getTime();
+        const idx = Math.min(11, Math.floor(age / 300000));
+        if (buckets[11 - idx][v.severity] !== undefined) buckets[11 - idx][v.severity]++;
+      });
+
+      const maxVal = Math.max(1, ...buckets.map(b => b.critical + b.high + b.medium + b.low));
+      const barW = (W - 80) / 12;
+      const colors = { critical: '#f87171', high: '#fb923c', medium: '#fbbf24', low: '#4ade80' };
+
+      // Axes
+      ctx.strokeStyle = '#444'; ctx.lineWidth = 1;
+      ctx.beginPath(); ctx.moveTo(60, 20); ctx.lineTo(60, H - 40); ctx.lineTo(W - 20, H - 40); ctx.stroke();
+
+      // Labels
+      ctx.fillStyle = '#888'; ctx.font = '11px system-ui'; ctx.textAlign = 'center';
+      for (let i = 0; i < 12; i++) {
+        ctx.fillText(`-${(11 - i) * 5}m`, 60 + i * barW + barW / 2, H - 22);
+      }
+
+      // Stacked bars
+      for (let i = 0; i < 12; i++) {
+        const b = buckets[i];
+        let y = H - 40;
+        for (const sev of ['low', 'medium', 'high', 'critical']) {
+          const h = (b[sev] / maxVal) * (H - 80);
+          ctx.fillStyle = colors[sev];
+          ctx.fillRect(60 + i * barW + 4, y - h, barW - 8, h);
+          y -= h;
+        }
+      }
+
+      // Y-axis labels
+      ctx.textAlign = 'right'; ctx.fillStyle = '#888';
+      for (let i = 0; i <= 4; i++) {
+        const val = Math.round(maxVal * i / 4);
+        const y = H - 40 - (H - 80) * i / 4;
+        ctx.fillText(val, 52, y + 4);
+        ctx.strokeStyle = '#333'; ctx.beginPath(); ctx.moveTo(60, y); ctx.lineTo(W - 20, y); ctx.stroke();
+      }
+
+      // Legend
+      ctx.textAlign = 'left'; let lx = 80;
+      for (const [sev, col] of Object.entries(colors)) {
+        ctx.fillStyle = col; ctx.fillRect(lx, 6, 12, 12);
+        ctx.fillStyle = '#aaa'; ctx.fillText(sev, lx + 16, 16);
+        lx += 80;
+      }
+    }
+
+    // --- Proactive Insights ---
+    function renderProactiveInsights() {
+      const insights = [];
+      const agentViolations = {};
+      violations.forEach(v => { agentViolations[v.agent] = (agentViolations[v.agent] || 0) + 1; });
+
+      // Repeat offenders
+      const repeatOffenders = Object.entries(agentViolations).filter(([, c]) => c >= 3).sort((a, b) => b[1] - a[1]);
+      if (repeatOffenders.length) {
+        insights.push({ icon: '🔴', text: `**Repeat offenders:** ${repeatOffenders.map(([a, c]) => `${a} (${c})`).join(', ')} — consider tightening permissions or adding guardrails.` });
+      }
+
+      // Critical violations
+      const criticals = violations.filter(v => v.severity === 'critical');
+      if (criticals.length) {
+        const policies = [...new Set(criticals.map(v => v.policyName))];
+        insights.push({ icon: '🚨', text: `${criticals.length} critical violation(s) across ${policies.join(', ')} — immediate review recommended.` });
+      }
+
+      // PII leaks
+      const piiV = violations.filter(v => v.policyId === 'pii-leak');
+      if (piiV.length) {
+        insights.push({ icon: '🔒', text: `PII leaks detected in ${piiV.map(v => v.agent).join(', ')} — enable output sanitization filters.` });
+      }
+
+      // Cost overruns
+      const costV = violations.filter(v => v.policyId === 'cost-cap');
+      if (costV.length) {
+        insights.push({ icon: '💰', text: `${costV.length} agent(s) exceeded cost cap — consider implementing hard budget cutoffs.` });
+      }
+
+      // Trend
+      if (auditHistory.length >= 2) {
+        const prev = auditHistory[1].violations;
+        const curr = auditHistory[0].violations;
+        if (curr > prev * 1.5) {
+          insights.push({ icon: '📈', text: `Violations increased ${Math.round((curr/prev - 1)*100)}% since last audit — investigate recent deployments.` });
+        } else if (curr < prev * 0.7) {
+          insights.push({ icon: '📉', text: `Violations decreased ${Math.round((1 - curr/prev)*100)}% — compliance posture improving.` });
+        }
+      }
+
+      if (!insights.length) {
+        insights.push({ icon: '✅', text: 'No immediate concerns. Compliance posture is healthy.' });
+      }
+
+      document.getElementById('proactiveList').innerHTML = insights.map(i =>
+        `<div class="proactive-item"><span class="proactive-icon">${i.icon}</span><span class="proactive-text">${i.text.replace(/\*\*(.*?)\*\*/g, '<strong>$1</strong>')}</span></div>`
+      ).join('');
+    }
+
+    // --- Filters ---
+    function populateFilters() {
+      const agentSelect = document.getElementById('filterAgent');
+      const policySelect = document.getElementById('filterPolicy');
+      const agents = [...new Set(violations.map(v => v.agent))].sort();
+      const pols = [...new Set(violations.map(v => v.policyName))].sort();
+      agentSelect.innerHTML = '<option value="">All Agents</option>' + agents.map(a => `<option value="${a}">${a}</option>`).join('');
+      policySelect.innerHTML = '<option value="">All Policies</option>' + pols.map(p => `<option value="${p}">${p}</option>`).join('');
+    }
+
+    function applyFilters() {
+      const sev = document.getElementById('filterSeverity').value;
+      const agent = document.getElementById('filterAgent').value;
+      const pol = document.getElementById('filterPolicy').value;
+      const search = document.getElementById('filterSearch').value.toLowerCase();
+      filteredViolations = violations.filter(v =>
+        (!sev || v.severity === sev) &&
+        (!agent || v.agent === agent) &&
+        (!pol || v.policyName === pol) &&
+        (!search || v.detail.toLowerCase().includes(search) || v.agent.toLowerCase().includes(search) || v.policyName.toLowerCase().includes(search))
+      );
+      renderViolations();
+    }
+
+    // --- Auto-Audit ---
+    function toggleAutoAudit() {
+      const bar = document.getElementById('autoAuditBar');
+      if (autoAuditInterval) {
+        clearInterval(autoAuditInterval);
+        clearInterval(countdownTimer);
+        autoAuditInterval = null;
+        bar.classList.add('paused');
+        bar.style.display = 'none';
+      } else {
+        autoCountdown = 30;
+        bar.classList.remove('paused');
+        bar.style.display = '';
+        bar.querySelector('button').textContent = '⏸ Pause';
+        countdownTimer = setInterval(() => {
+          autoCountdown--;
+          document.getElementById('autoCountdown').textContent = autoCountdown;
+          if (autoCountdown <= 0) autoCountdown = 30;
+        }, 1000);
+        autoAuditInterval = setInterval(() => { autoCountdown = 30; runAudit(); }, 30000);
+        runAudit();
+      }
+    }
+
+    // --- Reset ---
+    function resetPolicies() {
+      policies = JSON.parse(JSON.stringify(DEFAULT_POLICIES));
+      renderPolicies();
+    }
+
+    // --- History ---
+    function renderHistory() {
+      document.getElementById('historySection').style.display = '';
+      document.getElementById('historyList').innerHTML = auditHistory.map(h =>
+        `<div style="padding:6px 0;border-bottom:1px solid #222;display:flex;justify-content:space-between">
+          <span>${h.time.toLocaleTimeString()}</span>
+          <span>${h.violations} violations</span>
+          <span style="color:${h.score>=80?'#4ade80':h.score>=60?'#fbbf24':'#f87171'}">Score: ${h.score}</span>
+        </div>`
+      ).join('');
+    }
+
+    // --- Export ---
+    function exportAudit(format) {
+      const data = {
+        timestamp: new Date().toISOString(),
+        complianceScore: calcComplianceScore(),
+        totalViolations: violations.length,
+        policies: policies.filter(p => p.enabled).map(p => ({ id: p.id, name: p.name, severity: p.severity })),
+        violations: violations.map(v => ({ severity: v.severity, agent: v.agent, policy: v.policyName, rule: v.rule, detail: v.detail, timestamp: v.timestamp.toISOString() }))
+      };
+
+      let content, mime, ext;
+      if (format === 'json') {
+        content = JSON.stringify(data, null, 2);
+        mime = 'application/json'; ext = 'json';
+      } else if (format === 'csv') {
+        const rows = [['Severity','Agent','Policy','Rule','Details','Timestamp']];
+        data.violations.forEach(v => rows.push([v.severity, v.agent, v.policy, v.rule, `"${v.detail}"`, v.timestamp]));
+        content = rows.map(r => r.join(',')).join('\n');
+        mime = 'text/csv'; ext = 'csv';
+      } else {
+        content = `<!DOCTYPE html><html><head><title>Compliance Audit Report</title><style>body{font-family:system-ui;background:#0e0e16;color:#eee;padding:20px;max-width:1000px;margin:auto}table{width:100%;border-collapse:collapse}th,td{padding:8px;border-bottom:1px solid #333;text-align:left}th{color:#888}.critical{color:#f87171}.high{color:#fb923c}.medium{color:#fbbf24}.low{color:#4ade80}h1{color:#a78bfa}</style></head><body>
+<h1>🛡️ Compliance Audit Report</h1>
+<p>Generated: ${data.timestamp}</p>
+<h2>Score: ${data.complianceScore}/100</h2>
+<p>Total violations: ${data.totalViolations}</p>
+<table><tr><th>Severity</th><th>Agent</th><th>Policy</th><th>Details</th><th>Time</th></tr>
+${data.violations.map(v => `<tr><td class="${v.severity}">${v.severity}</td><td>${v.agent}</td><td>${v.policy}</td><td>${v.detail}</td><td>${v.timestamp}</td></tr>`).join('')}
+</table></body></html>`;
+        mime = 'text/html'; ext = 'html';
+      }
+
+      const blob = new Blob([content], { type: mime });
+      const a = document.createElement('a'); a.href = URL.createObjectURL(blob);
+      a.download = `compliance-audit-${Date.now()}.${ext}`; a.click();
+      URL.revokeObjectURL(a.href);
+    }
+
+    // --- Init ---
+    renderPolicies();
+  </script>
+</body>
+</html>
