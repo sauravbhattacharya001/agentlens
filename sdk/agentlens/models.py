@@ -8,9 +8,7 @@ from typing import Any
 
 from pydantic import BaseModel, Field
 
-
-def _utcnow() -> datetime:
-    return datetime.now(timezone.utc)
+from agentlens._utils import utcnow as _utcnow
 
 
 def _new_id() -> str:

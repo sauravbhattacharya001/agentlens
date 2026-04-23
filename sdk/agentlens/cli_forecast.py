@@ -16,10 +16,7 @@ from datetime import datetime, timedelta, timezone
 
 
 from agentlens.cli_common import get_client, sparkline as _spark, linear_regression as _linear_regression
-
-
-def _utcnow() -> datetime:
-    return datetime.now(timezone.utc)
+from agentlens._utils import utcnow as _utcnow
 
 
 def _exponential_smoothing(ys: list[float], alpha: float = 0.3) -> list[float]:

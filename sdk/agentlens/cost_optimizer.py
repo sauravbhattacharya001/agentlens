@@ -38,10 +38,7 @@ from enum import Enum
 from typing import Any
 
 from agentlens.models import AgentEvent
-
-
-def _utcnow() -> datetime:
-    return datetime.now(timezone.utc)
+from agentlens._utils import utcnow as _utcnow
 
 
 def _new_id() -> str:

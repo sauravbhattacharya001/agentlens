@@ -50,6 +50,8 @@ from datetime import datetime, timezone
 from enum import Enum
 from typing import Any
 
+from agentlens._utils import utcnow as _utcnow
+
 
 # ---------------------------------------------------------------------------
 # Constants
@@ -74,10 +76,6 @@ _NORM_PATTERNS: list[tuple[re.Pattern[str], str]] = [
     # Bare integers ≥ 2 digits (but not inside words)
     (re.compile(r"(?<![a-zA-Z_])\d{2,}(?![a-zA-Z_])"), "<NUM>"),
 ]
-
-
-def _utcnow() -> datetime:
-    return datetime.now(timezone.utc)
 
 
 # ---------------------------------------------------------------------------

@@ -9,9 +9,20 @@ from __future__ import annotations
 import re
 import signal
 import sys
+from datetime import datetime, timezone
 from typing import Any, Optional, Pattern
 
-__all__ = ["format_duration", "safe_compile", "safe_search", "percentile"]
+__all__ = ["format_duration", "safe_compile", "safe_search", "percentile", "utcnow"]
+
+
+def utcnow() -> datetime:
+    """Return the current UTC datetime (timezone-aware).
+
+    Centralised helper so every module uses the same clock source.
+    This also makes it easy to monkey-patch in tests for deterministic
+    timestamps.
+    """
+    return datetime.now(timezone.utc)
 
 # ---------------------------------------------------------------------------
 # ReDoS-safe regex helpers (CWE-1333)

@@ -18,10 +18,7 @@ from typing import Any
 
 
 from agentlens.cli_common import get_client, sparkline as _spark, linear_regression as _linear_regression, percentile as _percentile
-
-
-def _utcnow() -> datetime:
-    return datetime.now(timezone.utc)
+from agentlens._utils import utcnow as _utcnow
 
 
 def _aggregate_hourly(sessions: list[dict]) -> dict[str, list[float]]:
