@@ -1,0 +1,538 @@
+<!DOCTYPE html>
+<html lang="en">
+<head>
+  <meta charset="UTF-8">
+  <meta name="viewport" content="width=device-width, initial-scale=1.0">
+  <title>AgentLens — Communication Graph</title>
+  <link rel="stylesheet" href="styles.css">
+  <style>
+    .comm-container { display: grid; grid-template-columns: 1fr 320px; gap: 16px; height: calc(100vh - 160px); }
+    .comm-canvas-wrap { position: relative; background: var(--card-bg, #1a1a2e); border-radius: 12px; overflow: hidden; border: 1px solid var(--border, #2a2a4a); }
+    .comm-canvas-wrap canvas { width: 100%; height: 100%; cursor: grab; }
+    .comm-canvas-wrap canvas:active { cursor: grabbing; }
+    .comm-sidebar { display: flex; flex-direction: column; gap: 12px; overflow-y: auto; }
+    .comm-card { background: var(--card-bg, #1a1a2e); border-radius: 10px; padding: 14px; border: 1px solid var(--border, #2a2a4a); }
+    .comm-card h3 { margin: 0 0 10px; font-size: 14px; color: var(--text-secondary, #8888aa); text-transform: uppercase; letter-spacing: .5px; }
+    .comm-stat { display: flex; justify-content: space-between; padding: 4px 0; font-size: 13px; }
+    .comm-stat .label { color: var(--text-secondary, #8888aa); }
+    .comm-stat .value { font-weight: 600; color: var(--text, #e0e0ff); }
+    .comm-badge { display: inline-block; padding: 2px 8px; border-radius: 10px; font-size: 11px; font-weight: 600; }
+    .comm-badge.healthy { background: #0f5132; color: #75d5a0; }
+    .comm-badge.warning { background: #664d03; color: #ffda6a; }
+    .comm-badge.critical { background: #842029; color: #f5c2c7; }
+    .bottleneck-item { padding: 8px; margin: 4px 0; border-radius: 8px; background: rgba(255,100,100,.08); border-left: 3px solid #f66; font-size: 12px; }
+    .bottleneck-item .agent { font-weight: 600; color: var(--text, #e0e0ff); }
+    .bottleneck-item .reason { color: var(--text-secondary, #8888aa); margin-top: 2px; }
+    .pattern-item { padding: 8px; margin: 4px 0; border-radius: 8px; background: rgba(100,150,255,.08); border-left: 3px solid #66f; font-size: 12px; }
+    .insight-item { padding: 8px; margin: 4px 0; border-radius: 8px; background: rgba(100,255,150,.08); border-left: 3px solid #6f6; font-size: 12px; }
+    .comm-toolbar { display: flex; gap: 8px; align-items: center; flex-wrap: wrap; margin-bottom: 12px; }
+    .comm-toolbar select, .comm-toolbar button { font-size: 12px; padding: 6px 12px; border-radius: 6px; border: 1px solid var(--border, #2a2a4a); background: var(--card-bg, #1a1a2e); color: var(--text, #e0e0ff); cursor: pointer; }
+    .comm-toolbar button:hover { background: rgba(100,100,255,.15); }
+    .comm-toolbar button.active { background: rgba(100,100,255,.25); border-color: #66f; }
+    .legend { display: flex; gap: 12px; flex-wrap: wrap; font-size: 11px; color: var(--text-secondary, #8888aa); }
+    .legend-item { display: flex; align-items: center; gap: 4px; }
+    .legend-dot { width: 10px; height: 10px; border-radius: 50%; }
+    .tooltip { position: absolute; background: #222244; border: 1px solid #4444aa; border-radius: 8px; padding: 10px; font-size: 12px; pointer-events: none; z-index: 100; color: #e0e0ff; max-width: 250px; display: none; }
+    .auto-badge { animation: pulse-badge 2s infinite; }
+    @keyframes pulse-badge { 0%,100% { opacity: 1; } 50% { opacity: .6; } }
+  </style>
+</head>
+<body>
+  <div id="app">
+    <header class="header">
+      <div class="header-left">
+        <h1 class="logo">🔍 AgentLens</h1>
+        <span class="tagline">Communication Graph</span>
+      </div>
+      <div class="header-right">
+        <a href="index.html" class="btn btn-alert-header" style="text-decoration:none">← Dashboard</a>
+        <button class="theme-toggle" onclick="toggleTheme()" title="Toggle theme" id="themeToggleBtn">🌙</button>
+      </div>
+    </header>
+    <main class="main" style="padding: 16px;">
+      <div class="comm-toolbar">
+        <select id="presetSelect" onchange="loadPreset(this.value)">
+          <option value="microservices">🏗️ Microservices Fleet</option>
+          <option value="pipeline">🔗 Pipeline Chain</option>
+          <option value="hub">⭐ Hub-and-Spoke</option>
+          <option value="mesh">🕸️ Full Mesh</option>
+          <option value="hierarchical">🏛️ Hierarchical</option>
+        </select>
+        <button onclick="toggleAutoMonitor()" id="autoBtn">🤖 Auto-Monitor</button>
+        <button onclick="toggleAnimation()" id="animBtn" class="active">✨ Animate</button>
+        <button onclick="resetView()">🔄 Reset View</button>
+        <button onclick="exportJSON()">📥 Export JSON</button>
+        <div class="legend">
+          <div class="legend-item"><div class="legend-dot" style="background:#4ecdc4"></div> Healthy</div>
+          <div class="legend-item"><div class="legend-dot" style="background:#ffe66d"></div> Slow</div>
+          <div class="legend-item"><div class="legend-dot" style="background:#ff6b6b"></div> Bottleneck</div>
+          <div class="legend-item"><div class="legend-dot" style="background:#c44dff"></div> Hub</div>
+        </div>
+      </div>
+      <div class="comm-container">
+        <div class="comm-canvas-wrap">
+          <canvas id="graphCanvas"></canvas>
+          <div class="tooltip" id="tooltip"></div>
+        </div>
+        <div class="comm-sidebar">
+          <div class="comm-card">
+            <h3>📡 Network Health</h3>
+            <div class="comm-stat"><span class="label">Agents</span><span class="value" id="statAgents">0</span></div>
+            <div class="comm-stat"><span class="label">Active Links</span><span class="value" id="statLinks">0</span></div>
+            <div class="comm-stat"><span class="label">Messages/sec</span><span class="value" id="statMps">0</span></div>
+            <div class="comm-stat"><span class="label">Avg Latency</span><span class="value" id="statLatency">0ms</span></div>
+            <div class="comm-stat"><span class="label">Health</span><span class="value" id="statHealth"><span class="comm-badge healthy">GOOD</span></span></div>
+          </div>
+          <div class="comm-card">
+            <h3>🚨 Bottlenecks</h3>
+            <div id="bottleneckList"><em style="color:#666;font-size:12px">No bottlenecks detected</em></div>
+          </div>
+          <div class="comm-card">
+            <h3>🔍 Patterns</h3>
+            <div id="patternList"><em style="color:#666;font-size:12px">Analyzing...</em></div>
+          </div>
+          <div class="comm-card">
+            <h3>💡 Proactive Insights</h3>
+            <div id="insightList"><em style="color:#666;font-size:12px">Gathering data...</em></div>
+          </div>
+          <div class="comm-card">
+            <h3>📊 Top Talkers</h3>
+            <div id="topTalkers"></div>
+          </div>
+        </div>
+      </div>
+    </main>
+  </div>
+  <script>
+(function(){
+  const canvas = document.getElementById('graphCanvas');
+  const ctx = canvas.getContext('2d');
+  const tooltip = document.getElementById('tooltip');
+  let W, H, dpr;
+  let nodes = [], edges = [], particles = [];
+  let animating = true, autoMonitor = false, autoInterval = null;
+  let dragging = null, panX = 0, panY = 0, zoom = 1, lastMouse = {x:0,y:0};
+  let isPanning = false, hovered = null;
+
+  function resize() {
+    const r = canvas.parentElement.getBoundingClientRect();
+    dpr = window.devicePixelRatio || 1;
+    W = r.width; H = r.height;
+    canvas.width = W * dpr; canvas.height = H * dpr;
+    canvas.style.width = W + 'px'; canvas.style.height = H + 'px';
+    ctx.setTransform(dpr, 0, 0, dpr, 0, 0);
+  }
+  window.addEventListener('resize', resize);
+
+  const COLORS = {
+    healthy: '#4ecdc4', slow: '#ffe66d', bottleneck: '#ff6b6b', hub: '#c44dff',
+    edge: 'rgba(100,100,200,.3)', edgeActive: 'rgba(100,200,255,.6)',
+    particle: '#66ccff', text: '#e0e0ff', textDim: '#888'
+  };
+
+  const PRESETS = {
+    microservices: {
+      nodes: [
+        {id:'gateway',label:'API Gateway',role:'router',x:.5,y:.12},
+        {id:'auth',label:'Auth Service',role:'processor',x:.2,y:.3},
+        {id:'user',label:'User Service',role:'processor',x:.4,y:.35},
+        {id:'order',label:'Order Service',role:'processor',x:.6,y:.35},
+        {id:'payment',label:'Payment Service',role:'processor',x:.8,y:.3},
+        {id:'notify',label:'Notification',role:'sink',x:.3,y:.6},
+        {id:'inventory',label:'Inventory',role:'processor',x:.7,y:.6},
+        {id:'analytics',label:'Analytics',role:'sink',x:.5,y:.75},
+        {id:'cache',label:'Cache Layer',role:'processor',x:.15,y:.5},
+        {id:'search',label:'Search Service',role:'processor',x:.85,y:.5}
+      ],
+      edges: [
+        {from:'gateway',to:'auth',rate:120,latency:5},{from:'gateway',to:'user',rate:90,latency:8},
+        {from:'gateway',to:'order',rate:150,latency:12},{from:'gateway',to:'payment',rate:80,latency:15},
+        {from:'auth',to:'cache',rate:100,latency:2},{from:'user',to:'notify',rate:30,latency:20},
+        {from:'order',to:'inventory',rate:140,latency:25},{from:'order',to:'payment',rate:70,latency:18},
+        {from:'payment',to:'notify',rate:60,latency:10},{from:'inventory',to:'analytics',rate:50,latency:8},
+        {from:'order',to:'analytics',rate:45,latency:6},{from:'user',to:'search',rate:35,latency:12},
+        {from:'gateway',to:'search',rate:55,latency:10}
+      ]
+    },
+    pipeline: {
+      nodes: [
+        {id:'ingest',label:'Ingest Agent',role:'source',x:.1,y:.5},
+        {id:'parse',label:'Parser',role:'processor',x:.25,y:.35},
+        {id:'validate',label:'Validator',role:'processor',x:.4,y:.5},
+        {id:'enrich',label:'Enricher',role:'processor',x:.55,y:.35},
+        {id:'classify',label:'Classifier',role:'processor',x:.7,y:.5},
+        {id:'store',label:'Store Agent',role:'sink',x:.85,y:.35},
+        {id:'alert',label:'Alerter',role:'sink',x:.85,y:.65}
+      ],
+      edges: [
+        {from:'ingest',to:'parse',rate:200,latency:3},{from:'parse',to:'validate',rate:190,latency:5},
+        {from:'validate',to:'enrich',rate:180,latency:15},{from:'enrich',to:'classify',rate:175,latency:22},
+        {from:'classify',to:'store',rate:160,latency:8},{from:'classify',to:'alert',rate:40,latency:4}
+      ]
+    },
+    hub: {
+      nodes: [
+        {id:'orchestrator',label:'Orchestrator',role:'router',x:.5,y:.5},
+        {id:'worker1',label:'Worker Alpha',role:'processor',x:.2,y:.2},
+        {id:'worker2',label:'Worker Beta',role:'processor',x:.8,y:.2},
+        {id:'worker3',label:'Worker Gamma',role:'processor',x:.2,y:.8},
+        {id:'worker4',label:'Worker Delta',role:'processor',x:.8,y:.8},
+        {id:'monitor',label:'Monitor',role:'sink',x:.5,y:.15},
+        {id:'store',label:'Data Store',role:'sink',x:.5,y:.85}
+      ],
+      edges: [
+        {from:'orchestrator',to:'worker1',rate:100,latency:8},{from:'orchestrator',to:'worker2',rate:95,latency:10},
+        {from:'orchestrator',to:'worker3',rate:110,latency:7},{from:'orchestrator',to:'worker4',rate:88,latency:12},
+        {from:'worker1',to:'orchestrator',rate:90,latency:6},{from:'worker2',to:'orchestrator',rate:85,latency:9},
+        {from:'worker3',to:'orchestrator',rate:100,latency:5},{from:'worker4',to:'orchestrator',rate:80,latency:11},
+        {from:'orchestrator',to:'monitor',rate:50,latency:3},{from:'orchestrator',to:'store',rate:60,latency:15}
+      ]
+    },
+    mesh: {
+      nodes: [
+        {id:'a1',label:'Agent-1',role:'processor',x:.3,y:.2},
+        {id:'a2',label:'Agent-2',role:'processor',x:.7,y:.2},
+        {id:'a3',label:'Agent-3',role:'processor',x:.85,y:.5},
+        {id:'a4',label:'Agent-4',role:'processor',x:.7,y:.8},
+        {id:'a5',label:'Agent-5',role:'processor',x:.3,y:.8},
+        {id:'a6',label:'Agent-6',role:'processor',x:.15,y:.5}
+      ],
+      edges: [
+        {from:'a1',to:'a2',rate:60,latency:8},{from:'a2',to:'a3',rate:55,latency:10},
+        {from:'a3',to:'a4',rate:70,latency:7},{from:'a4',to:'a5',rate:65,latency:9},
+        {from:'a5',to:'a6',rate:50,latency:12},{from:'a6',to:'a1',rate:58,latency:11},
+        {from:'a1',to:'a4',rate:30,latency:15},{from:'a2',to:'a5',rate:35,latency:14},
+        {from:'a3',to:'a6',rate:25,latency:18}
+      ]
+    },
+    hierarchical: {
+      nodes: [
+        {id:'ceo',label:'Supervisor',role:'router',x:.5,y:.1},
+        {id:'mgr1',label:'Team Lead A',role:'router',x:.25,y:.35},
+        {id:'mgr2',label:'Team Lead B',role:'router',x:.75,y:.35},
+        {id:'w1',label:'Worker 1',role:'processor',x:.1,y:.65},
+        {id:'w2',label:'Worker 2',role:'processor',x:.3,y:.65},
+        {id:'w3',label:'Worker 3',role:'processor',x:.4,y:.65},
+        {id:'w4',label:'Worker 4',role:'processor',x:.6,y:.65},
+        {id:'w5',label:'Worker 5',role:'processor',x:.7,y:.65},
+        {id:'w6',label:'Worker 6',role:'processor',x:.9,y:.65},
+        {id:'log',label:'Logger',role:'sink',x:.5,y:.9}
+      ],
+      edges: [
+        {from:'ceo',to:'mgr1',rate:80,latency:5},{from:'ceo',to:'mgr2',rate:75,latency:6},
+        {from:'mgr1',to:'w1',rate:40,latency:3},{from:'mgr1',to:'w2',rate:45,latency:4},
+        {from:'mgr1',to:'w3',rate:35,latency:5},{from:'mgr2',to:'w4',rate:42,latency:3},
+        {from:'mgr2',to:'w5',rate:38,latency:4},{from:'mgr2',to:'w6',rate:40,latency:6},
+        {from:'w1',to:'log',rate:20,latency:2},{from:'w2',to:'log',rate:22,latency:2},
+        {from:'w4',to:'log',rate:18,latency:3},{from:'w5',to:'log',rate:25,latency:2},
+        {from:'mgr1',to:'ceo',rate:30,latency:8},{from:'mgr2',to:'ceo',rate:28,latency:9}
+      ]
+    }
+  };
+
+  function loadPreset(name) {
+    const p = PRESETS[name]; if (!p) return;
+    nodes = p.nodes.map(n => ({
+      ...n, px: n.x * W, py: n.y * H, radius: 24,
+      inRate: 0, outRate: 0, totalLatency: 0, linkCount: 0,
+      status: 'healthy', vx: 0, vy: 0
+    }));
+    edges = p.edges.map(e => ({
+      ...e, status: e.latency > 20 ? 'slow' : 'healthy',
+      _rate: e.rate, _latency: e.latency
+    }));
+    // compute in/out rates
+    nodes.forEach(n => { n.inRate = 0; n.outRate = 0; n.totalLatency = 0; n.linkCount = 0; });
+    edges.forEach(e => {
+      const src = nodes.find(n => n.id === e.from);
+      const dst = nodes.find(n => n.id === e.to);
+      if (src) { src.outRate += e.rate; src.linkCount++; src.totalLatency += e.latency; }
+      if (dst) { dst.inRate += e.rate; dst.linkCount++; dst.totalLatency += e.latency; }
+    });
+    detectStatuses();
+    particles = [];
+    updateSidebar();
+  }
+
+  function detectStatuses() {
+    const avgRate = edges.reduce((s,e) => s+e.rate, 0) / (edges.length||1);
+    const avgLat = edges.reduce((s,e) => s+e.latency, 0) / (edges.length||1);
+    nodes.forEach(n => {
+      const totalIO = n.inRate + n.outRate;
+      const avgNodeLat = n.linkCount ? n.totalLatency / n.linkCount : 0;
+      if (totalIO > avgRate * 3) n.status = 'hub';
+      else if (avgNodeLat > avgLat * 1.5) n.status = 'bottleneck';
+      else if (avgNodeLat > avgLat) n.status = 'slow';
+      else n.status = 'healthy';
+    });
+    edges.forEach(e => {
+      e.status = e.latency > avgLat * 2 ? 'bottleneck' : e.latency > avgLat * 1.2 ? 'slow' : 'healthy';
+    });
+  }
+
+  function updateSidebar() {
+    document.getElementById('statAgents').textContent = nodes.length;
+    document.getElementById('statLinks').textContent = edges.length;
+    const totalRate = edges.reduce((s,e)=>s+e.rate,0);
+    document.getElementById('statMps').textContent = totalRate.toLocaleString();
+    const avgLat = edges.length ? (edges.reduce((s,e)=>s+e.latency,0)/edges.length).toFixed(1) : 0;
+    document.getElementById('statLatency').textContent = avgLat + 'ms';
+    const bns = nodes.filter(n=>n.status==='bottleneck');
+    const healthEl = document.getElementById('statHealth');
+    if (bns.length > 2) healthEl.innerHTML = '<span class="comm-badge critical">CRITICAL</span>';
+    else if (bns.length > 0) healthEl.innerHTML = '<span class="comm-badge warning">DEGRADED</span>';
+    else healthEl.innerHTML = '<span class="comm-badge healthy">GOOD</span>';
+
+    // Bottlenecks
+    const bnList = document.getElementById('bottleneckList');
+    if (bns.length === 0) {
+      bnList.innerHTML = '<em style="color:#666;font-size:12px">No bottlenecks detected</em>';
+    } else {
+      bnList.innerHTML = bns.map(n => {
+        const avgL = n.linkCount ? (n.totalLatency/n.linkCount).toFixed(0) : 0;
+        return `<div class="bottleneck-item"><div class="agent">${n.label}</div><div class="reason">Avg latency ${avgL}ms across ${n.linkCount} links — ${n.inRate+n.outRate} msg/s throughput</div></div>`;
+      }).join('');
+    }
+
+    // Patterns
+    const patterns = detectPatterns();
+    document.getElementById('patternList').innerHTML = patterns.length ? patterns.map(p =>
+      `<div class="pattern-item">${p}</div>`).join('') : '<em style="color:#666;font-size:12px">No notable patterns</em>';
+
+    // Insights
+    const insights = generateInsights();
+    document.getElementById('insightList').innerHTML = insights.length ? insights.map(i =>
+      `<div class="insight-item">${i}</div>`).join('') : '<em style="color:#666;font-size:12px">Network looks healthy</em>';
+
+    // Top talkers
+    const sorted = [...nodes].sort((a,b) => (b.inRate+b.outRate) - (a.inRate+a.outRate)).slice(0,5);
+    document.getElementById('topTalkers').innerHTML = sorted.map(n => {
+      const total = n.inRate + n.outRate;
+      return `<div class="comm-stat"><span class="label">${n.label}</span><span class="value">${total} msg/s</span></div>`;
+    }).join('');
+  }
+
+  function detectPatterns() {
+    const p = [];
+    // Hub detection
+    const hubs = nodes.filter(n => n.status === 'hub');
+    if (hubs.length) p.push(`⭐ Hub-spoke pattern: ${hubs.map(h=>h.label).join(', ')} centralize ${hubs.reduce((s,h)=>s+h.linkCount,0)} connections`);
+    // Chain detection
+    const chainNodes = nodes.filter(n => n.linkCount === 2 && n.role === 'processor');
+    if (chainNodes.length >= 3) p.push(`🔗 Pipeline chain detected: ${chainNodes.length} sequential processors`);
+    // Fan-out
+    nodes.forEach(n => {
+      const outEdges = edges.filter(e => e.from === n.id);
+      if (outEdges.length >= 4) p.push(`📤 High fan-out: ${n.label} sends to ${outEdges.length} agents`);
+    });
+    // Bidirectional
+    let bidir = 0;
+    edges.forEach(e => { if (edges.find(e2 => e2.from === e.to && e2.to === e.from)) bidir++; });
+    if (bidir > 2) p.push(`🔄 ${bidir/2} bidirectional communication pairs detected`);
+    return p;
+  }
+
+  function generateInsights() {
+    const ins = [];
+    const slowEdges = edges.filter(e => e.status === 'slow' || e.status === 'bottleneck');
+    if (slowEdges.length > 0) {
+      const worst = slowEdges.sort((a,b) => b.latency - a.latency)[0];
+      const src = nodes.find(n => n.id === worst.from);
+      const dst = nodes.find(n => n.id === worst.to);
+      ins.push(`⚠️ Highest latency: ${src?.label} → ${dst?.label} at ${worst.latency}ms. Consider adding a cache or async queue.`);
+    }
+    const hubs = nodes.filter(n => n.status === 'hub');
+    if (hubs.length === 1) ins.push(`🎯 Single point of failure: ${hubs[0].label} handles most traffic. Consider load balancing or replication.`);
+    const sinks = nodes.filter(n => n.role === 'sink');
+    if (sinks.length) {
+      const overloaded = sinks.filter(s => s.inRate > 80);
+      if (overloaded.length) ins.push(`📥 Sink overload risk: ${overloaded.map(s=>s.label).join(', ')} receiving ${overloaded.reduce((s,n)=>s+n.inRate,0)} msg/s combined.`);
+    }
+    const isolated = nodes.filter(n => n.linkCount <= 1);
+    if (isolated.length) ins.push(`🏝️ ${isolated.length} weakly connected agent(s) — consider redundant links for resilience.`);
+    // Latency variance
+    const lats = edges.map(e=>e.latency);
+    const mean = lats.reduce((a,b)=>a+b,0)/lats.length;
+    const variance = lats.reduce((s,l)=>s+(l-mean)**2,0)/lats.length;
+    if (Math.sqrt(variance) > mean * 0.8) ins.push(`📊 High latency variance (σ=${Math.sqrt(variance).toFixed(1)}ms). Network performance is inconsistent.`);
+    return ins;
+  }
+
+  // --- Rendering ---
+  function drawEdge(e) {
+    const src = nodes.find(n => n.id === e.from);
+    const dst = nodes.find(n => n.id === e.to);
+    if (!src || !dst) return;
+    const sx = src.px + panX, sy = src.py + panY;
+    const dx = dst.px + panX, dy = dst.py + panY;
+    const color = e.status === 'bottleneck' ? COLORS.bottleneck : e.status === 'slow' ? COLORS.slow : COLORS.edge;
+    const width = Math.max(1, Math.min(5, e.rate / 40));
+    ctx.beginPath(); ctx.moveTo(sx, sy); ctx.lineTo(dx, dy);
+    ctx.strokeStyle = color; ctx.lineWidth = width * zoom; ctx.stroke();
+    // Arrow
+    const angle = Math.atan2(dy - sy, dx - sx);
+    const arrowLen = 10 * zoom;
+    const mx = (sx + dx) / 2, my = (sy + dy) / 2;
+    ctx.beginPath();
+    ctx.moveTo(mx + arrowLen * Math.cos(angle - .3), my + arrowLen * Math.sin(angle - .3));
+    ctx.lineTo(mx, my);
+    ctx.lineTo(mx + arrowLen * Math.cos(angle + .3), my + arrowLen * Math.sin(angle + .3));
+    ctx.strokeStyle = color; ctx.lineWidth = 1.5 * zoom; ctx.stroke();
+    // Label
+    ctx.font = `${10*zoom}px system-ui`; ctx.fillStyle = COLORS.textDim; ctx.textAlign = 'center';
+    const lx = mx + 12 * Math.cos(angle + Math.PI/2);
+    const ly = my + 12 * Math.sin(angle + Math.PI/2);
+    ctx.fillText(`${e.rate}/s ${e.latency}ms`, lx, ly);
+  }
+
+  function drawNode(n) {
+    const x = n.px + panX, y = n.py + panY;
+    const r = n.radius * zoom;
+    const color = COLORS[n.status] || COLORS.healthy;
+    // Glow
+    if (n === hovered || n.status === 'bottleneck') {
+      ctx.beginPath(); ctx.arc(x, y, r * 1.6, 0, Math.PI * 2);
+      const g = ctx.createRadialGradient(x, y, r * .5, x, y, r * 1.6);
+      g.addColorStop(0, color + '44'); g.addColorStop(1, 'transparent');
+      ctx.fillStyle = g; ctx.fill();
+    }
+    // Circle
+    ctx.beginPath(); ctx.arc(x, y, r, 0, Math.PI * 2);
+    ctx.fillStyle = color + '33'; ctx.fill();
+    ctx.strokeStyle = color; ctx.lineWidth = 2 * zoom; ctx.stroke();
+    // Icon
+    const icons = {router:'🔀',processor:'⚙️',source:'📤',sink:'📥'};
+    ctx.font = `${14*zoom}px system-ui`; ctx.textAlign = 'center'; ctx.textBaseline = 'middle';
+    ctx.fillText(icons[n.role]||'⚙️', x, y);
+    // Label
+    ctx.font = `bold ${11*zoom}px system-ui`; ctx.fillStyle = COLORS.text;
+    ctx.fillText(n.label, x, y + r + 14 * zoom);
+  }
+
+  function spawnParticle(e) {
+    const src = nodes.find(n => n.id === e.from);
+    const dst = nodes.find(n => n.id === e.to);
+    if (!src || !dst) return;
+    particles.push({ x: src.px, y: src.py, tx: dst.px, ty: dst.py, t: 0, speed: .005 + Math.random()*.01, color: COLORS.particle });
+  }
+
+  function drawParticles() {
+    particles.forEach(p => {
+      const x = p.x + (p.tx - p.x) * p.t + panX;
+      const y = p.y + (p.ty - p.y) * p.t + panY;
+      ctx.beginPath(); ctx.arc(x, y, 3 * zoom, 0, Math.PI * 2);
+      ctx.fillStyle = p.color; ctx.globalAlpha = 1 - p.t * .5; ctx.fill(); ctx.globalAlpha = 1;
+    });
+  }
+
+  let frame = 0;
+  function render() {
+    ctx.clearRect(0, 0, W, H);
+    edges.forEach(drawEdge);
+    if (animating) drawParticles();
+    nodes.forEach(drawNode);
+    // Spawn particles
+    if (animating && frame % 8 === 0) {
+      const e = edges[Math.floor(Math.random() * edges.length)];
+      if (e) spawnParticle(e);
+    }
+    // Update particles
+    particles = particles.filter(p => { p.t += p.speed; return p.t < 1; });
+    frame++;
+    requestAnimationFrame(render);
+  }
+
+  // --- Interaction ---
+  function screenToWorld(mx, my) { return { x: (mx - panX) / zoom, y: (my - panY) / zoom }; }
+  function hitTest(mx, my) {
+    const wm = { x: mx - panX, y: my - panY };
+    return nodes.find(n => Math.hypot(n.px - wm.x, n.py - wm.y) < n.radius * zoom * 1.2);
+  }
+
+  canvas.addEventListener('mousedown', e => {
+    const r = canvas.getBoundingClientRect();
+    const mx = e.clientX - r.left, my = e.clientY - r.top;
+    const hit = hitTest(mx, my);
+    if (hit) { dragging = hit; } else { isPanning = true; lastMouse = {x: e.clientX, y: e.clientY}; }
+  });
+  canvas.addEventListener('mousemove', e => {
+    const r = canvas.getBoundingClientRect();
+    const mx = e.clientX - r.left, my = e.clientY - r.top;
+    if (dragging) {
+      dragging.px = mx - panX; dragging.py = my - panY;
+    } else if (isPanning) {
+      panX += e.clientX - lastMouse.x; panY += e.clientY - lastMouse.y;
+      lastMouse = {x: e.clientX, y: e.clientY};
+    } else {
+      const hit = hitTest(mx, my);
+      hovered = hit;
+      if (hit) {
+        tooltip.style.display = 'block';
+        tooltip.style.left = (mx + 15) + 'px'; tooltip.style.top = (my + 15) + 'px';
+        const avgLat = hit.linkCount ? (hit.totalLatency/hit.linkCount).toFixed(0) : 0;
+        tooltip.innerHTML = `<strong>${hit.label}</strong><br>Role: ${hit.role}<br>In: ${hit.inRate} msg/s | Out: ${hit.outRate} msg/s<br>Links: ${hit.linkCount} | Avg Latency: ${avgLat}ms<br>Status: <span style="color:${COLORS[hit.status]}">${hit.status.toUpperCase()}</span>`;
+      } else { tooltip.style.display = 'none'; }
+    }
+  });
+  canvas.addEventListener('mouseup', () => { dragging = null; isPanning = false; });
+  canvas.addEventListener('mouseleave', () => { dragging = null; isPanning = false; tooltip.style.display = 'none'; hovered = null; });
+  canvas.addEventListener('wheel', e => {
+    e.preventDefault();
+    const factor = e.deltaY > 0 ? 0.9 : 1.1;
+    zoom = Math.max(0.3, Math.min(3, zoom * factor));
+  }, {passive: false});
+
+  // --- Controls ---
+  window.toggleAnimation = () => { animating = !animating; document.getElementById('animBtn').classList.toggle('active', animating); };
+  window.resetView = () => { panX = 0; panY = 0; zoom = 1; };
+  window.toggleAutoMonitor = () => {
+    autoMonitor = !autoMonitor;
+    const btn = document.getElementById('autoBtn');
+    btn.classList.toggle('active', autoMonitor);
+    if (autoMonitor) {
+      btn.innerHTML = '🤖 <span class="auto-badge">Auto-Monitor ON</span>';
+      autoInterval = setInterval(simulateDrift, 3000);
+    } else {
+      btn.textContent = '🤖 Auto-Monitor';
+      clearInterval(autoInterval);
+    }
+  };
+  function simulateDrift() {
+    edges.forEach(e => {
+      e.rate = Math.max(5, e._rate + Math.round((Math.random()-.5)*30));
+      e.latency = Math.max(1, e._latency + Math.round((Math.random()-.5)*10));
+    });
+    nodes.forEach(n => { n.inRate = 0; n.outRate = 0; n.totalLatency = 0; n.linkCount = 0; });
+    edges.forEach(e => {
+      const src = nodes.find(n => n.id === e.from);
+      const dst = nodes.find(n => n.id === e.to);
+      if (src) { src.outRate += e.rate; src.linkCount++; src.totalLatency += e.latency; }
+      if (dst) { dst.inRate += e.rate; dst.linkCount++; dst.totalLatency += e.latency; }
+    });
+    detectStatuses(); updateSidebar();
+  }
+  window.loadPreset = (name) => { loadPreset(name); };
+  window.exportJSON = () => {
+    const data = { nodes: nodes.map(n => ({id:n.id,label:n.label,role:n.role,status:n.status,inRate:n.inRate,outRate:n.outRate})),
+      edges: edges.map(e => ({from:e.from,to:e.to,rate:e.rate,latency:e.latency,status:e.status})),
+      analysis: { patterns: detectPatterns(), insights: generateInsights(), bottlenecks: nodes.filter(n=>n.status==='bottleneck').map(n=>n.label) }
+    };
+    const blob = new Blob([JSON.stringify(data,null,2)], {type:'application/json'});
+    const a = document.createElement('a'); a.href = URL.createObjectURL(blob); a.download = 'comm-graph.json'; a.click();
+  };
+
+  // Theme
+  window.toggleTheme = () => {
+    document.body.classList.toggle('light-theme');
+    const btn = document.getElementById('themeToggleBtn');
+    btn.textContent = document.body.classList.contains('light-theme') ? '☀️' : '🌙';
+  };
+
+  // Init
+  resize();
+  loadPreset('microservices');
+  render();
+})();
+  </script>
+</body>
+</html>
