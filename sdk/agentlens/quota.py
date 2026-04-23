@@ -240,6 +240,9 @@ class QuotaManager:
     def __init__(self, *, now_fn=None):
         self._policies: dict[str, QuotaPolicy] = {}
         self._records: list[UsageRecord] = []
+        # Per-entity index for O(entity_records) lookups instead of
+        # O(all_records) linear scans in record_usage/check_usage/report.
+        self._entity_records: dict[str, list[UsageRecord]] = defaultdict(list)
         self._pools: dict[str, SharedPool] = {}
         self._pool_usage: dict[str, list[UsageRecord]] = defaultdict(list)
         self._callbacks: list[Any] = []
@@ -331,11 +334,16 @@ class QuotaManager:
             return QuotaCheck(allowed=True, reason="no active quota")
 
         start, end = self._window_bounds(policy.window, now)
-        window_records = [r for r in self._records
-                          if r.entity_id == entity_id and start <= r.timestamp < end]
-        current_tokens = sum(r.tokens for r in window_records)
-        current_cost = sum(r.cost_usd for r in window_records)
-        current_requests = len(window_records)
+        # Use per-entity index instead of scanning all records.
+        entity_recs = self._entity_records.get(entity_id, [])
+        current_tokens = 0
+        current_cost = 0.0
+        current_requests = 0
+        for r in entity_recs:
+            if start <= r.timestamp < end:
+                current_tokens += r.tokens
+                current_cost += r.cost_usd
+                current_requests += 1
 
         new_tokens = current_tokens + tokens
         new_cost = current_cost + cost_usd
@@ -399,6 +407,7 @@ class QuotaManager:
             check.reason = ""
 
         self._records.append(record)
+        self._entity_records[entity_id].append(record)
 
         for cb in self._callbacks:
             cb(entity_id, check)
@@ -413,10 +422,14 @@ class QuotaManager:
 
         now = self._now_fn()
         start, end = self._window_bounds(policy.window, now)
-        window_records = [r for r in self._records
-                          if r.entity_id == entity_id and start <= r.timestamp < end]
-        current_tokens = sum(r.tokens for r in window_records) + tokens
-        current_cost = sum(r.cost_usd for r in window_records) + cost_usd
+        # Use per-entity index instead of scanning all records.
+        entity_recs = self._entity_records.get(entity_id, [])
+        current_tokens = tokens
+        current_cost = cost_usd
+        for r in entity_recs:
+            if start <= r.timestamp < end:
+                current_tokens += r.tokens
+                current_cost += r.cost_usd
 
         check = QuotaCheck()
         if policy.max_tokens is not None:
@@ -451,10 +464,16 @@ class QuotaManager:
             return QuotaReport(entity_id=entity_id, status="no_quota")
 
         start, end = self._window_bounds(policy.window, now)
-        window_records = [r for r in self._records
-                          if r.entity_id == entity_id and start <= r.timestamp < end]
-        tokens_used = sum(r.tokens for r in window_records)
-        cost_used = sum(r.cost_usd for r in window_records)
+        # Use per-entity index instead of scanning all records.
+        entity_recs = self._entity_records.get(entity_id, [])
+        window_records: list[UsageRecord] = []
+        tokens_used = 0
+        cost_used = 0.0
+        for r in entity_recs:
+            if start <= r.timestamp < end:
+                window_records.append(r)
+                tokens_used += r.tokens
+                cost_used += r.cost_usd
         requests_used = len(window_records)
 
         util_t = tokens_used / policy.max_tokens if policy.max_tokens and policy.max_tokens > 0 else 0
@@ -541,9 +560,13 @@ class QuotaManager:
         )
 
     def reset_usage(self, entity_id: str) -> int:
-        before = len(self._records)
-        self._records = [r for r in self._records if r.entity_id != entity_id]
-        return before - len(self._records)
+        removed = self._entity_records.pop(entity_id, [])
+        count = len(removed)
+        if count:
+            # Rebuild the flat list only when records were actually removed.
+            removed_ids = {id(r) for r in removed}
+            self._records = [r for r in self._records if id(r) not in removed_ids]
+        return count
 
     def export_state(self) -> dict[str, Any]:
         return {
