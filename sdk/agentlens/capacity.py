@@ -360,15 +360,31 @@ class CapacityPlanner:
         }
 
     def peak_utilization(self) -> Dict[str, float]:
-        """Peak utilization across all samples."""
+        """Peak utilization across all samples.
+
+        Single-pass scan instead of 5 separate generator expressions,
+        reducing from O(5n) to O(n).
+        """
         if not self._samples:
             return {"cpu": 0, "memory": 0, "error_rate": 0, "rpm": 0, "sessions": 0}
+        cpu = mem = err = rpm = ses = 0.0
+        for s in self._samples:
+            if s.cpu_utilization > cpu:
+                cpu = s.cpu_utilization
+            if s.memory_utilization > mem:
+                mem = s.memory_utilization
+            if s.error_rate > err:
+                err = s.error_rate
+            if s.requests_per_minute > rpm:
+                rpm = s.requests_per_minute
+            if s.active_sessions > ses:
+                ses = s.active_sessions
         return {
-            "cpu": max(s.cpu_utilization for s in self._samples),
-            "memory": max(s.memory_utilization for s in self._samples),
-            "error_rate": max(s.error_rate for s in self._samples),
-            "rpm": max(s.requests_per_minute for s in self._samples),
-            "sessions": max(s.active_sessions for s in self._samples),
+            "cpu": cpu,
+            "memory": mem,
+            "error_rate": err,
+            "rpm": rpm,
+            "sessions": ses,
         }
 
     def _compute_all_trends(
@@ -478,7 +494,11 @@ class CapacityPlanner:
             return bottlenecks
 
         cur = self.current_utilization()
-        trends = self.compute_trends()
+        # Reuse _compute_all_trends() for both directions and slopes,
+        # avoiding redundant list comprehension + regression in CPU
+        # saturation projection below.
+        all_trends = self._compute_all_trends()
+        trends = {k: v[0] for k, v in all_trends.items()}
         ss = self._sorted_samples()
 
         # CPU bottleneck
@@ -495,9 +515,9 @@ class CapacityPlanner:
                 recommendation="Scale out compute or optimize hot paths",
             ))
         elif trends.get("cpu") == TrendDirection.RISING and cpu > 0.5:
-            # Project when CPU hits threshold
-            cpu_vals = [s.cpu_utilization for s in ss]
-            _, slope = self._compute_trend(cpu_vals)
+            # Reuse slope from _compute_all_trends instead of re-extracting
+            # cpu_vals and re-running _compute_trend (saves O(n) + regression).
+            slope = all_trends["cpu"][1]
             obs_hours = self._observation_hours()
             samples_per_hour = len(ss) / max(obs_hours, 1) if obs_hours > 0 else 1
             if slope > 0:
