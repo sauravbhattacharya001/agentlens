@@ -1,0 +1,265 @@
+<!DOCTYPE html>
+<html lang="en">
+<head>
+  <meta charset="UTF-8">
+  <meta name="viewport" content="width=device-width, initial-scale=1.0">
+  <title>AgentLens — SLO Dashboard</title>
+  <link rel="stylesheet" href="styles.css">
+  <script src="https://cdn.jsdelivr.net/npm/chart.js@4"></script>
+  <style>
+    .slo-grid { display: grid; grid-template-columns: 1fr 1fr; gap: 1rem; margin-top: 1rem; }
+    .slo-card { background: var(--card-bg, #1e1e2e); border-radius: 12px; padding: 1.25rem; border: 1px solid var(--border, #2e2e3e); }
+    .slo-card h3 { margin: 0 0 1rem; font-size: 1rem; }
+    .slo-full { grid-column: 1 / -1; }
+    .budget-gauge { position: relative; width: 180px; height: 180px; margin: 0 auto; }
+    .budget-gauge canvas { width: 180px; height: 180px; }
+    .budget-center { position: absolute; top: 50%; left: 50%; transform: translate(-50%, -50%); text-align: center; }
+    .budget-center .pct { font-size: 2rem; font-weight: 700; }
+    .budget-center .label { font-size: 0.75rem; opacity: 0.6; }
+    .slo-form { display: grid; grid-template-columns: repeat(auto-fill, minmax(180px, 1fr)); gap: 0.75rem; align-items: end; }
+    .slo-form label { font-size: 0.8rem; opacity: 0.7; display: block; margin-bottom: 0.25rem; }
+    .slo-form input, .slo-form select { width: 100%; padding: 0.5rem; border-radius: 6px; border: 1px solid var(--border, #2e2e3e); background: var(--input-bg, #16161e); color: inherit; font-size: 0.9rem; }
+    .slo-form button { padding: 0.5rem 1rem; }
+    .slo-list { margin-top: 1rem; }
+    .slo-item { display: grid; grid-template-columns: 2fr 1fr 1fr 1fr 1fr auto; gap: 0.5rem; align-items: center; padding: 0.6rem 0; border-bottom: 1px solid var(--border, #2e2e3e); font-size: 0.85rem; }
+    .slo-item.header { font-weight: 700; opacity: 0.7; font-size: 0.75rem; text-transform: uppercase; }
+    .status-badge { padding: 0.2rem 0.6rem; border-radius: 99px; font-size: 0.75rem; font-weight: 600; text-align: center; }
+    .status-met { background: #22c55e22; color: #22c55e; }
+    .status-warn { background: #eab30822; color: #eab308; }
+    .status-breach { background: #ef444422; color: #ef4444; }
+    .rec-panel { display: flex; flex-direction: column; gap: 0.75rem; }
+    .rec-card { padding: 1rem; border-radius: 8px; border-left: 4px solid; }
+    .rec-safe { border-color: #22c55e; background: #22c55e0a; }
+    .rec-caution { border-color: #eab308; background: #eab3080a; }
+    .rec-freeze { border-color: #ef4444; background: #ef44440a; }
+    .rec-card h4 { margin: 0 0 0.25rem; font-size: 0.9rem; }
+    .rec-card p { margin: 0; font-size: 0.8rem; opacity: 0.8; }
+    .burn-legend { display: flex; gap: 1rem; margin-top: 0.5rem; font-size: 0.8rem; }
+    .burn-legend span::before { content: ''; display: inline-block; width: 12px; height: 12px; border-radius: 2px; margin-right: 4px; vertical-align: middle; }
+    .burn-legend .leg-1h::before { background: #818cf8; }
+    .burn-legend .leg-6h::before { background: #f472b6; }
+    .history-table { width: 100%; border-collapse: collapse; font-size: 0.85rem; }
+    .history-table th, .history-table td { padding: 0.5rem; text-align: left; border-bottom: 1px solid var(--border, #2e2e3e); }
+    .history-table th { opacity: 0.7; font-size: 0.75rem; text-transform: uppercase; }
+    .toolbar { display: flex; gap: 0.5rem; flex-wrap: wrap; margin-top: 1rem; }
+    .toolbar select, .toolbar button { padding: 0.4rem 0.8rem; border-radius: 6px; border: 1px solid var(--border, #2e2e3e); background: var(--input-bg, #16161e); color: inherit; font-size: 0.8rem; cursor: pointer; }
+    .toolbar button:hover { background: var(--border, #2e2e3e); }
+    @media (max-width: 900px) { .slo-grid { grid-template-columns: 1fr; } }
+  </style>
+</head>
+<body>
+  <div id="app">
+    <header class="header">
+      <div class="header-left">
+        <h1 class="logo">🔍 AgentLens</h1>
+        <span class="tagline">SLO Dashboard</span>
+      </div>
+      <div class="header-right">
+        <a href="index.html" class="btn btn-alert-header" style="text-decoration:none">🏠 Dashboard</a>
+        <a href="sla.html" class="btn btn-alert-header" style="text-decoration:none">📏 SLA</a>
+        <a href="costs.html" class="btn btn-alert-header" style="text-decoration:none">💰 Costs</a>
+        <a href="alerts.html" class="btn btn-alert-header" style="text-decoration:none">🚨 Alerts</a>
+      </div>
+    </header>
+    <main class="main" style="padding: 1.5rem; max-width: 1400px; margin: 0 auto;">
+      <h2 style="margin:0 0 0.5rem">🎯 Service Level Objectives</h2>
+      <p style="margin:0 0 1rem; opacity:0.7; font-size:0.9rem;">Define SLOs, track error budgets, and get autonomous deployment recommendations.</p>
+
+      <div class="slo-card slo-full">
+        <h3>➕ Define New SLO</h3>
+        <div class="slo-form" id="sloForm">
+          <div><label>Name</label><input id="sloName" placeholder="e.g. Agent Success Rate"></div>
+          <div><label>Metric</label><select id="sloMetric">
+            <option value="availability">Availability</option>
+            <option value="latency_p95">Latency (p95)</option>
+            <option value="error_rate">Error Rate</option>
+            <option value="throughput">Throughput</option>
+          </select></div>
+          <div><label>Target</label><input id="sloTarget" type="number" step="0.01" placeholder="99.9"></div>
+          <div><label>Unit</label><select id="sloUnit">
+            <option value="%">%</option>
+            <option value="ms">ms</option>
+            <option value="req/s">req/s</option>
+          </select></div>
+          <div><label>Window</label><select id="sloWindow">
+            <option value="7d">Rolling 7 days</option>
+            <option value="30d">Rolling 30 days</option>
+            <option value="90d">Rolling 90 days</option>
+          </select></div>
+          <div><button class="btn btn-analytics" onclick="addSLO()">Add SLO</button></div>
+        </div>
+      </div>
+
+      <div class="toolbar">
+        <button onclick="generateDemoData()">🎲 Generate Demo Data</button>
+        <button onclick="exportJSON()">📥 Export JSON</button>
+        <select id="timeWindow" onchange="refreshAll()">
+          <option value="1h">Last 1 hour</option>
+          <option value="6h">Last 6 hours</option>
+          <option value="24h" selected>Last 24 hours</option>
+          <option value="7d">Last 7 days</option>
+          <option value="30d">Last 30 days</option>
+        </select>
+      </div>
+
+      <div class="slo-grid" id="sloGrid"></div>
+    </main>
+  </div>
+  <script>
+  let slos = [], selectedSLO = null, burnChart = null;
+
+  function addSLO(preset) {
+    const s = preset || {
+      name: document.getElementById('sloName').value || 'Untitled SLO',
+      metric: document.getElementById('sloMetric').value,
+      target: parseFloat(document.getElementById('sloTarget').value) || 99.9,
+      unit: document.getElementById('sloUnit').value,
+      window: document.getElementById('sloWindow').value,
+    };
+    s.id = crypto.randomUUID();
+    s.created = new Date().toISOString();
+    s.datapoints = s.datapoints || generateDatapoints(s);
+    slos.push(s);
+    if (!selectedSLO) selectedSLO = s.id;
+    refreshAll();
+    return s;
+  }
+
+  function removeSLO(id) { slos = slos.filter(s => s.id !== id); if (selectedSLO === id) selectedSLO = slos[0]?.id || null; refreshAll(); }
+  function selectSLO(id) { selectedSLO = id; refreshAll(); }
+
+  function generateDatapoints(slo) {
+    const pts = [], now = Date.now();
+    for (let i = 720; i >= 0; i--) {
+      const t = now - i * 3600000;
+      let value;
+      if (slo.metric === 'availability' || slo.unit === '%') {
+        const base = slo.target - (Math.random() * 0.3);
+        value = Math.min(100, Math.max(90, base + (Math.random() < 0.03 ? -(Math.random() * 2) : 0)));
+      } else if (slo.metric === 'latency_p95') {
+        value = Math.max(10, slo.target * 0.7 + Math.random() * slo.target * 0.3 + (Math.random() < 0.05 ? slo.target * (0.5 + Math.random()) : 0));
+      } else if (slo.metric === 'error_rate') {
+        value = Math.max(0, slo.target * 0.4 + Math.random() * slo.target * 0.3 + (Math.random() < 0.04 ? slo.target * (1 + Math.random() * 3) : 0));
+      } else {
+        value = slo.target * (0.8 + Math.random() * 0.4);
+      }
+      pts.push({ t, value: Math.round(value * 1000) / 1000 });
+    }
+    return pts;
+  }
+
+  function getWindowMs(w) { return { '1h': 36e5, '6h': 216e5, '24h': 864e5, '7d': 6048e5, '30d': 2592e6 }[w] || 864e5; }
+
+  function computeSLOStatus(slo) {
+    const win = getWindowMs(document.getElementById('timeWindow').value), now = Date.now();
+    const pts = slo.datapoints.filter(p => p.t >= now - win);
+    if (!pts.length) return { compliance: 0, budgetRemaining: 0, burnRate1h: 0, burnRate6h: 0, status: 'breach' };
+    const isUpper = slo.metric === 'availability' || slo.metric === 'throughput';
+    let good = 0;
+    for (const p of pts) { if (isUpper ? p.value >= slo.target : p.value <= slo.target) good++; }
+    const compliance = (good / pts.length) * 100;
+    const budgetTotal = isUpper ? (100 - slo.target) : slo.target;
+    const consumed = isUpper ? (100 - compliance) : compliance;
+    const budgetRemaining = Math.max(0, Math.min(100, ((budgetTotal - consumed) / budgetTotal) * 100));
+    const burnRate = (windowMs) => {
+      const wPts = slo.datapoints.filter(p => p.t >= now - windowMs);
+      if (!wPts.length) return 0;
+      let bad = 0;
+      for (const p of wPts) { if (isUpper ? p.value < slo.target : p.value > slo.target) bad++; }
+      return (bad / wPts.length) / ((100 - slo.target) / 100 || 0.001);
+    };
+    const burnRate1h = burnRate(36e5), burnRate6h = burnRate(216e5);
+    let status = 'met';
+    if (budgetRemaining <= 0 || (burnRate1h > 14.4 && burnRate6h > 6)) status = 'breach';
+    else if (budgetRemaining < 30 || burnRate1h > 6) status = 'warn';
+    return { compliance: Math.round(compliance * 100) / 100, budgetRemaining: Math.round(budgetRemaining * 10) / 10, burnRate1h: Math.round(burnRate1h * 100) / 100, burnRate6h: Math.round(burnRate6h * 100) / 100, status };
+  }
+
+  function getRecommendation(s) {
+    if (s.status === 'breach') return { level: 'freeze', title: '🛑 FREEZE Deployments', text: 'Error budget exhausted or critical burn rate. Halt non-essential changes.' };
+    if (s.status === 'warn') return { level: 'caution', title: '⚠️ Caution — Budget Tightening', text: `Budget at ${s.budgetRemaining}%. Limit risky deployments. 1h burn: ${s.burnRate1h}x.` };
+    return { level: 'safe', title: '✅ Safe to Deploy', text: `Budget healthy at ${s.budgetRemaining}%. Normal burn rate.` };
+  }
+
+  function esc(s) { const d = document.createElement('div'); d.textContent = s; return d.innerHTML; }
+
+  function refreshAll() {
+    const grid = document.getElementById('sloGrid');
+    if (!slos.length) { grid.innerHTML = '<div class="slo-card slo-full" style="text-align:center;opacity:0.5;padding:3rem">No SLOs defined. Add one above or click "Generate Demo Data".</div>'; return; }
+    const sel = slos.find(s => s.id === selectedSLO) || slos[0];
+    const stats = slos.map(s => ({ slo: s, ...computeSLOStatus(s) }));
+    const selStat = stats.find(s => s.slo.id === sel.id);
+    const rec = getRecommendation(selStat);
+    let h = '<div class="slo-card slo-full"><h3>📋 Active SLOs</h3><div class="slo-item header"><span>Name</span><span>Metric</span><span>Target</span><span>Compliance</span><span>Status</span><span></span></div>';
+    for (const s of stats) {
+      const act = s.slo.id === sel.id ? 'background:var(--border,#2e2e3e);border-radius:6px;' : 'cursor:pointer;';
+      h += `<div class="slo-item" style="${act}" onclick="selectSLO('${s.slo.id}')"><span><strong>${esc(s.slo.name)}</strong></span><span>${s.slo.metric}</span><span>${s.slo.target}${s.slo.unit}</span><span>${s.compliance}%</span><span><span class="status-badge status-${s.status}">${s.status.toUpperCase()}</span></span><span><button onclick="event.stopPropagation();removeSLO('${s.slo.id}')" style="background:none;border:none;color:inherit;cursor:pointer;opacity:0.5">✕</button></span></div>`;
+    }
+    h += '</div>';
+    h += `<div class="slo-card"><h3>🔋 Error Budget — ${esc(sel.name)}</h3><div class="budget-gauge"><canvas id="gaugeCanvas" width="180" height="180"></canvas><div class="budget-center"><div class="pct">${selStat.budgetRemaining}%</div><div class="label">remaining</div></div></div></div>`;
+    h += `<div class="slo-card"><h3>🤖 Autonomous Recommendation</h3><div class="rec-panel"><div class="rec-card rec-${rec.level}"><h4>${rec.title}</h4><p>${rec.text}</p></div><div style="font-size:0.8rem;opacity:0.7;margin-top:0.5rem"><div>1h burn rate: <strong>${selStat.burnRate1h}x</strong> ${selStat.burnRate1h > 14.4 ? '🔴' : selStat.burnRate1h > 6 ? '🟡' : '🟢'}</div><div>6h burn rate: <strong>${selStat.burnRate6h}x</strong> ${selStat.burnRate6h > 6 ? '🔴' : selStat.burnRate6h > 3 ? '🟡' : '🟢'}</div></div></div>`;
+    h += '<div class="slo-card slo-full"><h3>📈 Burn Rate Over Time</h3><canvas id="burnCanvas" height="200"></canvas><div class="burn-legend"><span class="leg-1h">1h window</span><span class="leg-6h">6h window</span></div></div>';
+    h += '<div class="slo-card slo-full"><h3>📊 Compliance History</h3><table class="history-table"><thead><tr><th>Period</th><th>Compliance</th><th>Budget Used</th><th>Status</th></tr></thead><tbody>';
+    const oldWin = document.getElementById('timeWindow').value;
+    for (const p of ['1h','6h','24h','7d','30d']) {
+      document.getElementById('timeWindow').value = p;
+      const cs = computeSLOStatus(sel);
+      h += `<tr><td>${p}</td><td>${cs.compliance}%</td><td>${(100-cs.budgetRemaining).toFixed(1)}%</td><td><span class="status-badge status-${cs.status}">${cs.status.toUpperCase()}</span></td></tr>`;
+    }
+    document.getElementById('timeWindow').value = oldWin;
+    h += '</tbody></table></div>';
+    grid.innerHTML = h;
+    drawGauge(selStat.budgetRemaining, selStat.status);
+    drawBurnChart(sel);
+  }
+
+  function drawGauge(pct, status) {
+    const c = document.getElementById('gaugeCanvas'); if (!c) return;
+    const ctx = c.getContext('2d'); ctx.clearRect(0,0,180,180);
+    const color = { met:'#22c55e', warn:'#eab308', breach:'#ef4444' }[status] || '#818cf8';
+    ctx.beginPath(); ctx.arc(90,90,70,0,Math.PI*2); ctx.strokeStyle='#2e2e3e'; ctx.lineWidth=14; ctx.stroke();
+    ctx.beginPath(); ctx.arc(90,90,70,-Math.PI/2,(pct/100)*Math.PI*2-Math.PI/2); ctx.strokeStyle=color; ctx.lineWidth=14; ctx.lineCap='round'; ctx.stroke();
+  }
+
+  function drawBurnChart(slo) {
+    const c = document.getElementById('burnCanvas'); if (!c) return;
+    if (burnChart) { burnChart.destroy(); burnChart = null; }
+    const now = Date.now(), win = getWindowMs(document.getElementById('timeWindow').value);
+    const pts = slo.datapoints.filter(p => p.t >= now - win);
+    const isUpper = slo.metric === 'availability' || slo.metric === 'throughput';
+    const bf = (100 - slo.target) / 100 || 0.001;
+    const labels = [], d1 = [], d6 = [], step = Math.max(1, Math.floor(pts.length / 80));
+    for (let i = 0; i < pts.length; i += step) {
+      const t = pts[i].t;
+      labels.push(new Date(t).toLocaleTimeString([], {hour:'2-digit',minute:'2-digit'}));
+      const calc = (wMs) => { const w = slo.datapoints.filter(p => p.t >= t-wMs && p.t <= t); if(!w.length) return 0; let bad=0; for(const p of w){if(isUpper?p.value<slo.target:p.value>slo.target)bad++;} return(bad/w.length)/bf; };
+      d1.push(Math.round(calc(36e5)*100)/100);
+      d6.push(Math.round(calc(216e5)*100)/100);
+    }
+    burnChart = new Chart(c, { type:'line', data:{ labels, datasets:[
+      {label:'1h Burn Rate',data:d1,borderColor:'#818cf8',backgroundColor:'#818cf822',fill:true,tension:0.3,pointRadius:0},
+      {label:'6h Burn Rate',data:d6,borderColor:'#f472b6',backgroundColor:'#f472b622',fill:true,tension:0.3,pointRadius:0}
+    ]}, options:{ responsive:true, maintainAspectRatio:false, plugins:{legend:{display:false}}, scales:{x:{ticks:{color:'#888'},grid:{color:'#2e2e3e'}},y:{beginAtZero:true,ticks:{color:'#888'},grid:{color:'#2e2e3e'},title:{display:true,text:'Burn Rate (x)',color:'#888'}}}}});
+  }
+
+  function generateDemoData() {
+    slos = []; selectedSLO = null;
+    addSLO({name:'Agent Success Rate',metric:'availability',target:99.9,unit:'%',window:'30d'});
+    addSLO({name:'Response Latency (p95)',metric:'latency_p95',target:500,unit:'ms',window:'7d'});
+    addSLO({name:'Error Rate',metric:'error_rate',target:1,unit:'%',window:'30d'});
+    addSLO({name:'Throughput',metric:'throughput',target:100,unit:'req/s',window:'7d'});
+    const bad = slos[2], now = Date.now();
+    for (let i = 0; i < 24; i++) { const idx = bad.datapoints.findIndex(p => p.t >= now-(24-i)*36e5); if(idx>=0) bad.datapoints[idx].value = bad.target*(2+Math.random()*3); }
+    refreshAll();
+  }
+
+  function exportJSON() {
+    const data = slos.map(s => ({...s, status: computeSLOStatus(s)}));
+    const blob = new Blob([JSON.stringify(data,null,2)],{type:'application/json'});
+    const a = document.createElement('a'); a.href=URL.createObjectURL(blob); a.download='slo-export.json'; a.click();
+  }
+
+  refreshAll();
+  </script>
+</body>
+</html>
