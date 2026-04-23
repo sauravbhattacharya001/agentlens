@@ -15,6 +15,7 @@ from typing import Any
 import httpx
 
 from agentlens._utils import format_duration  # noqa: F401 — re-exported
+from agentlens._utils import percentile as _raw_percentile
 
 __all__ = [
     "get_client",
@@ -83,16 +84,12 @@ def fetch_sessions(client: httpx.Client, limit: int = 200) -> list[dict]:
 def percentile(values: list[float], p: float) -> float:
     """Compute the *p*-th percentile (0–100) of *values* without numpy.
 
-    Returns ``0.0`` for empty input.  Uses linear interpolation between
-    the two nearest ranks.
+    Returns ``0.0`` for empty input.  Sorts internally, then delegates
+    to :func:`agentlens._utils.percentile`.
     """
     if not values:
         return 0.0
-    s = sorted(values)
-    k = (len(s) - 1) * p / 100.0
-    f = int(k)
-    c = min(f + 1, len(s) - 1)
-    return s[f] + (s[c] - s[f]) * (k - f)
+    return _raw_percentile(sorted(values), p)
 
 
 def linear_regression(xs: list[float], ys: list[float]) -> tuple[float, float]:

@@ -11,7 +11,7 @@ import signal
 import sys
 from typing import Any, Optional, Pattern
 
-__all__ = ["format_duration", "safe_compile", "safe_search"]
+__all__ = ["format_duration", "safe_compile", "safe_search", "percentile"]
 
 # ---------------------------------------------------------------------------
 # ReDoS-safe regex helpers (CWE-1333)
@@ -71,6 +71,27 @@ def safe_search(
             return compiled.search(truncated)
         except (RecursionError, MemoryError):
             return None
+
+
+def percentile(sorted_values: list[float], p: float) -> float:
+    """Compute the *p*-th percentile (0–100) of pre-sorted *values*.
+
+    Uses linear interpolation between the two nearest ranks.
+    Returns ``0.0`` for empty input.
+
+    .. note:: *sorted_values* must already be sorted in ascending order.
+       For unsorted input, use ``percentile(sorted(data), p)``.
+    """
+    n = len(sorted_values)
+    if n == 0:
+        return 0.0
+    if n == 1:
+        return sorted_values[0]
+    k = (p / 100.0) * (n - 1)
+    lo = int(k)
+    hi = min(lo + 1, n - 1)
+    frac = k - lo
+    return sorted_values[lo] + frac * (sorted_values[hi] - sorted_values[lo])
 
 
 def format_duration(ms: Any) -> str:
