@@ -1,0 +1,409 @@
+<!DOCTYPE html>
+<html lang="en">
+<head>
+  <meta charset="UTF-8">
+  <meta name="viewport" content="width=device-width, initial-scale=1.0">
+  <title>AgentLens — Smart Triage Queue</title>
+  <link rel="stylesheet" href="styles.css">
+  <style>
+    .tq-container { max-width: 1200px; margin: 0 auto; padding: 24px; }
+    .tq-header-row { display: flex; justify-content: space-between; align-items: center; margin-bottom: 20px; flex-wrap: wrap; gap: 12px; }
+    .tq-header-row h2 { margin: 0; color: var(--text-primary); }
+    .tq-stats { display: grid; grid-template-columns: repeat(auto-fit, minmax(160px, 1fr)); gap: 12px; margin-bottom: 20px; }
+    .tq-stat { background: var(--bg-secondary); border: 1px solid var(--border); border-radius: var(--radius); padding: 16px; text-align: center; }
+    .tq-stat-val { font-size: 1.8rem; font-weight: 700; color: var(--text-primary); }
+    .tq-stat-lbl { font-size: 0.8rem; color: var(--text-secondary); margin-top: 2px; }
+    .tq-stat.crit .tq-stat-val { color: #ff4757; }
+    .tq-stat.warn .tq-stat-val { color: #ffa502; }
+    .tq-stat.ok .tq-stat-val { color: #2ed573; }
+
+    .tq-controls { display: flex; gap: 10px; margin-bottom: 16px; flex-wrap: wrap; align-items: center; }
+    .tq-controls select, .tq-controls button {
+      background: var(--bg-secondary); color: var(--text-primary); border: 1px solid var(--border);
+      border-radius: var(--radius-sm); padding: 6px 12px; font-size: 0.85rem; cursor: pointer;
+    }
+    .tq-controls button:hover { background: var(--bg-hover); }
+    .tq-controls button.active { background: var(--accent); color: #fff; border-color: var(--accent); }
+
+    .tq-queue { display: flex; flex-direction: column; gap: 8px; margin-bottom: 24px; }
+    .tq-item {
+      background: var(--bg-secondary); border: 1px solid var(--border); border-radius: var(--radius);
+      padding: 14px 18px; display: flex; align-items: flex-start; gap: 14px; cursor: pointer; transition: border-color 0.15s;
+    }
+    .tq-item:hover { border-color: var(--accent); }
+    .tq-item.sev-critical { border-left: 4px solid #ff4757; }
+    .tq-item.sev-high { border-left: 4px solid #ffa502; }
+    .tq-item.sev-medium { border-left: 4px solid #eccc68; }
+    .tq-item.sev-low { border-left: 4px solid #2ed573; }
+    .tq-item.status-escalated { box-shadow: 0 0 0 1px #ff475766; }
+    .tq-item.status-auto-resolved { opacity: 0.6; }
+
+    .tq-icon { font-size: 1.4rem; flex-shrink: 0; margin-top: 2px; }
+    .tq-body { flex: 1; min-width: 0; }
+    .tq-title { font-weight: 600; color: var(--text-primary); margin-bottom: 3px; }
+    .tq-desc { font-size: 0.88rem; color: var(--text-secondary); }
+    .tq-meta { display: flex; gap: 12px; margin-top: 6px; font-size: 0.78rem; color: var(--text-muted); flex-wrap: wrap; }
+
+    .tq-score {
+      flex-shrink: 0; width: 52px; height: 52px; border-radius: 50%; display: flex; align-items: center;
+      justify-content: center; font-size: 1.1rem; font-weight: 700; color: #fff;
+    }
+    .tq-score.crit { background: #ff4757; }
+    .tq-score.high { background: #ffa502; }
+    .tq-score.med { background: #eccc68; color: #333; }
+    .tq-score.low { background: #2ed573; color: #333; }
+
+    .tq-badge {
+      display: inline-block; padding: 2px 8px; border-radius: 10px; font-size: 0.72rem; font-weight: 600; text-transform: uppercase;
+    }
+    .tq-badge.open { background: #3742fa22; color: #3742fa; }
+    .tq-badge.escalated { background: #ff475722; color: #ff4757; }
+    .tq-badge.auto-resolved { background: #2ed57322; color: #2ed573; }
+
+    .tq-detail {
+      display: none; margin-top: 10px; padding: 12px; background: var(--bg-primary); border: 1px solid var(--border);
+      border-radius: var(--radius-sm); font-size: 0.85rem;
+    }
+    .tq-detail.open { display: block; }
+    .tq-factor { display: flex; justify-content: space-between; padding: 4px 0; border-bottom: 1px solid var(--border); }
+    .tq-factor:last-child { border-bottom: none; }
+    .tq-factor-bar { height: 6px; border-radius: 3px; background: var(--accent); margin-top: 2px; }
+    .tq-action { margin-top: 8px; padding: 8px 12px; background: var(--accent-dim, #3742fa15); border-radius: var(--radius-sm); color: var(--accent); font-weight: 500; }
+
+    .tq-recs { background: var(--bg-secondary); border: 1px solid var(--border); border-radius: var(--radius); padding: 16px; margin-bottom: 20px; }
+    .tq-recs h3 { margin: 0 0 10px; color: var(--text-primary); font-size: 1rem; }
+    .tq-rec-item { padding: 8px 0; border-bottom: 1px solid var(--border); font-size: 0.88rem; color: var(--text-secondary); }
+    .tq-rec-item:last-child { border-bottom: none; }
+
+    .tq-chart-wrap { background: var(--bg-secondary); border: 1px solid var(--border); border-radius: var(--radius); padding: 16px; margin-bottom: 20px; }
+    .tq-chart-wrap h3 { margin: 0 0 10px; color: var(--text-primary); font-size: 1rem; }
+
+    .tq-empty { text-align: center; padding: 60px 20px; color: var(--text-muted); }
+    .tq-pulse { animation: tqPulse 2s infinite; }
+    @keyframes tqPulse { 0%,100% { opacity: 1; } 50% { opacity: 0.5; } }
+  </style>
+</head>
+<body>
+  <div id="app">
+    <header class="header">
+      <div class="header-left">
+        <h1 class="logo">🔍 AgentLens</h1>
+        <span class="tagline">Smart Triage Queue</span>
+      </div>
+      <div class="header-right">
+        <a href="index.html" class="btn btn-alert-header" style="text-decoration:none">📋 Sessions</a>
+        <a href="command-center.html" class="btn btn-alert-header" style="text-decoration:none">🎯 Command Center</a>
+        <a href="errors.html" class="btn btn-alert-header" style="text-decoration:none">🐛 Errors</a>
+        <a href="costs.html" class="btn btn-alert-header" style="text-decoration:none">💰 Costs</a>
+        <a href="scorecards.html" class="btn btn-alert-header" style="text-decoration:none">🏅 Scorecards</a>
+        <button class="theme-toggle" onclick="toggleTheme()" title="Toggle light/dark theme" id="themeToggleBtn">🌙</button>
+      </div>
+    </header>
+
+    <main class="tq-container">
+      <div class="tq-header-row">
+        <h2>🚦 Smart Triage Queue</h2>
+        <div style="display:flex;gap:8px;align-items:center;">
+          <span id="autoTriageStatus" style="font-size:0.8rem;color:var(--text-muted);">Auto-triage: off</span>
+          <button class="btn" id="autoTriageBtn" onclick="toggleAutoTriage()" style="background:var(--bg-secondary);color:var(--text-primary);border:1px solid var(--border);border-radius:var(--radius-sm);padding:6px 12px;font-size:0.85rem;cursor:pointer;">⚡ Enable Auto-Triage</button>
+        </div>
+      </div>
+
+      <div class="tq-stats" id="statsBar">
+        <div class="tq-stat crit"><div class="tq-stat-val" id="statOpen">-</div><div class="tq-stat-lbl">Open</div></div>
+        <div class="tq-stat warn"><div class="tq-stat-val" id="statEscalated">-</div><div class="tq-stat-lbl">Escalated</div></div>
+        <div class="tq-stat ok"><div class="tq-stat-val" id="statResolved">-</div><div class="tq-stat-lbl">Auto-Resolved</div></div>
+        <div class="tq-stat"><div class="tq-stat-val" id="statMean">-</div><div class="tq-stat-lbl">Mean Score</div></div>
+        <div class="tq-stat crit"><div class="tq-stat-val" id="statRiskAgent" style="font-size:1rem;">-</div><div class="tq-stat-lbl">Highest Risk Agent</div></div>
+      </div>
+
+      <div class="tq-controls">
+        <select id="filterType" onchange="renderQueue()">
+          <option value="">All Types</option>
+          <option value="error">🐛 Error</option>
+          <option value="latency">⏱️ Latency</option>
+          <option value="budget">💰 Budget</option>
+          <option value="sla">📏 SLA</option>
+          <option value="anomaly">🔮 Anomaly</option>
+          <option value="security">🔒 Security</option>
+        </select>
+        <select id="filterSeverity" onchange="renderQueue()">
+          <option value="">All Severities</option>
+          <option value="critical">Critical</option>
+          <option value="high">High</option>
+          <option value="medium">Medium</option>
+          <option value="low">Low</option>
+        </select>
+        <select id="filterStatus" onchange="renderQueue()">
+          <option value="">All Statuses</option>
+          <option value="open">Open</option>
+          <option value="escalated">Escalated</option>
+          <option value="auto-resolved">Auto-Resolved</option>
+        </select>
+        <button onclick="generateIncidents(); renderQueue();" style="background:var(--bg-secondary);color:var(--text-primary);border:1px solid var(--border);border-radius:var(--radius-sm);padding:6px 12px;font-size:0.85rem;cursor:pointer;">↻ Regenerate</button>
+      </div>
+
+      <div class="tq-recs" id="recsPanel">
+        <h3>💡 Proactive Recommendations</h3>
+        <div id="recsList"></div>
+      </div>
+
+      <div class="tq-chart-wrap">
+        <h3>📊 Triage Score Distribution</h3>
+        <canvas id="histogramCanvas" width="700" height="200"></canvas>
+      </div>
+
+      <div class="tq-queue" id="queueList"></div>
+    </main>
+  </div>
+
+<script>
+function toggleTheme() {
+  var d = document.documentElement;
+  var next = d.getAttribute('data-theme') === 'light' ? 'dark' : 'light';
+  d.setAttribute('data-theme', next);
+  localStorage.setItem('theme', next);
+  document.getElementById('themeToggleBtn').textContent = next === 'light' ? '🌙' : '☀️';
+  drawHistogram();
+}
+(function initTheme() {
+  var t = localStorage.getItem('theme') || 'dark';
+  document.documentElement.setAttribute('data-theme', t);
+  document.getElementById('themeToggleBtn').textContent = t === 'light' ? '🌙' : '☀️';
+})();
+
+var AGENTS = ['gpt-4-agent','claude-ops','search-bot','code-reviewer','data-pipeline','monitor-alpha','deploy-agent','qa-runner','summarizer','ingestion-worker'];
+var TYPES = [
+  { key:'error', icon:'🐛', templates:['Unhandled exception in {agent}','Null reference in tool call for {agent}','Timeout in downstream API for {agent}','Rate limit exceeded by {agent}','Memory leak detected in {agent}'] },
+  { key:'latency', icon:'⏱️', templates:['P99 latency spike to {ms}ms for {agent}','Median response time degraded for {agent}','Tool call latency >5s for {agent}','Queue depth growing for {agent}'] },
+  { key:'budget', icon:'💰', templates:['{agent} exceeded daily token budget by {pct}%','{agent} cost anomaly: {x}x above baseline','Projected weekly overspend for {agent}'] },
+  { key:'sla', icon:'📏', templates:['{agent} SLA breach: success rate {rate}%','{agent} uptime below target ({rate}%)','{agent} response time SLA violated'] },
+  { key:'anomaly', icon:'🔮', templates:['Anomalous output pattern detected for {agent}','Behavior drift: {agent} deviating from baseline','Unusual error clustering in {agent}'] },
+  { key:'security', icon:'🔒', templates:['Prompt injection attempt detected in {agent}','Unauthorized tool access by {agent}','Data exfiltration pattern flagged for {agent}','Elevated privilege request from {agent}'] }
+];
+var ACTIONS = {
+  error: ['Inspect error logs and stack trace','Restart agent with fresh context','Roll back to previous version','Apply circuit breaker'],
+  latency: ['Scale up agent resources','Check downstream dependencies','Enable request caching','Shed non-critical traffic'],
+  budget: ['Apply token rate limiter','Switch to cheaper model tier','Review prompt efficiency','Set hard budget cap'],
+  sla: ['Increase retry budget','Activate fallback agent','Adjust SLA thresholds','Prioritize affected workflows'],
+  anomaly: ['Run behavioral regression test','Compare against known-good baseline','Enable detailed tracing','Quarantine suspicious outputs'],
+  security: ['Block agent pending review','Rotate credentials immediately','Enable input sanitization','Escalate to security team']
+};
+
+var incidents = [];
+var autoTriageInterval = null;
+var expandedId = null;
+
+function rand(a, b) { return Math.floor(Math.random() * (b - a + 1)) + a; }
+function pick(arr) { return arr[rand(0, arr.length - 1)]; }
+
+function computeTriageScore(inc) {
+  var sevW = { critical: 1, high: 0.75, medium: 0.5, low: 0.25 };
+  var severity = (sevW[inc.severity] || 0.5) * 100;
+  var blast = Math.min(inc.affectedAgents / AGENTS.length, 1) * 100;
+  var age = (Date.now() - inc.createdAt) / 60000;
+  var recency = Math.max(0, 100 - age * 2);
+  var recurrence = Math.min(inc.recurrenceCount / 5, 1) * 100;
+  var score = Math.round(severity * 0.4 + blast * 0.25 + recency * 0.2 + recurrence * 0.15);
+  inc.score = Math.min(100, Math.max(0, score));
+  inc.factors = { severity: Math.round(severity), blast: Math.round(blast), recency: Math.round(recency), recurrence: Math.round(recurrence) };
+  inc.scoreSeverity = score >= 80 ? 'critical' : score >= 60 ? 'high' : score >= 40 ? 'medium' : 'low';
+  return inc;
+}
+
+function generateIncidents() {
+  incidents = [];
+  var count = rand(25, 40);
+  for (var i = 0; i < count; i++) {
+    var type = pick(TYPES);
+    var agent = pick(AGENTS);
+    var sev = pick(['critical','high','medium','low']);
+    var tpl = pick(type.templates);
+    var desc = tpl.replace('{agent}', agent).replace('{ms}', rand(800,5000)).replace('{pct}', rand(10,200)).replace('{x}', (rand(20,80)/10).toFixed(1)).replace('{rate}', (rand(700,990)/10).toFixed(1));
+    var inc = {
+      id: 'INC-' + String(i + 1).padStart(3, '0'),
+      type: type.key, icon: type.icon, agent: agent, severity: sev,
+      description: desc, status: 'open',
+      affectedAgents: rand(1, Math.min(AGENTS.length, sev === 'critical' ? 8 : sev === 'high' ? 5 : 3)),
+      recurrenceCount: rand(0, 7),
+      createdAt: Date.now() - rand(0, 3600000),
+      action: pick(ACTIONS[type.key]),
+      score: 0, factors: {}, scoreSeverity: 'low'
+    };
+    computeTriageScore(inc);
+    incidents.push(inc);
+  }
+  incidents.sort(function(a, b) { return b.score - a.score; });
+}
+
+function getFiltered() {
+  var ft = document.getElementById('filterType').value;
+  var fs = document.getElementById('filterSeverity').value;
+  var fst = document.getElementById('filterStatus').value;
+  return incidents.filter(function(i) {
+    return (!ft || i.type === ft) && (!fs || i.severity === fs) && (!fst || i.status === fst);
+  });
+}
+
+function renderQueue() {
+  var list = getFiltered();
+  var el = document.getElementById('queueList');
+  if (!list.length) { el.innerHTML = '<div class="tq-empty">No incidents match filters</div>'; updateStats(); drawHistogram(); updateRecs(); return; }
+  el.innerHTML = list.map(function(i) {
+    var sc = i.scoreSeverity === 'critical' ? 'crit' : i.scoreSeverity === 'high' ? 'high' : i.scoreSeverity === 'medium' ? 'med' : 'low';
+    return '<div class="tq-item sev-' + i.scoreSeverity + ' status-' + i.status + '" onclick="toggleDetail(\'' + i.id + '\')">' +
+      '<div class="tq-icon">' + i.icon + '</div>' +
+      '<div class="tq-body">' +
+        '<div class="tq-title">' + i.id + ' — ' + i.description + '</div>' +
+        '<div class="tq-meta">' +
+          '<span class="tq-badge ' + i.status + '">' + i.status + '</span>' +
+          '<span>Agent: <strong>' + i.agent + '</strong></span>' +
+          '<span>Blast: ' + i.affectedAgents + ' agent' + (i.affectedAgents > 1 ? 's' : '') + '</span>' +
+          '<span>Recurrence: ' + i.recurrenceCount + 'x</span>' +
+          '<span>' + formatAge(i.createdAt) + '</span>' +
+        '</div>' +
+        '<div class="tq-detail ' + (expandedId === i.id ? 'open' : '') + '" id="detail-' + i.id + '">' +
+          '<div style="font-weight:600;margin-bottom:6px;color:var(--text-primary);">Score Breakdown</div>' +
+          renderFactor('Severity (40%)', i.factors.severity) +
+          renderFactor('Blast Radius (25%)', i.factors.blast) +
+          renderFactor('Recency (20%)', i.factors.recency) +
+          renderFactor('Recurrence (15%)', i.factors.recurrence) +
+          '<div class="tq-action">💡 Recommended: ' + i.action + '</div>' +
+        '</div>' +
+      '</div>' +
+      '<div class="tq-score ' + sc + '">' + i.score + '</div>' +
+    '</div>';
+  }).join('');
+  updateStats();
+  drawHistogram();
+  updateRecs();
+}
+
+function renderFactor(label, value) {
+  var col = value >= 80 ? '#ff4757' : value >= 60 ? '#ffa502' : value >= 40 ? '#eccc68' : '#2ed573';
+  return '<div class="tq-factor"><span style="color:var(--text-secondary)">' + label + '</span><span style="font-weight:600;color:var(--text-primary)">' + value + '/100</span></div>' +
+    '<div class="tq-factor-bar" style="width:' + value + '%;background:' + col + '"></div>';
+}
+
+function formatAge(ts) {
+  var m = Math.round((Date.now() - ts) / 60000);
+  if (m < 1) return 'just now';
+  if (m < 60) return m + 'm ago';
+  return Math.round(m / 60) + 'h ago';
+}
+
+function toggleDetail(id) {
+  expandedId = expandedId === id ? null : id;
+  var details = document.querySelectorAll('.tq-detail');
+  for (var i = 0; i < details.length; i++) details[i].classList.remove('open');
+  if (expandedId) { var d = document.getElementById('detail-' + id); if (d) d.classList.add('open'); }
+}
+
+function updateStats() {
+  var open = 0, esc = 0, res = 0, total = 0;
+  var agentScores = {};
+  for (var i = 0; i < incidents.length; i++) {
+    var inc = incidents[i];
+    if (inc.status === 'open') open++;
+    if (inc.status === 'escalated') esc++;
+    if (inc.status === 'auto-resolved') res++;
+    total += inc.score;
+    if (inc.status !== 'auto-resolved') agentScores[inc.agent] = (agentScores[inc.agent] || 0) + inc.score;
+  }
+  var mean = incidents.length ? Math.round(total / incidents.length) : 0;
+  var topAgent = null, topScore = 0;
+  for (var a in agentScores) { if (agentScores[a] > topScore) { topScore = agentScores[a]; topAgent = a; } }
+  document.getElementById('statOpen').textContent = open;
+  document.getElementById('statEscalated').textContent = esc;
+  document.getElementById('statResolved').textContent = res;
+  document.getElementById('statMean').textContent = mean;
+  document.getElementById('statRiskAgent').textContent = topAgent || '-';
+}
+
+function drawHistogram() {
+  var canvas = document.getElementById('histogramCanvas');
+  var ctx = canvas.getContext('2d');
+  var W = canvas.width, H = canvas.height;
+  ctx.clearRect(0, 0, W, H);
+  var isDark = document.documentElement.getAttribute('data-theme') !== 'light';
+  var textCol = isDark ? '#ccc' : '#333';
+  var bins = [0,0,0,0,0,0,0,0,0,0];
+  for (var i = 0; i < incidents.length; i++) { var b = Math.min(Math.floor(incidents[i].score / 10), 9); bins[b]++; }
+  var max = Math.max.apply(null, bins.concat([1]));
+  var barW = (W - 80) / 10;
+  var colors = ['#2ed573','#2ed573','#2ed573','#2ed573','#eccc68','#eccc68','#ffa502','#ffa502','#ff4757','#ff4757'];
+  ctx.font = '11px sans-serif';
+  for (var j = 0; j < 10; j++) {
+    var x = 50 + j * barW;
+    var h = (bins[j] / max) * (H - 40);
+    ctx.fillStyle = colors[j];
+    ctx.fillRect(x + 2, H - 25 - h, barW - 4, h);
+    ctx.fillStyle = textCol;
+    ctx.textAlign = 'center';
+    ctx.fillText(j * 10 + '-' + (j * 10 + 9), x + barW / 2, H - 8);
+    if (bins[j] > 0) ctx.fillText(bins[j], x + barW / 2, H - 30 - h);
+  }
+  ctx.fillStyle = textCol;
+  ctx.textAlign = 'right';
+  ctx.fillText('Count', 42, 15);
+}
+
+function updateRecs() {
+  var typeCount = {}, agentCount = {};
+  for (var i = 0; i < incidents.length; i++) {
+    var inc = incidents[i];
+    if (inc.status !== 'auto-resolved') {
+      typeCount[inc.type] = (typeCount[inc.type] || 0) + 1;
+      agentCount[inc.agent] = (agentCount[inc.agent] || 0) + 1;
+    }
+  }
+  var topType = null, topTypeN = 0;
+  for (var t in typeCount) { if (typeCount[t] > topTypeN) { topTypeN = typeCount[t]; topType = t; } }
+  var topAgent = null, topAgentN = 0;
+  for (var a in agentCount) { if (agentCount[a] > topAgentN) { topAgentN = agentCount[a]; topAgent = a; } }
+  var critCount = incidents.filter(function(i) { return i.scoreSeverity === 'critical' && i.status === 'open'; }).length;
+  var recs = [];
+  if (critCount > 3) recs.push('🔴 ' + critCount + ' critical incidents open — consider pausing non-essential agents to focus on triage');
+  if (topType) recs.push('📌 Most common type: <strong>' + topType + '</strong> (' + topTypeN + ' incidents) — investigate systemic ' + topType + ' causes');
+  if (topAgent) recs.push('⚠️ Highest-incident agent: <strong>' + topAgent + '</strong> (' + topAgentN + ' incidents) — consider restarting or rolling back');
+  if (!recs.length) recs.push('✅ Queue looks healthy — no urgent patterns detected');
+  document.getElementById('recsList').innerHTML = recs.map(function(r) { return '<div class="tq-rec-item">' + r + '</div>'; }).join('');
+}
+
+function toggleAutoTriage() {
+  if (autoTriageInterval) {
+    clearInterval(autoTriageInterval);
+    autoTriageInterval = null;
+    document.getElementById('autoTriageBtn').textContent = '⚡ Enable Auto-Triage';
+    document.getElementById('autoTriageBtn').classList.remove('active');
+    document.getElementById('autoTriageStatus').textContent = 'Auto-triage: off';
+    document.getElementById('autoTriageStatus').classList.remove('tq-pulse');
+  } else {
+    autoTriageInterval = setInterval(runAutoTriage, 10000);
+    document.getElementById('autoTriageBtn').textContent = '⏸ Disable Auto-Triage';
+    document.getElementById('autoTriageBtn').classList.add('active');
+    document.getElementById('autoTriageStatus').textContent = 'Auto-triage: every 10s';
+    document.getElementById('autoTriageStatus').classList.add('tq-pulse');
+    runAutoTriage();
+  }
+}
+
+function runAutoTriage() {
+  for (var i = 0; i < incidents.length; i++) {
+    var inc = incidents[i];
+    computeTriageScore(inc);
+    if (inc.status === 'open' && inc.score >= 85) inc.status = 'escalated';
+    if (inc.status === 'open' && inc.score < 20) {
+      var age = (Date.now() - inc.createdAt) / 60000;
+      if (age > 30) inc.status = 'auto-resolved';
+    }
+  }
+  incidents.sort(function(a, b) { return b.score - a.score; });
+  renderQueue();
+}
+
+generateIncidents();
+renderQueue();
+</script>
+</body>
+</html>
