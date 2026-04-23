@@ -128,6 +128,7 @@ class Flamegraph:
         self.session_name = session_name
         self._nodes: list[_FGNode] = []
         self._total_ms: float = 0
+        self._flat_cache: list[_FGNode] | None = None
         self._build()
 
     @classmethod
@@ -245,23 +246,44 @@ class Flamegraph:
 
         if top_nodes:
             # ── Place events under spans ──
-            # Flatten span nodes once (not per-event) and sort by
-            # start_ms descending so we can find the deepest (most
-            # specific) matching span first.
+            # Flatten span nodes and sort by depth descending so the
+            # first containing span found is the deepest (most specific).
+            # Within each depth, sort by start_ms for binary-search
+            # pruning.  This replaces the O(E × S) brute-force with
+            # O(E × D × log(S/D)) where D = max depth and S = spans.
             all_span_nodes = self._all_nodes(top_nodes)
-            all_span_nodes.sort(
-                key=lambda n: (n.start_ms, -n.depth), reverse=False
-            )
-            # For each event, find the deepest span that contains it.
-            # We prefer the deepest match (highest depth) so events
-            # nest inside the most specific span.
+            # Group by depth (deepest first) for early-exit matching
+            from collections import defaultdict as _dd
+            _by_depth: dict[int, list[_FGNode]] = _dd(list)
+            for sn in all_span_nodes:
+                _by_depth[sn.depth].append(sn)
+            # Sort each depth bucket by start_ms for binary search
+            import bisect as _bisect
+            _depth_keys: list[int] = sorted(_by_depth.keys(), reverse=True)
+            _depth_starts: dict[int, list[float]] = {}
+            for _dk in _depth_keys:
+                bucket = _by_depth[_dk]
+                bucket.sort(key=lambda n: n.start_ms)
+                _depth_starts[_dk] = [n.start_ms for n in bucket]
+
             for enode in event_nodes:
                 best: _FGNode | None = None
-                for snode in all_span_nodes:
-                    if (enode.start_ms >= snode.start_ms and
-                            enode.start_ms < snode.start_ms + snode.duration_ms):
-                        if best is None or snode.depth > best.depth:
-                            best = snode
+                for _dk in _depth_keys:
+                    bucket = _by_depth[_dk]
+                    starts = _depth_starts[_dk]
+                    # Find rightmost span whose start_ms <= enode.start_ms
+                    idx = _bisect.bisect_right(starts, enode.start_ms) - 1
+                    # Check a small window around idx (spans may overlap)
+                    lo = max(0, idx - 1)
+                    hi = min(len(bucket), idx + 3)
+                    for j in range(lo, hi):
+                        sn = bucket[j]
+                        if (enode.start_ms >= sn.start_ms and
+                                enode.start_ms < sn.start_ms + sn.duration_ms):
+                            best = sn
+                            break
+                    if best is not None:
+                        break
                 if best is not None:
                     enode.depth = best.depth + 1
                     best.children.append(enode)

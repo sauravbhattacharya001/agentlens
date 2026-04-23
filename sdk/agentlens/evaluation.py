@@ -190,15 +190,23 @@ def _score_relevance(input_tokens: set[str], response_tokens: set[str]) -> tuple
 
 
 def _score_coherence(response_text: str) -> tuple[float, str]:
-    """Sentence-to-sentence vocabulary overlap."""
+    """Sentence-to-sentence vocabulary overlap.
+
+    Pre-tokenizes all sentences once (O(S)) instead of tokenizing each
+    sentence twice — once as curr and once as prev — which doubled the
+    total tokenization work for S sentences (2·(S-1) → S calls).
+    """
     sents = _sentences(response_text)
     if len(sents) <= 1:
         return (1.0, "single sentence — coherent by default")
 
+    # Tokenize each sentence once and cache the token sets.
+    sent_token_sets = [set(_tokenize(s)) for s in sents]
+
     overlaps: list[float] = []
     for i in range(1, len(sents)):
-        prev_tokens = set(_tokenize(sents[i - 1]))
-        curr_tokens = set(_tokenize(sents[i]))
+        prev_tokens = sent_token_sets[i - 1]
+        curr_tokens = sent_token_sets[i]
         union = prev_tokens | curr_tokens
         if not union:
             overlaps.append(1.0)
