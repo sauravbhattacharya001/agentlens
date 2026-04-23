@@ -316,9 +316,24 @@ class SLAEvaluator:
         # Normalize sessions to dicts
         normalized = [self._normalize_session(s) for s in sessions]
 
+        # Determine which metric kinds are needed by the policy
+        needed_kinds = {obj.kind for obj in policy.objectives}
+
+        # Single-pass: compute all needed metrics per session once,
+        # instead of re-iterating events M times (once per objective).
+        # For M objectives and N sessions with E events each, this
+        # reduces work from O(M × N × E) to O(N × E + M × N).
+        session_metrics: list[dict[ObjectiveKind, float]] = []
+        for s in normalized:
+            session_metrics.append(
+                self._measure_all(s.get("events", []), needed_kinds)
+            )
+
         results: list[ObjectiveResult] = []
         for obj in policy.objectives:
-            result = self._evaluate_objective(normalized, obj)
+            result = self._evaluate_objective_precomputed(
+                normalized, session_metrics, obj,
+            )
             results.append(result)
 
         # Aggregate status
@@ -345,20 +360,20 @@ class SLAEvaluator:
 
     # -- per-objective evaluation -------------------------------------------
 
-    def _evaluate_objective(
+    def _evaluate_objective_precomputed(
         self,
         sessions: list[dict[str, Any]],
+        session_metrics: list[dict[ObjectiveKind, float]],
         objective: SLObjective,
     ) -> ObjectiveResult:
-        """Evaluate a single objective across all sessions."""
+        """Evaluate a single objective using pre-computed metrics."""
         violations: list[str] = []
         measured_values: list[float] = []
         total = len(sessions)
 
-        for s in sessions:
+        for s, metrics in zip(sessions, session_metrics):
             sid = s.get("session_id", "unknown")
-            events = s.get("events", [])
-            value = self._measure(events, objective.kind)
+            value = metrics.get(objective.kind, 0.0)
             measured_values.append(value)
 
             if self._is_violated(value, objective):
@@ -399,85 +414,108 @@ class SLAEvaluator:
 
     # -- measurement helpers -------------------------------------------------
 
-    def _measure(self, events: list[dict[str, Any]], kind: ObjectiveKind) -> float:
-        """Compute the metric value for a session's events."""
-        if kind == ObjectiveKind.LATENCY_P95:
-            return self._measure_p95_latency(events)
-        elif kind == ObjectiveKind.LATENCY_AVG:
-            return self._measure_avg_latency(events)
-        elif kind == ObjectiveKind.ERROR_RATE:
-            return self._measure_error_rate(events)
-        elif kind == ObjectiveKind.TOKEN_BUDGET:
-            return self._measure_total_tokens(events)
-        elif kind == ObjectiveKind.TOOL_SUCCESS_RATE:
-            return self._measure_tool_success_rate(events)
-        elif kind == ObjectiveKind.THROUGHPUT:
-            return float(len(events))
-        else:
-            return 0.0
+    def _measure_all(
+        self,
+        events: list[dict[str, Any]],
+        needed: set[ObjectiveKind],
+    ) -> dict[ObjectiveKind, float]:
+        """Compute all requested metrics in a single pass over events.
 
-    @staticmethod
-    def _measure_p95_latency(events: list[dict[str, Any]]) -> float:
-        durations = sorted(
-            e.get("duration_ms", 0.0) or 0.0
-            for e in events
-            if e.get("duration_ms") is not None
-        )
-        if not durations:
-            return 0.0
-        idx = 0.95 * (len(durations) - 1)
-        lo = int(math.floor(idx))
-        hi = min(lo + 1, len(durations) - 1)
-        frac = idx - lo
-        return durations[lo] + (durations[hi] - durations[lo]) * frac
+        Instead of iterating events once per metric kind (up to 6 passes),
+        this collects durations, tokens, error counts, tool counts, and
+        tool failure counts in one traversal, then derives all metrics.
+        """
+        result: dict[ObjectiveKind, float] = {}
+        event_count = len(events)
 
-    @staticmethod
-    def _measure_avg_latency(events: list[dict[str, Any]]) -> float:
-        durations = [
-            e.get("duration_ms", 0.0) or 0.0
-            for e in events
-            if e.get("duration_ms") is not None
-        ]
-        if not durations:
-            return 0.0
-        return sum(durations) / len(durations)
+        # Always useful
+        if ObjectiveKind.THROUGHPUT in needed:
+            result[ObjectiveKind.THROUGHPUT] = float(event_count)
 
-    @staticmethod
-    def _measure_error_rate(events: list[dict[str, Any]]) -> float:
         if not events:
-            return 0.0
-        errors = 0
+            for kind in needed:
+                result.setdefault(kind, 0.0)
+            # tool_success_rate is 1.0 when no events
+            if ObjectiveKind.TOOL_SUCCESS_RATE in needed:
+                result[ObjectiveKind.TOOL_SUCCESS_RATE] = 1.0
+            return result
+
+        need_latency = needed & {
+            ObjectiveKind.LATENCY_P95, ObjectiveKind.LATENCY_AVG,
+        }
+        need_errors = ObjectiveKind.ERROR_RATE in needed
+        need_tokens = ObjectiveKind.TOKEN_BUDGET in needed
+        need_tools = ObjectiveKind.TOOL_SUCCESS_RATE in needed
+
+        durations: list[float] = []
+        total_tokens = 0
+        error_count = 0
+        tool_count = 0
+        tool_failures = 0
+
         for e in events:
-            if e.get("event_type") == "error":
-                errors += 1
-                continue
-            tc = e.get("tool_call")
-            if isinstance(tc, dict):
-                out = tc.get("tool_output")
-                if isinstance(out, dict) and out.get("error"):
-                    errors += 1
-        return errors / len(events)
+            if need_latency:
+                dur = e.get("duration_ms")
+                if dur is not None:
+                    durations.append(dur or 0.0)
 
-    @staticmethod
-    def _measure_total_tokens(events: list[dict[str, Any]]) -> float:
-        return float(sum(
-            (e.get("tokens_in") or 0) + (e.get("tokens_out") or 0)
-            for e in events
-        ))
+            if need_tokens:
+                total_tokens += (e.get("tokens_in") or 0) + (e.get("tokens_out") or 0)
 
-    @staticmethod
-    def _measure_tool_success_rate(events: list[dict[str, Any]]) -> float:
-        tool_events = [e for e in events if e.get("tool_call") is not None]
-        if not tool_events:
-            return 1.0  # No tool calls = no failures
-        failures = 0
-        for e in tool_events:
             tc = e.get("tool_call")
-            if isinstance(tc, dict):
-                out = tc.get("tool_output")
-                if isinstance(out, dict) and out.get("error"):
-                    failures += 1
-        return 1.0 - (failures / len(tool_events))
+            is_error = e.get("event_type") == "error"
+
+            if need_errors:
+                if is_error:
+                    error_count += 1
+                elif isinstance(tc, dict):
+                    out = tc.get("tool_output")
+                    if isinstance(out, dict) and out.get("error"):
+                        error_count += 1
+
+            if need_tools and tc is not None:
+                tool_count += 1
+                if isinstance(tc, dict):
+                    out = tc.get("tool_output")
+                    if isinstance(out, dict) and out.get("error"):
+                        tool_failures += 1
+
+        # Derive metrics from collected data
+        if ObjectiveKind.LATENCY_P95 in needed:
+            if durations:
+                durations_sorted = sorted(durations)
+                idx = 0.95 * (len(durations_sorted) - 1)
+                lo = int(math.floor(idx))
+                hi = min(lo + 1, len(durations_sorted) - 1)
+                frac = idx - lo
+                result[ObjectiveKind.LATENCY_P95] = (
+                    durations_sorted[lo]
+                    + (durations_sorted[hi] - durations_sorted[lo]) * frac
+                )
+            else:
+                result[ObjectiveKind.LATENCY_P95] = 0.0
+
+        if ObjectiveKind.LATENCY_AVG in needed:
+            result[ObjectiveKind.LATENCY_AVG] = (
+                (sum(durations) / len(durations)) if durations else 0.0
+            )
+
+        if need_errors:
+            result[ObjectiveKind.ERROR_RATE] = error_count / event_count
+
+        if need_tokens:
+            result[ObjectiveKind.TOKEN_BUDGET] = float(total_tokens)
+
+        if need_tools:
+            result[ObjectiveKind.TOOL_SUCCESS_RATE] = (
+                1.0 - (tool_failures / tool_count) if tool_count > 0 else 1.0
+            )
+
+        return result
+
+    def _measure(self, events: list[dict[str, Any]], kind: ObjectiveKind) -> float:
+        """Compute a single metric (convenience wrapper for _measure_all)."""
+        return self._measure_all(events, {kind}).get(kind, 0.0)
 
     @staticmethod
     def _is_violated(value: float, objective: SLObjective) -> bool:
