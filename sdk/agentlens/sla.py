@@ -316,9 +316,22 @@ class SLAEvaluator:
         # Normalize sessions to dicts
         normalized = [self._normalize_session(s) for s in sessions]
 
+        # Determine which metric kinds are needed by the policy
+        needed_kinds = {obj.kind for obj in policy.objectives}
+
+        # Single-pass: compute all needed metrics for every session at once.
+        # Previously each objective scanned every session's events independently,
+        # resulting in O(objectives × sessions × events) work.  This reduces it
+        # to O(sessions × events) + O(objectives × sessions) — a significant
+        # win when multiple objectives share the same session pool.
+        all_metrics: list[dict[ObjectiveKind, float]] = []
+        for s in normalized:
+            events = s.get("events", [])
+            all_metrics.append(self._measure_all(events, needed_kinds))
+
         results: list[ObjectiveResult] = []
         for obj in policy.objectives:
-            result = self._evaluate_objective(normalized, obj)
+            result = self._evaluate_objective_precomputed(normalized, obj, all_metrics)
             results.append(result)
 
         # Aggregate status
@@ -364,20 +377,52 @@ class SLAEvaluator:
             if self._is_violated(value, objective):
                 violations.append(sid)
 
+        return self._build_objective_result(objective, total, violations, measured_values)
+
+    def _evaluate_objective_precomputed(
+        self,
+        sessions: list[dict[str, Any]],
+        objective: SLObjective,
+        all_metrics: list[dict[ObjectiveKind, float]],
+    ) -> ObjectiveResult:
+        """Evaluate a single objective using pre-computed metrics.
+
+        Uses the metrics dict already computed by :meth:`_measure_all`
+        in a single pass over each session's events, eliminating the
+        per-objective O(events) scan.
+        """
+        violations: list[str] = []
+        measured_values: list[float] = []
+        total = len(sessions)
+
+        for s, metrics in zip(sessions, all_metrics):
+            sid = s.get("session_id", "unknown")
+            value = metrics[objective.kind]
+            measured_values.append(value)
+            if self._is_violated(value, objective):
+                violations.append(sid)
+
+        return self._build_objective_result(objective, total, violations, measured_values)
+
+    @staticmethod
+    def _build_objective_result(
+        objective: SLObjective,
+        total: int,
+        violations: list[str],
+        measured_values: list[float],
+    ) -> ObjectiveResult:
+        """Build an ObjectiveResult from collected violation data."""
         compliant_count = total - len(violations)
         compliance_pct = (compliant_count / total * 100.0) if total > 0 else 100.0
 
-        # Error budget: how many violations are allowed
         allowed_violations = total * (1.0 - objective.slo_percent / 100.0)
         budget_remaining = allowed_violations - len(violations)
         budget_pct = (budget_remaining / allowed_violations * 100.0) if allowed_violations > 0 else (
             100.0 if len(violations) == 0 else 0.0
         )
 
-        # Determine status
         if compliance_pct >= objective.slo_percent:
-            # Check if at-risk (within margin)
-            if compliance_pct < objective.slo_percent + self.AT_RISK_MARGIN and len(violations) > 0:
+            if compliance_pct < objective.slo_percent + SLAEvaluator.AT_RISK_MARGIN and len(violations) > 0:
                 status = ComplianceStatus.AT_RISK
             else:
                 status = ComplianceStatus.COMPLIANT
@@ -398,6 +443,97 @@ class SLAEvaluator:
         )
 
     # -- measurement helpers -------------------------------------------------
+
+    def _measure_all(
+        self,
+        events: list[dict[str, Any]],
+        kinds: set[ObjectiveKind],
+    ) -> dict[ObjectiveKind, float]:
+        """Compute all requested metric kinds in a single pass over events.
+
+        Previously each objective triggered an independent full scan of the
+        event list.  With K objectives and E events per session this was
+        O(K·E).  This method reduces it to O(E) regardless of K by
+        collecting durations, tokens, error/tool counts in one loop and
+        deriving all metrics from the aggregated data.
+        """
+        n = len(events)
+        results: dict[ObjectiveKind, float] = {}
+
+        if kinds == {ObjectiveKind.THROUGHPUT}:
+            results[ObjectiveKind.THROUGHPUT] = float(n)
+            return results
+
+        need_latency = ObjectiveKind.LATENCY_P95 in kinds or ObjectiveKind.LATENCY_AVG in kinds
+        need_tokens = ObjectiveKind.TOKEN_BUDGET in kinds
+        need_errors = ObjectiveKind.ERROR_RATE in kinds
+        need_tools = ObjectiveKind.TOOL_SUCCESS_RATE in kinds
+
+        durations: list[float] = []
+        total_tokens = 0
+        error_count = 0
+        tool_count = 0
+        tool_failures = 0
+
+        for e in events:
+            if need_latency:
+                dur = e.get("duration_ms")
+                if dur is not None:
+                    durations.append(dur or 0.0)
+
+            if need_tokens:
+                total_tokens += (e.get("tokens_in") or 0) + (e.get("tokens_out") or 0)
+
+            if need_errors:
+                if e.get("event_type") == "error":
+                    error_count += 1
+                else:
+                    tc = e.get("tool_call")
+                    if isinstance(tc, dict):
+                        out = tc.get("tool_output")
+                        if isinstance(out, dict) and out.get("error"):
+                            error_count += 1
+
+            if need_tools:
+                tc = e.get("tool_call")
+                if tc is not None:
+                    tool_count += 1
+                    if isinstance(tc, dict):
+                        out = tc.get("tool_output")
+                        if isinstance(out, dict) and out.get("error"):
+                            tool_failures += 1
+
+        if ObjectiveKind.LATENCY_P95 in kinds:
+            if durations:
+                durations_sorted = sorted(durations)
+                idx = 0.95 * (len(durations_sorted) - 1)
+                lo = int(math.floor(idx))
+                hi = min(lo + 1, len(durations_sorted) - 1)
+                frac = idx - lo
+                results[ObjectiveKind.LATENCY_P95] = (
+                    durations_sorted[lo] + (durations_sorted[hi] - durations_sorted[lo]) * frac
+                )
+            else:
+                results[ObjectiveKind.LATENCY_P95] = 0.0
+
+        if ObjectiveKind.LATENCY_AVG in kinds:
+            results[ObjectiveKind.LATENCY_AVG] = (sum(durations) / len(durations)) if durations else 0.0
+
+        if ObjectiveKind.ERROR_RATE in kinds:
+            results[ObjectiveKind.ERROR_RATE] = (error_count / n) if n > 0 else 0.0
+
+        if ObjectiveKind.TOKEN_BUDGET in kinds:
+            results[ObjectiveKind.TOKEN_BUDGET] = float(total_tokens)
+
+        if ObjectiveKind.TOOL_SUCCESS_RATE in kinds:
+            results[ObjectiveKind.TOOL_SUCCESS_RATE] = (
+                1.0 - (tool_failures / tool_count) if tool_count > 0 else 1.0
+            )
+
+        if ObjectiveKind.THROUGHPUT in kinds:
+            results[ObjectiveKind.THROUGHPUT] = float(n)
+
+        return results
 
     def _measure(self, events: list[dict[str, Any]], kind: ObjectiveKind) -> float:
         """Compute the metric value for a session's events."""
