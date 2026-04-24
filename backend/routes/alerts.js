@@ -62,6 +62,31 @@ function ensureAlertsTable() {
   _alertsTableReady = true;
 }
 
+// ── Cached prepared statements for evaluate endpoint ────────────────
+// The /evaluate endpoint previously called db.prepare() inside the
+// per-rule loop for cooldown checks and alert inserts — recompiling
+// the same SQL on every rule × every evaluation.  Caching them here
+// ensures they are compiled once per DB lifetime.
+let _evalStmts = null;
+
+function getEvaluateStatements() {
+  if (_evalStmts) return _evalStmts;
+  const db = getDb();
+  _evalStmts = {
+    enabledRules: db.prepare("SELECT * FROM alert_rules WHERE enabled = 1"),
+    recentAlert: db.prepare(
+      `SELECT alert_id FROM alert_events
+       WHERE rule_id = ? AND triggered_at >= ?
+       ORDER BY triggered_at DESC LIMIT 1`
+    ),
+    insertAlert: db.prepare(
+      `INSERT INTO alert_events (alert_id, rule_id, triggered_at, metric_value, details)
+       VALUES (?, ?, ?, ?, ?)`
+    ),
+  };
+  return _evalStmts;
+}
+
 // Valid metrics users can alert on
 const VALID_METRICS = [
   "total_tokens",         // total tokens (in+out) across sessions in window
@@ -365,9 +390,9 @@ router.delete("/rules/:ruleId", validateIdParam("ruleId"), wrapRoute("delete ale
 
 router.post("/evaluate", wrapRoute("evaluate alerts", async (req, res) => {
     ensureAlertsTable();
-    const db = getDb();
 
-    const rules = db.prepare("SELECT * FROM alert_rules WHERE enabled = 1").all();
+    const evalStmts = getEvaluateStatements();
+    const rules = evalStmts.enabledRules.all();
     const results = [];
 
     for (const rule of rules) {
@@ -389,18 +414,11 @@ router.post("/evaluate", wrapRoute("evaluate alerts", async (req, res) => {
       if (triggered) {
         // Check cooldown — don't fire if recently triggered
         const cooldownStart = new Date(Date.now() - rule.cooldown_minutes * 60 * 1000).toISOString();
-        const recentAlert = db.prepare(`
-          SELECT alert_id FROM alert_events
-          WHERE rule_id = ? AND triggered_at >= ?
-          ORDER BY triggered_at DESC LIMIT 1
-        `).get(rule.rule_id, cooldownStart);
+        const recentAlert = evalStmts.recentAlert.get(rule.rule_id, cooldownStart);
 
         if (!recentAlert) {
           const alertId = generateId();
-          db.prepare(`
-            INSERT INTO alert_events (alert_id, rule_id, triggered_at, metric_value, details)
-            VALUES (?, ?, ?, ?, ?)
-          `).run(alertId, rule.rule_id, new Date().toISOString(), value,
+          evalStmts.insertAlert.run(alertId, rule.rule_id, new Date().toISOString(), value,
             JSON.stringify({ threshold: rule.threshold, operator: rule.operator, window_minutes: rule.window_minutes }));
           result.alert_id = alertId;
           result.status = "fired";
