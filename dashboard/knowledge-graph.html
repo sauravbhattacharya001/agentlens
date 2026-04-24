@@ -1,0 +1,641 @@
+<!DOCTYPE html>
+<html lang="en">
+<head>
+  <meta charset="UTF-8">
+  <meta name="viewport" content="width=device-width, initial-scale=1.0">
+  <title>AgentLens — Knowledge Graph</title>
+  <link rel="stylesheet" href="styles.css">
+  <style>
+    .kg-container { display: grid; grid-template-columns: 1fr 340px; gap: 16px; height: calc(100vh - 160px); }
+    .kg-canvas-wrap { position: relative; background: var(--card-bg, #1a1a2e); border-radius: 12px; overflow: hidden; border: 1px solid var(--border, #2a2a4a); }
+    .kg-canvas-wrap canvas { width: 100%; height: 100%; cursor: grab; }
+    .kg-canvas-wrap canvas:active { cursor: grabbing; }
+    .kg-sidebar { display: flex; flex-direction: column; gap: 12px; overflow-y: auto; }
+    .kg-card { background: var(--card-bg, #1a1a2e); border-radius: 10px; padding: 14px; border: 1px solid var(--border, #2a2a4a); }
+    .kg-card h3 { margin: 0 0 10px; font-size: 14px; color: var(--text-secondary, #8888aa); text-transform: uppercase; letter-spacing: .5px; }
+    .kg-stat { display: flex; justify-content: space-between; padding: 4px 0; font-size: 13px; }
+    .kg-stat .label { color: var(--text-secondary, #8888aa); }
+    .kg-stat .value { font-weight: 600; color: var(--text, #e0e0ff); }
+    .kg-badge { display: inline-block; padding: 2px 8px; border-radius: 10px; font-size: 11px; font-weight: 600; }
+    .kg-badge.high { background: #0f5132; color: #75d5a0; }
+    .kg-badge.medium { background: #664d03; color: #ffda6a; }
+    .kg-badge.low { background: #842029; color: #f5c2c7; }
+    .rec-item { padding: 8px; margin: 4px 0; border-radius: 8px; font-size: 12px; }
+    .rec-item.learn { background: rgba(100,150,255,.08); border-left: 3px solid #66f; }
+    .rec-item.stale { background: rgba(255,200,50,.08); border-left: 3px solid #fb3; }
+    .rec-item.gap { background: rgba(255,100,100,.08); border-left: 3px solid #f66; }
+    .rec-item.consolidate { background: rgba(100,255,150,.08); border-left: 3px solid #6f6; }
+    .rec-item .title { font-weight: 600; color: var(--text, #e0e0ff); }
+    .rec-item .desc { color: var(--text-secondary, #8888aa); margin-top: 2px; }
+    .kg-toolbar { display: flex; gap: 8px; align-items: center; flex-wrap: wrap; margin-bottom: 12px; }
+    .kg-toolbar select, .kg-toolbar button { font-size: 12px; padding: 6px 12px; border-radius: 6px; border: 1px solid var(--border, #2a2a4a); background: var(--card-bg, #1a1a2e); color: var(--text, #e0e0ff); cursor: pointer; }
+    .kg-toolbar button:hover { background: rgba(100,100,255,.15); }
+    .kg-toolbar button.active { background: rgba(100,100,255,.25); border-color: #66f; }
+    .legend { display: flex; gap: 12px; flex-wrap: wrap; font-size: 11px; color: var(--text-secondary, #8888aa); }
+    .legend-item { display: flex; align-items: center; gap: 4px; }
+    .legend-dot { width: 10px; height: 10px; border-radius: 50%; }
+    .legend-hex { width: 10px; height: 10px; background: #6cf; clip-path: polygon(50% 0%,100% 25%,100% 75%,50% 100%,0% 75%,0% 25%); }
+    .legend-diamond { width: 10px; height: 10px; background: #fc6; transform: rotate(45deg); }
+    .tooltip { position: absolute; background: #222244; border: 1px solid #4444aa; border-radius: 8px; padding: 10px; font-size: 12px; pointer-events: none; z-index: 100; color: #e0e0ff; max-width: 260px; display: none; }
+    .auto-badge { animation: pulse-badge 2s infinite; }
+    @keyframes pulse-badge { 0%,100% { opacity: 1; } 50% { opacity: .6; } }
+    .score-bar { height: 6px; border-radius: 3px; background: var(--border, #2a2a4a); margin-top: 4px; overflow: hidden; }
+    .score-bar-fill { height: 100%; border-radius: 3px; transition: width .5s; }
+    .detail-panel { display: none; }
+    .detail-panel.open { display: block; }
+    .detail-title { font-size: 16px; font-weight: 700; color: var(--text, #e0e0ff); margin-bottom: 8px; }
+    .detail-type { font-size: 11px; text-transform: uppercase; letter-spacing: .5px; margin-bottom: 8px; }
+  </style>
+</head>
+<body>
+  <div id="app">
+    <header class="header">
+      <div class="header-left">
+        <h1 class="logo">🔍 AgentLens</h1>
+        <span class="tagline">Knowledge Graph</span>
+      </div>
+      <div class="header-right">
+        <a href="index.html" class="btn btn-alert-header" style="text-decoration:none">← Dashboard</a>
+        <button class="theme-toggle" onclick="toggleTheme()" title="Toggle theme" id="themeToggleBtn">🌙</button>
+      </div>
+    </header>
+    <main class="main" style="padding: 16px;">
+      <div class="kg-toolbar">
+        <select id="presetSelect" onchange="loadPreset(this.value)">
+          <option value="default">🏗️ Full Fleet</option>
+          <option value="capabilities">⚡ Capabilities View</option>
+          <option value="knowledge">📚 Knowledge View</option>
+          <option value="delegation">🔄 Delegation Chains</option>
+        </select>
+        <button onclick="runAutoDiscovery()" title="Auto-discover implicit connections">🔎 Auto-Discover</button>
+        <button id="monitorBtn" onclick="toggleMonitor()">📡 Auto-Monitor</button>
+        <button onclick="exportJSON()">📥 Export JSON</button>
+        <div class="legend">
+          <div class="legend-item"><div class="legend-dot" style="background:#6cf"></div> Agent</div>
+          <div class="legend-item"><div class="legend-hex"></div> Capability</div>
+          <div class="legend-item"><div class="legend-diamond"></div> Knowledge</div>
+          <div class="legend-item"><div class="legend-dot" style="background:#666;width:6px;height:2px;border-radius:1px"></div> has_capability</div>
+          <div class="legend-item"><div class="legend-dot" style="background:#fc6;width:6px;height:2px;border-radius:1px"></div> shares_knowledge</div>
+          <div class="legend-item"><div class="legend-dot" style="background:#f66;width:6px;height:2px;border-radius:1px"></div> delegates_to</div>
+          <div class="legend-item"><div class="legend-dot" style="background:#6f6;width:6px;height:2px;border-radius:1px"></div> learned_from</div>
+        </div>
+      </div>
+      <div class="kg-container">
+        <div class="kg-canvas-wrap">
+          <canvas id="kgCanvas"></canvas>
+          <div class="tooltip" id="tooltip"></div>
+        </div>
+        <div class="kg-sidebar">
+          <!-- Fleet Health Score -->
+          <div class="kg-card">
+            <h3>🧠 Fleet Knowledge Health</h3>
+            <div id="fleetHealth"></div>
+          </div>
+          <!-- Detail Panel (shown on node click) -->
+          <div class="kg-card detail-panel" id="detailPanel">
+            <h3>📋 Node Details</h3>
+            <div id="detailContent"></div>
+          </div>
+          <!-- Proactive Recommendations -->
+          <div class="kg-card">
+            <h3>💡 Proactive Recommendations</h3>
+            <div id="recommendations"></div>
+          </div>
+          <!-- Discovery Log -->
+          <div class="kg-card">
+            <h3>🔎 Discovery Log</h3>
+            <div id="discoveryLog" style="font-size:12px;color:var(--text-secondary,#8888aa);max-height:160px;overflow-y:auto;">
+              <em>Run Auto-Discover to find implicit connections...</em>
+            </div>
+          </div>
+        </div>
+      </div>
+    </main>
+  </div>
+  <script src="app.js"></script>
+  <script>
+(function() {
+  // ============ DATA MODEL ============
+  const AGENT_COLORS = ['#6cf','#f6c','#cf6','#c6f','#6fc','#fc6','#f66','#66f'];
+  const CAPABILITY_COLOR = '#6cf';
+  const KNOWLEDGE_COLOR = '#fc6';
+  const EDGE_COLORS = { has_capability:'#555', shares_knowledge:'#fc6', delegates_to:'#f66', learned_from:'#6f6' };
+
+  function generateDemoData() {
+    const agents = [
+      { id:'a1', type:'agent', label:'Orchestrator', health:0.95, capabilities:['planning','routing','monitoring'], knowledge:['system-architecture','sla-policies'], lastActive:'2m ago' },
+      { id:'a2', type:'agent', label:'Researcher', health:0.88, capabilities:['web-search','summarization','citation'], knowledge:['domain-ontology','research-methods'], lastActive:'5m ago' },
+      { id:'a3', type:'agent', label:'Coder', health:0.92, capabilities:['code-generation','debugging','testing'], knowledge:['api-patterns','language-specs'], lastActive:'1m ago' },
+      { id:'a4', type:'agent', label:'Reviewer', health:0.79, capabilities:['code-review','testing','security-scan'], knowledge:['style-guides','vulnerability-db'], lastActive:'12m ago' },
+      { id:'a5', type:'agent', label:'Deployer', health:0.85, capabilities:['ci-cd','monitoring','rollback'], knowledge:['infra-config','deployment-history'], lastActive:'8m ago' },
+      { id:'a6', type:'agent', label:'Analyst', health:0.91, capabilities:['data-analysis','visualization','reporting'], knowledge:['metrics-catalog','business-rules'], lastActive:'3m ago' },
+      { id:'a7', type:'agent', label:'Guardian', health:0.97, capabilities:['security-scan','compliance','auditing'], knowledge:['vulnerability-db','compliance-frameworks'], lastActive:'30s ago' },
+    ];
+    const capSet = new Set(); const knowSet = new Set();
+    agents.forEach(a => { a.capabilities.forEach(c => capSet.add(c)); a.knowledge.forEach(k => knowSet.add(k)); });
+    const capNodes = [...capSet].map(c => ({ id:'cap_'+c, type:'capability', label:c, agents: agents.filter(a=>a.capabilities.includes(c)).map(a=>a.id) }));
+    const knowNodes = [...knowSet].map(k => ({ id:'know_'+k, type:'knowledge', label:k, agents: agents.filter(a=>a.knowledge.includes(k)).map(a=>a.id), freshness: Math.random()*0.6+0.4, lastUpdated: Math.floor(Math.random()*14)+1 + 'd ago' }));
+    const nodes = [...agents, ...capNodes, ...knowNodes];
+    const edges = [];
+    agents.forEach(a => {
+      a.capabilities.forEach(c => edges.push({ source:a.id, target:'cap_'+c, type:'has_capability' }));
+      a.knowledge.forEach(k => edges.push({ source:a.id, target:'know_'+k, type:'shares_knowledge' }));
+    });
+    // Delegation edges
+    edges.push({ source:'a1', target:'a3', type:'delegates_to', label:'coding tasks' });
+    edges.push({ source:'a1', target:'a2', type:'delegates_to', label:'research tasks' });
+    edges.push({ source:'a1', target:'a5', type:'delegates_to', label:'deployments' });
+    edges.push({ source:'a3', target:'a4', type:'delegates_to', label:'review requests' });
+    edges.push({ source:'a4', target:'a7', type:'delegates_to', label:'security checks' });
+    // Learned-from edges
+    edges.push({ source:'a3', target:'a4', type:'learned_from', label:'code patterns' });
+    edges.push({ source:'a5', target:'a3', type:'learned_from', label:'build configs' });
+    edges.push({ source:'a6', target:'a2', type:'learned_from', label:'analysis methods' });
+    edges.push({ source:'a7', target:'a4', type:'learned_from', label:'vulnerability patterns' });
+    return { nodes, edges };
+  }
+
+  let graphData = generateDemoData();
+  let nodePositions = {};
+  let velocities = {};
+  let selectedNode = null;
+  let dragNode = null;
+  let panX = 0, panY = 0, zoom = 1;
+  let isDragging = false, lastMouse = null;
+  let monitorInterval = null;
+  let discoveredEdges = [];
+
+  // ============ PHYSICS ============
+  function initPositions() {
+    const cx = 400, cy = 300;
+    graphData.nodes.forEach((n, i) => {
+      const angle = (i / graphData.nodes.length) * Math.PI * 2;
+      const r = n.type === 'agent' ? 120 : (n.type === 'capability' ? 250 : 200);
+      nodePositions[n.id] = { x: cx + Math.cos(angle) * r + (Math.random()-0.5)*80, y: cy + Math.sin(angle) * r + (Math.random()-0.5)*80 };
+      velocities[n.id] = { x: 0, y: 0 };
+    });
+  }
+
+  function simulate() {
+    const nodes = graphData.nodes;
+    const edges = graphData.edges;
+    const REPULSION = 3000, ATTRACTION = 0.005, DAMPING = 0.85, CENTER_PULL = 0.001;
+    const cx = canvas.width / (2 * dpr), cy = canvas.height / (2 * dpr);
+    for (let i = 0; i < nodes.length; i++) {
+      const ni = nodes[i], pi = nodePositions[ni.id];
+      if (ni.id === (dragNode && dragNode.id)) continue;
+      let fx = 0, fy = 0;
+      // Repulsion
+      for (let j = 0; j < nodes.length; j++) {
+        if (i === j) continue;
+        const pj = nodePositions[nodes[j].id];
+        let dx = pi.x - pj.x, dy = pi.y - pj.y;
+        const dist = Math.sqrt(dx*dx + dy*dy) || 1;
+        const force = REPULSION / (dist * dist);
+        fx += (dx / dist) * force;
+        fy += (dy / dist) * force;
+      }
+      // Attraction along edges
+      edges.forEach(e => {
+        let other = null;
+        if (e.source === ni.id) other = e.target;
+        else if (e.target === ni.id) other = e.source;
+        if (!other) return;
+        const po = nodePositions[other];
+        if (!po) return;
+        const dx = po.x - pi.x, dy = po.y - pi.y;
+        const dist = Math.sqrt(dx*dx + dy*dy) || 1;
+        fx += dx * ATTRACTION;
+        fy += dy * ATTRACTION;
+      });
+      // Center pull
+      fx += (cx - pi.x) * CENTER_PULL;
+      fy += (cy - pi.y) * CENTER_PULL;
+      velocities[ni.id].x = (velocities[ni.id].x + fx) * DAMPING;
+      velocities[ni.id].y = (velocities[ni.id].y + fy) * DAMPING;
+      pi.x += velocities[ni.id].x;
+      pi.y += velocities[ni.id].y;
+    }
+  }
+
+  // ============ RENDERING ============
+  const canvas = document.getElementById('kgCanvas');
+  const ctx = canvas.getContext('2d');
+  let dpr = window.devicePixelRatio || 1;
+
+  function resize() {
+    const rect = canvas.parentElement.getBoundingClientRect();
+    canvas.width = rect.width * dpr;
+    canvas.height = rect.height * dpr;
+    canvas.style.width = rect.width + 'px';
+    canvas.style.height = rect.height + 'px';
+  }
+  window.addEventListener('resize', resize);
+
+  function getNodeRadius(n) { return n.type === 'agent' ? 22 : 14; }
+  function getNodeColor(n) {
+    if (n.type === 'agent') {
+      const idx = graphData.nodes.filter(x=>x.type==='agent').indexOf(n);
+      return AGENT_COLORS[idx % AGENT_COLORS.length];
+    }
+    return n.type === 'capability' ? CAPABILITY_COLOR : KNOWLEDGE_COLOR;
+  }
+
+  function drawNode(n) {
+    const p = nodePositions[n.id];
+    if (!p) return;
+    const sx = (p.x + panX) * zoom * dpr;
+    const sy = (p.y + panY) * zoom * dpr;
+    const r = getNodeRadius(n) * zoom * dpr;
+    const col = getNodeColor(n);
+    ctx.save();
+    // Glow for selected
+    if (selectedNode && selectedNode.id === n.id) {
+      ctx.shadowColor = col; ctx.shadowBlur = 20 * dpr;
+    }
+    if (n.type === 'agent') {
+      ctx.beginPath(); ctx.arc(sx, sy, r, 0, Math.PI*2); ctx.fillStyle = col; ctx.globalAlpha = 0.2; ctx.fill();
+      ctx.globalAlpha = 1; ctx.strokeStyle = col; ctx.lineWidth = 2*dpr; ctx.stroke();
+      // Health ring
+      if (n.health != null) {
+        ctx.beginPath(); ctx.arc(sx, sy, r + 4*dpr, -Math.PI/2, -Math.PI/2 + Math.PI*2*n.health);
+        ctx.strokeStyle = n.health > 0.8 ? '#4f4' : n.health > 0.6 ? '#fb3' : '#f44';
+        ctx.lineWidth = 2*dpr; ctx.stroke();
+      }
+    } else if (n.type === 'capability') {
+      // Hexagon
+      ctx.beginPath();
+      for (let i = 0; i < 6; i++) { const a = Math.PI/6 + i*Math.PI/3; ctx.lineTo(sx+Math.cos(a)*r, sy+Math.sin(a)*r); }
+      ctx.closePath(); ctx.fillStyle = col; ctx.globalAlpha = 0.15; ctx.fill();
+      ctx.globalAlpha = 1; ctx.strokeStyle = col; ctx.lineWidth = 2*dpr; ctx.stroke();
+    } else {
+      // Diamond
+      ctx.beginPath();
+      ctx.moveTo(sx, sy-r); ctx.lineTo(sx+r, sy); ctx.lineTo(sx, sy+r); ctx.lineTo(sx-r, sy);
+      ctx.closePath(); ctx.fillStyle = col; ctx.globalAlpha = 0.15; ctx.fill();
+      ctx.globalAlpha = 1; ctx.strokeStyle = col; ctx.lineWidth = 2*dpr; ctx.stroke();
+    }
+    // Label
+    ctx.globalAlpha = 1; ctx.fillStyle = 'var(--text, #e0e0ff)';
+    ctx.fillStyle = '#e0e0ff';
+    ctx.font = `${Math.max(10, 11 * zoom) * dpr}px system-ui, sans-serif`;
+    ctx.textAlign = 'center'; ctx.textBaseline = 'top';
+    ctx.fillText(n.label, sx, sy + r + 4*dpr);
+    ctx.restore();
+  }
+
+  function drawEdge(e) {
+    const ps = nodePositions[e.source], pt = nodePositions[e.target];
+    if (!ps || !pt) return;
+    const sx = (ps.x+panX)*zoom*dpr, sy = (ps.y+panY)*zoom*dpr;
+    const tx = (pt.x+panX)*zoom*dpr, ty = (pt.y+panY)*zoom*dpr;
+    ctx.beginPath(); ctx.moveTo(sx, sy); ctx.lineTo(tx, ty);
+    ctx.strokeStyle = EDGE_COLORS[e.type] || '#555';
+    ctx.globalAlpha = e._discovered ? 0.8 : 0.3;
+    ctx.lineWidth = (e._discovered ? 2.5 : 1.5) * dpr;
+    if (e.type === 'delegates_to' || e.type === 'learned_from') { ctx.setLineDash([6*dpr, 4*dpr]); }
+    ctx.stroke(); ctx.setLineDash([]); ctx.globalAlpha = 1;
+    // Arrow for delegates_to
+    if (e.type === 'delegates_to') {
+      const angle = Math.atan2(ty-sy, tx-sx);
+      const nr = getNodeRadius(graphData.nodes.find(n=>n.id===e.target)||{type:'agent'}) * zoom * dpr;
+      const ax = tx - Math.cos(angle)*nr, ay = ty - Math.sin(angle)*nr;
+      ctx.beginPath(); ctx.moveTo(ax, ay);
+      ctx.lineTo(ax - Math.cos(angle-0.4)*10*dpr, ay - Math.sin(angle-0.4)*10*dpr);
+      ctx.lineTo(ax - Math.cos(angle+0.4)*10*dpr, ay - Math.sin(angle+0.4)*10*dpr);
+      ctx.closePath(); ctx.fillStyle = EDGE_COLORS.delegates_to; ctx.fill();
+    }
+  }
+
+  function render() {
+    simulate();
+    ctx.clearRect(0, 0, canvas.width, canvas.height);
+    graphData.edges.forEach(drawEdge);
+    graphData.nodes.forEach(drawNode);
+    requestAnimationFrame(render);
+  }
+
+  // ============ INTERACTION ============
+  function screenToWorld(mx, my) { return { x: mx/zoom - panX, y: my/zoom - panY }; }
+  function hitTest(mx, my) {
+    const w = screenToWorld(mx, my);
+    for (let i = graphData.nodes.length-1; i >= 0; i--) {
+      const n = graphData.nodes[i], p = nodePositions[n.id];
+      if (!p) continue;
+      const r = getNodeRadius(n) + 5;
+      if (Math.abs(w.x-p.x)<r && Math.abs(w.y-p.y)<r) return n;
+    }
+    return null;
+  }
+
+  canvas.addEventListener('mousedown', e => {
+    const rect = canvas.getBoundingClientRect();
+    const mx = e.clientX - rect.left, my = e.clientY - rect.top;
+    const hit = hitTest(mx, my);
+    if (hit) { dragNode = hit; selectedNode = hit; showDetail(hit); }
+    else { isDragging = true; selectedNode = null; document.getElementById('detailPanel').classList.remove('open'); }
+    lastMouse = { x: e.clientX, y: e.clientY };
+  });
+  canvas.addEventListener('mousemove', e => {
+    const rect = canvas.getBoundingClientRect();
+    const mx = e.clientX - rect.left, my = e.clientY - rect.top;
+    if (dragNode) {
+      const w = screenToWorld(mx, my);
+      nodePositions[dragNode.id].x = w.x;
+      nodePositions[dragNode.id].y = w.y;
+      velocities[dragNode.id] = { x:0, y:0 };
+    } else if (isDragging && lastMouse) {
+      panX += (e.clientX - lastMouse.x) / zoom;
+      panY += (e.clientY - lastMouse.y) / zoom;
+    } else {
+      // Tooltip
+      const hit = hitTest(mx, my);
+      const tip = document.getElementById('tooltip');
+      if (hit) {
+        tip.style.display = 'block';
+        tip.style.left = (mx + 14) + 'px'; tip.style.top = (my + 14) + 'px';
+        if (hit.type === 'agent') tip.innerHTML = `<b>${hit.label}</b><br>Health: ${(hit.health*100).toFixed(0)}%<br>Active: ${hit.lastActive}`;
+        else if (hit.type === 'capability') tip.innerHTML = `<b>⚡ ${hit.label}</b><br>Used by ${hit.agents.length} agents`;
+        else tip.innerHTML = `<b>📚 ${hit.label}</b><br>Freshness: ${hit.lastUpdated}<br>Shared by ${hit.agents.length} agents`;
+      } else { tip.style.display = 'none'; }
+    }
+    lastMouse = { x: e.clientX, y: e.clientY };
+  });
+  canvas.addEventListener('mouseup', () => { dragNode = null; isDragging = false; });
+  canvas.addEventListener('wheel', e => {
+    e.preventDefault();
+    const factor = e.deltaY > 0 ? 0.92 : 1.08;
+    zoom = Math.max(0.2, Math.min(4, zoom * factor));
+  }, { passive: false });
+
+  // ============ DETAIL PANEL ============
+  function showDetail(node) {
+    const panel = document.getElementById('detailPanel');
+    const content = document.getElementById('detailContent');
+    panel.classList.add('open');
+    const connEdges = graphData.edges.filter(e => e.source === node.id || e.target === node.id);
+    let html = `<div class="detail-title">${node.label}</div>`;
+    html += `<div class="detail-type" style="color:${getNodeColor(node)}">${node.type}</div>`;
+    if (node.type === 'agent') {
+      html += `<div class="kg-stat"><span class="label">Health</span><span class="value">${(node.health*100).toFixed(0)}%</span></div>`;
+      html += `<div class="score-bar"><div class="score-bar-fill" style="width:${node.health*100}%;background:${node.health>0.8?'#4f4':node.health>0.6?'#fb3':'#f44'}"></div></div>`;
+      html += `<div class="kg-stat"><span class="label">Last Active</span><span class="value">${node.lastActive}</span></div>`;
+      html += `<div class="kg-stat"><span class="label">Capabilities</span><span class="value">${node.capabilities.length}</span></div>`;
+      html += `<div class="kg-stat"><span class="label">Knowledge</span><span class="value">${node.knowledge.length}</span></div>`;
+      html += `<div class="kg-stat"><span class="label">Connections</span><span class="value">${connEdges.length}</span></div>`;
+      // Per-agent knowledge health
+      const scores = computeAgentHealth(node);
+      html += `<div style="margin-top:8px;font-size:11px;color:var(--text-secondary,#8888aa)">KNOWLEDGE HEALTH</div>`;
+      ['coverage','redundancy','freshness','connectivity'].forEach(k => {
+        const v = scores[k];
+        const c = v > 0.7 ? '#4f4' : v > 0.4 ? '#fb3' : '#f44';
+        html += `<div class="kg-stat"><span class="label">${k.charAt(0).toUpperCase()+k.slice(1)}</span><span class="value" style="color:${c}">${(v*100).toFixed(0)}%</span></div>`;
+        html += `<div class="score-bar"><div class="score-bar-fill" style="width:${v*100}%;background:${c}"></div></div>`;
+      });
+    } else if (node.type === 'capability') {
+      html += `<div class="kg-stat"><span class="label">Agents</span><span class="value">${node.agents.length}</span></div>`;
+      html += `<div style="margin-top:6px;font-size:12px">` + node.agents.map(id => {
+        const a = graphData.nodes.find(n=>n.id===id);
+        return a ? `<span class="kg-badge high">${a.label}</span> ` : '';
+      }).join('') + `</div>`;
+    } else {
+      html += `<div class="kg-stat"><span class="label">Last Updated</span><span class="value">${node.lastUpdated}</span></div>`;
+      html += `<div class="kg-stat"><span class="label">Freshness</span><span class="value">${(node.freshness*100).toFixed(0)}%</span></div>`;
+      html += `<div class="score-bar"><div class="score-bar-fill" style="width:${node.freshness*100}%;background:${node.freshness>0.7?'#4f4':'#fb3'}"></div></div>`;
+      html += `<div class="kg-stat"><span class="label">Shared by</span><span class="value">${node.agents.length} agents</span></div>`;
+    }
+    content.innerHTML = html;
+  }
+
+  // ============ KNOWLEDGE HEALTH ============
+  function computeAgentHealth(agent) {
+    const allCaps = [...new Set(graphData.nodes.filter(n=>n.type==='capability').map(n=>n.label))];
+    const coverage = agent.capabilities ? agent.capabilities.length / Math.max(allCaps.length, 1) : 0;
+    const sharedCaps = agent.capabilities ? agent.capabilities.filter(c => {
+      const cn = graphData.nodes.find(n=>n.id==='cap_'+c);
+      return cn && cn.agents.length > 1;
+    }).length / Math.max(agent.capabilities.length, 1) : 0;
+    const freshness = agent.knowledge ? agent.knowledge.reduce((s,k) => {
+      const kn = graphData.nodes.find(n=>n.id==='know_'+k);
+      return s + (kn ? kn.freshness : 0.5);
+    }, 0) / Math.max(agent.knowledge.length, 1) : 0.5;
+    const connEdges = graphData.edges.filter(e => e.source===agent.id || e.target===agent.id);
+    const connectivity = Math.min(1, connEdges.length / 10);
+    return { coverage, redundancy: sharedCaps, freshness, connectivity };
+  }
+
+  function computeFleetHealth() {
+    const agents = graphData.nodes.filter(n => n.type === 'agent');
+    const metrics = { coverage: 0, redundancy: 0, freshness: 0, connectivity: 0 };
+    agents.forEach(a => {
+      const h = computeAgentHealth(a);
+      Object.keys(metrics).forEach(k => metrics[k] += h[k]);
+    });
+    Object.keys(metrics).forEach(k => metrics[k] /= Math.max(agents.length, 1));
+    const overall = (metrics.coverage + metrics.redundancy + metrics.freshness + metrics.connectivity) / 4;
+    return { ...metrics, overall };
+  }
+
+  function renderFleetHealth() {
+    const fh = computeFleetHealth();
+    const el = document.getElementById('fleetHealth');
+    let html = `<div class="kg-stat"><span class="label">Overall Score</span><span class="value" style="font-size:18px;color:${fh.overall>0.7?'#4f4':fh.overall>0.4?'#fb3':'#f44'}">${(fh.overall*100).toFixed(0)}%</span></div>`;
+    html += `<div class="score-bar"><div class="score-bar-fill" style="width:${fh.overall*100}%;background:${fh.overall>0.7?'#4f4':fh.overall>0.4?'#fb3':'#f44'}"></div></div>`;
+    html += `<div style="margin-top:8px">`;
+    ['coverage','redundancy','freshness','connectivity'].forEach(k => {
+      const v = fh[k];
+      html += `<div class="kg-stat"><span class="label">${k.charAt(0).toUpperCase()+k.slice(1)}</span><span class="value">${(v*100).toFixed(0)}%</span></div>`;
+    });
+    html += `</div>`;
+    // Agent count summary
+    const agents = graphData.nodes.filter(n=>n.type==='agent');
+    const caps = graphData.nodes.filter(n=>n.type==='capability');
+    const knows = graphData.nodes.filter(n=>n.type==='knowledge');
+    html += `<div style="margin-top:8px;font-size:11px;color:var(--text-secondary,#8888aa)">${agents.length} agents · ${caps.length} capabilities · ${knows.length} knowledge entities · ${graphData.edges.length} edges</div>`;
+    el.innerHTML = html;
+  }
+
+  // ============ AUTO-DISCOVERY ============
+  function runAutoDiscovery() {
+    const log = document.getElementById('discoveryLog');
+    log.innerHTML = '';
+    const agents = graphData.nodes.filter(n => n.type === 'agent');
+    const discoveries = [];
+    // 1. Find capability overlaps
+    for (let i = 0; i < agents.length; i++) {
+      for (let j = i+1; j < agents.length; j++) {
+        const shared = agents[i].capabilities.filter(c => agents[j].capabilities.includes(c));
+        if (shared.length >= 2) {
+          const pct = Math.round(shared.length / Math.max(agents[i].capabilities.length, agents[j].capabilities.length) * 100);
+          discoveries.push({ type:'overlap', msg:`${agents[i].label} ↔ ${agents[j].label}: ${pct}% capability overlap (${shared.join(', ')})` });
+        }
+      }
+    }
+    // 2. Find knowledge transfer patterns (agents sharing knowledge but not explicitly connected)
+    agents.forEach(a => {
+      agents.forEach(b => {
+        if (a.id === b.id) return;
+        const sharedK = a.knowledge.filter(k => b.knowledge.includes(k));
+        const hasEdge = graphData.edges.some(e => (e.source===a.id&&e.target===b.id||e.source===b.id&&e.target===a.id) && e.type==='learned_from');
+        if (sharedK.length > 0 && !hasEdge && a.id < b.id) {
+          const newEdge = { source:a.id, target:b.id, type:'learned_from', label:'inferred: '+sharedK.join(', '), _discovered:true };
+          if (!graphData.edges.some(e=>e.source===newEdge.source&&e.target===newEdge.target&&e.type===newEdge.type)) {
+            graphData.edges.push(newEdge);
+            discoveredEdges.push(newEdge);
+            discoveries.push({ type:'transfer', msg:`Inferred knowledge link: ${a.label} ↔ ${b.label} via shared ${sharedK.join(', ')}` });
+          }
+        }
+      });
+    });
+    // 3. Capability gaps
+    const allCaps = graphData.nodes.filter(n=>n.type==='capability');
+    allCaps.forEach(cap => {
+      if (cap.agents.length === 1) {
+        const agent = graphData.nodes.find(n=>n.id===cap.agents[0]);
+        discoveries.push({ type:'gap', msg:`⚠️ Single point of failure: only ${agent?agent.label:'?'} has "${cap.label}"` });
+      }
+    });
+    // 4. Stale knowledge
+    graphData.nodes.filter(n=>n.type==='knowledge').forEach(k => {
+      if (k.freshness < 0.5) {
+        discoveries.push({ type:'stale', msg:`🕐 Knowledge "${k.label}" is stale (freshness ${(k.freshness*100).toFixed(0)}%, last updated ${k.lastUpdated})` });
+      }
+    });
+    discoveries.forEach(d => {
+      const div = document.createElement('div');
+      div.style.cssText = 'padding:4px 0;border-bottom:1px solid rgba(255,255,255,.05)';
+      div.textContent = d.msg;
+      log.appendChild(div);
+    });
+    if (discoveries.length === 0) {
+      log.innerHTML = '<em>No new implicit connections found.</em>';
+    }
+    renderFleetHealth();
+    renderRecommendations();
+  }
+
+  // ============ RECOMMENDATIONS ============
+  function renderRecommendations() {
+    const el = document.getElementById('recommendations');
+    const agents = graphData.nodes.filter(n=>n.type==='agent');
+    const recs = [];
+    // Delegation-based learning suggestions
+    graphData.edges.filter(e=>e.type==='delegates_to').forEach(e => {
+      const src = graphData.nodes.find(n=>n.id===e.source);
+      const tgt = graphData.nodes.find(n=>n.id===e.target);
+      if (src && tgt && tgt.capabilities) {
+        const missing = tgt.capabilities.filter(c => !src.capabilities.includes(c));
+        if (missing.length > 0) {
+          recs.push({ cls:'learn', title:`${src.label} should learn "${missing[0]}"`, desc:`Based on frequent delegation to ${tgt.label}` });
+        }
+      }
+    });
+    // Stale knowledge
+    graphData.nodes.filter(n=>n.type==='knowledge'&&n.freshness<0.5).forEach(k => {
+      recs.push({ cls:'stale', title:`"${k.label}" needs refresh`, desc:`Last updated ${k.lastUpdated} — freshness ${(k.freshness*100).toFixed(0)}%` });
+    });
+    // Capability gaps
+    graphData.nodes.filter(n=>n.type==='capability'&&n.agents.length===1).forEach(cap => {
+      const agent = graphData.nodes.find(n=>n.id===cap.agents[0]);
+      recs.push({ cls:'gap', title:`No backup for "${cap.label}"`, desc:`Only ${agent?agent.label:'?'} handles this — critical risk` });
+    });
+    // Consolidation opportunities
+    for (let i = 0; i < agents.length; i++) {
+      for (let j = i+1; j < agents.length; j++) {
+        const a = agents[i], b = agents[j];
+        const shared = a.capabilities.filter(c => b.capabilities.includes(c));
+        const maxLen = Math.max(a.capabilities.length, b.capabilities.length);
+        if (maxLen > 0 && shared.length / maxLen > 0.7) {
+          recs.push({ cls:'consolidate', title:`Consider merging ${a.label} + ${b.label}`, desc:`${Math.round(shared.length/maxLen*100)}% capability overlap` });
+        }
+      }
+    }
+    el.innerHTML = recs.length ? recs.map(r =>
+      `<div class="rec-item ${r.cls}"><div class="title">${r.title}</div><div class="desc">${r.desc}</div></div>`
+    ).join('') : '<em style="font-size:12px;color:var(--text-secondary,#8888aa)">Run Auto-Discover for recommendations.</em>';
+  }
+
+  // ============ PRESETS / VIEWS ============
+  window.loadPreset = function(view) {
+    const agents = graphData.nodes.filter(n=>n.type==='agent');
+    const caps = graphData.nodes.filter(n=>n.type==='capability');
+    const knows = graphData.nodes.filter(n=>n.type==='knowledge');
+    // Re-position based on view
+    const cx = canvas.width/(2*dpr), cy = canvas.height/(2*dpr);
+    if (view === 'capabilities') {
+      caps.forEach((c,i) => {
+        const a = (i/caps.length)*Math.PI*2;
+        nodePositions[c.id] = { x:cx+Math.cos(a)*150, y:cy+Math.sin(a)*150 };
+      });
+      agents.forEach((a,i) => {
+        nodePositions[a.id] = { x:cx+Math.cos(i/agents.length*Math.PI*2)*300, y:cy+Math.sin(i/agents.length*Math.PI*2)*300 };
+      });
+    } else if (view === 'knowledge') {
+      knows.forEach((k,i) => {
+        const a = (i/knows.length)*Math.PI*2;
+        nodePositions[k.id] = { x:cx+Math.cos(a)*120, y:cy+Math.sin(a)*120 };
+      });
+      agents.forEach((a,i) => {
+        nodePositions[a.id] = { x:cx+Math.cos(i/agents.length*Math.PI*2)*280, y:cy+Math.sin(i/agents.length*Math.PI*2)*280 };
+      });
+    } else if (view === 'delegation') {
+      // Tree-like layout from Orchestrator
+      const orch = agents.find(a=>a.label==='Orchestrator');
+      if (orch) nodePositions[orch.id] = { x:cx, y:cy-150 };
+      const delegates = graphData.edges.filter(e=>e.type==='delegates_to'&&e.source===(orch&&orch.id));
+      delegates.forEach((d,i) => {
+        const a = ((i+0.5)/delegates.length)*Math.PI - Math.PI/2 + Math.PI/2;
+        nodePositions[d.target] = { x:cx+Math.cos(a)*200, y:cy+Math.sin(a)*100+50 };
+      });
+    } else {
+      initPositions();
+    }
+  };
+
+  // ============ MONITOR ============
+  window.toggleMonitor = function() {
+    const btn = document.getElementById('monitorBtn');
+    if (monitorInterval) {
+      clearInterval(monitorInterval); monitorInterval = null;
+      btn.classList.remove('active'); btn.textContent = '📡 Auto-Monitor';
+    } else {
+      btn.classList.add('active'); btn.innerHTML = '📡 <span class="auto-badge">Monitoring</span>';
+      monitorInterval = setInterval(() => {
+        // Simulate changes: tweak a random agent's health
+        const agents = graphData.nodes.filter(n=>n.type==='agent');
+        const a = agents[Math.floor(Math.random()*agents.length)];
+        if (a) a.health = Math.max(0.3, Math.min(1, a.health + (Math.random()-0.5)*0.1));
+        // Tweak knowledge freshness
+        graphData.nodes.filter(n=>n.type==='knowledge').forEach(k => {
+          k.freshness = Math.max(0.1, Math.min(1, k.freshness - 0.02 + Math.random()*0.01));
+        });
+        renderFleetHealth();
+        renderRecommendations();
+      }, 3000);
+    }
+  };
+
+  // ============ EXPORT ============
+  window.exportJSON = function() {
+    const data = {
+      exportedAt: new Date().toISOString(),
+      nodes: graphData.nodes.map(n => ({ ...n, position: nodePositions[n.id] })),
+      edges: graphData.edges,
+      fleetHealth: computeFleetHealth(),
+      discoveredEdges: discoveredEdges
+    };
+    const blob = new Blob([JSON.stringify(data, null, 2)], { type:'application/json' });
+    const a = document.createElement('a'); a.href = URL.createObjectURL(blob);
+    a.download = `knowledge-graph-${Date.now()}.json`; a.click();
+  };
+
+  // ============ INIT ============
+  resize();
+  initPositions();
+  renderFleetHealth();
+  renderRecommendations();
+  render();
+})();
+  </script>
+</body>
+</html>
