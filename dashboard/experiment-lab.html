@@ -1,0 +1,696 @@
+<!DOCTYPE html>
+<html lang="en">
+<head>
+  <meta charset="UTF-8">
+  <meta name="viewport" content="width=device-width, initial-scale=1.0">
+  <title>AgentLens — Experiment Lab</title>
+  <link rel="stylesheet" href="styles.css">
+  <style>
+    .exp-container { padding: 24px; max-width: 1400px; margin: 0 auto; }
+    .exp-header { margin-bottom: 24px; }
+    .exp-header h1 { font-size: 1.5rem; display: flex; align-items: center; gap: 10px; }
+    .exp-header p { color: var(--text-secondary); font-size: 0.85rem; margin-top: 4px; }
+
+    .stats-grid { display: grid; grid-template-columns: repeat(4, 1fr); gap: 16px; margin-bottom: 24px; }
+    .stat-card { background: var(--bg-secondary); border: 1px solid var(--border); border-radius: var(--radius); padding: 20px; }
+    .stat-card h3 { font-size: 0.75rem; color: var(--text-secondary); text-transform: uppercase; letter-spacing: 0.5px; margin-bottom: 8px; }
+    .stat-card .value { font-size: 2rem; font-weight: 700; }
+    .stat-card .sub { font-size: 0.8rem; color: var(--text-secondary); margin-top: 4px; }
+
+    .panel-row { display: grid; grid-template-columns: 1fr 1fr; gap: 16px; margin-bottom: 24px; }
+    .panel-row.wide { grid-template-columns: 1fr; }
+    .panel-row.triple { grid-template-columns: 1fr 1fr 1fr; }
+    .panel { background: var(--bg-secondary); border: 1px solid var(--border); border-radius: var(--radius); padding: 20px; }
+    .panel h2 { font-size: 1rem; margin-bottom: 16px; display: flex; align-items: center; gap: 8px; }
+
+    .chart-area { position: relative; width: 100%; height: 280px; }
+    .chart-area canvas { width: 100% !important; height: 100% !important; }
+
+    .form-row { display: flex; align-items: center; gap: 12px; margin-bottom: 12px; }
+    .form-row label { font-size: 0.85rem; color: var(--text-secondary); min-width: 140px; }
+    .form-row select, .form-row input { background: var(--bg-tertiary); border: 1px solid var(--border); color: var(--text-primary); padding: 6px 10px; border-radius: var(--radius-sm); flex: 1; }
+    .form-row input[type="number"] { max-width: 100px; }
+
+    .btn-run { background: var(--accent); color: #fff; border: none; padding: 10px 24px; border-radius: var(--radius-sm); cursor: pointer; font-weight: 600; font-size: 0.9rem; }
+    .btn-run:hover { opacity: 0.9; }
+    .btn-sm { padding: 6px 14px; font-size: 0.8rem; }
+    .btn-stop { background: var(--danger, #e74c3c); }
+
+    .experiment-table { width: 100%; border-collapse: collapse; font-size: 0.85rem; }
+    .experiment-table th, .experiment-table td { padding: 10px 12px; text-align: left; border-bottom: 1px solid var(--border); }
+    .experiment-table th { color: var(--text-secondary); font-weight: 600; font-size: 0.75rem; text-transform: uppercase; letter-spacing: 0.5px; }
+
+    .badge { display: inline-block; padding: 2px 8px; border-radius: 10px; font-size: 0.75rem; font-weight: 600; }
+    .badge-running { background: rgba(46,204,113,0.15); color: #2ecc71; }
+    .badge-complete { background: rgba(52,152,219,0.15); color: #3498db; }
+    .badge-stopped { background: rgba(231,76,60,0.15); color: #e74c3c; }
+
+    .verdict { padding: 16px; border-radius: var(--radius); margin-top: 12px; font-size: 0.9rem; }
+    .verdict-a { background: rgba(46,204,113,0.1); border: 1px solid rgba(46,204,113,0.3); }
+    .verdict-b { background: rgba(52,152,219,0.1); border: 1px solid rgba(52,152,219,0.3); }
+    .verdict-none { background: rgba(241,196,15,0.1); border: 1px solid rgba(241,196,15,0.3); }
+
+    .metric-bar { display: flex; align-items: center; gap: 8px; margin: 4px 0; }
+    .metric-bar-fill { height: 8px; border-radius: 4px; transition: width 0.5s; }
+    .bar-a { background: #2ecc71; }
+    .bar-b { background: #3498db; }
+
+    .confidence-meter { width: 100%; height: 24px; background: var(--bg-tertiary); border-radius: 12px; overflow: hidden; position: relative; margin: 8px 0; }
+    .confidence-fill { height: 100%; border-radius: 12px; transition: width 0.5s; background: linear-gradient(90deg, #f1c40f, #2ecc71); }
+    .confidence-label { position: absolute; top: 50%; left: 50%; transform: translate(-50%, -50%); font-size: 0.75rem; font-weight: 700; }
+
+    .timeline-point { display: inline-block; width: 6px; height: 6px; border-radius: 50%; margin: 0 1px; }
+
+    .rec-card { background: var(--bg-tertiary); border-radius: var(--radius-sm); padding: 12px; margin-bottom: 8px; }
+    .rec-card .rec-title { font-weight: 600; font-size: 0.85rem; margin-bottom: 4px; }
+    .rec-card .rec-desc { font-size: 0.8rem; color: var(--text-secondary); }
+
+    .auto-badge { display: inline-flex; align-items: center; gap: 4px; padding: 2px 8px; border-radius: 10px; font-size: 0.7rem; font-weight: 600; background: rgba(155,89,182,0.15); color: #9b59b6; }
+
+    @media (max-width: 900px) {
+      .stats-grid { grid-template-columns: repeat(2, 1fr); }
+      .panel-row, .panel-row.triple { grid-template-columns: 1fr; }
+    }
+  </style>
+</head>
+<body>
+  <header class="header">
+    <div class="header-left">
+      <h1 class="logo">🔍 AgentLens</h1>
+      <span class="tagline">Experiment Lab</span>
+    </div>
+    <div class="header-right">
+      <a href="index.html" class="btn btn-alert-header" style="text-decoration:none">📊 Dashboard</a>
+      <button class="theme-toggle" onclick="toggleTheme()" title="Toggle theme" id="themeToggleBtn">🌙</button>
+    </div>
+  </header>
+
+  <div class="exp-container">
+    <div class="exp-header">
+      <h1>🧪 Agent Experiment Lab</h1>
+      <p>A/B test agent configurations with statistical significance testing and automated winner recommendations</p>
+    </div>
+
+    <!-- Stats -->
+    <div class="stats-grid">
+      <div class="stat-card"><h3>Total Experiments</h3><div class="value" id="statTotal">0</div><div class="sub" id="statTotalSub">—</div></div>
+      <div class="stat-card"><h3>Active Now</h3><div class="value" id="statActive">0</div><div class="sub" id="statActiveSub">collecting data…</div></div>
+      <div class="stat-card"><h3>Winners Called</h3><div class="value" id="statWinners">0</div><div class="sub" id="statWinnersSub">—</div></div>
+      <div class="stat-card"><h3>Avg Confidence</h3><div class="value" id="statConf">—</div><div class="sub">across completed</div></div>
+    </div>
+
+    <!-- Create Experiment -->
+    <div class="panel-row wide">
+      <div class="panel">
+        <h2>➕ Create Experiment</h2>
+        <div class="form-row"><label>Experiment Name</label><input type="text" id="expName" placeholder="e.g. GPT-4o vs Claude Sonnet"></div>
+        <div class="form-row"><label>Variant A Name</label><input type="text" id="varAName" placeholder="e.g. GPT-4o (default config)"></div>
+        <div class="form-row"><label>Variant B Name</label><input type="text" id="varBName" placeholder="e.g. Claude Sonnet (temp=0.3)"></div>
+        <div class="form-row"><label>Primary Metric</label>
+          <select id="primaryMetric">
+            <option value="success_rate">Success Rate (%)</option>
+            <option value="latency">Avg Latency (ms)</option>
+            <option value="cost">Cost per Request ($)</option>
+            <option value="token_usage">Token Usage</option>
+            <option value="user_satisfaction">User Satisfaction (1-5)</option>
+            <option value="error_rate">Error Rate (%)</option>
+          </select>
+        </div>
+        <div class="form-row"><label>Traffic Split</label>
+          <select id="trafficSplit">
+            <option value="50">50/50</option>
+            <option value="70">70/30 (A heavy)</option>
+            <option value="80">80/20 (A heavy)</option>
+            <option value="90">90/10 (Canary B)</option>
+          </select>
+        </div>
+        <div class="form-row"><label>Sample Size Target</label><input type="number" id="sampleTarget" value="500" min="50" max="10000" step="50"></div>
+        <div class="form-row"><label>Significance Level</label>
+          <select id="sigLevel">
+            <option value="0.05">95% (α=0.05)</option>
+            <option value="0.01">99% (α=0.01)</option>
+            <option value="0.10">90% (α=0.10)</option>
+          </select>
+        </div>
+        <div class="form-row"><label>Auto-Decide</label>
+          <select id="autoDecide">
+            <option value="yes">Yes — auto-call winner</option>
+            <option value="no">No — manual review</option>
+          </select>
+        </div>
+        <div style="margin-top: 16px; display: flex; gap: 12px;">
+          <button class="btn-run" onclick="createExperiment()">🚀 Launch Experiment</button>
+          <button class="btn-run btn-sm" style="background: var(--bg-tertiary); color: var(--text-primary);" onclick="loadPreset()">📋 Load Preset</button>
+        </div>
+      </div>
+    </div>
+
+    <!-- Active Experiments Table -->
+    <div class="panel-row wide">
+      <div class="panel">
+        <h2>📋 Experiments <span id="expCount" style="font-size:0.8rem; color:var(--text-secondary); font-weight:400; margin-left:8px;"></span></h2>
+        <div style="overflow-x: auto;">
+          <table class="experiment-table" id="expTable">
+            <thead>
+              <tr>
+                <th>Name</th>
+                <th>Variants</th>
+                <th>Metric</th>
+                <th>Samples</th>
+                <th>Progress</th>
+                <th>P-Value</th>
+                <th>Winner</th>
+                <th>Status</th>
+                <th>Actions</th>
+              </tr>
+            </thead>
+            <tbody id="expTableBody"></tbody>
+          </table>
+        </div>
+      </div>
+    </div>
+
+    <!-- Detail View (shown when experiment selected) -->
+    <div id="detailView" style="display:none;">
+      <div class="panel-row">
+        <div class="panel">
+          <h2>📊 Metric Comparison — <span id="detailTitle"></span></h2>
+          <div class="chart-area"><canvas id="compChart"></canvas></div>
+        </div>
+        <div class="panel">
+          <h2>📈 Cumulative Data</h2>
+          <div class="chart-area"><canvas id="cumChart"></canvas></div>
+        </div>
+      </div>
+
+      <div class="panel-row triple">
+        <div class="panel">
+          <h2>🎯 Statistical Summary</h2>
+          <div id="statsSummary"></div>
+        </div>
+        <div class="panel">
+          <h2>🏆 Verdict</h2>
+          <div id="verdictBox"></div>
+          <div style="margin-top:12px;">
+            <h3 style="font-size:0.85rem; margin-bottom:8px;">Confidence Level</h3>
+            <div class="confidence-meter"><div class="confidence-fill" id="confFill" style="width:0%"></div><span class="confidence-label" id="confLabel">0%</span></div>
+          </div>
+        </div>
+        <div class="panel">
+          <h2>🤖 AI Recommendations</h2>
+          <div id="recsBox"></div>
+        </div>
+      </div>
+
+      <div class="panel-row wide">
+        <div class="panel">
+          <h2>📜 Sample Timeline</h2>
+          <div id="timelineBox" style="max-height:200px; overflow-y:auto; font-size:0.8rem; font-family:monospace;"></div>
+        </div>
+      </div>
+    </div>
+  </div>
+
+  <script>
+    /* ===== Theme ===== */
+    function toggleTheme() {
+      const body = document.body;
+      body.classList.toggle('light-theme');
+      const btn = document.getElementById('themeToggleBtn');
+      btn.textContent = body.classList.contains('light-theme') ? '☀️' : '🌙';
+      localStorage.setItem('agentlens-theme', body.classList.contains('light-theme') ? 'light' : 'dark');
+    }
+    if (localStorage.getItem('agentlens-theme') === 'light') { document.body.classList.add('light-theme'); document.getElementById('themeToggleBtn').textContent = '☀️'; }
+
+    /* ===== State ===== */
+    let experiments = [];
+    let selectedExp = null;
+    let simTimers = {};
+
+    const METRIC_CONFIG = {
+      success_rate: { label: 'Success Rate (%)', higher: true, genA: () => 72 + Math.random()*16, genB: () => 70 + Math.random()*18 },
+      latency: { label: 'Avg Latency (ms)', higher: false, genA: () => 200 + Math.random()*300, genB: () => 180 + Math.random()*320 },
+      cost: { label: 'Cost per Request ($)', higher: false, genA: () => 0.002 + Math.random()*0.008, genB: () => 0.001 + Math.random()*0.009 },
+      token_usage: { label: 'Token Usage', higher: false, genA: () => 500 + Math.random()*1500, genB: () => 400 + Math.random()*1600 },
+      user_satisfaction: { label: 'User Satisfaction (1-5)', higher: true, genA: () => 3.0 + Math.random()*1.5, genB: () => 2.8 + Math.random()*1.7 },
+      error_rate: { label: 'Error Rate (%)', higher: false, genA: () => Math.random()*8, genB: () => Math.random()*10 },
+    };
+
+    /* ===== Statistics ===== */
+    function mean(arr) { return arr.reduce((a,b) => a+b, 0) / arr.length; }
+    function variance(arr) { const m = mean(arr); return arr.reduce((s,v) => s + (v-m)**2, 0) / (arr.length - 1); }
+    function welchT(a, b) {
+      const ma = mean(a), mb = mean(b);
+      const va = variance(a), vb = variance(b);
+      const na = a.length, nb = b.length;
+      const se = Math.sqrt(va/na + vb/nb);
+      if (se === 0) return { t: 0, df: na+nb-2, p: 1 };
+      const t = (ma - mb) / se;
+      const num = (va/na + vb/nb) ** 2;
+      const den = (va/na)**2/(na-1) + (vb/nb)**2/(nb-1);
+      const df = Math.max(1, Math.floor(num / den));
+      const p = tToP(Math.abs(t), df);
+      return { t, df, p, meanA: ma, meanB: mb, seA: Math.sqrt(va/na), seB: Math.sqrt(vb/nb) };
+    }
+
+    // Approximate two-tailed p-value from t-distribution using regularized incomplete beta
+    function tToP(t, df) {
+      const x = df / (df + t * t);
+      return betaIncomplete(df/2, 0.5, x);
+    }
+    function betaIncomplete(a, b, x) {
+      // Continued fraction approximation (Lentz)
+      if (x < 0 || x > 1) return 0;
+      if (x === 0 || x === 1) return x === 1 ? 1 : 0;
+      const lnBeta = gammaLn(a) + gammaLn(b) - gammaLn(a + b);
+      const front = Math.exp(Math.log(x) * a + Math.log(1 - x) * b - lnBeta) / a;
+      let f = 1, c = 1, d = 1 - (a + 1) * x / (a + 1);
+      if (Math.abs(d) < 1e-30) d = 1e-30;
+      d = 1 / d; f = d;
+      for (let i = 1; i <= 200; i++) {
+        const m = i, m2 = 2 * i;
+        let num = i * (b - i) * x / ((a + m2 - 1) * (a + m2));
+        d = 1 + num * d; if (Math.abs(d) < 1e-30) d = 1e-30; d = 1/d;
+        c = 1 + num / c; if (Math.abs(c) < 1e-30) c = 1e-30;
+        f *= d * c;
+        num = -(a + i) * (a + b + i) * x / ((a + m2) * (a + m2 + 1));
+        d = 1 + num * d; if (Math.abs(d) < 1e-30) d = 1e-30; d = 1/d;
+        c = 1 + num / c; if (Math.abs(c) < 1e-30) c = 1e-30;
+        const delta = d * c; f *= delta;
+        if (Math.abs(delta - 1) < 1e-10) break;
+      }
+      return Math.min(1, front * f);
+    }
+    function gammaLn(z) {
+      const c = [76.18009172947146,-86.50532032941678,24.01409824083091,-1.231739572450155,0.001208650973866179,-5.395239384953e-6];
+      let y = z, x = z, tmp = x + 5.5; tmp -= (x + 0.5) * Math.log(tmp);
+      let ser = 1.000000000190015;
+      for (let j = 0; j < 6; j++) ser += c[j] / ++y;
+      return -tmp + Math.log(2.5066282746310005 * ser / x);
+    }
+
+    function cohenD(a, b) {
+      const pooled = Math.sqrt(((a.length-1)*variance(a) + (b.length-1)*variance(b)) / (a.length+b.length-2));
+      return pooled === 0 ? 0 : (mean(a) - mean(b)) / pooled;
+    }
+
+    /* ===== Experiment CRUD ===== */
+    function createExperiment() {
+      const name = document.getElementById('expName').value || `Experiment ${experiments.length + 1}`;
+      const exp = {
+        id: Date.now(),
+        name,
+        varA: document.getElementById('varAName').value || 'Variant A',
+        varB: document.getElementById('varBName').value || 'Variant B',
+        metric: document.getElementById('primaryMetric').value,
+        split: parseInt(document.getElementById('trafficSplit').value),
+        sampleTarget: parseInt(document.getElementById('sampleTarget').value),
+        sigLevel: parseFloat(document.getElementById('sigLevel').value),
+        autoDecide: document.getElementById('autoDecide').value === 'yes',
+        status: 'running',
+        samplesA: [],
+        samplesB: [],
+        winner: null,
+        createdAt: new Date(),
+        completedAt: null,
+      };
+      experiments.unshift(exp);
+      startSimulation(exp);
+      renderAll();
+      // clear form
+      document.getElementById('expName').value = '';
+      document.getElementById('varAName').value = '';
+      document.getElementById('varBName').value = '';
+    }
+
+    function loadPreset() {
+      document.getElementById('expName').value = 'GPT-4o vs Claude Sonnet — Support Bot';
+      document.getElementById('varAName').value = 'GPT-4o (temp=0.7)';
+      document.getElementById('varBName').value = 'Claude Sonnet (temp=0.3)';
+      document.getElementById('primaryMetric').value = 'success_rate';
+      document.getElementById('sampleTarget').value = '300';
+    }
+
+    function stopExperiment(id) {
+      const exp = experiments.find(e => e.id === id);
+      if (!exp) return;
+      exp.status = 'stopped';
+      if (simTimers[id]) { clearInterval(simTimers[id]); delete simTimers[id]; }
+      renderAll();
+    }
+
+    function selectExperiment(id) {
+      selectedExp = id;
+      document.getElementById('detailView').style.display = 'block';
+      renderDetail();
+    }
+
+    /* ===== Simulation ===== */
+    function startSimulation(exp) {
+      const mc = METRIC_CONFIG[exp.metric];
+      const tick = () => {
+        if (exp.status !== 'running') return;
+        const batchSize = 3 + Math.floor(Math.random() * 5);
+        for (let i = 0; i < batchSize; i++) {
+          const total = exp.samplesA.length + exp.samplesB.length;
+          if (total >= exp.sampleTarget) {
+            exp.status = 'complete';
+            exp.completedAt = new Date();
+            clearInterval(simTimers[exp.id]);
+            delete simTimers[exp.id];
+            if (exp.autoDecide) autoDecide(exp);
+            renderAll();
+            return;
+          }
+          if (Math.random() * 100 < exp.split) {
+            exp.samplesA.push(mc.genA());
+          } else {
+            exp.samplesB.push(mc.genB());
+          }
+        }
+        renderAll();
+      };
+      simTimers[exp.id] = setInterval(tick, 800);
+    }
+
+    function autoDecide(exp) {
+      if (exp.samplesA.length < 5 || exp.samplesB.length < 5) return;
+      const result = welchT(exp.samplesA, exp.samplesB);
+      const mc = METRIC_CONFIG[exp.metric];
+      if (result.p < exp.sigLevel) {
+        const aBetter = mc.higher ? result.meanA > result.meanB : result.meanA < result.meanB;
+        exp.winner = aBetter ? 'A' : 'B';
+      } else {
+        exp.winner = 'none';
+      }
+    }
+
+    /* ===== Render ===== */
+    function renderAll() {
+      // Stats
+      const total = experiments.length;
+      const active = experiments.filter(e => e.status === 'running').length;
+      const winners = experiments.filter(e => e.winner && e.winner !== 'none').length;
+      const completed = experiments.filter(e => e.status === 'complete');
+      document.getElementById('statTotal').textContent = total;
+      document.getElementById('statTotalSub').textContent = `${completed.length} completed`;
+      document.getElementById('statActive').textContent = active;
+      document.getElementById('statActiveSub').textContent = active ? 'collecting data…' : 'none running';
+      document.getElementById('statWinners').textContent = winners;
+      document.getElementById('statWinnersSub').textContent = `${experiments.filter(e=>e.winner==='none').length} inconclusive`;
+
+      if (completed.length > 0) {
+        const confs = completed.map(e => {
+          if (e.samplesA.length < 5 || e.samplesB.length < 5) return 0;
+          return (1 - welchT(e.samplesA, e.samplesB).p) * 100;
+        });
+        document.getElementById('statConf').textContent = (mean(confs)).toFixed(1) + '%';
+      }
+
+      document.getElementById('expCount').textContent = `(${total} total, ${active} active)`;
+
+      // Table
+      const tbody = document.getElementById('expTableBody');
+      tbody.innerHTML = experiments.map(exp => {
+        const totalSamples = exp.samplesA.length + exp.samplesB.length;
+        const pct = Math.min(100, (totalSamples / exp.sampleTarget * 100)).toFixed(0);
+        const mc = METRIC_CONFIG[exp.metric];
+        let pVal = '—';
+        if (exp.samplesA.length >= 5 && exp.samplesB.length >= 5) {
+          pVal = welchT(exp.samplesA, exp.samplesB).p.toFixed(4);
+        }
+        const statusBadge = `<span class="badge badge-${exp.status}">${exp.status}</span>`;
+        const winnerStr = exp.winner ? (exp.winner === 'none' ? '⚖️ No winner' : `🏆 ${exp.winner === 'A' ? exp.varA : exp.varB}`) : '—';
+        const autoTag = exp.autoDecide ? '<span class="auto-badge">🤖 auto</span>' : '';
+        return `<tr style="cursor:pointer;" onclick="selectExperiment(${exp.id})">
+          <td><strong>${exp.name}</strong> ${autoTag}</td>
+          <td style="font-size:0.8rem;">${exp.varA} vs ${exp.varB}</td>
+          <td>${mc.label}</td>
+          <td>${totalSamples}/${exp.sampleTarget}</td>
+          <td><div style="background:var(--bg-tertiary);border-radius:4px;height:8px;width:100px;"><div style="height:8px;border-radius:4px;background:var(--accent);width:${pct}%;"></div></div></td>
+          <td style="font-family:monospace;">${pVal}</td>
+          <td>${winnerStr}</td>
+          <td>${statusBadge}</td>
+          <td>${exp.status === 'running' ? `<button class="btn-run btn-sm btn-stop" onclick="event.stopPropagation();stopExperiment(${exp.id})">⏹ Stop</button>` : ''}</td>
+        </tr>`;
+      }).join('');
+
+      if (selectedExp) renderDetail();
+    }
+
+    function renderDetail() {
+      const exp = experiments.find(e => e.id === selectedExp);
+      if (!exp) { document.getElementById('detailView').style.display = 'none'; return; }
+
+      document.getElementById('detailTitle').textContent = exp.name;
+      const mc = METRIC_CONFIG[exp.metric];
+
+      // Comparison chart (bar chart via canvas)
+      renderBarChart(exp, mc);
+      renderCumulativeChart(exp, mc);
+
+      // Stats summary
+      const ss = document.getElementById('statsSummary');
+      if (exp.samplesA.length >= 5 && exp.samplesB.length >= 5) {
+        const result = welchT(exp.samplesA, exp.samplesB);
+        const d = cohenD(exp.samplesA, exp.samplesB);
+        const effectLabel = Math.abs(d) < 0.2 ? 'negligible' : Math.abs(d) < 0.5 ? 'small' : Math.abs(d) < 0.8 ? 'medium' : 'large';
+        ss.innerHTML = `
+          <div style="font-size:0.85rem; line-height:1.8;">
+            <div><strong>${exp.varA}:</strong> μ=${result.meanA.toFixed(3)}, SE=${result.seA.toFixed(3)}, n=${exp.samplesA.length}</div>
+            <div><strong>${exp.varB}:</strong> μ=${result.meanB.toFixed(3)}, SE=${result.seB.toFixed(3)}, n=${exp.samplesB.length}</div>
+            <hr style="border-color:var(--border); margin:8px 0;">
+            <div><strong>Welch's t:</strong> ${result.t.toFixed(3)} (df=${result.df})</div>
+            <div><strong>p-value:</strong> ${result.p.toFixed(6)}</div>
+            <div><strong>Cohen's d:</strong> ${d.toFixed(3)} (${effectLabel})</div>
+            <div><strong>Significance:</strong> ${result.p < exp.sigLevel ? '✅ Significant' : '❌ Not significant'} (α=${exp.sigLevel})</div>
+          </div>`;
+      } else {
+        ss.innerHTML = '<p style="color:var(--text-secondary); font-size:0.85rem;">Need ≥5 samples per variant for statistics.</p>';
+      }
+
+      // Verdict
+      const vb = document.getElementById('verdictBox');
+      if (exp.samplesA.length >= 5 && exp.samplesB.length >= 5) {
+        const result = welchT(exp.samplesA, exp.samplesB);
+        const conf = ((1 - result.p) * 100);
+        document.getElementById('confFill').style.width = conf.toFixed(0) + '%';
+        document.getElementById('confLabel').textContent = conf.toFixed(1) + '%';
+
+        if (result.p < exp.sigLevel) {
+          const aBetter = mc.higher ? result.meanA > result.meanB : result.meanA < result.meanB;
+          const winner = aBetter ? exp.varA : exp.varB;
+          const cls = aBetter ? 'verdict-a' : 'verdict-b';
+          const lift = Math.abs(result.meanA - result.meanB) / Math.max(result.meanA, result.meanB) * 100;
+          vb.innerHTML = `<div class="verdict ${cls}">🏆 <strong>${winner}</strong> is the winner with ${conf.toFixed(1)}% confidence.<br><span style="font-size:0.8rem;">Relative improvement: ${lift.toFixed(1)}%</span></div>`;
+        } else {
+          vb.innerHTML = `<div class="verdict verdict-none">⚖️ No statistically significant difference detected yet.<br><span style="font-size:0.8rem;">p=${result.p.toFixed(4)}, need p < ${exp.sigLevel}</span></div>`;
+        }
+      } else {
+        vb.innerHTML = '<div class="verdict verdict-none">⏳ Collecting samples…</div>';
+        document.getElementById('confFill').style.width = '0%';
+        document.getElementById('confLabel').textContent = '—';
+      }
+
+      // Recommendations
+      const rb = document.getElementById('recsBox');
+      const recs = generateRecommendations(exp);
+      rb.innerHTML = recs.map(r => `<div class="rec-card"><div class="rec-title">${r.icon} ${r.title}</div><div class="rec-desc">${r.desc}</div></div>`).join('');
+
+      // Timeline
+      const tb = document.getElementById('timelineBox');
+      const recent = [];
+      const lastA = exp.samplesA.slice(-20);
+      const lastB = exp.samplesB.slice(-20);
+      for (let i = 0; i < Math.max(lastA.length, lastB.length); i++) {
+        if (i < lastA.length) recent.push({ variant: 'A', value: lastA[i] });
+        if (i < lastB.length) recent.push({ variant: 'B', value: lastB[i] });
+      }
+      tb.innerHTML = recent.slice(-30).reverse().map(s =>
+        `<div><span class="timeline-point" style="background:${s.variant==='A'?'#2ecc71':'#3498db'};"></span> ${s.variant === 'A' ? exp.varA : exp.varB}: ${s.value.toFixed(4)}</div>`
+      ).join('');
+    }
+
+    function generateRecommendations(exp) {
+      const recs = [];
+      const mc = METRIC_CONFIG[exp.metric];
+      const total = exp.samplesA.length + exp.samplesB.length;
+      const pct = total / exp.sampleTarget * 100;
+
+      if (pct < 30) {
+        recs.push({ icon: '⏳', title: 'Early Stage', desc: `Only ${pct.toFixed(0)}% of target samples collected. Results may be unstable. Consider waiting before making decisions.` });
+      }
+      if (exp.samplesA.length >= 5 && exp.samplesB.length >= 5) {
+        const result = welchT(exp.samplesA, exp.samplesB);
+        const d = Math.abs(cohenD(exp.samplesA, exp.samplesB));
+
+        if (result.p < exp.sigLevel && d < 0.2) {
+          recs.push({ icon: '⚠️', title: 'Statistically Significant but Tiny Effect', desc: 'The difference is real but extremely small. Consider whether the improvement justifies switching.' });
+        }
+        if (result.p > 0.5 && pct > 60) {
+          recs.push({ icon: '🤝', title: 'Likely No Difference', desc: 'With over 60% of data collected and high p-value, variants appear equivalent. Consider choosing based on cost or other factors.' });
+        }
+        if (result.p < exp.sigLevel) {
+          const aBetter = mc.higher ? result.meanA > result.meanB : result.meanA < result.meanB;
+          const winner = aBetter ? exp.varA : exp.varB;
+          recs.push({ icon: '🚀', title: `Deploy ${winner}`, desc: `Statistical significance achieved. Recommend rolling out ${winner} to 100% traffic.` });
+        }
+        if (d >= 0.8) {
+          recs.push({ icon: '💡', title: 'Large Effect Size', desc: `Cohen's d = ${d.toFixed(2)} indicates a large practical difference. Strong signal.` });
+        }
+      }
+      if (exp.status === 'running' && pct > 80 && exp.samplesA.length >= 5 && exp.samplesB.length >= 5) {
+        const r = welchT(exp.samplesA, exp.samplesB);
+        if (r.p > exp.sigLevel) {
+          recs.push({ icon: '📊', title: 'Consider Increasing Sample Size', desc: 'Approaching target without significance. You may need more samples or the effect is too small to detect.' });
+        }
+      }
+      if (recs.length === 0) {
+        recs.push({ icon: '🔬', title: 'Experiment In Progress', desc: 'Data is being collected. Recommendations will appear as patterns emerge.' });
+      }
+      return recs;
+    }
+
+    /* ===== Canvas Charts ===== */
+    function renderBarChart(exp, mc) {
+      const canvas = document.getElementById('compChart');
+      const ctx = canvas.getContext('2d');
+      const W = canvas.parentElement.clientWidth;
+      const H = 280;
+      canvas.width = W * 2; canvas.height = H * 2;
+      canvas.style.width = W + 'px'; canvas.style.height = H + 'px';
+      ctx.scale(2, 2);
+      ctx.clearRect(0, 0, W, H);
+
+      const textCol = getComputedStyle(document.body).getPropertyValue('--text-primary').trim() || '#e0e0e0';
+      const textSec = getComputedStyle(document.body).getPropertyValue('--text-secondary').trim() || '#888';
+
+      if (exp.samplesA.length < 2 || exp.samplesB.length < 2) {
+        ctx.fillStyle = textSec; ctx.font = '14px sans-serif'; ctx.fillText('Waiting for data…', W/2 - 60, H/2);
+        return;
+      }
+
+      const mA = mean(exp.samplesA), mB = mean(exp.samplesB);
+      const maxVal = Math.max(mA, mB) * 1.3;
+      const barW = 60, gap = 40;
+      const startX = W / 2 - barW - gap/2;
+
+      // Bars
+      const hA = (mA / maxVal) * (H - 60);
+      const hB = (mB / maxVal) * (H - 60);
+      ctx.fillStyle = '#2ecc71'; ctx.fillRect(startX, H - 30 - hA, barW, hA);
+      ctx.fillStyle = '#3498db'; ctx.fillRect(startX + barW + gap, H - 30 - hB, barW, hB);
+
+      // Labels
+      ctx.fillStyle = textCol; ctx.font = 'bold 12px sans-serif'; ctx.textAlign = 'center';
+      ctx.fillText(exp.varA.substring(0, 15), startX + barW/2, H - 12);
+      ctx.fillText(exp.varB.substring(0, 15), startX + barW + gap + barW/2, H - 12);
+
+      // Values
+      ctx.font = '11px monospace';
+      ctx.fillText(mA.toFixed(3), startX + barW/2, H - 34 - hA);
+      ctx.fillText(mB.toFixed(3), startX + barW + gap + barW/2, H - 34 - hB);
+    }
+
+    function renderCumulativeChart(exp, mc) {
+      const canvas = document.getElementById('cumChart');
+      const ctx = canvas.getContext('2d');
+      const W = canvas.parentElement.clientWidth;
+      const H = 280;
+      canvas.width = W * 2; canvas.height = H * 2;
+      canvas.style.width = W + 'px'; canvas.style.height = H + 'px';
+      ctx.scale(2, 2);
+      ctx.clearRect(0, 0, W, H);
+
+      const textSec = getComputedStyle(document.body).getPropertyValue('--text-secondary').trim() || '#888';
+      if (exp.samplesA.length < 2) { ctx.fillStyle = textSec; ctx.font = '14px sans-serif'; ctx.fillText('Waiting…', W/2-30, H/2); return; }
+
+      // Running means
+      const runA = [], runB = [];
+      let sumA = 0, sumB = 0;
+      for (let i = 0; i < exp.samplesA.length; i++) { sumA += exp.samplesA[i]; runA.push(sumA / (i+1)); }
+      for (let i = 0; i < exp.samplesB.length; i++) { sumB += exp.samplesB[i]; runB.push(sumB / (i+1)); }
+
+      const allVals = [...runA, ...runB];
+      const minV = Math.min(...allVals) * 0.95;
+      const maxV = Math.max(...allVals) * 1.05;
+      const pad = { l: 50, r: 20, t: 20, b: 30 };
+      const cW = W - pad.l - pad.r, cH = H - pad.t - pad.b;
+
+      const toX = (i, len) => pad.l + (i / Math.max(1, len - 1)) * cW;
+      const toY = (v) => pad.t + (1 - (v - minV) / (maxV - minV || 1)) * cH;
+
+      // Draw lines
+      ctx.lineWidth = 2;
+      [{ data: runA, color: '#2ecc71' }, { data: runB, color: '#3498db' }].forEach(({ data, color }) => {
+        ctx.strokeStyle = color; ctx.beginPath();
+        data.forEach((v, i) => { const x = toX(i, data.length), y = toY(v); i === 0 ? ctx.moveTo(x, y) : ctx.lineTo(x, y); });
+        ctx.stroke();
+      });
+
+      // Axis labels
+      ctx.fillStyle = textSec; ctx.font = '10px sans-serif'; ctx.textAlign = 'right';
+      ctx.fillText(maxV.toFixed(1), pad.l - 5, pad.t + 10);
+      ctx.fillText(minV.toFixed(1), pad.l - 5, H - pad.b);
+      ctx.textAlign = 'center';
+      ctx.fillText('Samples →', W/2, H - 5);
+
+      // Legend
+      ctx.font = '11px sans-serif'; ctx.textAlign = 'left';
+      ctx.fillStyle = '#2ecc71'; ctx.fillRect(pad.l, 5, 10, 10); ctx.fillText(exp.varA.substring(0,12), pad.l+14, 14);
+      ctx.fillStyle = '#3498db'; ctx.fillRect(pad.l + 120, 5, 10, 10); ctx.fillText(exp.varB.substring(0,12), pad.l+134, 14);
+    }
+
+    /* ===== Init with demo data ===== */
+    function initDemo() {
+      // Pre-populate with a completed experiment
+      const demo = {
+        id: 1,
+        name: 'GPT-4o vs Claude Sonnet — Ticket Resolution',
+        varA: 'GPT-4o (default)',
+        varB: 'Claude Sonnet (temp=0.2)',
+        metric: 'success_rate',
+        split: 50,
+        sampleTarget: 200,
+        sigLevel: 0.05,
+        autoDecide: true,
+        status: 'complete',
+        samplesA: Array.from({length: 100}, () => 72 + Math.random()*16),
+        samplesB: Array.from({length: 100}, () => 76 + Math.random()*14),
+        winner: null,
+        createdAt: new Date(Date.now() - 3600000),
+        completedAt: new Date(),
+      };
+      autoDecide(demo);
+      experiments.push(demo);
+
+      // A running one
+      const running = {
+        id: 2,
+        name: 'Temperature Sweep — Code Generation',
+        varA: 'temp=0.7',
+        varB: 'temp=0.3',
+        metric: 'error_rate',
+        split: 50,
+        sampleTarget: 400,
+        sigLevel: 0.05,
+        autoDecide: true,
+        status: 'running',
+        samplesA: Array.from({length: 30}, () => Math.random()*8),
+        samplesB: Array.from({length: 30}, () => Math.random()*6),
+        winner: null,
+        createdAt: new Date(Date.now() - 600000),
+        completedAt: null,
+      };
+      experiments.push(running);
+      startSimulation(running);
+
+      selectedExp = 1;
+      document.getElementById('detailView').style.display = 'block';
+      renderAll();
+    }
+
+    initDemo();
+  </script>
+</body>
+</html>
