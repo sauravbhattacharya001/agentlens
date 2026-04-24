@@ -219,6 +219,8 @@ class PromptVersionTracker:
         self._outcomes: dict[str, list[Outcome]] = {}
         # version_id -> PromptVersion (flat lookup)
         self._version_index: dict[str, PromptVersion] = {}
+        # tag -> set of version_ids (inverted index for O(1) tag lookup)
+        self._tag_index: dict[str, set[str]] = {}
 
     # ------------------------------------------------------------------
     # Registration
@@ -277,6 +279,9 @@ class PromptVersionTracker:
         self._versions.setdefault(prompt_name, []).append(version)
         self._version_index[version.version_id] = version
         self._outcomes[version.version_id] = []
+        # Update inverted tag index
+        for tag in version.tags:
+            self._tag_index.setdefault(tag, set()).add(version.version_id)
         return version
 
     # ------------------------------------------------------------------
@@ -435,18 +440,31 @@ class PromptVersionTracker:
                 p50_latency_ms=0, p95_latency_ms=0,
             )
 
-        tokens = [o.tokens for o in outcomes]
-        latencies = [o.latency_ms for o in outcomes]
-        qualities = [o.quality_score for o in outcomes if o.quality_score is not None]
-        successes = sum(1 for o in outcomes if o.success)
+        # Single-pass collection replaces 4 separate list comprehensions
+        # over outcomes (O(4·N) → O(N)), reducing allocation pressure
+        # and iteration overhead for large outcome sets.
+        total_tokens = 0
+        latencies: list[float] = []
+        qualities: list[float] = []
+        successes = 0
+
+        for o in outcomes:
+            total_tokens += o.tokens
+            latencies.append(o.latency_ms)
+            if o.quality_score is not None:
+                qualities.append(o.quality_score)
+            if o.success:
+                successes += 1
+
+        total_latency = sum(latencies)
 
         return VersionStats(
             version_id=version.version_id,
             version_number=version.version_number,
             runs=runs,
-            avg_tokens=statistics.mean(tokens),
-            avg_latency_ms=statistics.mean(latencies),
-            avg_quality=statistics.mean(qualities) if qualities else None,
+            avg_tokens=total_tokens / runs,
+            avg_latency_ms=total_latency / runs,
+            avg_quality=sum(qualities) / len(qualities) if qualities else None,
             success_rate=successes / runs,
             min_quality=min(qualities) if qualities else None,
             max_quality=max(qualities) if qualities else None,
@@ -510,13 +528,16 @@ class PromptVersionTracker:
     # ------------------------------------------------------------------
 
     def search_by_tag(self, tag: str) -> list[PromptVersion]:
-        """Find all versions across all prompts that have a given tag."""
-        results = []
-        for versions in self._versions.values():
-            for v in versions:
-                if tag in v.tags:
-                    results.append(v)
-        return results
+        """Find all versions across all prompts that have a given tag.
+
+        Uses an inverted tag index for O(matching) lookup instead of
+        scanning all versions across all prompts (was O(total_versions)).
+        """
+        version_ids = self._tag_index.get(tag)
+        if not version_ids:
+            return []
+        return [self._version_index[vid] for vid in version_ids
+                if vid in self._version_index]
 
     # ------------------------------------------------------------------
     # Rollback helper
@@ -592,6 +613,9 @@ class PromptVersionTracker:
                 self._versions.setdefault(name, []).append(version)
                 self._version_index[version.version_id] = version
                 self._outcomes.setdefault(version.version_id, [])
+                # Update inverted tag index
+                for tag in version.tags:
+                    self._tag_index.setdefault(tag, set()).add(version.version_id)
                 count += 1
 
                 # Import outcomes for this version
