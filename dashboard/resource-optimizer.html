@@ -1,0 +1,347 @@
+<!DOCTYPE html>
+<html lang="en">
+<head>
+  <meta charset="UTF-8">
+  <meta name="viewport" content="width=device-width, initial-scale=1.0">
+  <title>AgentLens — Resource Optimizer</title>
+  <link rel="stylesheet" href="styles.css">
+  <style>
+    .ro-grid { display: grid; grid-template-columns: repeat(4, 1fr); gap: 1rem; margin-top: 1rem; }
+    .ro-card { padding: 1.25rem; border-radius: 10px; background: var(--card-bg, #1e1e2e); }
+    .ro-card h3 { margin: 0 0 0.5rem; font-size: 0.9rem; opacity: 0.7; text-transform: uppercase; letter-spacing: 0.05em; }
+    .ro-card .big { font-size: 2.2rem; font-weight: 800; }
+    .ro-card .sub { font-size: 0.8rem; opacity: 0.6; margin-top: 0.25rem; }
+    .util-good { color: #a6e3a1; }
+    .util-warn { color: #f9e2af; }
+    .util-bad { color: #f38ba8; }
+    .section { margin-top: 2rem; }
+    .section-title { font-size: 1.3rem; font-weight: 700; margin-bottom: 1rem; display: flex; align-items: center; gap: 0.5rem; }
+    table.ro-table { width: 100%; border-collapse: collapse; background: var(--card-bg, #1e1e2e); border-radius: 8px; overflow: hidden; }
+    table.ro-table th, table.ro-table td { padding: 0.75rem 1rem; text-align: left; border-bottom: 1px solid var(--border, #313244); }
+    table.ro-table th { font-size: 0.8rem; text-transform: uppercase; opacity: 0.7; cursor: pointer; user-select: none; }
+    table.ro-table th:hover { opacity: 1; }
+    table.ro-table tr:hover td { background: var(--card-bg-active, #2a2a3e); }
+    .bar-bg { width: 100px; height: 8px; background: var(--bar-bg, #313244); border-radius: 4px; display: inline-block; vertical-align: middle; overflow: hidden; }
+    .bar-fill { height: 100%; border-radius: 4px; }
+    .waste-grid { display: grid; grid-template-columns: repeat(auto-fill, minmax(300px, 1fr)); gap: 1rem; }
+    .waste-card { padding: 1rem; border-radius: 8px; background: var(--card-bg, #1e1e2e); border-left: 4px solid; }
+    .waste-card.critical { border-color: #f38ba8; }
+    .waste-card.warning { border-color: #f9e2af; }
+    .waste-card.info { border-color: #89b4fa; }
+    .waste-card .title { font-weight: 700; margin-bottom: 0.25rem; }
+    .waste-card .desc { font-size: 0.85rem; opacity: 0.8; }
+    .waste-card .saving { font-size: 0.8rem; color: #a6e3a1; margin-top: 0.5rem; font-weight: 600; }
+    .rebalance-list { display: flex; flex-direction: column; gap: 0.75rem; }
+    .rebalance-item { padding: 1rem; border-radius: 8px; background: var(--card-bg, #1e1e2e); display: flex; align-items: center; gap: 1rem; }
+    .rebalance-item .action-icon { font-size: 1.5rem; }
+    .rebalance-item .details { flex: 1; }
+    .rebalance-item .details .action-title { font-weight: 700; }
+    .rebalance-item .details .action-desc { font-size: 0.85rem; opacity: 0.7; margin-top: 0.2rem; }
+    .rebalance-item .impact { font-weight: 600; font-size: 0.85rem; }
+    .impact-high { color: #a6e3a1; }
+    .impact-medium { color: #f9e2af; }
+    .impact-low { color: #89b4fa; }
+    .forecast-canvas { width: 100%; height: 250px; border-radius: 8px; background: var(--card-bg, #1e1e2e); }
+    .auto-toggle { display: flex; align-items: center; gap: 0.75rem; margin-bottom: 1rem; }
+    .toggle-switch { width: 48px; height: 26px; border-radius: 13px; background: var(--border, #313244); cursor: pointer; position: relative; transition: background 0.3s; }
+    .toggle-switch.active { background: #a6e3a1; }
+    .toggle-switch::after { content: ''; position: absolute; width: 20px; height: 20px; border-radius: 50%; background: white; top: 3px; left: 3px; transition: transform 0.3s; }
+    .toggle-switch.active::after { transform: translateX(22px); }
+    .activity-log { max-height: 200px; overflow-y: auto; font-family: monospace; font-size: 0.8rem; padding: 1rem; border-radius: 8px; background: var(--card-bg, #1e1e2e); }
+    .activity-log .entry { padding: 0.25rem 0; border-bottom: 1px solid var(--border, #313244); }
+    .activity-log .ts { opacity: 0.5; }
+    .toolbar { display: flex; gap: 0.75rem; align-items: center; flex-wrap: wrap; }
+    @media (max-width: 768px) { .ro-grid { grid-template-columns: repeat(2, 1fr); } }
+  </style>
+</head>
+<body>
+  <div id="app">
+    <header class="header">
+      <div class="header-left">
+        <a href="index.html" style="text-decoration:none;color:inherit"><h1 class="logo">🔍 AgentLens</h1></a>
+        <span class="tagline">⚡ Resource Optimizer</span>
+      </div>
+      <div class="header-right">
+        <div class="toolbar">
+          <button class="btn btn-secondary" onclick="refreshAll()">↻ Refresh</button>
+          <button class="btn btn-secondary" onclick="exportJSON()">📥 Export JSON</button>
+        </div>
+      </div>
+    </header>
+
+    <main class="main" style="padding: 1.5rem;">
+      <div class="ro-grid" id="overviewGrid"></div>
+
+      <div class="section">
+        <div class="section-title">📊 Agent Utilization</div>
+        <table class="ro-table" id="utilTable">
+          <thead>
+            <tr>
+              <th onclick="sortTable(0)">Agent ↕</th>
+              <th onclick="sortTable(1)">CPU % ↕</th>
+              <th onclick="sortTable(2)">Memory % ↕</th>
+              <th onclick="sortTable(3)">Tokens/min ↕</th>
+              <th onclick="sortTable(4)">Cost/hr ↕</th>
+              <th onclick="sortTable(5)">Utilization ↕</th>
+              <th onclick="sortTable(6)">Waste ↕</th>
+              <th onclick="sortTable(7)">Status ↕</th>
+            </tr>
+          </thead>
+          <tbody id="utilBody"></tbody>
+        </table>
+      </div>
+
+      <div class="section">
+        <div class="section-title">🗑️ Waste Detector <span id="wasteCount" style="font-size:0.8rem;opacity:0.6"></span></div>
+        <div class="waste-grid" id="wasteGrid"></div>
+      </div>
+
+      <div class="section">
+        <div class="section-title">⚖️ Auto-Rebalance Recommendations</div>
+        <div class="rebalance-list" id="rebalanceList"></div>
+      </div>
+
+      <div class="section">
+        <div class="section-title">📈 Resource Exhaustion Forecast</div>
+        <canvas id="forecastCanvas" class="forecast-canvas"></canvas>
+      </div>
+
+      <div class="section">
+        <div class="section-title">🤖 Auto-Optimize Mode</div>
+        <div class="auto-toggle">
+          <div class="toggle-switch" id="autoToggle" onclick="toggleAutoOptimize()"></div>
+          <span id="autoLabel">Disabled — click to enable continuous optimization</span>
+        </div>
+        <div class="activity-log" id="activityLog"><em style="opacity:0.5">No activity yet. Enable auto-optimize to start.</em></div>
+      </div>
+    </main>
+  </div>
+
+<script>
+const AGENTS = [
+  { name: 'classifier-v3', cpu: 82, mem: 71, tokensMin: 1240, costHr: 4.20, status: 'active' },
+  { name: 'summarizer-prod', cpu: 15, mem: 45, tokensMin: 320, costHr: 1.80, status: 'active' },
+  { name: 'router-alpha', cpu: 93, mem: 88, tokensMin: 2100, costHr: 7.50, status: 'active' },
+  { name: 'embedder-v2', cpu: 8, mem: 62, tokensMin: 90, costHr: 0.95, status: 'idle' },
+  { name: 'qa-agent', cpu: 45, mem: 34, tokensMin: 580, costHr: 2.40, status: 'active' },
+  { name: 'monitor-sentinel', cpu: 5, mem: 12, tokensMin: 20, costHr: 0.30, status: 'idle' },
+  { name: 'planner-v1', cpu: 67, mem: 55, tokensMin: 890, costHr: 3.60, status: 'active' },
+  { name: 'translator-multi', cpu: 38, mem: 41, tokensMin: 450, costHr: 2.10, status: 'active' },
+  { name: 'code-reviewer', cpu: 72, mem: 68, tokensMin: 1100, costHr: 4.80, status: 'active' },
+  { name: 'data-cleaner', cpu: 3, mem: 25, tokensMin: 15, costHr: 0.20, status: 'idle' },
+];
+
+function calcUtil(a) { return Math.round((a.cpu * 0.4 + a.mem * 0.3 + Math.min(a.tokensMin / 25, 100) * 0.3)); }
+function calcWaste(a) {
+  let w = 0;
+  if (a.cpu < 10) w += 40;
+  if (a.mem > 60 && a.cpu < 20) w += 30;
+  if (a.tokensMin < 50 && a.status === 'active') w += 20;
+  if (a.costHr > 3 && a.cpu < 30) w += 10;
+  return Math.min(w, 100);
+}
+function utilClass(v) { return v >= 60 ? 'util-good' : v >= 30 ? 'util-warn' : 'util-bad'; }
+function barColor(v) { return v >= 70 ? '#f38ba8' : v >= 40 ? '#f9e2af' : '#a6e3a1'; }
+
+function renderOverview() {
+  const grid = document.getElementById('overviewGrid');
+  const avgCpu = Math.round(AGENTS.reduce((s, a) => s + a.cpu, 0) / AGENTS.length);
+  const avgMem = Math.round(AGENTS.reduce((s, a) => s + a.mem, 0) / AGENTS.length);
+  const totalTokens = AGENTS.reduce((s, a) => s + a.tokensMin, 0);
+  const totalCost = AGENTS.reduce((s, a) => s + a.costHr, 0).toFixed(2);
+  const wasteCount = AGENTS.filter(a => calcWaste(a) > 50).length;
+  grid.innerHTML = `
+    <div class="ro-card"><h3>Avg CPU</h3><div class="big ${utilClass(avgCpu)}">${avgCpu}%</div><div class="sub">${AGENTS.length} agents in fleet</div></div>
+    <div class="ro-card"><h3>Avg Memory</h3><div class="big ${utilClass(avgMem)}">${avgMem}%</div><div class="sub">Fleet-wide allocation</div></div>
+    <div class="ro-card"><h3>Total Tokens/min</h3><div class="big" style="color:#89b4fa">${totalTokens.toLocaleString()}</div><div class="sub">$${totalCost}/hr fleet cost</div></div>
+    <div class="ro-card"><h3>Waste Alerts</h3><div class="big ${wasteCount > 2 ? 'util-bad' : wasteCount > 0 ? 'util-warn' : 'util-good'}">${wasteCount}</div><div class="sub">agents flagged for waste</div></div>
+  `;
+}
+
+let sortCol = -1, sortAsc = true;
+function renderTable() {
+  const body = document.getElementById('utilBody');
+  let rows = AGENTS.map(a => ({ ...a, util: calcUtil(a), waste: calcWaste(a) }));
+  if (sortCol >= 0) {
+    const keys = ['name', 'cpu', 'mem', 'tokensMin', 'costHr', 'util', 'waste', 'status'];
+    rows.sort((a, b) => {
+      let va = a[keys[sortCol]], vb = b[keys[sortCol]];
+      if (typeof va === 'string') return sortAsc ? va.localeCompare(vb) : vb.localeCompare(va);
+      return sortAsc ? va - vb : vb - va;
+    });
+  }
+  body.innerHTML = rows.map(a => `<tr>
+    <td><strong>${a.name}</strong></td>
+    <td>${a.cpu}% <div class="bar-bg"><div class="bar-fill" style="width:${a.cpu}%;background:${barColor(a.cpu)}"></div></div></td>
+    <td>${a.mem}% <div class="bar-bg"><div class="bar-fill" style="width:${a.mem}%;background:${barColor(a.mem)}"></div></div></td>
+    <td>${a.tokensMin.toLocaleString()}</td>
+    <td>$${a.costHr.toFixed(2)}</td>
+    <td class="${utilClass(a.util)}">${a.util}%</td>
+    <td class="${a.waste > 50 ? 'util-bad' : a.waste > 20 ? 'util-warn' : 'util-good'}">${a.waste}%</td>
+    <td>${a.status === 'idle' ? '💤 Idle' : '🟢 Active'}</td>
+  </tr>`).join('');
+}
+function sortTable(col) { if (sortCol === col) sortAsc = !sortAsc; else { sortCol = col; sortAsc = true; } renderTable(); }
+
+function renderWaste() {
+  const grid = document.getElementById('wasteGrid');
+  const findings = [];
+  AGENTS.forEach(a => {
+    if (a.status === 'idle' && a.costHr > 0.1)
+      findings.push({ sev: 'critical', title: `${a.name} is idle`, desc: `Consuming $${a.costHr.toFixed(2)}/hr while idle (CPU ${a.cpu}%, ${a.mem}% mem allocated).`, saving: `$${(a.costHr * 24).toFixed(2)}/day` });
+    if (a.mem > 60 && a.cpu < 20)
+      findings.push({ sev: 'warning', title: `${a.name} over-provisioned`, desc: `Memory at ${a.mem}% but CPU only ${a.cpu}%. Memory allocation can be reduced.`, saving: `~$${(a.costHr * 0.3).toFixed(2)}/hr` });
+    if (a.tokensMin > 1500 && a.cpu > 80)
+      findings.push({ sev: 'warning', title: `${a.name} token-heavy`, desc: `${a.tokensMin} tokens/min with high CPU. May indicate retry loops or inefficient prompts.`, saving: 'Review prompt efficiency' });
+    if (a.costHr > 5)
+      findings.push({ sev: 'info', title: `${a.name} high cost`, desc: `$${a.costHr.toFixed(2)}/hr — top-tier spender. Verify workload justifies cost.`, saving: 'Audit recommended' });
+  });
+  document.getElementById('wasteCount').textContent = `(${findings.length} findings)`;
+  grid.innerHTML = findings.length ? findings.map(f => `<div class="waste-card ${f.sev}">
+    <div class="title">${f.sev === 'critical' ? '🔴' : f.sev === 'warning' ? '🟡' : '🔵'} ${f.title}</div>
+    <div class="desc">${f.desc}</div>
+    <div class="saving">💰 Potential: ${f.saving}</div>
+  </div>`).join('') : '<div style="opacity:0.5">✅ No waste detected — fleet is running efficiently.</div>';
+}
+
+function renderRebalance() {
+  const list = document.getElementById('rebalanceList');
+  const recs = [];
+  const idle = AGENTS.filter(a => a.status === 'idle');
+  const hot = AGENTS.filter(a => a.cpu > 80);
+  const overMem = AGENTS.filter(a => a.mem > 60 && a.cpu < 30);
+  const expTokens = AGENTS.filter(a => a.tokensMin > 1000);
+  if (idle.length) recs.push({ icon: '⏸️', title: `Scale down ${idle.length} idle agent(s)`, desc: `${idle.map(a => a.name).join(', ')} — suspend to save $${idle.reduce((s, a) => s + a.costHr, 0).toFixed(2)}/hr`, impact: 'high' });
+  if (hot.length) recs.push({ icon: '🔥', title: `Redistribute load from ${hot.length} hot agent(s)`, desc: `${hot.map(a => a.name).join(', ')} running >80% CPU. Move tasks to underutilized agents.`, impact: 'high' });
+  if (overMem.length) recs.push({ icon: '📦', title: `Right-size memory for ${overMem.length} agent(s)`, desc: `${overMem.map(a => a.name).join(', ')} — high memory with low CPU. Reduce memory limits.`, impact: 'medium' });
+  if (expTokens.length) recs.push({ icon: '🎯', title: 'Optimize token consumption', desc: `${expTokens.map(a => a.name).join(', ')} using >1K tokens/min. Consider prompt caching or batching.`, impact: 'medium' });
+  recs.push({ icon: '🔄', title: 'Consolidate similar workloads', desc: 'Group classifier-v3 and code-reviewer onto shared infrastructure for better resource pooling.', impact: 'low' });
+  list.innerHTML = recs.map(r => `<div class="rebalance-item">
+    <div class="action-icon">${r.icon}</div>
+    <div class="details"><div class="action-title">${r.title}</div><div class="action-desc">${r.desc}</div></div>
+    <div class="impact impact-${r.impact}">${r.impact.toUpperCase()} IMPACT</div>
+  </div>`).join('');
+}
+
+function renderForecast() {
+  const canvas = document.getElementById('forecastCanvas');
+  const ctx = canvas.getContext('2d');
+  const dpr = window.devicePixelRatio || 1;
+  canvas.width = canvas.offsetWidth * dpr;
+  canvas.height = canvas.offsetHeight * dpr;
+  ctx.scale(dpr, dpr);
+  const W = canvas.offsetWidth, H = canvas.offsetHeight;
+  const pad = { t: 30, r: 30, b: 40, l: 60 };
+  const gW = W - pad.l - pad.r, gH = H - pad.t - pad.b;
+  const days = 30;
+  const cpuData = [], memData = [];
+  let cBase = 43, mBase = 50;
+  for (let i = 0; i <= days; i++) {
+    cpuData.push(Math.min(100, cBase + i * 1.2 + Math.sin(i) * 3));
+    memData.push(Math.min(100, mBase + i * 0.8 + Math.cos(i) * 2));
+  }
+  const textColor = getComputedStyle(document.body).getPropertyValue('--text') || '#cdd6f4';
+  ctx.fillStyle = textColor;
+  ctx.font = '11px system-ui';
+  // Grid
+  ctx.strokeStyle = 'rgba(128,128,128,0.15)';
+  ctx.lineWidth = 1;
+  for (let i = 0; i <= 4; i++) {
+    const y = pad.t + (gH / 4) * i;
+    ctx.beginPath(); ctx.moveTo(pad.l, y); ctx.lineTo(pad.l + gW, y); ctx.stroke();
+    ctx.fillStyle = textColor;
+    ctx.fillText(`${100 - i * 25}%`, 5, y + 4);
+  }
+  for (let i = 0; i <= days; i += 5) {
+    const x = pad.l + (gW / days) * i;
+    ctx.fillStyle = textColor;
+    ctx.fillText(`Day ${i}`, x - 15, H - 10);
+  }
+  // Threshold
+  ctx.strokeStyle = '#f38ba8';
+  ctx.setLineDash([5, 5]);
+  const threshY = pad.t + gH * 0.1;
+  ctx.beginPath(); ctx.moveTo(pad.l, threshY); ctx.lineTo(pad.l + gW, threshY); ctx.stroke();
+  ctx.fillStyle = '#f38ba8';
+  ctx.fillText('⚠ 90% threshold', pad.l + gW - 110, threshY - 5);
+  ctx.setLineDash([]);
+  // Lines
+  function drawLine(data, color) {
+    ctx.strokeStyle = color; ctx.lineWidth = 2.5; ctx.beginPath();
+    data.forEach((v, i) => {
+      const x = pad.l + (gW / days) * i, y = pad.t + gH * (1 - v / 100);
+      i === 0 ? ctx.moveTo(x, y) : ctx.lineTo(x, y);
+    });
+    ctx.stroke();
+  }
+  drawLine(cpuData, '#89b4fa');
+  drawLine(memData, '#a6e3a1');
+  // Legend
+  [['#89b4fa', 'CPU', 0], ['#a6e3a1', 'Memory', 70]].forEach(([c, l, off]) => {
+    ctx.fillStyle = c; ctx.fillRect(pad.l + off, 8, 12, 12);
+    ctx.fillStyle = textColor; ctx.fillText(l, pad.l + off + 16, 18);
+  });
+  // Exhaustion callout
+  const cpuEx = cpuData.findIndex(v => v >= 90);
+  if (cpuEx > 0) { ctx.fillStyle = '#f38ba8'; ctx.font = 'bold 12px system-ui'; ctx.fillText(`CPU exhaustion: ~Day ${cpuEx}`, W - 200, 18); }
+}
+
+// Auto-optimize
+let autoInterval = null;
+function toggleAutoOptimize() {
+  const toggle = document.getElementById('autoToggle');
+  const label = document.getElementById('autoLabel');
+  if (autoInterval) {
+    clearInterval(autoInterval); autoInterval = null;
+    toggle.classList.remove('active');
+    label.textContent = 'Disabled — click to enable continuous optimization';
+    addLog('🛑 Auto-optimize disabled');
+  } else {
+    toggle.classList.add('active');
+    label.textContent = 'Active — optimizing every 10s';
+    addLog('✅ Auto-optimize enabled — monitoring fleet');
+    autoInterval = setInterval(runAutoOptimize, 10000);
+    runAutoOptimize();
+  }
+}
+function runAutoOptimize() {
+  const actions = [
+    () => { const a = AGENTS.find(x => x.status === 'idle' && x.cpu < 10 && x.costHr > 0.1); if (a) { a.costHr = Math.max(0.05, a.costHr * 0.5); return `⏸️ Throttled ${a.name} — cost reduced to $${a.costHr.toFixed(2)}/hr`; } return null; },
+    () => { const a = AGENTS.find(x => x.cpu > 85); if (a) { const old = a.cpu; a.cpu = Math.max(60, a.cpu - 10); return `🔄 Rebalanced ${a.name} — CPU ${old}% → ${a.cpu}%`; } return null; },
+    () => { const a = AGENTS.find(x => x.mem > 65 && x.cpu < 25); if (a) { const old = a.mem; a.mem = Math.max(30, a.mem - 10); return `📦 Right-sized ${a.name} memory — ${old}% → ${a.mem}%`; } return null; },
+    () => { const a = AGENTS.find(x => x.tokensMin > 1200); if (a) { const old = a.tokensMin; a.tokensMin = Math.round(a.tokensMin * 0.9); return `🎯 Optimized ${a.name} tokens — ${old} → ${a.tokensMin}/min`; } return null; },
+    () => '📊 Fleet health scan complete — all metrics within bounds',
+  ];
+  const msg = actions[Math.floor(Math.random() * actions.length)]();
+  if (msg) addLog(msg);
+  refreshAll();
+}
+function addLog(msg) {
+  const log = document.getElementById('activityLog');
+  if (log.querySelector('em')) log.innerHTML = '';
+  const ts = new Date().toLocaleTimeString();
+  log.innerHTML = `<div class="entry"><span class="ts">[${ts}]</span> ${msg}</div>` + log.innerHTML;
+}
+
+function exportJSON() {
+  const data = {
+    timestamp: new Date().toISOString(),
+    agents: AGENTS.map(a => ({ ...a, utilization: calcUtil(a), waste: calcWaste(a) })),
+    fleet: {
+      avgCpu: Math.round(AGENTS.reduce((s, a) => s + a.cpu, 0) / AGENTS.length),
+      avgMem: Math.round(AGENTS.reduce((s, a) => s + a.mem, 0) / AGENTS.length),
+      totalCostHr: +AGENTS.reduce((s, a) => s + a.costHr, 0).toFixed(2),
+      wasteAgents: AGENTS.filter(a => calcWaste(a) > 50).length,
+    }
+  };
+  const blob = new Blob([JSON.stringify(data, null, 2)], { type: 'application/json' });
+  const a = document.createElement('a'); a.href = URL.createObjectURL(blob);
+  a.download = 'resource-optimizer-report.json'; a.click();
+}
+
+function refreshAll() { renderOverview(); renderTable(); renderWaste(); renderRebalance(); renderForecast(); }
+refreshAll();
+if (localStorage.getItem('theme') === 'light') document.body.classList.add('light');
+</script>
+</body>
+</html>
