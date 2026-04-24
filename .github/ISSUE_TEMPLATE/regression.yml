@@ -1,0 +1,86 @@
+name: 🔄 Regression Report
+description: Something that previously worked is now broken after an update
+title: "[Regression]: "
+labels: ["regression", "bug", "priority:high"]
+body:
+  - type: markdown
+    attributes:
+      value: |
+        A regression means something that **used to work** is now broken. These are treated as high priority.
+
+  - type: dropdown
+    id: component
+    attributes:
+      label: Component
+      description: Which part of AgentLens regressed?
+      options:
+        - Python SDK
+        - Backend API (Node.js)
+        - Dashboard (Web UI)
+        - CLI Tools
+        - LangChain Integration
+        - Other
+    validations:
+      required: true
+
+  - type: input
+    id: last-working
+    attributes:
+      label: Last Working Version
+      description: The most recent version where this worked correctly.
+      placeholder: "e.g., agentlens 0.3.2 / backend v0.8.0 / commit abc1234"
+    validations:
+      required: true
+
+  - type: input
+    id: broken-version
+    attributes:
+      label: Broken Version
+      description: The version where the regression was first noticed.
+      placeholder: "e.g., agentlens 0.4.0 / backend v0.9.0 / latest main"
+    validations:
+      required: true
+
+  - type: textarea
+    id: description
+    attributes:
+      label: What Regressed
+      description: Clearly describe what used to work and how it now fails.
+      placeholder: |
+        Previously: `@tracker.trace()` decorated async generators yielded events in real-time to the dashboard.
+        Now: Events only appear after the generator is fully exhausted.
+    validations:
+      required: true
+
+  - type: textarea
+    id: reproduction
+    attributes:
+      label: Steps to Reproduce
+      description: Minimal steps to trigger the regression.
+    validations:
+      required: true
+
+  - type: textarea
+    id: suspected-cause
+    attributes:
+      label: Suspected Cause (optional)
+      description: If you've bisected or have a theory about which change caused the regression, share it here.
+      placeholder: "Might be related to PR #42 which refactored the event batching logic."
+
+  - type: textarea
+    id: environment
+    attributes:
+      label: Environment
+      placeholder: |
+        - AgentLens SDK version: 0.4.0
+        - Python version: 3.11
+        - OS: Ubuntu 22.04
+        - Node.js version (if backend): 20.x
+    validations:
+      required: true
+
+  - type: textarea
+    id: impact
+    attributes:
+      label: Impact
+      description: How does this affect your workflow? Are there workarounds?

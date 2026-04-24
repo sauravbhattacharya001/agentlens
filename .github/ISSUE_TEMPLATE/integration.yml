@@ -1,0 +1,94 @@
+name: 🔗 Integration / Compatibility Issue
+description: Report a problem with a specific agent framework, LLM provider, or Python version
+title: "[Integration]: "
+labels: ["integration", "triage"]
+body:
+  - type: markdown
+    attributes:
+      value: |
+        Use this template when AgentLens doesn't work correctly with a specific framework, provider, or environment combination.
+
+  - type: dropdown
+    id: integration-type
+    attributes:
+      label: Integration Category
+      description: What kind of integration is failing?
+      options:
+        - Agent Framework (LangChain, LlamaIndex, CrewAI, AutoGen, etc.)
+        - LLM Provider (OpenAI, Anthropic, Cohere, local models, etc.)
+        - Observability Backend (custom exporters, OpenTelemetry, etc.)
+        - Python Version Compatibility
+        - OS / Platform Compatibility
+        - Dependency Conflict
+        - Other
+    validations:
+      required: true
+
+  - type: input
+    id: integration-name
+    attributes:
+      label: Specific Integration
+      description: Name and version of the framework, provider, or dependency involved.
+      placeholder: "e.g., LangChain 0.2.3, Python 3.13, openai 1.30.0"
+    validations:
+      required: true
+
+  - type: textarea
+    id: description
+    attributes:
+      label: Issue Description
+      description: What breaks or behaves unexpectedly when using this integration?
+      placeholder: "Tracing captures parent spans but child tool calls are missing when using LangChain's AgentExecutor."
+    validations:
+      required: true
+
+  - type: textarea
+    id: minimal-repro
+    attributes:
+      label: Minimal Reproduction
+      description: Provide a short code snippet that demonstrates the issue.
+      render: python
+      placeholder: |
+        from agentlens import AgentLens
+        from langchain.agents import AgentExecutor
+        
+        lens = AgentLens(api_key="...")
+        # ... setup that triggers the issue
+    validations:
+      required: true
+
+  - type: textarea
+    id: expected
+    attributes:
+      label: Expected Behavior
+      description: What should happen with this integration?
+    validations:
+      required: true
+
+  - type: textarea
+    id: workaround
+    attributes:
+      label: Workaround (if any)
+      description: Have you found a workaround? This helps others while we fix the issue.
+
+  - type: textarea
+    id: environment
+    attributes:
+      label: Environment
+      description: Full dependency versions and platform details.
+      placeholder: |
+        - AgentLens SDK: 0.1.0
+        - Python: 3.11.7
+        - Framework: langchain==0.2.3, langchain-openai==0.1.8
+        - OS: macOS 14.4 / Ubuntu 22.04 / Windows 11
+        - Install method: pip / conda / poetry
+      render: yaml
+    validations:
+      required: true
+
+  - type: textarea
+    id: pip-freeze
+    attributes:
+      label: Dependency Snapshot
+      description: Output of `pip freeze` or `pip list` (helps detect version conflicts).
+      render: text
