@@ -1,0 +1,584 @@
+<!DOCTYPE html>
+<html lang="en">
+<head>
+  <meta charset="UTF-8">
+  <meta name="viewport" content="width=device-width, initial-scale=1.0">
+  <title>AgentLens — What-If Scenario Planner</title>
+  <link rel="stylesheet" href="styles.css">
+  <style>
+    .scenario-layout { display: grid; grid-template-columns: 340px 1fr; gap: 20px; margin-top: 20px; }
+    .scenario-sidebar { display: flex; flex-direction: column; gap: 16px; }
+    .scenario-card { background: var(--card-bg, #1e1e2e); border: 1px solid var(--border, #2d2d3d); border-radius: 12px; padding: 16px; cursor: pointer; transition: all 0.2s; }
+    .scenario-card:hover { border-color: var(--primary, #7c5cff); transform: translateY(-1px); }
+    .scenario-card.active { border-color: var(--primary, #7c5cff); box-shadow: 0 0 12px rgba(124,92,255,0.3); }
+    .scenario-card h3 { margin: 0 0 6px; font-size: 14px; }
+    .scenario-card p { margin: 0; font-size: 12px; opacity: 0.7; }
+    .scenario-card .severity { display: inline-block; padding: 2px 8px; border-radius: 10px; font-size: 11px; font-weight: 600; margin-top: 8px; }
+    .severity-critical { background: #ff4444; color: #fff; }
+    .severity-high { background: #ff8c00; color: #fff; }
+    .severity-medium { background: #ffd700; color: #000; }
+    .severity-low { background: #44bb44; color: #fff; }
+    .main-panel { display: flex; flex-direction: column; gap: 16px; }
+    .canvas-container { background: var(--card-bg, #1e1e2e); border: 1px solid var(--border, #2d2d3d); border-radius: 12px; padding: 16px; position: relative; }
+    .canvas-container canvas { width: 100%; height: 420px; border-radius: 8px; }
+    .impact-grid { display: grid; grid-template-columns: repeat(4, 1fr); gap: 12px; }
+    .impact-stat { background: var(--card-bg, #1e1e2e); border: 1px solid var(--border, #2d2d3d); border-radius: 12px; padding: 16px; text-align: center; }
+    .impact-stat .value { font-size: 28px; font-weight: 700; margin: 4px 0; }
+    .impact-stat .label { font-size: 12px; opacity: 0.6; }
+    .recommendations { background: var(--card-bg, #1e1e2e); border: 1px solid var(--border, #2d2d3d); border-radius: 12px; padding: 16px; }
+    .recommendations h3 { margin: 0 0 12px; }
+    .rec-item { display: flex; align-items: flex-start; gap: 10px; padding: 8px 0; border-bottom: 1px solid var(--border, #2d2d3d); }
+    .rec-item:last-child { border-bottom: none; }
+    .rec-icon { font-size: 18px; flex-shrink: 0; }
+    .rec-text { font-size: 13px; }
+    .rec-text strong { display: block; margin-bottom: 2px; }
+    .compare-panel { display: grid; grid-template-columns: 1fr 60px 1fr; gap: 12px; align-items: start; }
+    .compare-col { background: var(--card-bg, #1e1e2e); border: 1px solid var(--border, #2d2d3d); border-radius: 12px; padding: 16px; }
+    .compare-vs { text-align: center; font-size: 24px; font-weight: 700; padding-top: 40px; opacity: 0.4; }
+    .controls { display: flex; gap: 10px; flex-wrap: wrap; align-items: center; }
+    .controls select, .controls button { padding: 8px 14px; border-radius: 8px; border: 1px solid var(--border, #2d2d3d); background: var(--card-bg, #1e1e2e); color: inherit; font-size: 13px; cursor: pointer; }
+    .controls button.primary { background: var(--primary, #7c5cff); color: #fff; border-color: transparent; }
+    .controls button.primary:hover { opacity: 0.9; }
+    .auto-mitigate { background: #2d6a30; color: #fff; border-color: transparent !important; }
+    .auto-mitigate:hover { background: #3a8a3e !important; }
+    .tab-bar { display: flex; gap: 0; border-bottom: 2px solid var(--border, #2d2d3d); margin-bottom: 16px; }
+    .tab-bar button { padding: 10px 20px; background: none; border: none; color: inherit; opacity: 0.5; cursor: pointer; font-size: 14px; border-bottom: 2px solid transparent; margin-bottom: -2px; }
+    .tab-bar button.active { opacity: 1; border-bottom-color: var(--primary, #7c5cff); }
+    .custom-editor { width: 100%; min-height: 200px; font-family: monospace; font-size: 12px; background: var(--bg, #0d0d1a); color: var(--text, #e0e0e0); border: 1px solid var(--border, #2d2d3d); border-radius: 8px; padding: 12px; resize: vertical; }
+    .affected-list { display: flex; flex-wrap: wrap; gap: 6px; margin-top: 8px; }
+    .affected-badge { padding: 3px 10px; border-radius: 12px; font-size: 11px; font-weight: 600; }
+    .badge-failed { background: #ff4444; color: #fff; }
+    .badge-degraded { background: #ff8c00; color: #fff; }
+    .badge-warning { background: #ffd700; color: #000; }
+    .badge-healthy { background: #44bb44; color: #fff; }
+    @media (max-width: 900px) { .scenario-layout { grid-template-columns: 1fr; } .impact-grid { grid-template-columns: repeat(2, 1fr); } }
+  </style>
+</head>
+<body>
+  <div id="app">
+    <header class="header">
+      <div class="header-left">
+        <h1 class="logo"><a href="index.html" style="text-decoration:none;color:inherit">🔍 AgentLens</a></h1>
+        <span class="tagline">What-If Scenario Planner</span>
+      </div>
+      <div class="header-right">
+        <a href="index.html" class="btn btn-alert-header" style="text-decoration:none">📊 Dashboard</a>
+        <a href="topology.html" class="btn btn-alert-header" style="text-decoration:none">🗺️ Topology</a>
+        <a href="triage.html" class="btn btn-alert-header" style="text-decoration:none">🚦 Triage</a>
+        <button class="theme-toggle" onclick="toggleTheme()" title="Toggle theme" id="themeToggleBtn">🌙</button>
+      </div>
+    </header>
+
+    <main class="main" style="padding: 20px;">
+      <div class="tab-bar">
+        <button class="active" onclick="switchTab('planner')">🎯 Scenario Planner</button>
+        <button onclick="switchTab('compare')">⚖️ Compare</button>
+        <button onclick="switchTab('custom')">🔧 Custom Editor</button>
+      </div>
+
+      <!-- PLANNER TAB -->
+      <div id="tab-planner">
+        <div class="scenario-layout">
+          <div class="scenario-sidebar" id="scenarioList"></div>
+          <div class="main-panel">
+            <div class="controls">
+              <button class="primary" onclick="runScenario()">▶ Run Scenario</button>
+              <button class="auto-mitigate" onclick="showMitigation()">🛡️ Auto-Mitigate</button>
+              <span id="scenarioTitle" style="font-weight:600;font-size:16px;margin-left:8px;"></span>
+            </div>
+            <div class="impact-grid" id="impactGrid">
+              <div class="impact-stat"><div class="label">Risk Score</div><div class="value" id="riskScore">—</div></div>
+              <div class="impact-stat"><div class="label">Affected Agents</div><div class="value" id="affectedCount">—</div></div>
+              <div class="impact-stat"><div class="label">Est. Error Rate</div><div class="value" id="errorRate">—</div></div>
+              <div class="impact-stat"><div class="label">Recovery Time</div><div class="value" id="recoveryTime">—</div></div>
+            </div>
+            <div class="canvas-container">
+              <canvas id="fleetCanvas" width="900" height="420"></canvas>
+            </div>
+            <div class="affected-list" id="affectedBadges"></div>
+            <div class="recommendations" id="recommendations" style="display:none;">
+              <h3>🤖 Proactive Recommendations</h3>
+              <div id="recList"></div>
+            </div>
+            <div class="recommendations" id="mitigationPanel" style="display:none;">
+              <h3>🛡️ Auto-Mitigation Actions</h3>
+              <div id="mitigationList"></div>
+            </div>
+          </div>
+        </div>
+      </div>
+
+      <!-- COMPARE TAB -->
+      <div id="tab-compare" style="display:none;">
+        <div class="controls" style="margin-bottom:16px;">
+          <select id="compareA"></select>
+          <select id="compareB"></select>
+          <button class="primary" onclick="runCompare()">⚖️ Compare</button>
+        </div>
+        <div class="compare-panel">
+          <div class="compare-col" id="compareColA"><p style="opacity:0.5;text-align:center;">Select scenarios and click Compare</p></div>
+          <div class="compare-vs">VS</div>
+          <div class="compare-col" id="compareColB"><p style="opacity:0.5;text-align:center;"></p></div>
+        </div>
+      </div>
+
+      <!-- CUSTOM EDITOR TAB -->
+      <div id="tab-custom" style="display:none;">
+        <p style="opacity:0.7;font-size:13px;margin-bottom:12px;">Define a custom scenario in JSON. Specify failure points and parameters, then run to see impact.</p>
+        <textarea class="custom-editor" id="customJson"></textarea>
+        <div style="margin-top:10px;">
+          <button class="primary" onclick="runCustom()">▶ Run Custom Scenario</button>
+        </div>
+        <div id="customResult" style="margin-top:16px;"></div>
+      </div>
+    </main>
+  </div>
+
+  <script>
+  // ── Agent Fleet Data ──
+  const agents = [
+    { id: 'gateway', name: 'API Gateway', x: 450, y: 40, deps: [], role: 'ingress', capacity: 10000 },
+    { id: 'auth', name: 'Auth Service', x: 200, y: 130, deps: ['gateway'], role: 'security', capacity: 5000 },
+    { id: 'router', name: 'Request Router', x: 700, y: 130, deps: ['gateway'], role: 'routing', capacity: 8000 },
+    { id: 'agent-a', name: 'Agent Alpha', x: 100, y: 240, deps: ['auth', 'router'], role: 'worker', capacity: 3000 },
+    { id: 'agent-b', name: 'Agent Beta', x: 350, y: 240, deps: ['auth'], role: 'worker', capacity: 2500 },
+    { id: 'agent-c', name: 'Agent Gamma', x: 600, y: 240, deps: ['router'], role: 'worker', capacity: 4000 },
+    { id: 'agent-d', name: 'Agent Delta', x: 800, y: 240, deps: ['router', 'db'], role: 'worker', capacity: 3500 },
+    { id: 'db', name: 'Primary DB', x: 450, y: 340, deps: [], role: 'storage', capacity: 20000 },
+    { id: 'cache', name: 'Cache Layer', x: 200, y: 340, deps: ['db'], role: 'cache', capacity: 15000 },
+    { id: 'ml', name: 'ML Pipeline', x: 650, y: 340, deps: ['db', 'agent-c'], role: 'compute', capacity: 1500 },
+    { id: 'notifier', name: 'Notifier', x: 100, y: 400, deps: ['agent-a', 'agent-b'], role: 'output', capacity: 2000 },
+    { id: 'monitor', name: 'Health Monitor', x: 800, y: 400, deps: ['gateway', 'db', 'ml'], role: 'observability', capacity: 1000 },
+  ];
+
+  const scenarios = [
+    {
+      id: 'db-failure', name: 'Primary DB Failure', icon: '💥', severity: 'critical',
+      desc: 'Primary database becomes unavailable. All dependent agents lose data access.',
+      failures: [{ agent: 'db', type: 'down', impact: 1.0 }],
+      recommendations: [
+        { icon: '🔄', title: 'Enable read replicas', text: 'Promote a read replica to handle queries during primary outage.' },
+        { icon: '💾', title: 'Add local caching', text: 'Agents should cache recent data to survive brief DB outages.' },
+        { icon: '⚡', title: 'Circuit breakers', text: 'Add circuit breakers to prevent cascade timeouts to DB.' },
+        { icon: '📊', title: 'Health probe', text: 'Add deep health checks with automatic failover trigger.' },
+      ],
+      mitigation: [
+        '🔄 Promote read-replica to primary (est. 45s)',
+        '🛑 Enable circuit breaker on DB connections',
+        '📢 Alert on-call with severity P1',
+        '💾 Switch agents to cached-only mode',
+      ]
+    },
+    {
+      id: 'traffic-surge', name: 'Traffic Surge 5x', icon: '📈', severity: 'high',
+      desc: 'Sudden 5x traffic increase hitting the API Gateway.',
+      failures: [{ agent: 'gateway', type: 'overload', impact: 0.7 }, { agent: 'auth', type: 'overload', impact: 0.5 }],
+      recommendations: [
+        { icon: '📦', title: 'Auto-scale gateway', text: 'Configure HPA to scale gateway pods on CPU/request-rate.' },
+        { icon: '⏱️', title: 'Rate limiting', text: 'Add adaptive rate limits that activate during surges.' },
+        { icon: '🗂️', title: 'Request queuing', text: 'Buffer excess requests rather than rejecting immediately.' },
+        { icon: '🎯', title: 'Priority lanes', text: 'Route critical traffic through a priority path during overload.' },
+      ],
+      mitigation: [
+        '📦 Scale gateway replicas 3x → 15x (est. 90s)',
+        '⏱️ Activate rate limiter at 80% capacity',
+        '🗂️ Enable request queue with 30s TTL',
+        '📢 Notify team: traffic anomaly detected',
+      ]
+    },
+    {
+      id: 'auth-timeout', name: 'Auth Service Timeout', icon: '🔐', severity: 'high',
+      desc: 'Auth service latency increases 10x, blocking all authenticated requests.',
+      failures: [{ agent: 'auth', type: 'slow', impact: 0.9 }],
+      recommendations: [
+        { icon: '🎫', title: 'Token caching', text: 'Cache validated tokens to reduce auth dependency.' },
+        { icon: '⚡', title: 'Timeout tuning', text: 'Set aggressive timeouts with fast fallback to cached auth.' },
+        { icon: '🔓', title: 'Graceful degradation', text: 'Allow read-only access when auth is degraded.' },
+        { icon: '🔄', title: 'Auth redundancy', text: 'Deploy standby auth service for automatic failover.' },
+      ],
+      mitigation: [
+        '🎫 Enable token cache bypass (est. 5s)',
+        '⏱️ Reduce auth timeout from 5s to 500ms',
+        '🔓 Activate read-only fallback mode',
+        '📢 Page auth team with latency data',
+      ]
+    },
+    {
+      id: 'region-failover', name: 'Region Failover', icon: '🌍', severity: 'critical',
+      desc: 'East region goes offline. All agents in that region become unavailable.',
+      failures: [{ agent: 'agent-a', type: 'down', impact: 1.0 }, { agent: 'agent-b', type: 'down', impact: 1.0 }, { agent: 'cache', type: 'down', impact: 1.0 }],
+      recommendations: [
+        { icon: '🌐', title: 'Multi-region active-active', text: 'Deploy agents in multiple regions with traffic splitting.' },
+        { icon: '🔀', title: 'DNS failover', text: 'Configure health-based DNS routing to surviving regions.' },
+        { icon: '💾', title: 'Cross-region replication', text: 'Replicate critical data across regions for zero-RPO failover.' },
+        { icon: '🧪', title: 'Chaos testing', text: 'Regularly test region failover to verify recovery works.' },
+      ],
+      mitigation: [
+        '🔀 Redirect traffic to West region (est. 30s)',
+        '📦 Scale West region by 2x to absorb load',
+        '💾 Promote West DB replica',
+        '📢 Trigger region failover runbook',
+      ]
+    },
+    {
+      id: 'cascade', name: 'Cascade Chain Reaction', icon: '🔗', severity: 'critical',
+      desc: 'Router agent fails, triggering cascading failures through dependent agents.',
+      failures: [{ agent: 'router', type: 'down', impact: 1.0 }],
+      recommendations: [
+        { icon: '⚡', title: 'Circuit breakers everywhere', text: 'Every agent should have circuit breakers on upstream dependencies.' },
+        { icon: '🏗️', title: 'Bulkhead pattern', text: 'Isolate agent pools so one failure cannot drain shared resources.' },
+        { icon: '📉', title: 'Graceful degradation', text: 'Agents should serve partial results when dependencies are down.' },
+        { icon: '🔍', title: 'Dependency depth limit', text: 'Alert when dependency chains exceed 3 hops.' },
+      ],
+      mitigation: [
+        '⚡ Activate circuit breakers on all router dependents',
+        '🏗️ Enable bulkhead isolation',
+        '📉 Switch affected agents to degraded mode',
+        '🔄 Attempt router restart (est. 15s)',
+      ]
+    },
+    {
+      id: 'gradual', name: 'Gradual Degradation', icon: '📉', severity: 'medium',
+      desc: 'Slow performance decline across the fleet over 2 hours. Memory leak suspected.',
+      failures: [
+        { agent: 'agent-a', type: 'slow', impact: 0.3 }, { agent: 'agent-b', type: 'slow', impact: 0.3 },
+        { agent: 'agent-c', type: 'slow', impact: 0.4 }, { agent: 'agent-d', type: 'slow', impact: 0.3 },
+        { agent: 'ml', type: 'slow', impact: 0.5 },
+      ],
+      recommendations: [
+        { icon: '🔍', title: 'Memory profiling', text: 'Enable heap snapshots to identify leak source.' },
+        { icon: '🔄', title: 'Rolling restart', text: 'Schedule rolling restarts to reclaim memory before critical threshold.' },
+        { icon: '📊', title: 'Trend alerting', text: 'Alert on latency P99 trending upward over 30min windows.' },
+        { icon: '🧹', title: 'GC tuning', text: 'Tune garbage collection for long-running agent processes.' },
+      ],
+      mitigation: [
+        '🔄 Initiate rolling restart (est. 5min, zero-downtime)',
+        '📊 Enable detailed memory metrics',
+        '🔍 Capture heap snapshot from worst agent',
+        '🧹 Adjust GC pressure thresholds',
+      ]
+    }
+  ];
+
+  let activeScenario = null;
+  let animFrame = null;
+  let cascadeState = {};
+
+  // ── Theme ──
+  function toggleTheme() {
+    document.body.classList.toggle('light-theme');
+    const btn = document.getElementById('themeToggleBtn');
+    btn.textContent = document.body.classList.contains('light-theme') ? '☀️' : '🌙';
+    drawFleet();
+  }
+
+  // ── Tabs ──
+  function switchTab(tab) {
+    document.querySelectorAll('.tab-bar button').forEach(b => b.classList.remove('active'));
+    document.querySelectorAll('[id^="tab-"]').forEach(el => el.style.display = 'none');
+    document.getElementById('tab-' + tab).style.display = '';
+    event.target.classList.add('active');
+  }
+
+  // ── Scenario List ──
+  function renderScenarioList() {
+    const list = document.getElementById('scenarioList');
+    list.innerHTML = scenarios.map(s => `
+      <div class="scenario-card ${activeScenario?.id === s.id ? 'active' : ''}" onclick="selectScenario('${s.id}')">
+        <h3>${s.icon} ${s.name}</h3>
+        <p>${s.desc}</p>
+        <span class="severity severity-${s.severity}">${s.severity.toUpperCase()}</span>
+      </div>
+    `).join('');
+    // Populate compare selects
+    ['compareA', 'compareB'].forEach((id, i) => {
+      const sel = document.getElementById(id);
+      sel.innerHTML = scenarios.map((s, j) => `<option value="${s.id}" ${j === i ? 'selected' : ''}>${s.icon} ${s.name}</option>`).join('');
+    });
+  }
+
+  function selectScenario(id) {
+    activeScenario = scenarios.find(s => s.id === id);
+    renderScenarioList();
+    document.getElementById('scenarioTitle').textContent = activeScenario.icon + ' ' + activeScenario.name;
+    document.getElementById('recommendations').style.display = 'none';
+    document.getElementById('mitigationPanel').style.display = 'none';
+    resetImpact();
+    cascadeState = {};
+    drawFleet();
+  }
+
+  function resetImpact() {
+    document.getElementById('riskScore').textContent = '—';
+    document.getElementById('affectedCount').textContent = '—';
+    document.getElementById('errorRate').textContent = '—';
+    document.getElementById('recoveryTime').textContent = '—';
+    document.getElementById('affectedBadges').innerHTML = '';
+  }
+
+  // ── Impact Propagation Engine ──
+  function computeImpact(scenario) {
+    const state = {};
+    agents.forEach(a => state[a.id] = { status: 'healthy', impact: 0, depth: 0 });
+
+    // Apply direct failures
+    scenario.failures.forEach(f => {
+      state[f.agent] = { status: f.type === 'down' ? 'failed' : (f.impact > 0.6 ? 'degraded' : 'warning'), impact: f.impact, depth: 0 };
+    });
+
+    // Propagate through dependency graph (BFS)
+    let changed = true;
+    let rounds = 0;
+    while (changed && rounds < 10) {
+      changed = false;
+      rounds++;
+      agents.forEach(a => {
+        if (state[a.id].status !== 'healthy' && state[a.id].depth < rounds) return;
+        const depImpacts = a.deps.map(d => state[d]?.impact || 0);
+        if (depImpacts.length === 0) return;
+        const maxDep = Math.max(...depImpacts);
+        const propagated = maxDep * 0.6;
+        if (propagated > state[a.id].impact) {
+          state[a.id].impact = propagated;
+          state[a.id].depth = rounds;
+          state[a.id].status = propagated > 0.6 ? 'degraded' : propagated > 0.2 ? 'warning' : 'healthy';
+          changed = true;
+        }
+      });
+    }
+
+    // Also propagate reverse deps (agents that depend on failed ones)
+    agents.forEach(a => {
+      a.deps.forEach(d => {
+        if (state[d].status === 'failed' || state[d].status === 'degraded') {
+          const rev = state[a.id].impact;
+          const prop = state[d].impact * 0.7;
+          if (prop > rev) {
+            state[a.id] = { status: prop > 0.6 ? 'degraded' : 'warning', impact: prop, depth: state[a.id].depth + 1 };
+          }
+        }
+      });
+    });
+
+    return state;
+  }
+
+  function computeMetrics(state) {
+    const affected = Object.values(state).filter(s => s.status !== 'healthy');
+    const avgImpact = affected.length > 0 ? affected.reduce((s, a) => s + a.impact, 0) / agents.length : 0;
+    const riskScore = Math.min(100, Math.round(avgImpact * 100 + affected.length * 5));
+    const errorRate = (avgImpact * 35).toFixed(1);
+    const maxDepth = Math.max(...Object.values(state).map(s => s.depth), 0);
+    const recoveryMin = affected.filter(a => a.status === 'failed').length * 8 + affected.filter(a => a.status === 'degraded').length * 3 + maxDepth * 2;
+    return { riskScore, affected: affected.length, total: agents.length, errorRate, recoveryMin };
+  }
+
+  // ── Run Scenario ──
+  function runScenario() {
+    if (!activeScenario) { alert('Select a scenario first'); return; }
+    cascadeState = computeImpact(activeScenario);
+    const m = computeMetrics(cascadeState);
+
+    document.getElementById('riskScore').textContent = m.riskScore;
+    document.getElementById('riskScore').style.color = m.riskScore > 70 ? '#ff4444' : m.riskScore > 40 ? '#ff8c00' : '#44bb44';
+    document.getElementById('affectedCount').textContent = m.affected + ' / ' + m.total;
+    document.getElementById('errorRate').textContent = m.errorRate + '%';
+    document.getElementById('recoveryTime').textContent = m.recoveryMin + 'min';
+
+    // Badges
+    const badges = document.getElementById('affectedBadges');
+    badges.innerHTML = agents.map(a => {
+      const s = cascadeState[a.id];
+      const cls = s.status === 'failed' ? 'badge-failed' : s.status === 'degraded' ? 'badge-degraded' : s.status === 'warning' ? 'badge-warning' : 'badge-healthy';
+      return `<span class="affected-badge ${cls}">${a.name}</span>`;
+    }).join('');
+
+    // Recommendations
+    const recPanel = document.getElementById('recommendations');
+    const recList = document.getElementById('recList');
+    recPanel.style.display = '';
+    recList.innerHTML = activeScenario.recommendations.map(r => `
+      <div class="rec-item"><span class="rec-icon">${r.icon}</span><div class="rec-text"><strong>${r.title}</strong>${r.text}</div></div>
+    `).join('');
+
+    document.getElementById('mitigationPanel').style.display = 'none';
+    animateCascade();
+  }
+
+  function showMitigation() {
+    if (!activeScenario) return;
+    const panel = document.getElementById('mitigationPanel');
+    const list = document.getElementById('mitigationList');
+    panel.style.display = '';
+    list.innerHTML = activeScenario.mitigation.map(m => `<div class="rec-item"><div class="rec-text">${m}</div></div>`).join('');
+  }
+
+  // ── Canvas Rendering ──
+  function drawFleet() {
+    const canvas = document.getElementById('fleetCanvas');
+    canvas.width = canvas.clientWidth * (window.devicePixelRatio || 1);
+    canvas.height = canvas.clientHeight * (window.devicePixelRatio || 1);
+    const ctx = canvas.getContext('2d');
+    ctx.scale(window.devicePixelRatio || 1, window.devicePixelRatio || 1);
+    const w = canvas.clientWidth, h = canvas.clientHeight;
+    const isLight = document.body.classList.contains('light-theme');
+    ctx.clearRect(0, 0, w, h);
+
+    const scaleX = w / 900, scaleY = h / 420;
+
+    // Draw edges
+    agents.forEach(a => {
+      a.deps.forEach(d => {
+        const dep = agents.find(ag => ag.id === d);
+        if (!dep) return;
+        ctx.beginPath();
+        ctx.moveTo(a.x * scaleX, a.y * scaleY);
+        ctx.lineTo(dep.x * scaleX, dep.y * scaleY);
+        const aState = cascadeState[a.id]?.status;
+        const dState = cascadeState[d]?.status;
+        if (aState === 'failed' || dState === 'failed') { ctx.strokeStyle = '#ff4444'; ctx.lineWidth = 2; }
+        else if (aState === 'degraded' || dState === 'degraded') { ctx.strokeStyle = '#ff8c00'; ctx.lineWidth = 1.5; }
+        else { ctx.strokeStyle = isLight ? '#ccc' : '#333'; ctx.lineWidth = 1; }
+        ctx.stroke();
+      });
+    });
+
+    // Draw nodes
+    agents.forEach(a => {
+      const sx = a.x * scaleX, sy = a.y * scaleY;
+      const s = cascadeState[a.id];
+      const status = s?.status || 'healthy';
+      const colors = { healthy: '#44bb44', warning: '#ffd700', degraded: '#ff8c00', failed: '#ff4444' };
+      const color = colors[status];
+      const r = 22;
+
+      // Glow for affected
+      if (status !== 'healthy') {
+        ctx.beginPath();
+        const grd = ctx.createRadialGradient(sx, sy, r, sx, sy, r * 2.5);
+        grd.addColorStop(0, color + '44');
+        grd.addColorStop(1, color + '00');
+        ctx.fillStyle = grd;
+        ctx.arc(sx, sy, r * 2.5, 0, Math.PI * 2);
+        ctx.fill();
+      }
+
+      ctx.beginPath();
+      ctx.arc(sx, sy, r, 0, Math.PI * 2);
+      ctx.fillStyle = color;
+      ctx.fill();
+      ctx.strokeStyle = isLight ? '#fff' : '#0d0d1a';
+      ctx.lineWidth = 2;
+      ctx.stroke();
+
+      ctx.fillStyle = isLight ? '#333' : '#e0e0e0';
+      ctx.font = '11px system-ui, sans-serif';
+      ctx.textAlign = 'center';
+      ctx.fillText(a.name, sx, sy + r + 14);
+
+      // Impact % inside node
+      if (s && s.impact > 0) {
+        ctx.fillStyle = '#fff';
+        ctx.font = 'bold 10px system-ui';
+        ctx.fillText(Math.round(s.impact * 100) + '%', sx, sy + 4);
+      }
+    });
+  }
+
+  let cascadeStep = 0;
+  function animateCascade() {
+    if (animFrame) cancelAnimationFrame(animFrame);
+    cascadeStep = 0;
+    const fullState = { ...cascadeState };
+    const tempState = {};
+    agents.forEach(a => tempState[a.id] = { status: 'healthy', impact: 0, depth: 0 });
+
+    function step() {
+      agents.forEach(a => {
+        if (fullState[a.id].depth <= cascadeStep) {
+          tempState[a.id] = fullState[a.id];
+        }
+      });
+      cascadeState = { ...tempState };
+      drawFleet();
+      cascadeStep++;
+      if (cascadeStep <= 10) {
+        animFrame = requestAnimationFrame(() => setTimeout(step, 300));
+      } else {
+        cascadeState = fullState;
+        drawFleet();
+      }
+    }
+    step();
+  }
+
+  // ── Compare ──
+  function runCompare() {
+    const a = scenarios.find(s => s.id === document.getElementById('compareA').value);
+    const b = scenarios.find(s => s.id === document.getElementById('compareB').value);
+    const stateA = computeImpact(a);
+    const stateB = computeImpact(b);
+    const mA = computeMetrics(stateA);
+    const mB = computeMetrics(stateB);
+
+    function renderCol(scenario, metrics) {
+      return `
+        <h3>${scenario.icon} ${scenario.name}</h3>
+        <p><strong>Risk Score:</strong> <span style="color:${metrics.riskScore > 70 ? '#ff4444' : metrics.riskScore > 40 ? '#ff8c00' : '#44bb44'};font-size:24px;font-weight:700;">${metrics.riskScore}</span></p>
+        <p><strong>Affected:</strong> ${metrics.affected} / ${metrics.total} agents</p>
+        <p><strong>Error Rate:</strong> ${metrics.errorRate}%</p>
+        <p><strong>Recovery:</strong> ${metrics.recoveryMin} min</p>
+        <hr style="border-color:var(--border,#2d2d3d);margin:12px 0;">
+        <h4>Recommendations</h4>
+        ${scenario.recommendations.map(r => `<p>${r.icon} <strong>${r.title}:</strong> ${r.text}</p>`).join('')}
+      `;
+    }
+    document.getElementById('compareColA').innerHTML = renderCol(a, mA);
+    document.getElementById('compareColB').innerHTML = renderCol(b, mB);
+  }
+
+  // ── Custom Editor ──
+  const defaultCustom = {
+    name: "Custom Scenario",
+    description: "My custom failure scenario",
+    failures: [
+      { agent: "db", type: "down", impact: 1.0 },
+      { agent: "cache", type: "slow", impact: 0.5 }
+    ]
+  };
+  document.getElementById('customJson').value = JSON.stringify(defaultCustom, null, 2);
+
+  function runCustom() {
+    let custom;
+    try {
+      custom = JSON.parse(document.getElementById('customJson').value);
+    } catch (e) {
+      document.getElementById('customResult').innerHTML = `<p style="color:#ff4444;">❌ Invalid JSON: ${e.message}</p>`;
+      return;
+    }
+    if (!custom.failures || !Array.isArray(custom.failures)) {
+      document.getElementById('customResult').innerHTML = `<p style="color:#ff4444;">❌ Missing "failures" array</p>`;
+      return;
+    }
+    const state = computeImpact(custom);
+    const m = computeMetrics(state);
+    cascadeState = state;
+    drawFleet();
+    document.getElementById('customResult').innerHTML = `
+      <div class="impact-grid">
+        <div class="impact-stat"><div class="label">Risk Score</div><div class="value" style="color:${m.riskScore > 70 ? '#ff4444' : '#ff8c00'}">${m.riskScore}</div></div>
+        <div class="impact-stat"><div class="label">Affected</div><div class="value">${m.affected}/${m.total}</div></div>
+        <div class="impact-stat"><div class="label">Error Rate</div><div class="value">${m.errorRate}%</div></div>
+        <div class="impact-stat"><div class="label">Recovery</div><div class="value">${m.recoveryMin}min</div></div>
+      </div>
+      <p style="margin-top:12px;opacity:0.7;">Available agents: ${agents.map(a => a.id).join(', ')}</p>
+    `;
+  }
+
+  // ── Init ──
+  renderScenarioList();
+  selectScenario(scenarios[0].id);
+  window.addEventListener('resize', drawFleet);
+  </script>
+</body>
+</html>
