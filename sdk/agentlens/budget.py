@@ -32,17 +32,12 @@ Example::
 
 from __future__ import annotations
 
-import uuid
 from dataclasses import dataclass, field
 from datetime import datetime, timezone
 from enum import Enum
 from typing import Any, Callable
 
-from agentlens._utils import utcnow as _utcnow
-
-
-def _new_id() -> str:
-    return uuid.uuid4().hex[:12]
+from agentlens._utils import new_id as _new_id, utcnow as _utcnow
 
 
 # ── Model pricing (per 1M tokens, USD) ──────────────────────────

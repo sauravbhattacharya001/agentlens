@@ -2,17 +2,15 @@
 
 from __future__ import annotations
 
-import uuid
 from datetime import datetime, timezone
+from functools import partial
 from typing import Any
 
 from pydantic import BaseModel, Field
 
-from agentlens._utils import utcnow as _utcnow
+from agentlens._utils import new_id, utcnow as _utcnow
 
-
-def _new_id() -> str:
-    return uuid.uuid4().hex[:16]
+_new_id = partial(new_id, 16)
 
 
 class ToolCall(BaseModel):

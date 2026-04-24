@@ -36,18 +36,13 @@ from __future__ import annotations
 
 import statistics
 import time
-import uuid
 from contextlib import contextmanager
 from dataclasses import dataclass, field
 from datetime import datetime, timezone
 from enum import Enum
 from typing import Any, Generator
 
-from agentlens._utils import utcnow as _utcnow
-
-
-def _new_id() -> str:
-    return uuid.uuid4().hex[:12]
+from agentlens._utils import new_id as _new_id, utcnow as _utcnow
 
 
 class StepStatus(str, Enum):

@@ -9,10 +9,20 @@ from __future__ import annotations
 import re
 import signal
 import sys
+import uuid
 from datetime import datetime, timezone
 from typing import Any, Optional, Pattern
 
-__all__ = ["format_duration", "safe_compile", "safe_search", "percentile", "utcnow"]
+__all__ = ["format_duration", "new_id", "safe_compile", "safe_search", "percentile", "utcnow"]
+
+
+def new_id(length: int = 12) -> str:
+    """Return a random hex identifier of the given *length*.
+
+    Consolidates the previously duplicated ``_new_id`` helpers from
+    ``budget``, ``cost_optimizer``, ``latency``, ``models``, and ``span``.
+    """
+    return uuid.uuid4().hex[:length]
 
 
 def utcnow() -> datetime:
