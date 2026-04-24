@@ -468,28 +468,50 @@ def _welch_t_test(vals_a: List[float], vals_b: List[float]) -> tuple:
 
 
 def _mann_whitney_u(vals_a: List[float], vals_b: List[float]) -> tuple:
-    """Mann-Whitney U test (non-parametric). Returns (U, p_value)."""
+    """Mann-Whitney U test (non-parametric). Returns (U, p_value).
+
+    Uses a sort-based rank-sum algorithm — O((n+m) log(n+m)) instead of
+    the naive O(n×m) pairwise comparison.  Handles tied ranks correctly
+    via midrank averaging and applies a tie-correction to the variance
+    of the normal approximation.
+    """
     n_a, n_b = len(vals_a), len(vals_b)
     if n_a == 0 or n_b == 0:
         return (0.0, 1.0)
 
-    # Count how many times a value from A exceeds one from B
-    u_a = 0.0
-    for a in vals_a:
-        for b in vals_b:
-            if a > b:
-                u_a += 1
-            elif a == b:
-                u_a += 0.5
+    n = n_a + n_b
+    # Tag each value with its group (True = group A)
+    combined: List[tuple] = [(v, True) for v in vals_a] + [(v, False) for v in vals_b]
+    combined.sort(key=lambda x: x[0])
 
+    # Assign midranks (1-indexed) and compute rank-sum for group A.
+    # Walk through sorted values, grouping ties.
+    rank_sum_a = 0.0
+    tie_correction = 0.0  # Σ (t³ - t) for each tie group of size t
+    i = 0
+    while i < n:
+        j = i + 1
+        while j < n and combined[j][0] == combined[i][0]:
+            j += 1
+        # Positions i..j-1 are tied; midrank = average 1-indexed rank
+        midrank = (i + j + 1) / 2.0  # avg of (i+1)..(j)
+        tie_size = j - i
+        if tie_size > 1:
+            tie_correction += tie_size * tie_size * tie_size - tie_size
+        for k in range(i, j):
+            if combined[k][1]:  # group A
+                rank_sum_a += midrank
+        i = j
+
+    u_a = rank_sum_a - n_a * (n_a + 1) / 2.0
     u = min(u_a, n_a * n_b - u_a)
-    # Normal approximation for large samples
+
+    # Normal approximation with tie correction
     mu = n_a * n_b / 2.0
-    sigma = math.sqrt(n_a * n_b * (n_a + n_b + 1) / 12.0)
-    if sigma == 0:
+    var = (n_a * n_b / 12.0) * ((n + 1) - tie_correction / (n * (n - 1))) if n > 1 else 0.0
+    if var <= 0:
         return (u, 1.0)
-    z = (u - mu) / sigma
-    # Two-tailed p from normal distribution approximation
+    z = (u - mu) / math.sqrt(var)
     p_value = 2.0 * _normal_cdf(-abs(z))
     return (u, max(0.0, min(1.0, p_value)))
 
@@ -665,7 +687,17 @@ class ABTestAnalyzer:
 
         d = _cohens_d(vals_a, vals_b)
         effect = _interpret_effect_size(d)
-        mean_a, mean_b = va.mean(metric), vb.mean(metric)
+
+        # Compute stats from raw value lists directly — avoids re-filtering
+        # observations through Variant.values()/mean()/variance()/std() which
+        # each iterate the full observation list again.
+        n_a, n_b = len(vals_a), len(vals_b)
+        mean_a = sum(vals_a) / n_a
+        mean_b = sum(vals_b) / n_b
+        var_a = sum((v - mean_a) ** 2 for v in vals_a) / (n_a - 1) if n_a > 1 else 0.0
+        var_b = sum((v - mean_b) ** 2 for v in vals_b) / (n_b - 1) if n_b > 1 else 0.0
+        std_a = math.sqrt(var_a)
+        std_b = math.sqrt(var_b)
         significant = p_value < alpha
 
         # Determine winner (variant with better mean)
@@ -678,7 +710,7 @@ class ABTestAnalyzer:
         improvement = ((mean_a - mean_b) / abs(base)) * 100
 
         # Confidence interval for the difference
-        se = math.sqrt(va.variance(metric) / len(vals_a) + vb.variance(metric) / len(vals_b))
+        se = math.sqrt(var_a / n_a + var_b / n_b)
         z = _normal_quantile(1 - alpha / 2)
         diff = mean_a - mean_b
         ci = (diff - z * se, diff + z * se)
@@ -690,10 +722,10 @@ class ABTestAnalyzer:
             variant_b=variant_b,
             mean_a=mean_a,
             mean_b=mean_b,
-            std_a=va.std(metric),
-            std_b=vb.std(metric),
-            n_a=len(vals_a),
-            n_b=len(vals_b),
+            std_a=std_a,
+            std_b=std_b,
+            n_a=n_a,
+            n_b=n_b,
             t_statistic=t_stat,
             p_value=p_value,
             significant=significant,
