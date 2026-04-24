@@ -1,0 +1,366 @@
+<!DOCTYPE html>
+<html lang="en">
+<head>
+  <meta charset="UTF-8">
+  <meta name="viewport" content="width=device-width, initial-scale=1.0">
+  <title>AgentLens — Agent Fatigue Monitor</title>
+  <link rel="stylesheet" href="styles.css">
+  <style>
+    .fm-container { max-width: 1200px; margin: 0 auto; padding: 24px; }
+    .fm-header-row { display: flex; justify-content: space-between; align-items: center; margin-bottom: 20px; flex-wrap: wrap; gap: 12px; }
+    .fm-header-row h2 { margin: 0; color: var(--text-primary); }
+    .fm-stats { display: grid; grid-template-columns: repeat(auto-fit, minmax(160px, 1fr)); gap: 12px; margin-bottom: 20px; }
+    .fm-stat { background: var(--bg-secondary); border: 1px solid var(--border); border-radius: var(--radius); padding: 16px; text-align: center; }
+    .fm-stat-val { font-size: 1.8rem; font-weight: 700; color: var(--text-primary); }
+    .fm-stat-lbl { font-size: 0.8rem; color: var(--text-secondary); margin-top: 2px; }
+    .fm-stat.crit .fm-stat-val { color: #ff4757; }
+    .fm-stat.warn .fm-stat-val { color: #ffa502; }
+    .fm-stat.ok .fm-stat-val { color: #2ed573; }
+
+    .fm-grid { display: grid; grid-template-columns: 1fr 1fr; gap: 16px; margin-bottom: 20px; }
+    @media (max-width: 800px) { .fm-grid { grid-template-columns: 1fr; } }
+    .fm-panel { background: var(--bg-secondary); border: 1px solid var(--border); border-radius: var(--radius); padding: 16px; }
+    .fm-panel h3 { margin: 0 0 12px 0; color: var(--text-primary); font-size: 1rem; }
+    .fm-panel canvas { width: 100%; border-radius: var(--radius-sm); }
+
+    .fm-agent-list { display: flex; flex-direction: column; gap: 8px; margin-bottom: 20px; }
+    .fm-agent {
+      background: var(--bg-secondary); border: 1px solid var(--border); border-radius: var(--radius);
+      padding: 14px 18px; display: flex; align-items: center; gap: 14px; cursor: pointer; transition: border-color 0.15s;
+    }
+    .fm-agent:hover { border-color: var(--accent); }
+    .fm-agent.selected { border-color: var(--accent); box-shadow: 0 0 0 1px var(--accent); }
+    .fm-agent.level-fresh { border-left: 4px solid #2ed573; }
+    .fm-agent.level-tired { border-left: 4px solid #ffa502; }
+    .fm-agent.level-fatigued { border-left: 4px solid #ff6348; }
+    .fm-agent.level-exhausted { border-left: 4px solid #ff4757; }
+
+    .fm-score-badge {
+      flex-shrink: 0; width: 48px; height: 48px; border-radius: 50%; display: flex; align-items: center;
+      justify-content: center; font-size: 1rem; font-weight: 700; color: #fff;
+    }
+    .fm-agent-info { flex: 1; min-width: 0; }
+    .fm-agent-name { font-weight: 600; color: var(--text-primary); }
+    .fm-agent-meta { font-size: 0.82rem; color: var(--text-secondary); margin-top: 2px; }
+    .fm-agent-bars { display: flex; gap: 6px; margin-top: 6px; }
+    .fm-bar { height: 4px; border-radius: 2px; flex: 1; background: var(--border); position: relative; overflow: hidden; }
+    .fm-bar-fill { height: 100%; border-radius: 2px; transition: width 0.3s; }
+
+    .fm-recs { display: flex; flex-direction: column; gap: 8px; }
+    .fm-rec {
+      background: var(--bg-secondary); border: 1px solid var(--border); border-radius: var(--radius);
+      padding: 12px 16px; display: flex; align-items: flex-start; gap: 10px;
+    }
+    .fm-rec-icon { font-size: 1.2rem; flex-shrink: 0; }
+    .fm-rec-body { flex: 1; }
+    .fm-rec-title { font-weight: 600; color: var(--text-primary); font-size: 0.9rem; }
+    .fm-rec-desc { font-size: 0.82rem; color: var(--text-secondary); margin-top: 2px; }
+    .fm-rec.urgent { border-left: 3px solid #ff4757; }
+    .fm-rec.warning { border-left: 3px solid #ffa502; }
+    .fm-rec.info { border-left: 3px solid #3742fa; }
+
+    .fm-controls { display: flex; gap: 10px; flex-wrap: wrap; align-items: center; }
+    .fm-controls select, .fm-controls button {
+      background: var(--bg-secondary); color: var(--text-primary); border: 1px solid var(--border);
+      border-radius: var(--radius-sm); padding: 6px 12px; font-size: 0.85rem; cursor: pointer;
+    }
+    .fm-controls button:hover { background: var(--bg-hover); }
+    .fm-controls button.active { background: var(--accent); color: #fff; border-color: var(--accent); }
+
+    .fm-alert-cfg { display: grid; grid-template-columns: repeat(auto-fit, minmax(200px, 1fr)); gap: 12px; margin-top: 12px; }
+    .fm-threshold { background: var(--bg-primary); border: 1px solid var(--border); border-radius: var(--radius-sm); padding: 10px; }
+    .fm-threshold label { display: block; font-size: 0.8rem; color: var(--text-secondary); margin-bottom: 4px; }
+    .fm-threshold input[type=range] { width: 100%; }
+    .fm-threshold .val { font-weight: 600; color: var(--text-primary); }
+  </style>
+</head>
+<body>
+  <div id="app">
+    <header class="header">
+      <div class="header-left">
+        <h1 class="logo">🔍 AgentLens</h1>
+        <span class="tagline">Observability for AI Agents</span>
+        <a href="index.html" class="btn btn-alert-header" style="text-decoration:none">📊 Dashboard</a>
+        <a href="timeline.html" class="btn btn-alert-header" style="text-decoration:none">📅 Timeline</a>
+        <a href="triage.html" class="btn btn-alert-header" style="text-decoration:none">🚦 Triage</a>
+        <a href="fatigue.html" class="btn btn-alert-header active" style="text-decoration:none">😴 Fatigue</a>
+      </div>
+      <div class="header-right">
+        <button class="btn btn-export" onclick="exportReport()">📥 Export JSON</button>
+      </div>
+    </header>
+
+    <div class="fm-container">
+      <div class="fm-header-row">
+        <h2>😴 Agent Fatigue Monitor</h2>
+        <div class="fm-controls">
+          <select id="sortBy" onchange="render()">
+            <option value="fatigue-desc">Most Fatigued</option>
+            <option value="fatigue-asc">Least Fatigued</option>
+            <option value="name">Name</option>
+            <option value="uptime">Longest Uptime</option>
+          </select>
+          <button onclick="toggleAutoMonitor()" id="autoBtn">▶ Auto-Monitor</button>
+          <button onclick="refreshData()">🔄 Refresh</button>
+        </div>
+      </div>
+
+      <div class="fm-stats" id="stats"></div>
+
+      <div class="fm-grid">
+        <div class="fm-panel">
+          <h3>🫧 Fleet Fatigue Map</h3>
+          <canvas id="fleetCanvas" width="540" height="360"></canvas>
+        </div>
+        <div class="fm-panel">
+          <h3>📈 Fatigue Timeline <span id="timelineAgent" style="font-weight:400;color:var(--text-secondary);font-size:0.85rem;"></span></h3>
+          <canvas id="timelineCanvas" width="540" height="360"></canvas>
+        </div>
+      </div>
+
+      <h3 style="color:var(--text-primary);margin-bottom:12px;">🤖 Agent Fleet</h3>
+      <div class="fm-agent-list" id="agentList"></div>
+
+      <h3 style="color:var(--text-primary);margin:20px 0 12px;">🧠 Recovery Recommendations</h3>
+      <div class="fm-recs" id="recs"></div>
+
+      <div class="fm-panel" style="margin-top:20px;">
+        <h3>⚙️ Fatigue Alert Thresholds</h3>
+        <div class="fm-alert-cfg">
+          <div class="fm-threshold">
+            <label>Tired threshold</label>
+            <input type="range" min="20" max="60" value="40" id="thTired" oninput="updateThresholds()">
+            <span class="val" id="thTiredVal">40</span>
+          </div>
+          <div class="fm-threshold">
+            <label>Fatigued threshold</label>
+            <input type="range" min="40" max="80" value="65" id="thFatigued" oninput="updateThresholds()">
+            <span class="val" id="thFatiguedVal">65</span>
+          </div>
+          <div class="fm-threshold">
+            <label>Exhausted threshold</label>
+            <input type="range" min="60" max="95" value="80" id="thExhausted" oninput="updateThresholds()">
+            <span class="val" id="thExhaustedVal">80</span>
+          </div>
+          <div class="fm-threshold">
+            <label>Auto-rotate at score</label>
+            <input type="range" min="70" max="100" value="90" id="thRotate" oninput="updateThresholds()">
+            <span class="val" id="thRotateVal">90</span>
+          </div>
+        </div>
+      </div>
+    </div>
+  </div>
+
+  <script>
+    const AGENTS = [
+      { id: 'agent-1', name: 'Atlas', role: 'Router' },
+      { id: 'agent-2', name: 'Bolt', role: 'Executor' },
+      { id: 'agent-3', name: 'Cipher', role: 'Analyst' },
+      { id: 'agent-4', name: 'Delta', role: 'Monitor' },
+      { id: 'agent-5', name: 'Echo', role: 'Retriever' },
+      { id: 'agent-6', name: 'Flare', role: 'Generator' },
+      { id: 'agent-7', name: 'Ghost', role: 'Validator' },
+      { id: 'agent-8', name: 'Helix', role: 'Planner' },
+      { id: 'agent-9', name: 'Ion', role: 'Summarizer' },
+      { id: 'agent-10', name: 'Jade', role: 'Classifier' },
+    ];
+
+    let thresholds = { tired: 40, fatigued: 65, exhausted: 80, rotate: 90 };
+    let selectedAgent = null;
+    let autoMonitor = false;
+    let autoInterval = null;
+
+    function seed(s) { return function() { s = (s * 16807) % 2147483647; return (s - 1) / 2147483646; }; }
+
+    function generateAgentData() {
+      const now = Date.now();
+      return AGENTS.map((a, i) => {
+        const rng = seed(i * 7 + 42);
+        const uptimeH = 2 + Math.floor(rng() * 70);
+        const baseLoad = 0.3 + rng() * 0.6;
+        const history = [];
+        let fatigue = 5 + rng() * 15;
+        for (let h = 23; h >= 0; h--) {
+          const loadSpike = rng() > 0.8 ? 15 : 0;
+          const drift = (baseLoad * 2 + loadSpike + rng() * 3) * (uptimeH > 24 ? 1.5 : 1);
+          fatigue = Math.min(100, Math.max(0, fatigue + drift - rng() * 4));
+          history.push({ t: now - h * 3600000, score: Math.round(fatigue * 10) / 10 });
+        }
+        const currentFatigue = history[history.length - 1].score;
+        const respTrend = currentFatigue > 50 ? 1.2 + (currentFatigue - 50) * 0.03 : 1.0;
+        const errTrend = currentFatigue > 40 ? (currentFatigue - 40) * 0.05 : 0;
+        const throughputDrop = currentFatigue > 30 ? (currentFatigue - 30) * 0.7 : 0;
+        const recentSlope = history.length > 3 ? (history[history.length-1].score - history[history.length-4].score) / 3 : 0;
+        const criticalIn = recentSlope > 0 ? Math.max(0, Math.round((thresholds.exhausted - currentFatigue) / recentSlope)) : null;
+        return {
+          ...a, uptimeH, baseLoad, history, fatigue: currentFatigue,
+          respTime: Math.round(120 * respTrend), errRate: Math.round(errTrend * 100) / 100,
+          throughput: Math.max(10, Math.round(500 - throughputDrop)), criticalIn, slope: recentSlope
+        };
+      });
+    }
+
+    let agents = generateAgentData();
+
+    function getLevel(score) {
+      if (score >= thresholds.exhausted) return 'exhausted';
+      if (score >= thresholds.fatigued) return 'fatigued';
+      if (score >= thresholds.tired) return 'tired';
+      return 'fresh';
+    }
+    function levelColor(l) { return { fresh:'#2ed573', tired:'#ffa502', fatigued:'#ff6348', exhausted:'#ff4757' }[l]; }
+    function levelEmoji(l) { return { fresh:'😊', tired:'😐', fatigued:'😓', exhausted:'🥵' }[l]; }
+
+    function renderStats() {
+      const el = document.getElementById('stats');
+      const exhausted = agents.filter(a => getLevel(a.fatigue)==='exhausted').length;
+      const fatigued = agents.filter(a => getLevel(a.fatigue)==='fatigued').length;
+      const avg = Math.round(agents.reduce((s,a)=>s+a.fatigue,0)/agents.length);
+      const rotate = agents.filter(a => a.fatigue >= thresholds.rotate).length;
+      el.innerHTML = `
+        <div class="fm-stat ${exhausted?'crit':'ok'}"><div class="fm-stat-val">${exhausted}</div><div class="fm-stat-lbl">Exhausted</div></div>
+        <div class="fm-stat ${fatigued?'warn':'ok'}"><div class="fm-stat-val">${fatigued}</div><div class="fm-stat-lbl">Fatigued</div></div>
+        <div class="fm-stat"><div class="fm-stat-val">${avg}</div><div class="fm-stat-lbl">Avg Fatigue</div></div>
+        <div class="fm-stat ${rotate?'crit':'ok'}"><div class="fm-stat-val">${rotate}</div><div class="fm-stat-lbl">Need Rotation</div></div>
+        <div class="fm-stat"><div class="fm-stat-val">${agents.length}</div><div class="fm-stat-lbl">Total Agents</div></div>`;
+    }
+
+    function renderFleet() {
+      const c = document.getElementById('fleetCanvas'), ctx = c.getContext('2d');
+      const W = c.width, H = c.height;
+      ctx.clearRect(0,0,W,H);
+      ctx.fillStyle = '#1a1a2e'; ctx.fillRect(0,0,W,H);
+      ctx.font = '11px system-ui'; ctx.fillStyle = '#ffffff44';
+      ctx.fillText('Fresh',10,20); ctx.fillText('Tired',W*0.3,20); ctx.fillText('Fatigued',W*0.6,20); ctx.fillText('Exhausted',W*0.82,20);
+      [thresholds.tired,thresholds.fatigued,thresholds.exhausted].forEach(t => {
+        const x = (t/100)*W;
+        ctx.strokeStyle='#ffffff15'; ctx.lineWidth=1; ctx.setLineDash([4,4]);
+        ctx.beginPath(); ctx.moveTo(x,0); ctx.lineTo(x,H); ctx.stroke(); ctx.setLineDash([]);
+      });
+      agents.forEach((a,i) => {
+        const x = (a.fatigue/100)*(W-60)+30, y = 50+(i/(agents.length-1))*(H-100), r = 18+a.baseLoad*12;
+        const level = getLevel(a.fatigue), color = levelColor(level);
+        if (level==='exhausted') {
+          const pulse = 1+0.15*Math.sin(Date.now()/300+i);
+          ctx.beginPath(); ctx.arc(x,y,r*pulse+4,0,Math.PI*2); ctx.fillStyle=color+'33'; ctx.fill();
+        }
+        ctx.beginPath(); ctx.arc(x,y,r,0,Math.PI*2);
+        ctx.fillStyle=color+'88'; ctx.fill(); ctx.strokeStyle=color; ctx.lineWidth=2; ctx.stroke();
+        if (a.id===selectedAgent) { ctx.strokeStyle='#fff'; ctx.lineWidth=2; ctx.stroke(); }
+        ctx.fillStyle='#fff'; ctx.font='bold 11px system-ui'; ctx.textAlign='center'; ctx.textBaseline='middle';
+        ctx.fillText(a.name,x,y-4); ctx.font='10px system-ui'; ctx.fillText(Math.round(a.fatigue),x,y+9);
+      });
+    }
+
+    function renderTimeline() {
+      const c = document.getElementById('timelineCanvas'), ctx = c.getContext('2d');
+      const W = c.width, H = c.height;
+      ctx.clearRect(0,0,W,H); ctx.fillStyle='#1a1a2e'; ctx.fillRect(0,0,W,H);
+      const agent = selectedAgent ? agents.find(a=>a.id===selectedAgent) : agents[0];
+      if (!agent) return;
+      document.getElementById('timelineAgent').textContent = '— '+agent.name;
+      const pts = agent.history, pL=40, pR=10, pT=20, pB=30, gW=W-pL-pR, gH=H-pT-pB;
+      [{max:thresholds.tired,color:'#2ed57322'},{max:thresholds.fatigued,color:'#ffa50222'},
+       {max:thresholds.exhausted,color:'#ff634822'},{max:100,color:'#ff475722'}].forEach((z,i,a)=>{
+        const prev = i===0?0:a[i-1].max;
+        const y1=pT+gH-(z.max/100)*gH, y0=pT+gH-(prev/100)*gH;
+        ctx.fillStyle=z.color; ctx.fillRect(pL,y1,gW,y0-y1);
+      });
+      ctx.strokeStyle='#ffffff15'; ctx.lineWidth=0.5;
+      for(let v=0;v<=100;v+=20){
+        const y=pT+gH-(v/100)*gH;
+        ctx.beginPath();ctx.moveTo(pL,y);ctx.lineTo(pL+gW,y);ctx.stroke();
+        ctx.fillStyle='#ffffff66';ctx.font='10px system-ui';ctx.textAlign='right';ctx.textBaseline='middle';ctx.fillText(v,pL-5,y);
+      }
+      ctx.textAlign='center';ctx.textBaseline='top';ctx.fillStyle='#ffffff66';
+      for(let i=0;i<pts.length;i+=4){const x=pL+(i/(pts.length-1))*gW;ctx.fillText(new Date(pts[i].t).getHours()+':00',x,pT+gH+6);}
+      const color = levelColor(getLevel(agent.fatigue));
+      ctx.strokeStyle=color;ctx.lineWidth=2.5;ctx.lineJoin='round';ctx.beginPath();
+      pts.forEach((p,i)=>{const x=pL+(i/(pts.length-1))*gW,y=pT+gH-(p.score/100)*gH;i===0?ctx.moveTo(x,y):ctx.lineTo(x,y);});
+      ctx.stroke();
+      ctx.lineTo(pL+gW,pT+gH);ctx.lineTo(pL,pT+gH);ctx.closePath();ctx.fillStyle=color+'22';ctx.fill();
+      pts.forEach((p,i)=>{const x=pL+(i/(pts.length-1))*gW,y=pT+gH-(p.score/100)*gH;
+        ctx.beginPath();ctx.arc(x,y,3,0,Math.PI*2);ctx.fillStyle=levelColor(getLevel(p.score));ctx.fill();});
+      if(agent.slope>0){const lx=pL+gW,ly=pT+gH-(pts[pts.length-1].score/100)*gH;
+        const ps=Math.min(100,pts[pts.length-1].score+agent.slope*6),py=pT+gH-(ps/100)*gH;
+        ctx.setLineDash([6,4]);ctx.strokeStyle='#ff475788';ctx.lineWidth=1.5;
+        ctx.beginPath();ctx.moveTo(lx,ly);ctx.lineTo(lx+60,py);ctx.stroke();ctx.setLineDash([]);
+        ctx.fillStyle='#ff4757';ctx.font='10px system-ui';ctx.textAlign='left';ctx.fillText('predicted',lx+5,py-8);}
+    }
+
+    function renderAgentList() {
+      const el = document.getElementById('agentList'), sorted = [...agents];
+      const sort = document.getElementById('sortBy').value;
+      if(sort==='fatigue-desc') sorted.sort((a,b)=>b.fatigue-a.fatigue);
+      else if(sort==='fatigue-asc') sorted.sort((a,b)=>a.fatigue-b.fatigue);
+      else if(sort==='name') sorted.sort((a,b)=>a.name.localeCompare(b.name));
+      else if(sort==='uptime') sorted.sort((a,b)=>b.uptimeH-a.uptimeH);
+      el.innerHTML = sorted.map(a=>{const l=getLevel(a.fatigue),sel=a.id===selectedAgent?' selected':'';
+        return `<div class="fm-agent level-${l}${sel}" onclick="selectAgent('${a.id}')">
+          <div class="fm-score-badge" style="background:${levelColor(l)}">${Math.round(a.fatigue)}</div>
+          <div class="fm-agent-info"><div class="fm-agent-name">${levelEmoji(l)} ${a.name} <span style="font-weight:400;color:var(--text-secondary);font-size:0.82rem;">(${a.role})</span></div>
+          <div class="fm-agent-meta">Uptime: ${a.uptimeH}h · Response: ${a.respTime}ms · Errors: ${a.errRate}% · Throughput: ${a.throughput}/min${a.criticalIn!==null&&a.criticalIn<12?` · ⚠️ Critical in ~${a.criticalIn}h`:''}</div>
+          <div class="fm-agent-bars">
+            <div class="fm-bar" title="Response time"><div class="fm-bar-fill" style="width:${Math.min(100,a.respTime/5)}%;background:${a.respTime>300?'#ff4757':a.respTime>200?'#ffa502':'#2ed573'}"></div></div>
+            <div class="fm-bar" title="Error rate"><div class="fm-bar-fill" style="width:${Math.min(100,a.errRate*20)}%;background:${a.errRate>3?'#ff4757':a.errRate>1?'#ffa502':'#2ed573'}"></div></div>
+            <div class="fm-bar" title="Throughput"><div class="fm-bar-fill" style="width:${a.throughput/5}%;background:${a.throughput<200?'#ff4757':a.throughput<350?'#ffa502':'#2ed573'}"></div></div>
+          </div></div></div>`;}).join('');
+    }
+
+    function renderRecommendations() {
+      const el = document.getElementById('recs'), recs = [];
+      agents.forEach(a=>{const l=getLevel(a.fatigue);
+        if(a.fatigue>=thresholds.rotate) recs.push({icon:'🔄',cls:'urgent',title:`Rotate ${a.name} immediately`,desc:`Fatigue score ${Math.round(a.fatigue)} exceeds rotation threshold (${thresholds.rotate}). ${a.uptimeH}h uptime. Replace with standby agent.`});
+        else if(l==='exhausted') recs.push({icon:'🛑',cls:'urgent',title:`${a.name} is exhausted`,desc:`Score ${Math.round(a.fatigue)}, ${a.errRate}% error rate. Reduce load by 50% or rotate within 1h.`});
+        else if(l==='fatigued') recs.push({icon:'⚠️',cls:'warning',title:`Schedule maintenance for ${a.name}`,desc:`Score ${Math.round(a.fatigue)}${a.criticalIn!==null?`, predicted critical in ~${a.criticalIn}h`:''}. Consider 30% load reduction.`});
+        else if(a.uptimeH>48&&l==='tired') recs.push({icon:'💡',cls:'info',title:`${a.name} has high uptime`,desc:`Running for ${a.uptimeH}h. Score is ${Math.round(a.fatigue)} (tired). Plan a proactive restart window.`});
+      });
+      const avg=agents.reduce((s,a)=>s+a.fatigue,0)/agents.length;
+      if(avg>60) recs.push({icon:'🏥',cls:'urgent',title:'Fleet-wide fatigue detected',desc:`Average fatigue score is ${Math.round(avg)}. Consider scaling up fleet or reducing overall load.`});
+      const fast=agents.filter(a=>a.slope>3);
+      if(fast.length) recs.push({icon:'📈',cls:'warning',title:'Rapid fatigue accumulation',desc:`${fast.map(a=>a.name).join(', ')} ${fast.length>1?'are':'is'} accumulating fatigue rapidly. Investigate load distribution.`});
+      if(!recs.length) recs.push({icon:'✅',cls:'info',title:'Fleet is healthy',desc:'All agents are within acceptable fatigue levels. No action needed.'});
+      recs.sort((a,b)=>({urgent:0,warning:1,info:2})[a.cls]-({urgent:0,warning:1,info:2})[b.cls]);
+      el.innerHTML = recs.map(r=>`<div class="fm-rec ${r.cls}"><div class="fm-rec-icon">${r.icon}</div><div class="fm-rec-body"><div class="fm-rec-title">${r.title}</div><div class="fm-rec-desc">${r.desc}</div></div></div>`).join('');
+    }
+
+    function selectAgent(id){selectedAgent=id;render();}
+    function render(){renderStats();renderFleet();renderTimeline();renderAgentList();renderRecommendations();}
+    function updateThresholds(){
+      thresholds.tired=+document.getElementById('thTired').value;thresholds.fatigued=+document.getElementById('thFatigued').value;
+      thresholds.exhausted=+document.getElementById('thExhausted').value;thresholds.rotate=+document.getElementById('thRotate').value;
+      ['thTired','thFatigued','thExhausted','thRotate'].forEach(id=>document.getElementById(id+'Val').textContent=document.getElementById(id).value);
+      render();
+    }
+    function refreshData(){agents=generateAgentData();render();}
+    function toggleAutoMonitor(){
+      autoMonitor=!autoMonitor;const btn=document.getElementById('autoBtn');
+      if(autoMonitor){btn.textContent='⏸ Stop Monitor';btn.classList.add('active');
+        autoInterval=setInterval(()=>{agents.forEach(a=>{const d=(Math.random()-0.3)*2;const ns=Math.min(100,Math.max(0,a.fatigue+d));
+          a.history.push({t:Date.now(),score:ns});if(a.history.length>48)a.history.shift();a.fatigue=ns;
+          a.respTime=Math.round(120*(ns>50?1.2+(ns-50)*0.03:1.0));a.errRate=Math.round((ns>40?(ns-40)*0.05:0)*100)/100;
+          a.throughput=Math.max(10,Math.round(500-(ns>30?(ns-30)*0.7:0)));});render();},2000);
+      }else{btn.textContent='▶ Auto-Monitor';btn.classList.remove('active');clearInterval(autoInterval);}
+    }
+    function exportReport(){
+      const r={timestamp:new Date().toISOString(),thresholds,fleet:{total:agents.length,
+        avgFatigue:Math.round(agents.reduce((s,a)=>s+a.fatigue,0)/agents.length*10)/10,
+        exhausted:agents.filter(a=>getLevel(a.fatigue)==='exhausted').length,
+        fatigued:agents.filter(a=>getLevel(a.fatigue)==='fatigued').length,
+        needRotation:agents.filter(a=>a.fatigue>=thresholds.rotate).length},
+        agents:agents.map(a=>({id:a.id,name:a.name,role:a.role,fatigue:Math.round(a.fatigue*10)/10,
+          level:getLevel(a.fatigue),uptimeH:a.uptimeH,respTime:a.respTime,errRate:a.errRate,throughput:a.throughput,criticalIn:a.criticalIn}))};
+      const b=new Blob([JSON.stringify(r,null,2)],{type:'application/json'});const u=URL.createObjectURL(b);
+      const a=document.createElement('a');a.href=u;a.download='fatigue-report.json';a.click();URL.revokeObjectURL(u);
+    }
+    document.getElementById('fleetCanvas').addEventListener('click',function(e){
+      const rect=this.getBoundingClientRect(),sx=this.width/rect.width,sy=this.height/rect.height;
+      const mx=(e.clientX-rect.left)*sx,my=(e.clientY-rect.top)*sy,W=this.width,H=this.height;
+      for(const a of agents){const i=agents.indexOf(a);const x=(a.fatigue/100)*(W-60)+30,y=50+(i/(agents.length-1))*(H-100);
+        if(Math.hypot(mx-x,my-y)<24){selectAgent(a.id);return;}}
+    });
+    selectedAgent=agents[0].id;render();
+  </script>
+</body>
+</html>
