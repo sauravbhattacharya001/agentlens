@@ -1,0 +1,483 @@
+<!DOCTYPE html>
+<html lang="en">
+<head>
+  <meta charset="UTF-8">
+  <meta name="viewport" content="width=device-width, initial-scale=1.0">
+  <title>AgentLens — Mood Ring</title>
+  <link rel="stylesheet" href="styles.css">
+  <style>
+    .mood-page { padding: 20px; max-width: 1400px; margin: 0 auto; }
+    .mood-hero { display: flex; gap: 30px; align-items: flex-start; margin-bottom: 30px; flex-wrap: wrap; }
+    .mood-ring-container { text-align: center; flex: 0 0 320px; }
+    .mood-ring-container canvas { border-radius: 50%; cursor: pointer; }
+    .mood-label { font-size: 28px; font-weight: bold; margin-top: 12px; }
+    .mood-score { font-size: 16px; opacity: 0.7; margin-top: 4px; }
+    .mood-details { flex: 1; min-width: 300px; }
+    .radar-container { text-align: center; margin-bottom: 20px; }
+    .triggers-section, .recs-section, .forecast-section { background: var(--card-bg, #1e1e2e); border-radius: 12px; padding: 16px; margin-bottom: 16px; border: 1px solid var(--border, #333); }
+    .triggers-section h3, .recs-section h3, .forecast-section h3 { margin: 0 0 10px 0; font-size: 16px; }
+    .trigger-item { display: flex; align-items: center; gap: 8px; padding: 6px 0; font-size: 14px; }
+    .trigger-dot { width: 8px; height: 8px; border-radius: 50%; flex-shrink: 0; }
+    .rec-item { padding: 6px 0; font-size: 14px; border-bottom: 1px solid var(--border, #333); }
+    .rec-item:last-child { border-bottom: none; }
+    .fleet-grid { display: grid; grid-template-columns: repeat(auto-fill, minmax(140px, 1fr)); gap: 16px; margin-bottom: 30px; }
+    .fleet-card { background: var(--card-bg, #1e1e2e); border-radius: 12px; padding: 12px; text-align: center; border: 1px solid var(--border, #333); transition: transform 0.2s; }
+    .fleet-card:hover { transform: scale(1.05); }
+    .fleet-card canvas { border-radius: 50%; }
+    .fleet-name { font-size: 13px; font-weight: 600; margin-top: 6px; }
+    .fleet-mood-text { font-size: 11px; opacity: 0.7; }
+    .timeline-section { background: var(--card-bg, #1e1e2e); border-radius: 12px; padding: 16px; margin-bottom: 16px; border: 1px solid var(--border, #333); }
+    .timeline-section h3 { margin: 0 0 10px 0; }
+    .controls-bar { display: flex; gap: 12px; align-items: center; margin-bottom: 20px; flex-wrap: wrap; }
+    .auto-toggle { display: flex; align-items: center; gap: 6px; cursor: pointer; font-size: 14px; }
+    .auto-toggle input { cursor: pointer; }
+    .section-title { font-size: 20px; font-weight: bold; margin-bottom: 16px; }
+    .forecast-bar { display: flex; align-items: center; gap: 10px; margin: 6px 0; font-size: 14px; }
+    .forecast-bar-fill { height: 16px; border-radius: 8px; transition: width 0.5s; }
+    :root { --card-bg: #1e1e2e; --border: #333; --text: #e0e0e0; }
+    @media (prefers-color-scheme: light) { :root { --card-bg: #fff; --border: #ddd; --text: #222; } }
+  </style>
+</head>
+<body>
+  <div id="app">
+    <header class="header">
+      <div class="header-left">
+        <h1 class="logo">🔍 AgentLens</h1>
+        <span class="tagline">Agent Mood Ring</span>
+      </div>
+      <div class="header-right">
+        <a href="index.html" class="btn btn-alert-header" style="text-decoration:none">📋 Dashboard</a>
+        <a href="command-center.html" class="btn btn-alert-header" style="text-decoration:none">🎯 Command</a>
+        <a href="topology.html" class="btn btn-alert-header" style="text-decoration:none">🗺️ Topology</a>
+        <a href="triage.html" class="btn btn-alert-header" style="text-decoration:none">🚦 Triage</a>
+        <a href="knowledge-graph.html" class="btn btn-alert-header" style="text-decoration:none">🧠 Knowledge</a>
+        <button class="theme-toggle" onclick="toggleTheme()" title="Toggle theme" id="themeToggleBtn">🌙</button>
+      </div>
+    </header>
+
+    <main class="mood-page">
+      <div class="controls-bar">
+        <h2 style="margin:0;">💍 Fleet Mood Ring</h2>
+        <label class="auto-toggle"><input type="checkbox" id="autoMonitor" onchange="toggleAutoMonitor()"> Auto-Monitor (5s)</label>
+        <button class="btn" onclick="refreshAll()">🔄 Refresh</button>
+      </div>
+
+      <div class="mood-hero">
+        <div class="mood-ring-container">
+          <canvas id="mainRing" width="280" height="280"></canvas>
+          <div class="mood-label" id="moodLabel">Calm</div>
+          <div class="mood-score" id="moodScore">Overall: 0.78</div>
+        </div>
+
+        <div class="mood-details">
+          <div class="radar-container">
+            <canvas id="radarChart" width="300" height="300"></canvas>
+          </div>
+
+          <div class="forecast-section">
+            <h3>🔮 Mood Forecast (next hour)</h3>
+            <div id="forecastContent"></div>
+          </div>
+
+          <div class="triggers-section">
+            <h3>⚡ Mood Triggers</h3>
+            <div id="triggersContent"></div>
+          </div>
+
+          <div class="recs-section">
+            <h3>💡 Proactive Recommendations</h3>
+            <div id="recsContent"></div>
+          </div>
+        </div>
+      </div>
+
+      <div class="section-title">🤖 Individual Agent Moods</div>
+      <div class="fleet-grid" id="fleetGrid"></div>
+
+      <div class="timeline-section">
+        <h3>📈 Mood History (24h)</h3>
+        <canvas id="timelineChart" width="1200" height="200"></canvas>
+      </div>
+    </main>
+  </div>
+
+<script>
+// --- Data ---
+const AGENTS = ['alpha-1','beta-2','gamma-3','delta-4','epsilon-5','zeta-6','eta-7','theta-8'];
+const MOODS = [
+  { name:'Critical', min:0, max:0.25, color:'#ef4444', glow:'#ff0000' },
+  { name:'Struggling', min:0.25, max:0.4, color:'#f97316', glow:'#ff6600' },
+  { name:'Stressed', min:0.4, max:0.55, color:'#eab308', glow:'#ffcc00' },
+  { name:'Neutral', min:0.55, max:0.7, color:'#3b82f6', glow:'#4488ff' },
+  { name:'Calm', min:0.7, max:0.85, color:'#06b6d4', glow:'#00ccdd' },
+  { name:'Thriving', min:0.85, max:1.01, color:'#22c55e', glow:'#00ff66' },
+];
+const DIMS = ['Performance','Reliability','Efficiency','Responsiveness','Stability'];
+
+let fleetData = {};
+let moodHistory = [];
+let autoInterval = null;
+
+function rand(a,b){ return a+Math.random()*(b-a); }
+function clamp(v){ return Math.max(0,Math.min(1,v)); }
+function getMoodState(score){
+  return MOODS.find(m=>score>=m.min && score<m.max) || MOODS[0];
+}
+function lerpColor(c1,c2,t){
+  const h=s=>'0123456789abcdef'.indexOf(s);
+  const p=(s,i)=>h(s[i*2+1])*16+h(s[i*2+2]);
+  const r=Math.round(p(c1,0)+(p(c2,0)-p(c1,0))*t);
+  const g=Math.round(p(c1,1)+(p(c2,1)-p(c1,1))*t);
+  const b=Math.round(p(c1,2)+(p(c2,2)-p(c1,2))*t);
+  return `rgb(${r},${g},${b})`;
+}
+
+function generateAgentData(name, prev){
+  const dims = {};
+  DIMS.forEach(d=>{
+    const base = prev ? prev.dims[d] : rand(0.3,0.95);
+    dims[d] = clamp(base + rand(-0.08,0.08));
+  });
+  const overall = clamp(DIMS.reduce((s,d)=>s+dims[d],0)/DIMS.length);
+  return { name, dims, overall, latency: rand(50,800), errorRate: rand(0,0.15), cost: rand(0.5,5), throughput: rand(10,200) };
+}
+
+function initData(){
+  AGENTS.forEach(a=>{ fleetData[a]=generateAgentData(a); });
+  // Generate 24h history
+  const now = Date.now();
+  for(let i=24*12;i>=0;i--){
+    const t = now - i*5*60000;
+    const score = clamp(0.6 + 0.2*Math.sin(i*0.05) + rand(-0.1,0.1));
+    moodHistory.push({t, score});
+  }
+}
+
+function refreshData(){
+  AGENTS.forEach(a=>{ fleetData[a]=generateAgentData(a, fleetData[a]); });
+  const overall = getOverallMood();
+  moodHistory.push({t:Date.now(), score:overall});
+  if(moodHistory.length>300) moodHistory.shift();
+}
+
+function getOverallMood(){
+  const scores = Object.values(fleetData).map(a=>a.overall);
+  return scores.reduce((s,v)=>s+v,0)/scores.length;
+}
+
+// --- Drawing ---
+function drawMoodRing(canvas, score, size){
+  const ctx = canvas.getContext('2d');
+  const cx=size/2, cy=size/2, r=size/2-10;
+  ctx.clearRect(0,0,size,size);
+  const mood = getMoodState(score);
+  const time = Date.now()/1000;
+
+  // Glow
+  const glowSize = score<0.25 ? 15+5*Math.sin(time*4) : 8;
+  ctx.shadowColor = mood.glow;
+  ctx.shadowBlur = glowSize;
+
+  // Outer ring
+  const grad = ctx.createRadialGradient(cx,cy,r*0.6,cx,cy,r);
+  grad.addColorStop(0, mood.color+'44');
+  grad.addColorStop(0.7, mood.color);
+  grad.addColorStop(1, mood.glow);
+  ctx.beginPath();
+  ctx.arc(cx,cy,r,0,Math.PI*2);
+  ctx.lineWidth = size > 200 ? 20 : 10;
+  ctx.strokeStyle = grad;
+  ctx.stroke();
+  ctx.shadowBlur = 0;
+
+  // Inner fill
+  const innerGrad = ctx.createRadialGradient(cx,cy,0,cx,cy,r*0.55);
+  innerGrad.addColorStop(0, mood.color+'33');
+  innerGrad.addColorStop(1, mood.color+'11');
+  ctx.beginPath();
+  ctx.arc(cx,cy,r*0.55,0,Math.PI*2);
+  ctx.fillStyle = innerGrad;
+  ctx.fill();
+
+  // Score text
+  ctx.fillStyle = mood.color;
+  ctx.font = `bold ${size>200?36:16}px system-ui`;
+  ctx.textAlign = 'center';
+  ctx.textBaseline = 'middle';
+  ctx.fillText((score*100).toFixed(0)+'%', cx, cy);
+}
+
+function drawRadar(canvas, dims){
+  const ctx = canvas.getContext('2d');
+  const w=canvas.width, h=canvas.height;
+  const cx=w/2, cy=h/2, r=Math.min(w,h)/2-40;
+  ctx.clearRect(0,0,w,h);
+  const n = DIMS.length;
+  const angleStep = (Math.PI*2)/n;
+
+  // Grid
+  ctx.strokeStyle = '#555';
+  ctx.lineWidth = 0.5;
+  for(let ring=1;ring<=4;ring++){
+    ctx.beginPath();
+    for(let i=0;i<=n;i++){
+      const a = -Math.PI/2 + i*angleStep;
+      const rr = r*(ring/4);
+      const x = cx+rr*Math.cos(a), y = cy+rr*Math.sin(a);
+      i===0 ? ctx.moveTo(x,y) : ctx.lineTo(x,y);
+    }
+    ctx.stroke();
+  }
+
+  // Axes + labels
+  ctx.fillStyle = '#aaa';
+  ctx.font = '12px system-ui';
+  ctx.textAlign = 'center';
+  for(let i=0;i<n;i++){
+    const a = -Math.PI/2 + i*angleStep;
+    ctx.beginPath();
+    ctx.moveTo(cx,cy);
+    ctx.lineTo(cx+r*Math.cos(a), cy+r*Math.sin(a));
+    ctx.strokeStyle = '#444';
+    ctx.stroke();
+    const lx=cx+(r+25)*Math.cos(a), ly=cy+(r+25)*Math.sin(a);
+    ctx.fillText(DIMS[i], lx, ly+4);
+  }
+
+  // Data polygon
+  const overall = DIMS.reduce((s,d)=>s+dims[d],0)/n;
+  const mood = getMoodState(overall);
+  ctx.beginPath();
+  for(let i=0;i<=n;i++){
+    const idx = i%n;
+    const a = -Math.PI/2 + idx*angleStep;
+    const val = dims[DIMS[idx]];
+    const x = cx+r*val*Math.cos(a), y = cy+r*val*Math.sin(a);
+    i===0 ? ctx.moveTo(x,y) : ctx.lineTo(x,y);
+  }
+  ctx.fillStyle = mood.color+'44';
+  ctx.fill();
+  ctx.strokeStyle = mood.color;
+  ctx.lineWidth = 2;
+  ctx.stroke();
+
+  // Points
+  for(let i=0;i<n;i++){
+    const a = -Math.PI/2 + i*angleStep;
+    const val = dims[DIMS[i]];
+    const x = cx+r*val*Math.cos(a), y = cy+r*val*Math.sin(a);
+    ctx.beginPath();
+    ctx.arc(x,y,4,0,Math.PI*2);
+    ctx.fillStyle = mood.color;
+    ctx.fill();
+  }
+}
+
+function drawTimeline(canvas){
+  const ctx = canvas.getContext('2d');
+  const w=canvas.width, h=canvas.height;
+  ctx.clearRect(0,0,w,h);
+  if(moodHistory.length<2) return;
+
+  const pad={l:50,r:20,t:10,b:30};
+  const pw=w-pad.l-pad.r, ph=h-pad.t-pad.b;
+
+  // Y axis
+  ctx.strokeStyle='#555'; ctx.lineWidth=0.5;
+  for(let v=0;v<=1;v+=0.25){
+    const y=pad.t+ph*(1-v);
+    ctx.beginPath(); ctx.moveTo(pad.l,y); ctx.lineTo(w-pad.r,y); ctx.stroke();
+    ctx.fillStyle='#888'; ctx.font='11px system-ui'; ctx.textAlign='right';
+    ctx.fillText((v*100).toFixed(0)+'%',pad.l-6,y+4);
+  }
+
+  // Mood zones
+  MOODS.forEach(m=>{
+    const y1=pad.t+ph*(1-m.max), y2=pad.t+ph*(1-m.min);
+    ctx.fillStyle=m.color+'11';
+    ctx.fillRect(pad.l,y1,pw,y2-y1);
+  });
+
+  // Line
+  ctx.beginPath();
+  moodHistory.forEach((pt,i)=>{
+    const x=pad.l+(i/(moodHistory.length-1))*pw;
+    const y=pad.t+ph*(1-pt.score);
+    i===0?ctx.moveTo(x,y):ctx.lineTo(x,y);
+  });
+  ctx.strokeStyle='#06b6d4';
+  ctx.lineWidth=2;
+  ctx.stroke();
+
+  // Fill under
+  const lastX=pad.l+pw;
+  ctx.lineTo(lastX, pad.t+ph);
+  ctx.lineTo(pad.l, pad.t+ph);
+  ctx.closePath();
+  ctx.fillStyle='#06b6d422';
+  ctx.fill();
+}
+
+function renderTriggers(){
+  const overall = getOverallMood();
+  const agents = Object.values(fleetData);
+  const triggers = [];
+
+  const avgLatency = agents.reduce((s,a)=>s+a.latency,0)/agents.length;
+  if(avgLatency>400) triggers.push({severity:'high', text:`High avg latency: ${avgLatency.toFixed(0)}ms`});
+  else if(avgLatency>200) triggers.push({severity:'med', text:`Moderate latency: ${avgLatency.toFixed(0)}ms`});
+
+  const avgErr = agents.reduce((s,a)=>s+a.errorRate,0)/agents.length;
+  if(avgErr>0.08) triggers.push({severity:'high', text:`Error rate elevated: ${(avgErr*100).toFixed(1)}%`});
+  else if(avgErr>0.04) triggers.push({severity:'med', text:`Error rate notable: ${(avgErr*100).toFixed(1)}%`});
+
+  const lowAgents = agents.filter(a=>a.overall<0.4);
+  if(lowAgents.length>0) triggers.push({severity:'high', text:`${lowAgents.length} agent(s) in critical/struggling state`});
+
+  const avgCost = agents.reduce((s,a)=>s+a.cost,0)/agents.length;
+  if(avgCost>3.5) triggers.push({severity:'med', text:`Cost trending high: $${avgCost.toFixed(2)}/call avg`});
+
+  const stableAgents = agents.filter(a=>a.dims.Stability<0.5);
+  if(stableAgents.length>2) triggers.push({severity:'med', text:`${stableAgents.length} agents with low stability`});
+
+  if(triggers.length===0) triggers.push({severity:'low', text:'All systems nominal — fleet is healthy'});
+
+  const colors = {high:'#ef4444',med:'#eab308',low:'#22c55e'};
+  document.getElementById('triggersContent').innerHTML = triggers.map(t=>
+    `<div class="trigger-item"><span class="trigger-dot" style="background:${colors[t.severity]}"></span>${t.text}</div>`
+  ).join('');
+}
+
+function renderRecs(){
+  const overall = getOverallMood();
+  const agents = Object.values(fleetData);
+  const recs = [];
+
+  const avgDims = {};
+  DIMS.forEach(d=>{ avgDims[d]=agents.reduce((s,a)=>s+a.dims[d],0)/agents.length; });
+  const weakest = DIMS.reduce((a,b)=>avgDims[a]<avgDims[b]?a:b);
+
+  recs.push(`🎯 Focus on <b>${weakest}</b> — lowest fleet dimension at ${(avgDims[weakest]*100).toFixed(0)}%`);
+
+  if(avgDims.Reliability<0.6) recs.push('🛡️ Enable circuit breakers — reliability is below safe threshold');
+  if(avgDims.Performance<0.5) recs.push('⚡ Consider scaling up — performance degradation detected');
+  if(avgDims.Efficiency<0.5) recs.push('💰 Review token usage — efficiency score suggests waste');
+  if(avgDims.Stability<0.5) recs.push('📊 Investigate metric variance — stability needs attention');
+  if(overall>0.8) recs.push('✅ Fleet is healthy — good time for canary deployments');
+
+  document.getElementById('recsContent').innerHTML = recs.map(r=>
+    `<div class="rec-item">${r}</div>`
+  ).join('');
+}
+
+function renderForecast(){
+  // Simple linear trend from recent history
+  const recent = moodHistory.slice(-12);
+  if(recent.length<2){ document.getElementById('forecastContent').innerHTML='Insufficient data'; return; }
+  const n=recent.length;
+  const xm=recent.reduce((s,_,i)=>s+i,0)/n;
+  const ym=recent.reduce((s,p)=>s+p.score,0)/n;
+  const num=recent.reduce((s,p,i)=>s+(i-xm)*(p.score-ym),0);
+  const den=recent.reduce((s,_,i)=>s+(i-xm)**2,0);
+  const slope=den?num/den:0;
+
+  const forecasts = [15,30,45,60].map(min=>{
+    const steps = min/5;
+    const predicted = clamp(ym + slope*steps);
+    const mood = getMoodState(predicted);
+    return {min, predicted, mood};
+  });
+
+  document.getElementById('forecastContent').innerHTML = forecasts.map(f=>
+    `<div class="forecast-bar">
+      <span style="width:40px">+${f.min}m</span>
+      <div style="flex:1;background:#333;border-radius:8px;overflow:hidden">
+        <div class="forecast-bar-fill" style="width:${f.predicted*100}%;background:${f.mood.color}"></div>
+      </div>
+      <span style="width:70px;text-align:right;color:${f.mood.color}">${f.mood.name} ${(f.predicted*100).toFixed(0)}%</span>
+    </div>`
+  ).join('');
+}
+
+function renderFleetGrid(){
+  const grid = document.getElementById('fleetGrid');
+  grid.innerHTML = '';
+  AGENTS.forEach(name=>{
+    const agent = fleetData[name];
+    const mood = getMoodState(agent.overall);
+    const card = document.createElement('div');
+    card.className = 'fleet-card';
+    card.innerHTML = `<canvas width="80" height="80" id="ring-${name}"></canvas>
+      <div class="fleet-name">${name}</div>
+      <div class="fleet-mood-text" style="color:${mood.color}">${mood.name}</div>`;
+    grid.appendChild(card);
+  });
+  // Draw small rings
+  AGENTS.forEach(name=>{
+    const canvas = document.getElementById('ring-'+name);
+    if(canvas) drawMoodRing(canvas, fleetData[name].overall, 80);
+  });
+}
+
+function renderAll(){
+  const overall = getOverallMood();
+  const mood = getMoodState(overall);
+
+  drawMoodRing(document.getElementById('mainRing'), overall, 280);
+  document.getElementById('moodLabel').textContent = mood.name;
+  document.getElementById('moodLabel').style.color = mood.color;
+  document.getElementById('moodScore').textContent = `Overall: ${(overall*100).toFixed(1)}%`;
+
+  // Aggregate dims for radar
+  const agents = Object.values(fleetData);
+  const avgDims = {};
+  DIMS.forEach(d=>{ avgDims[d]=agents.reduce((s,a)=>s+a.dims[d],0)/agents.length; });
+  drawRadar(document.getElementById('radarChart'), avgDims);
+
+  drawTimeline(document.getElementById('timelineChart'));
+  renderTriggers();
+  renderRecs();
+  renderForecast();
+  renderFleetGrid();
+}
+
+function refreshAll(){
+  refreshData();
+  renderAll();
+}
+
+function toggleAutoMonitor(){
+  if(document.getElementById('autoMonitor').checked){
+    autoInterval = setInterval(refreshAll, 5000);
+  } else {
+    clearInterval(autoInterval);
+    autoInterval = null;
+  }
+}
+
+// Animation loop for ring glow
+let animFrame;
+function animateRings(){
+  const overall = getOverallMood();
+  drawMoodRing(document.getElementById('mainRing'), overall, 280);
+  AGENTS.forEach(name=>{
+    const canvas = document.getElementById('ring-'+name);
+    if(canvas) drawMoodRing(canvas, fleetData[name].overall, 80);
+  });
+  animFrame = requestAnimationFrame(animateRings);
+}
+
+// Theme
+function toggleTheme(){
+  document.body.classList.toggle('light-theme');
+  const btn = document.getElementById('themeToggleBtn');
+  btn.textContent = document.body.classList.contains('light-theme') ? '☀️' : '🌙';
+}
+
+// Init
+initData();
+renderAll();
+animateRings();
+</script>
+</body>
+</html>
