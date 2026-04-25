@@ -36,7 +36,7 @@ import bisect
 import math
 import statistics
 from dataclasses import dataclass, field
-from datetime import datetime, timedelta
+from datetime import datetime, timedelta, timezone
 from enum import Enum
 from typing import Dict, List, Optional, Tuple
 
@@ -437,12 +437,24 @@ class CapacityPlanner:
         all_trends = self._compute_all_trends()
         return {k: v[0] for k, v in all_trends.items()}
 
-    def project_workload(self, horizon_hours: float = 24, steps: int = 6) -> List[WorkloadProjection]:
+    def project_workload(
+        self,
+        horizon_hours: float = 24,
+        steps: int = 6,
+        _all_trends: Optional[Dict[str, tuple]] = None,
+    ) -> List[WorkloadProjection]:
         """Project workload metrics into the future.
 
         Uses linear trend extrapolation with decaying confidence.
         Reuses pre-computed trend data from _compute_all_trends() to
         avoid redundant list extraction and regression calls.
+
+        Args:
+            horizon_hours: How far ahead to project.
+            steps: Number of projection points.
+            _all_trends: Pre-computed output of _compute_all_trends().
+                When None the method computes it internally.  Passing
+                it in from :meth:`report` avoids a redundant O(n) scan.
         """
         ss = self._sorted_samples()
         if len(ss) < 2:
@@ -452,7 +464,7 @@ class CapacityPlanner:
         obs_hours = self._observation_hours()
 
         # Reuse trend data; rpm/sessions are already computed.
-        all_trends = self._compute_all_trends()
+        all_trends = _all_trends or self._compute_all_trends()
         rpm_vals = all_trends["rpm"][2]
         ses_vals = all_trends["sessions"][2]
         rpm_slope = all_trends["rpm"][1]
@@ -492,8 +504,9 @@ class CapacityPlanner:
         if not self._samples:
             return []
         cur = self.current_utilization()
-        trends = self.compute_trends()
-        return self._detect_bottlenecks_with(cur, trends)
+        all_trends = self._compute_all_trends()
+        trends = {k: v[0] for k, v in all_trends.items()}
+        return self._detect_bottlenecks_with(cur, trends, _all_trends=all_trends)
 
     def size_resources(
         self,
@@ -573,20 +586,18 @@ class CapacityPlanner:
     def report(self) -> CapacityReport:
         """Generate a comprehensive capacity planning report.
 
-        Caches intermediate results (utilization, trends, bottlenecks)
-        to avoid redundant recomputation — previously each helper method
-        was called 2-6 times across the call tree.
+        Computes _compute_all_trends() once and threads the result
+        through projections and bottleneck detection, eliminating
+        three redundant O(n) sample scans.
         """
-        now = datetime.now()
+        now = datetime.now(timezone.utc)
         cur = self.current_utilization()
         peak = self.peak_utilization()
-        trends = self.compute_trends()
-        projections = self.project_workload()
+        all_trends = self._compute_all_trends()
+        trends = {k: v[0] for k, v in all_trends.items()}
+        projections = self.project_workload(_all_trends=all_trends)
 
-        # detect_bottlenecks and scaling_recommendations both recompute
-        # current_utilization / compute_trends / detect_bottlenecks internally.
-        # Inline the logic to avoid those redundant calls.
-        bottlenecks = self._detect_bottlenecks_with(cur, trends)
+        bottlenecks = self._detect_bottlenecks_with(cur, trends, _all_trends=all_trends)
         recs = self._scaling_recommendations_with(cur, trends, bottlenecks)
         score = self._headroom_score_with(cur)
 
@@ -625,8 +636,16 @@ class CapacityPlanner:
         self,
         cur: Dict[str, float],
         trends: Dict[str, TrendDirection],
+        *,
+        _all_trends: Optional[Dict[str, tuple]] = None,
     ) -> List[Bottleneck]:
-        """Like detect_bottlenecks() but reuses pre-computed utilization/trends."""
+        """Like detect_bottlenecks() but reuses pre-computed utilization/trends.
+
+        Args:
+            _all_trends: Pre-computed output of _compute_all_trends().
+                When supplied the CPU slope is read directly instead of
+                re-scanning all samples with _compute_trend().
+        """
         bottlenecks: List[Bottleneck] = []
         if not self._samples:
             return bottlenecks
@@ -643,8 +662,12 @@ class CapacityPlanner:
                 recommendation="Scale out compute or optimize hot paths",
             ))
         elif trends.get("cpu") == TrendDirection.RISING and cpu > 0.5:
-            cpu_vals = [s.cpu_utilization for s in ss]
-            _, slope = self._compute_trend(cpu_vals)
+            # Reuse pre-computed CPU slope when available
+            if _all_trends and "cpu" in _all_trends:
+                slope = _all_trends["cpu"][1]
+            else:
+                cpu_vals = [s.cpu_utilization for s in ss]
+                _, slope = self._compute_trend(cpu_vals)
             obs_hours = self._observation_hours()
             samples_per_hour = len(ss) / max(obs_hours, 1) if obs_hours > 0 else 1
             if slope > 0:
