@@ -17,6 +17,7 @@ from datetime import datetime, timedelta, timezone
 from typing import Any
 
 from agentlens.cli_common import get_client, print_json, format_duration as _format_duration, percentile as _percentile, bar_chart as _bar
+from agentlens._utils import parse_iso
 
 
 def cmd_profile(args: argparse.Namespace) -> None:
@@ -42,12 +43,9 @@ def cmd_profile(args: argparse.Namespace) -> None:
             continue
         created = s.get("created_at", "")
         if created:
-            try:
-                dt = datetime.fromisoformat(created.replace("Z", "+00:00"))
-                if dt < cutoff:
-                    continue
-            except (ValueError, TypeError):
-                pass
+            dt = parse_iso(created)
+            if dt and dt < cutoff:
+                continue
         sessions.append(s)
 
     if not sessions:

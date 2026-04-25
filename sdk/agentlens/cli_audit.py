@@ -6,6 +6,8 @@ import json
 from datetime import datetime
 from typing import Any
 
+from agentlens._utils import parse_iso
+
 
 _SEVERITY_COLORS = {
     "critical": "\033[91m",
@@ -19,11 +21,10 @@ _BOLD = "\033[1m"
 
 def _ts(iso: str) -> str:
     """Format an ISO timestamp to a human-friendly string."""
-    try:
-        dt = datetime.fromisoformat(iso.replace("Z", "+00:00"))
+    dt = parse_iso(iso)
+    if dt:
         return dt.strftime("%Y-%m-%d %H:%M:%S")
-    except (ValueError, AttributeError):
-        return iso or "?"
+    return iso or "?"
 
 
 def _truncate(text: str, max_len: int = 60) -> str:

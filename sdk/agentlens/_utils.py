@@ -13,7 +13,7 @@ import uuid
 from datetime import datetime, timezone
 from typing import Any, Optional, Pattern
 
-__all__ = ["format_duration", "new_id", "safe_compile", "safe_search", "percentile", "utcnow"]
+__all__ = ["format_duration", "new_id", "parse_iso", "safe_compile", "safe_search", "percentile", "utcnow"]
 
 
 def new_id(length: int = 12) -> str:
@@ -33,6 +33,23 @@ def utcnow() -> datetime:
     timestamps.
     """
     return datetime.now(timezone.utc)
+
+
+def parse_iso(value: "str | Any") -> Optional[datetime]:
+    """Parse an ISO-8601 timestamp string into a timezone-aware datetime.
+
+    Handles the common ``"Z"`` suffix (replacing it with ``"+00:00"``) and
+    gracefully returns ``None`` for ``None``, empty strings, or unparseable
+    values.  Consolidates the duplicated ``datetime.fromisoformat(…
+    .replace("Z", "+00:00"))`` pattern previously copy-pasted across
+    nine CLI / analytics modules.
+    """
+    if not value:
+        return None
+    try:
+        return datetime.fromisoformat(str(value).replace("Z", "+00:00"))
+    except (ValueError, TypeError):
+        return None
 
 # ---------------------------------------------------------------------------
 # ReDoS-safe regex helpers (CWE-1333)

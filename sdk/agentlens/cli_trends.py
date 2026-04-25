@@ -11,6 +11,7 @@ from typing import Any
 
 
 from agentlens.cli_common import get_client_only as _get_client
+from agentlens._utils import parse_iso
 
 
 def _sparkline(values: list[float]) -> str:
@@ -54,12 +55,7 @@ def _color_change(current: float, previous: float, *, invert: bool = False) -> s
 
 
 def _parse_ts(val: str) -> datetime | None:
-    if not val:
-        return None
-    try:
-        return datetime.fromisoformat(val.replace("Z", "+00:00"))
-    except (ValueError, TypeError):
-        return None
+    return parse_iso(val)
 
 
 def cmd_trends(args: argparse.Namespace) -> None:

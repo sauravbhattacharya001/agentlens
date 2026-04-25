@@ -28,6 +28,7 @@ from datetime import datetime
 from typing import Any
 
 from agentlens.cli_common import get_client, fetch_sessions
+from agentlens._utils import parse_iso
 
 ALL_METRICS = ["cost", "tokens", "duration", "events", "errors", "tool_calls", "models"]
 
@@ -61,12 +62,10 @@ def _extract_metric(session: dict, metric: str) -> float | None:
         start = session.get("started_at") or session.get("created_at")
         end = session.get("ended_at") or session.get("updated_at")
         if start and end:
-            try:
-                t0 = datetime.fromisoformat(str(start).replace("Z", "+00:00"))
-                t1 = datetime.fromisoformat(str(end).replace("Z", "+00:00"))
+            t0 = parse_iso(start)
+            t1 = parse_iso(end)
+            if t0 and t1:
                 return (t1 - t0).total_seconds()
-            except (ValueError, TypeError):
-                pass
         return session.get("duration_ms", 0) / 1000.0 if session.get("duration_ms") else None
     if metric == "events":
         return session.get("event_count") or session.get("total_events") or 0

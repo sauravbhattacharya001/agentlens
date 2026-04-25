@@ -20,6 +20,8 @@ import webbrowser
 from datetime import datetime, timezone
 from typing import Any
 
+from agentlens._utils import parse_iso
+
 
 def _fetch_events(client: Any, session_id: str) -> list[dict]:
     """Fetch events for the session, sorted by timestamp."""
@@ -35,11 +37,8 @@ def _fetch_events(client: Any, session_id: str) -> list[dict]:
 def _parse_ts(ts: str | None) -> float | None:
     if not ts:
         return None
-    try:
-        dt = datetime.fromisoformat(ts.replace("Z", "+00:00"))
-        return dt.timestamp()
-    except Exception:
-        return None
+    dt = parse_iso(ts)
+    return dt.timestamp() if dt else None
 
 
 def _build_bars(events: list[dict]) -> list[dict]:

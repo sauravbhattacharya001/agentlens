@@ -13,6 +13,7 @@ from typing import Any
 import httpx
 
 from agentlens.cli_common import get_client as _get_client, print_json as _print_json
+from agentlens._utils import parse_iso
 
 
 # ── cmd_report ───────────────────────────────────────────────────────
@@ -45,8 +46,8 @@ def cmd_report(args: argparse.Namespace) -> None:
         created = s.get("created_at", "")
         if created:
             try:
-                ts = datetime.fromisoformat(str(created).replace("Z", "+00:00"))
-                if ts >= since:
+                ts = parse_iso(created)
+                if ts and ts >= since:
                     sessions.append(s)
             except (ValueError, TypeError):
                 sessions.append(s)
