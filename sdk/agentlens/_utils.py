@@ -13,7 +13,7 @@ import uuid
 from datetime import datetime, timezone
 from typing import Any, Optional, Pattern
 
-__all__ = ["format_duration", "new_id", "parse_iso", "safe_compile", "safe_search", "percentile", "utcnow"]
+__all__ = ["format_duration", "new_id", "parse_iso", "parse_iso_or_epoch", "safe_compile", "safe_search", "percentile", "utcnow"]
 
 
 def new_id(length: int = 12) -> str:
@@ -50,6 +50,34 @@ def parse_iso(value: "str | Any") -> Optional[datetime]:
         return datetime.fromisoformat(str(value).replace("Z", "+00:00"))
     except (ValueError, TypeError):
         return None
+
+def parse_iso_or_epoch(value: "str | int | float | datetime | Any") -> Optional[datetime]:
+    """Parse an ISO-8601 string *or* numeric epoch timestamp into a datetime.
+
+    Handles:
+    - ISO-8601 strings (with or without ``Z`` suffix)
+    - ``datetime`` objects (returned as-is)
+    - Numeric timestamps: seconds since epoch (< 1e12) or
+      milliseconds since epoch (>= 1e12)
+
+    Returns ``None`` for ``None``, empty strings, or unparseable values.
+
+    This consolidates the duplicated ``_parse_ts`` helpers previously
+    copy-pasted across ``cli_digest``, ``cli_retention``, ``cli_replay``,
+    ``flamegraph``, and ``postmortem``.
+    """
+    if value is None:
+        return None
+    if isinstance(value, datetime):
+        return value
+    if isinstance(value, (int, float)):
+        try:
+            epoch = value / 1000 if value > 1e12 else value
+            return datetime.fromtimestamp(epoch, tz=timezone.utc)
+        except (ValueError, OSError, OverflowError):
+            return None
+    return parse_iso(value)
+
 
 # ---------------------------------------------------------------------------
 # ReDoS-safe regex helpers (CWE-1333)

@@ -18,6 +18,7 @@ import webbrowser
 from datetime import datetime, timezone
 from typing import Any
 
+from agentlens._utils import parse_iso_or_epoch as _parse_ts
 from agentlens.cli_common import get_client, fetch_sessions, print_json
 
 
@@ -42,17 +43,6 @@ def _bucket_label(age_days: float) -> str:
 
 
 # ── Helpers ──────────────────────────────────────────────────────────────────
-
-def _parse_ts(ts: Any) -> datetime | None:
-    if ts is None:
-        return None
-    if isinstance(ts, (int, float)):
-        return datetime.fromtimestamp(ts / 1000 if ts > 1e12 else ts, tz=timezone.utc)
-    try:
-        s = str(ts).replace("Z", "+00:00")
-        return datetime.fromisoformat(s)
-    except Exception:
-        return None
 
 
 def _session_tokens(s: dict) -> int:

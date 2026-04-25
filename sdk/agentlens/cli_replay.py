@@ -9,21 +9,14 @@ import argparse
 from datetime import datetime, timezone
 from typing import Any
 
+from agentlens._utils import parse_iso_or_epoch, utcnow
 from agentlens.cli_common import get_client as _get_client
 from agentlens.models import AgentEvent, Session, ToolCall
 
 
 def _parse_ts(val: Any) -> datetime:
-    """Parse a timestamp value into a datetime."""
-    if isinstance(val, datetime):
-        return val
-    if isinstance(val, str):
-        val = val.replace("Z", "+00:00")
-        try:
-            return datetime.fromisoformat(val)
-        except Exception:
-            return datetime.now(timezone.utc)
-    return datetime.now(timezone.utc)
+    """Parse a timestamp value into a datetime (never None)."""
+    return parse_iso_or_epoch(val) or utcnow()
 
 
 def build_session_from_api(session_data: dict, events_data: list[dict]) -> Session:

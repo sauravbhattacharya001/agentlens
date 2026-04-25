@@ -804,20 +804,12 @@ class PostmortemGenerator:
     def _parse_ts(self, ts: Any) -> datetime | None:
         """Parse a timestamp value into a timezone-aware ``datetime``.
 
-        Accepts ``datetime`` objects, ISO-8601 strings (with or without
-        a trailing ``Z``), and returns ``None`` for unparseable values.
+        Delegates to the shared :func:`agentlens._utils.parse_iso_or_epoch`
+        helper which handles ``datetime`` objects, ISO-8601 strings
+        (with or without ``Z``), and numeric epoch timestamps.
         """
-        if ts is None:
-            return None
-        if isinstance(ts, datetime):
-            return ts
-        try:
-            s = str(ts)
-            if s.endswith("Z"):
-                s = s[:-1] + "+00:00"
-            return datetime.fromisoformat(s)
-        except (ValueError, TypeError):
-            return None
+        from agentlens._utils import parse_iso_or_epoch
+        return parse_iso_or_epoch(ts)
 
     def _empty_report(self, session_id: str) -> PostmortemReport:
         """Return a clean "no incident" report when there are no errors."""

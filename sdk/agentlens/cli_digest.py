@@ -21,6 +21,7 @@ from typing import Any
 
 import httpx
 
+from agentlens._utils import parse_iso_or_epoch as _parse_ts
 from agentlens.cli_common import get_client as _get_client, fetch_sessions as _fetch_sessions
 
 
@@ -32,20 +33,6 @@ def _fetch_alerts(client: httpx.Client) -> list[dict]:
         return data if isinstance(data, list) else data.get("alerts", [])
     except Exception:
         return []
-
-
-def _parse_ts(val: Any) -> datetime | None:
-    if val is None:
-        return None
-    if isinstance(val, (int, float)):
-        return datetime.fromtimestamp(val / 1000 if val > 1e12 else val, tz=timezone.utc)
-    if isinstance(val, str):
-        for fmt in ("%Y-%m-%dT%H:%M:%S.%fZ", "%Y-%m-%dT%H:%M:%SZ", "%Y-%m-%d %H:%M:%S"):
-            try:
-                return datetime.strptime(val, fmt).replace(tzinfo=timezone.utc)
-            except ValueError:
-                continue
-    return None
 
 
 def _filter_by_window(sessions: list[dict], days: int) -> tuple[list[dict], list[dict]]:
