@@ -13,7 +13,7 @@ import uuid
 from datetime import datetime, timezone
 from typing import Any, Optional, Pattern
 
-__all__ = ["format_duration", "new_id", "parse_iso", "parse_iso_or_epoch", "safe_compile", "safe_search", "percentile", "utcnow"]
+__all__ = ["format_duration", "linear_regression", "new_id", "parse_iso", "parse_iso_or_epoch", "safe_compile", "safe_search", "percentile", "utcnow"]
 
 
 def new_id(length: int = 12) -> str:
@@ -137,6 +137,53 @@ def safe_search(
             return compiled.search(truncated)
         except (RecursionError, MemoryError):
             return None
+
+
+def linear_regression(
+    ys: list[float],
+    xs: list[float] | None = None,
+) -> tuple[float, float]:
+    """Ordinary least-squares linear regression: y = slope * x + intercept.
+
+    When *xs* is ``None`` the x-values default to ``0, 1, 2, …``
+    (indexed regression — useful for time-series where each data point
+    is one period apart).
+
+    Returns ``(slope, intercept)``.  Falls back to ``(0.0, ys[0])``
+    when fewer than two data points.
+    """
+    n = len(ys)
+    if n == 0:
+        return 0.0, 0.0
+    if n == 1:
+        return 0.0, ys[0]
+
+    if xs is None:
+        # Fast path: x = 0..n-1 — closed-form means avoid sum()
+        x_mean = (n - 1) / 2.0
+        y_mean = sum(ys) / n
+        numerator = 0.0
+        denominator = 0.0
+        for i, y in enumerate(ys):
+            dx = i - x_mean
+            numerator += dx * (y - y_mean)
+            denominator += dx * dx
+    else:
+        x_mean = sum(xs) / n
+        y_mean = sum(ys) / n
+        numerator = 0.0
+        denominator = 0.0
+        for x, y in zip(xs, ys):
+            dx = x - x_mean
+            numerator += dx * (y - y_mean)
+            denominator += dx * dx
+
+    if denominator == 0:
+        return 0.0, y_mean
+
+    slope = numerator / denominator
+    intercept = y_mean - slope * x_mean
+    return slope, intercept
 
 
 def percentile(sorted_values: list[float], p: float) -> float:

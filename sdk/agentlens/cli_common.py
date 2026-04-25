@@ -15,6 +15,7 @@ from typing import Any
 import httpx
 
 from agentlens._utils import format_duration  # noqa: F401 — re-exported
+from agentlens._utils import linear_regression  # noqa: F401 — re-exported
 from agentlens._utils import percentile as _raw_percentile
 
 __all__ = [
@@ -95,18 +96,15 @@ def percentile(values: list[float], p: float) -> float:
 def linear_regression(xs: list[float], ys: list[float]) -> tuple[float, float]:
     """Simple OLS linear regression.  Returns ``(slope, intercept)``.
 
-    Falls back to ``(0.0, ys[0])`` when fewer than two data points.
+    Delegates to :func:`agentlens._utils.linear_regression` for the
+    actual computation.
+
+    .. deprecated:: Use ``agentlens._utils.linear_regression`` directly
+       for new code.  This wrapper preserves the ``(xs, ys)`` call
+       convention expected by existing CLI callers.
     """
-    n = len(xs)
-    if n < 2:
-        return 0.0, (ys[0] if ys else 0.0)
-    x_mean = sum(xs) / n
-    y_mean = sum(ys) / n
-    ss_xy = sum((x - x_mean) * (y - y_mean) for x, y in zip(xs, ys))
-    ss_xx = sum((x - x_mean) ** 2 for x in xs)
-    slope = ss_xy / ss_xx if ss_xx else 0.0
-    intercept = y_mean - slope * x_mean
-    return slope, intercept
+    from agentlens._utils import linear_regression as _lr
+    return _lr(ys, xs)
 
 
 def sparkline(values: list[float], width: int = 30) -> str:

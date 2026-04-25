@@ -37,7 +37,7 @@ from dataclasses import dataclass, field
 from datetime import datetime, timedelta, timezone
 from typing import Any
 
-from agentlens._utils import utcnow as _utcnow
+from agentlens._utils import linear_regression as _linear_regression, utcnow as _utcnow
 
 
 @dataclass
@@ -276,34 +276,16 @@ class CostForecaster:
     def _linear_regression(values: list[float]) -> tuple[float, float]:
         """Simple OLS linear regression: y = slope * x + intercept.
 
+        Delegates to :func:`agentlens._utils.linear_regression` with
+        implicit 0-based x indices.
+
         Args:
             values: y-values indexed 0, 1, 2, ...
 
         Returns:
             (slope, intercept) tuple.
         """
-        n = len(values)
-        if n == 0:
-            return 0.0, 0.0
-        if n == 1:
-            return 0.0, values[0]
-
-        x_mean = (n - 1) / 2.0
-        y_mean = sum(values) / n
-
-        numerator = 0.0
-        denominator = 0.0
-        for i, y in enumerate(values):
-            dx = i - x_mean
-            numerator += dx * (y - y_mean)
-            denominator += dx * dx
-
-        if denominator == 0:
-            return 0.0, y_mean
-
-        slope = numerator / denominator
-        intercept = y_mean - slope * x_mean
-        return slope, intercept
+        return _linear_regression(values)
 
     @staticmethod
     def _prediction_interval(
