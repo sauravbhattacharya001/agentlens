@@ -1,0 +1,273 @@
+<!DOCTYPE html>
+<html lang="en">
+<head>
+  <meta charset="UTF-8">
+  <meta name="viewport" content="width=device-width, initial-scale=1.0">
+  <title>CLI Reference — AgentLens Docs</title>
+  <link rel="stylesheet" href="style.css">
+</head>
+<body>
+
+<header class="header">
+  <button class="menu-toggle" onclick="document.querySelector('.sidebar').classList.toggle('open')">☰</button>
+  <a href="index.html" class="header-logo">🔍 <span>AgentLens</span> Docs</a>
+  <nav class="header-nav">
+    <a href="getting-started.html">Getting Started</a>
+    <a href="sdk-reference.html">SDK</a>
+    <a href="api.html">API</a>
+    <a href="cli.html">CLI</a>
+    <a href="https://github.com/sauravbhattacharya001/agentlens" class="github-link" target="_blank">⭐ GitHub</a>
+  </nav>
+</header>
+
+<aside class="sidebar">
+  <div class="sidebar-section">
+    <div class="sidebar-section-title">Overview</div>
+    <a href="index.html">Introduction</a>
+    <a href="architecture.html">Architecture</a>
+  </div>
+  <div class="sidebar-section">
+    <div class="sidebar-section-title">Guides</div>
+    <a href="getting-started.html">Getting Started</a>
+    <a href="quickstart.html">5-Minute Quickstart</a>
+    <a href="deployment.html">Deployment</a>
+  </div>
+  <div class="sidebar-section">
+    <div class="sidebar-section-title">SDK</div>
+    <a href="sdk-reference.html">Python SDK Reference</a>
+    <a href="decorators.html">Decorators</a>
+    <a href="models.html">Data Models</a>
+    <a href="transport.html">Transport &amp; Batching</a>
+    <a href="sampling.html">Sampling &amp; Rate Limiting</a>
+  </div>
+  <div class="sidebar-section">
+    <div class="sidebar-section-title">Backend</div>
+    <a href="api.html">REST API</a>
+    <a href="cli.html" class="active">CLI Reference</a>
+    <a href="database.html">Database Schema</a>
+    <a href="dashboard.html">Dashboard</a>
+  </div>
+  <div class="sidebar-section">
+    <div class="sidebar-section-title">Advanced</div>
+    <a href="explainability.html">Explainability</a>
+    <a href="integrations.html">Integrations</a>
+    <a href="monitoring.html">Monitoring &amp; Analysis</a>
+    <a href="cost-optimization.html">Cost Optimization</a>
+    <a href="session-replay.html">Session Replay</a>
+  </div>
+</aside>
+
+<main class="main">
+  <h1>CLI Reference</h1>
+  <p class="subtitle">Command-line interface for querying sessions, analyzing costs, debugging agents, and managing operations.</p>
+
+  <div class="callout callout-tip">
+    <div class="callout-title">💡 Installation</div>
+    <p>The CLI is included with the Python SDK: <code>pip install agentlens</code>. All commands use the <code>agentlens</code> binary.</p>
+  </div>
+
+  <h2 id="global-options">Global Options</h2>
+  <p>All commands accept these options:</p>
+  <table>
+    <thead><tr><th>Option</th><th>Env Variable</th><th>Default</th><th>Description</th></tr></thead>
+    <tbody>
+      <tr><td><code>--endpoint URL</code></td><td><code>AGENTLENS_ENDPOINT</code></td><td><code>http://localhost:3000</code></td><td>Backend URL</td></tr>
+      <tr><td><code>--api-key KEY</code></td><td><code>AGENTLENS_API_KEY</code></td><td><code>default</code></td><td>API authentication key</td></tr>
+    </tbody>
+  </table>
+
+  <h2 id="configuration">Configuration</h2>
+  <pre><code>agentlens config show              # Show current config
+agentlens config set &lt;key&gt; &lt;value&gt; # Set a config value
+agentlens config unset &lt;key&gt;       # Remove a config value
+agentlens config reset             # Reset to defaults
+agentlens config path              # Print config file path</code></pre>
+  <p>Set <code>endpoint</code> and <code>api_key</code> to avoid passing them on every command:</p>
+  <pre><code>agentlens config set endpoint http://localhost:3000
+agentlens config set api_key your-secret-key</code></pre>
+
+  <h2 id="session-commands">Session Commands</h2>
+
+  <h3>List Sessions</h3>
+  <pre><code>agentlens sessions [--limit N]</code></pre>
+
+  <h3>Session Detail</h3>
+  <pre><code>agentlens session &lt;session_id&gt;</code></pre>
+
+  <h3>Session Costs</h3>
+  <pre><code>agentlens costs &lt;session_id&gt;</code></pre>
+
+  <h3>List Events</h3>
+  <pre><code>agentlens events [--session SESSION] [--type TYPE] [--model MODEL] [--limit N]</code></pre>
+
+  <h3>Export Session</h3>
+  <pre><code>agentlens export &lt;session_id&gt; [--format json|csv] [--output FILE]</code></pre>
+
+  <h2 id="analysis-commands">Analysis Commands</h2>
+
+  <h3>Analytics Overview</h3>
+  <pre><code>agentlens analytics</code></pre>
+
+  <h3>Health Score</h3>
+  <pre><code>agentlens health &lt;session_id&gt;</code></pre>
+
+  <h3>Compare Sessions</h3>
+  <pre><code>agentlens compare &lt;session_a&gt; &lt;session_b&gt;</code></pre>
+
+  <h3>Session Diff</h3>
+  <pre><code>agentlens diff &lt;session_a&gt; &lt;session_b&gt; [--label-a LABEL] [--label-b LABEL] [--no-color] [--json]</code></pre>
+
+  <h3>Agent Profile</h3>
+  <pre><code>agentlens profile &lt;agent_name&gt; [--days N] [--json]</code></pre>
+
+  <h3>Trends</h3>
+  <pre><code>agentlens trends [--period day|week|month] [--metric METRIC|all] [--agent NAME] [--limit N] [--json]</code></pre>
+
+  <h3>Correlation Analysis</h3>
+  <pre><code>agentlens correlate [--metrics METRICS] [--limit N] [--min-sessions N] [--format table|json|csv] [--output FILE]</code></pre>
+
+  <h3>Leaderboard</h3>
+  <pre><code>agentlens leaderboard [--sort efficiency|speed|reliability|cost|volume] [--days N] [--limit N] [--min-sessions N] [--order asc|desc] [--json]</code></pre>
+
+  <h3>Bottleneck Detection</h3>
+  <pre><code>agentlens bottleneck [--by agent|model|type] [--metric latency|cost|errors] [--limit N] [--min-sessions N] [--format table|json] [--output FILE]</code></pre>
+
+  <h3>Outlier Detection</h3>
+  <pre><code>agentlens outlier [--metric cost|tokens|duration|errors|all] [--limit N] [--threshold F] [--format table|json] [--top N]</code></pre>
+
+  <h2 id="visualization-commands">Visualization Commands</h2>
+
+  <h3>Flamegraph</h3>
+  <pre><code>agentlens flamegraph &lt;session_id&gt; [--output FILE] [--open] [--stats]</code></pre>
+  <p>Generates an interactive HTML flamegraph of a session's event hierarchy.</p>
+
+  <h3>Gantt Chart</h3>
+  <pre><code>agentlens gantt &lt;session_id&gt; [--output FILE] [--open] [--format html|json|ascii]</code></pre>
+
+  <h3>Heatmap</h3>
+  <pre><code>agentlens heatmap [--metric sessions|cost|tokens|events] [--weeks N] [--limit N]</code></pre>
+
+  <h3>Scatter Plot</h3>
+  <pre><code>agentlens scatter [--x METRIC] [--y METRIC] [--limit N] [--width W] [--height H] [--agent NAME] [--no-trend] [--format ascii|json] [--output FILE]</code></pre>
+
+  <h3>Trace View</h3>
+  <pre><code>agentlens trace &lt;session_id&gt; [--no-color] [--json] [--type TYPE] [--min-ms N]</code></pre>
+
+  <h3>Session Replay</h3>
+  <pre><code>agentlens replay &lt;session_id&gt; [--speed N] [--type TYPES] [--exclude TYPES] [--format text|json|markdown] [--live] [--no-color] [--output FILE]</code></pre>
+
+  <h3>Event Funnel</h3>
+  <pre><code>agentlens funnel [--stages TYPES] [--limit N] [--format table|json|html] [--output FILE] [--open]</code></pre>
+
+  <h3>Dependency Map</h3>
+  <pre><code>agentlens depmap [--limit N] [--format ascii|json|html] [--output FILE] [--open]</code></pre>
+
+  <h2 id="monitoring-commands">Monitoring Commands</h2>
+
+  <h3>Live Tail</h3>
+  <pre><code>agentlens tail [--session SESSION] [--type TYPE] [--interval SECS]</code></pre>
+  <p>Streams events in real-time (like <code>tail -f</code>).</p>
+
+  <h3>Top (Live Dashboard)</h3>
+  <pre><code>agentlens top [--sort cost|tokens|events] [--limit N] [--interval SECS]</code></pre>
+  <p>Live-updating view of the most active/expensive sessions.</p>
+
+  <h3>Watch</h3>
+  <pre><code>agentlens watch [--interval SECS] [--metric METRIC] [--agent NAME] [--alert-threshold N] [--compact] [--no-spark] [--duration MINS]</code></pre>
+  <p>Continuous metric monitoring with spark lines and threshold alerts.</p>
+
+  <h3>Status</h3>
+  <pre><code>agentlens status</code></pre>
+  <p>Check backend connectivity and database stats.</p>
+
+  <h2 id="cost-budget">Cost &amp; Budget Commands</h2>
+
+  <h3>Cost Forecast</h3>
+  <pre><code>agentlens forecast [--days N] [--metric cost|tokens|sessions] [--model MODEL] [--format table|json|chart] [--output FILE]</code></pre>
+
+  <h3>Budget Management</h3>
+  <pre><code>agentlens budget list [--json]
+agentlens budget set &lt;scope&gt; &lt;period&gt; &lt;limit_usd&gt; [--warn-pct N]
+agentlens budget check &lt;session_id&gt; [--json]
+agentlens budget delete &lt;scope&gt; [&lt;period&gt;]</code></pre>
+  <p><strong>Scope</strong> can be <code>global</code> or an agent name. <strong>Period</strong> is <code>daily</code>, <code>weekly</code>, or <code>monthly</code>.</p>
+
+  <h2 id="alert-commands">Alert Commands</h2>
+  <pre><code>agentlens alert history [--severity LEVEL] [--since HOURS] [--limit N] [--ack|--unack] [--format table|json]
+agentlens alert rules [--format table|json]
+agentlens alert test &lt;rule_id&gt; &lt;session_id&gt;
+agentlens alert ack &lt;alert_id&gt; [--note TEXT]
+agentlens alert silence &lt;rule_id&gt; [--duration MINUTES]
+agentlens alert unsilence &lt;rule_id&gt;
+agentlens alert stats [--period day|week|month] [--format table|json]</code></pre>
+
+  <h2 id="sla-commands">SLA Commands</h2>
+  <pre><code>agentlens sla [--policy production|development] [--latency MS] [--error-rate PCT] [--token-budget N] [--slo PCT] [--agent NAME] [--limit N] [--verbose] [--json]</code></pre>
+  <p>Built-in policies: <code>production</code> (strict) and <code>development</code> (relaxed). Override individual thresholds with flags.</p>
+
+  <h2 id="reporting-commands">Reporting Commands</h2>
+
+  <h3>Summary Report</h3>
+  <pre><code>agentlens report [--period day|week|month] [--format table|json|markdown] [--output FILE]</code></pre>
+
+  <h3>Digest</h3>
+  <pre><code>agentlens digest [--period day|week|month] [--format text|markdown|html|json] [--output FILE] [--open] [--top N]</code></pre>
+
+  <h3>Dashboard (HTML)</h3>
+  <pre><code>agentlens dashboard [--limit N] [--output FILE] [--open]</code></pre>
+  <p>Generates a standalone HTML dashboard.</p>
+
+  <h2 id="operational-commands">Operational Commands</h2>
+
+  <h3>Audit Log</h3>
+  <pre><code>agentlens audit [ENTRY_ID] [--agent NAME] [--action TYPE] [--severity LEVEL] [--model MODEL] [--session ID] [--since HOURS] [--limit N] [--format table|csv|json] [--output FILE] [--stats] [--no-color]</code></pre>
+
+  <h3>Postmortem</h3>
+  <pre><code>agentlens postmortem &lt;session_id&gt;
+agentlens postmortem candidates [--min-errors N] [--limit N]</code></pre>
+
+  <h3>Snapshots</h3>
+  <pre><code>agentlens snapshot [--label LABEL] [--output FILE] [--limit N] [--format json|table]
+agentlens snapshot diff &lt;file_a&gt; &lt;file_b&gt; [--format table|json]</code></pre>
+
+  <h3>Baseline Management</h3>
+  <pre><code>agentlens baseline list [--json]
+agentlens baseline show &lt;agent_name&gt; [--json]
+agentlens baseline record &lt;session_id&gt;
+agentlens baseline check &lt;session_id&gt; [--json]
+agentlens baseline delete &lt;agent_name&gt;</code></pre>
+
+  <h3>Data Retention</h3>
+  <pre><code>agentlens retention [--limit N] [--format table|json|chart] [--output FILE] [--open]
+agentlens retention policy [--keep-days N] [--dry-run] [--json]
+agentlens retention purge --older-than DAYS [--dry-run] [--yes]</code></pre>
+
+  <h2 id="examples">Examples</h2>
+  <pre><code># Quick health check
+agentlens status
+
+# See today's most expensive sessions
+agentlens leaderboard --sort cost --days 1
+
+# Debug a slow session
+agentlens trace sess_abc123 --min-ms 500
+agentlens flamegraph sess_abc123 --open
+
+# Set a daily budget and check it
+agentlens budget set global daily 50.00 --warn-pct 80
+agentlens budget check sess_abc123
+
+# Monitor agents in real-time
+agentlens watch --metric cost --alert-threshold 10
+
+# Generate a weekly report
+agentlens digest --period week --format markdown --output weekly.md</code></pre>
+
+  <div class="footer">
+    <span>AgentLens v0.1.0 — MIT License</span>
+    <span><a href="https://github.com/sauravbhattacharya001/agentlens">GitHub</a></span>
+  </div>
+</main>
+
+<script src="search.js"></script></body>
+</html>
