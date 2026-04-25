@@ -322,6 +322,28 @@ class QuotaManager:
         self._pool_usage.pop(name, None)
         return self._pools.pop(name, None) is not None
 
+    def _window_totals(
+        self, entity_id: str, window: QuotaWindow, now: datetime,
+    ) -> tuple[int, float, int, list[UsageRecord]]:
+        """Aggregate token/cost/request totals for *entity_id* in the
+        current window.  Returns ``(tokens, cost, requests, records)``.
+
+        Centralises the window-filter-and-sum logic that was previously
+        duplicated across ``record_usage``, ``check_usage``, and
+        ``report``.
+        """
+        start, end = self._window_bounds(window, now)
+        entity_recs = self._entity_records.get(entity_id, [])
+        tokens_used = 0
+        cost_used = 0.0
+        matched: list[UsageRecord] = []
+        for r in entity_recs:
+            if start <= r.timestamp < end:
+                tokens_used += r.tokens
+                cost_used += r.cost_usd
+                matched.append(r)
+        return tokens_used, cost_used, len(matched), matched
+
     def record_usage(self, entity_id: str, *, tokens: int = 0, cost_usd: float = 0.0,
                      model: str = "", session_id: str = "") -> QuotaCheck:
         now = self._now_fn()
@@ -333,17 +355,8 @@ class QuotaManager:
             self._records.append(record)
             return QuotaCheck(allowed=True, reason="no active quota")
 
-        start, end = self._window_bounds(policy.window, now)
-        # Use per-entity index instead of scanning all records.
-        entity_recs = self._entity_records.get(entity_id, [])
-        current_tokens = 0
-        current_cost = 0.0
-        current_requests = 0
-        for r in entity_recs:
-            if start <= r.timestamp < end:
-                current_tokens += r.tokens
-                current_cost += r.cost_usd
-                current_requests += 1
+        current_tokens, current_cost, current_requests, _ = self._window_totals(
+            entity_id, policy.window, now)
 
         new_tokens = current_tokens + tokens
         new_cost = current_cost + cost_usd
@@ -421,15 +434,10 @@ class QuotaManager:
             return QuotaCheck(allowed=True, reason="no active quota")
 
         now = self._now_fn()
-        start, end = self._window_bounds(policy.window, now)
-        # Use per-entity index instead of scanning all records.
-        entity_recs = self._entity_records.get(entity_id, [])
-        current_tokens = tokens
-        current_cost = cost_usd
-        for r in entity_recs:
-            if start <= r.timestamp < end:
-                current_tokens += r.tokens
-                current_cost += r.cost_usd
+        base_tokens, base_cost, _, _ = self._window_totals(
+            entity_id, policy.window, now)
+        current_tokens = base_tokens + tokens
+        current_cost = base_cost + cost_usd
 
         check = QuotaCheck()
         if policy.max_tokens is not None:
@@ -464,17 +472,8 @@ class QuotaManager:
             return QuotaReport(entity_id=entity_id, status="no_quota")
 
         start, end = self._window_bounds(policy.window, now)
-        # Use per-entity index instead of scanning all records.
-        entity_recs = self._entity_records.get(entity_id, [])
-        window_records: list[UsageRecord] = []
-        tokens_used = 0
-        cost_used = 0.0
-        for r in entity_recs:
-            if start <= r.timestamp < end:
-                window_records.append(r)
-                tokens_used += r.tokens
-                cost_used += r.cost_usd
-        requests_used = len(window_records)
+        tokens_used, cost_used, requests_used, window_records = self._window_totals(
+            entity_id, policy.window, now)
 
         util_t = tokens_used / policy.max_tokens if policy.max_tokens and policy.max_tokens > 0 else 0
         util_c = cost_used / policy.max_cost_usd if policy.max_cost_usd and policy.max_cost_usd > 0 else 0
@@ -539,9 +538,7 @@ class QuotaManager:
         now = self._now_fn()
         pool_reports = []
         for pool in self._pools.values():
-            start, end = self._window_bounds(pool.window, now)
-            pool_records = [r for r in self._pool_usage.get(pool.name, []) if start <= r.timestamp < end]
-            used = sum(r.tokens for r in pool_records)
+            used = self._pool_used_tokens(pool.name, pool.window, now)
             pool_reports.append({
                 "name": pool.name, "members": pool.members,
                 "total": pool.pool_tokens, "used": used,
@@ -610,13 +607,19 @@ class QuotaManager:
         duration = WINDOW_DURATIONS[window.value]
         return (start, start + duration)
 
+    def _pool_used_tokens(self, pool_name: str, window: QuotaWindow, now: datetime) -> int:
+        """Sum tokens drawn from *pool_name* in the current window."""
+        start, end = self._window_bounds(window, now)
+        return sum(
+            r.tokens for r in self._pool_usage.get(pool_name, [])
+            if start <= r.timestamp < end
+        )
+
     def _try_pool_borrow(self, entity_id: str, tokens: int, now: datetime) -> int:
         for pool in self._pools.values():
             if not pool.enabled or entity_id not in pool.members:
                 continue
-            start, end = self._window_bounds(pool.window, now)
-            pool_records = [r for r in self._pool_usage.get(pool.name, []) if start <= r.timestamp < end]
-            pool_used = sum(r.tokens for r in pool_records)
+            pool_used = self._pool_used_tokens(pool.name, pool.window, now)
             available = pool.pool_tokens - pool_used
             if available >= tokens:
                 self._pool_usage[pool.name].append(
