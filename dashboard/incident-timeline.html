@@ -1,0 +1,357 @@
+<!DOCTYPE html>
+<html lang="en">
+<head>
+  <meta charset="UTF-8">
+  <meta name="viewport" content="width=device-width, initial-scale=1.0">
+  <title>AgentLens — Incident Timeline</title>
+  <link rel="stylesheet" href="styles.css">
+  <style>
+    .it-container { padding: 24px; max-width: 1400px; margin: 0 auto; }
+    .it-header { margin-bottom: 24px; }
+    .it-header h1 { font-size: 1.5rem; display: flex; align-items: center; gap: 10px; }
+    .it-header p { color: var(--text-secondary); font-size: 0.85rem; margin-top: 4px; }
+
+    .stats-grid { display: grid; grid-template-columns: repeat(4, 1fr); gap: 16px; margin-bottom: 24px; }
+    .stat-card { background: var(--bg-secondary); border: 1px solid var(--border); border-radius: var(--radius); padding: 20px; }
+    .stat-card h3 { font-size: 0.75rem; color: var(--text-secondary); text-transform: uppercase; letter-spacing: 0.5px; margin-bottom: 8px; }
+    .stat-card .value { font-size: 2rem; font-weight: 700; }
+    .stat-card .sub { font-size: 0.8rem; color: var(--text-secondary); margin-top: 4px; }
+
+    .controls-row { display: flex; gap: 12px; align-items: center; margin-bottom: 24px; flex-wrap: wrap; }
+    .controls-row label { font-size: 0.85rem; color: var(--text-secondary); }
+    .controls-row select, .controls-row input { background: var(--bg-tertiary); border: 1px solid var(--border); color: var(--text-primary); padding: 6px 10px; border-radius: var(--radius-sm); font-size: 0.85rem; }
+    .controls-row button { background: var(--bg-tertiary); border: 1px solid var(--border); color: var(--text-primary); padding: 6px 14px; border-radius: var(--radius-sm); cursor: pointer; font-size: 0.85rem; }
+    .controls-row button:hover { background: var(--bg-hover); }
+    .controls-row button.active { background: var(--accent); color: #fff; border-color: var(--accent); }
+
+    .main-layout { display: grid; grid-template-columns: 1fr 380px; gap: 16px; }
+    @media (max-width: 900px) { .main-layout { grid-template-columns: 1fr; } }
+
+    .timeline-panel { background: var(--bg-secondary); border: 1px solid var(--border); border-radius: var(--radius); padding: 20px; }
+    .timeline-panel h2 { font-size: 1rem; margin-bottom: 16px; display: flex; align-items: center; gap: 8px; }
+
+    .canvas-wrap { position: relative; width: 100%; overflow-y: auto; max-height: 700px; }
+    .canvas-wrap canvas { width: 100%; }
+
+    .sidebar { display: flex; flex-direction: column; gap: 16px; }
+    .side-panel { background: var(--bg-secondary); border: 1px solid var(--border); border-radius: var(--radius); padding: 20px; }
+    .side-panel h2 { font-size: 1rem; margin-bottom: 12px; display: flex; align-items: center; gap: 8px; }
+
+    .incident-card { background: var(--bg-tertiary); border: 1px solid var(--border); border-radius: var(--radius-sm); padding: 14px; margin-bottom: 10px; cursor: pointer; transition: border-color 0.2s; }
+    .incident-card:hover { border-color: var(--accent); }
+    .incident-card.selected { border-color: var(--accent); box-shadow: 0 0 0 1px var(--accent); }
+    .incident-card .ic-title { font-size: 0.9rem; font-weight: 600; margin-bottom: 6px; display: flex; align-items: center; gap: 6px; }
+    .incident-card .ic-meta { font-size: 0.75rem; color: var(--text-secondary); margin-bottom: 4px; }
+    .incident-card .ic-agents { display: flex; gap: 4px; flex-wrap: wrap; margin-top: 6px; }
+    .agent-tag { background: rgba(80,180,255,0.15); color: var(--accent); font-size: 0.7rem; padding: 2px 8px; border-radius: 10px; }
+
+    .badge { padding: 2px 8px; border-radius: 10px; font-size: 0.7rem; font-weight: 700; }
+    .badge.critical { background: rgba(255,80,80,0.2); color: var(--red); }
+    .badge.high { background: rgba(255,150,50,0.2); color: #ff9632; }
+    .badge.medium { background: rgba(255,200,50,0.2); color: var(--yellow); }
+    .badge.low { background: rgba(80,180,255,0.2); color: var(--accent); }
+
+    .pattern-alert { background: rgba(255,200,50,0.1); border: 1px solid rgba(255,200,50,0.3); border-radius: var(--radius-sm); padding: 12px; margin-bottom: 10px; font-size: 0.8rem; }
+    .pattern-alert strong { color: var(--yellow); }
+
+    .incident-list { max-height: 500px; overflow-y: auto; }
+
+    .impact-bar { height: 6px; border-radius: 3px; background: var(--bg-tertiary); margin-top: 6px; overflow: hidden; }
+    .impact-bar .fill { height: 100%; border-radius: 3px; transition: width 0.3s; }
+
+    .monitor-pulse { display: inline-block; width: 8px; height: 8px; border-radius: 50%; background: var(--green); animation: pulse 1.5s infinite; margin-right: 6px; }
+    @keyframes pulse { 0%,100% { opacity: 1; } 50% { opacity: 0.3; } }
+
+    .detail-section { margin-top: 12px; }
+    .detail-section h3 { font-size: 0.85rem; margin-bottom: 8px; color: var(--text-secondary); }
+    .event-row { padding: 8px; border-bottom: 1px solid var(--bg-tertiary); font-size: 0.8rem; display: flex; align-items: center; gap: 8px; }
+    .event-dot { width: 8px; height: 8px; border-radius: 50%; flex-shrink: 0; }
+    .export-btn { background: var(--accent); color: #fff; border: none; padding: 8px 16px; border-radius: var(--radius-sm); cursor: pointer; font-size: 0.85rem; }
+    .export-btn:hover { opacity: 0.9; }
+  </style>
+</head>
+<body>
+  <div id="app">
+    <header class="header">
+      <div class="header-left">
+        <a href="index.html" style="text-decoration:none;color:inherit"><h1 class="logo">🔍 AgentLens</h1></a>
+        <span class="tagline">Incident Timeline</span>
+      </div>
+      <div class="header-right">
+        <a href="index.html" class="btn btn-alert-header" style="text-decoration:none">← Dashboard</a>
+        <button class="theme-toggle" onclick="toggleTheme()" title="Toggle theme" id="themeToggleBtn">🌙</button>
+      </div>
+    </header>
+
+    <div class="it-container">
+      <div class="it-header">
+        <h1>🔥 Agent Incident Timeline</h1>
+        <p>Unified chronological view — auto-clusters correlated events into incidents with pattern detection and impact scoring</p>
+      </div>
+
+      <div class="stats-grid" id="statsGrid"></div>
+
+      <div class="controls-row">
+        <label>Type:</label>
+        <select id="filterType"><option value="all">All Types</option><option value="alert">Alerts</option><option value="anomaly">Anomalies</option><option value="deployment">Deployments</option><option value="config">Config Changes</option><option value="restart">Restarts</option></select>
+        <label>Agent:</label>
+        <select id="filterAgent"><option value="all">All Agents</option></select>
+        <label>Severity:</label>
+        <select id="filterSeverity"><option value="all">All</option><option value="critical">Critical</option><option value="high">High</option><option value="medium">Medium</option><option value="low">Low</option></select>
+        <label>Cluster Window:</label>
+        <input type="number" id="clusterWindow" value="5" min="1" max="60" style="width:60px"> <span style="font-size:0.8rem;color:var(--text-secondary)">min</span>
+        <button id="monitorBtn" onclick="toggleMonitor()">📡 Auto-Monitor</button>
+        <button class="export-btn" onclick="exportJSON()">📥 Export JSON</button>
+      </div>
+
+      <div class="main-layout">
+        <div class="timeline-panel">
+          <h2>📅 Event Timeline</h2>
+          <div class="canvas-wrap">
+            <canvas id="timelineCanvas" width="900" height="800"></canvas>
+          </div>
+        </div>
+        <div class="sidebar">
+          <div class="side-panel">
+            <h2>🔗 Clustered Incidents <span id="incidentCount" style="font-size:0.8rem;color:var(--text-secondary)"></span></h2>
+            <div id="patternAlerts"></div>
+            <div class="incident-list" id="incidentList"></div>
+          </div>
+          <div class="side-panel" id="detailPanel" style="display:none">
+            <h2>📋 Incident Detail</h2>
+            <div id="detailContent"></div>
+          </div>
+        </div>
+      </div>
+    </div>
+  </div>
+
+<script>
+function toggleTheme() {
+  const d = document.documentElement;
+  const dark = d.getAttribute('data-theme') === 'dark';
+  d.setAttribute('data-theme', dark ? 'light' : 'dark');
+  document.getElementById('themeToggleBtn').textContent = dark ? '🌙' : '☀️';
+  localStorage.setItem('agentlens-theme', dark ? 'light' : 'dark');
+  drawTimeline();
+}
+(function(){const t=localStorage.getItem('agentlens-theme')||'dark';document.documentElement.setAttribute('data-theme',t);document.getElementById('themeToggleBtn').textContent=t==='dark'?'☀️':'🌙';})();
+
+const AGENTS = ['agent-alpha','agent-beta','agent-gamma','agent-delta','agent-epsilon'];
+const EVENT_TYPES = ['alert','anomaly','deployment','config','restart'];
+const SEVERITIES = ['critical','high','medium','low'];
+const SEV_COLORS = {critical:'#ff5050',high:'#ff9632',medium:'#ffc832',low:'#50b4ff'};
+const TYPE_ICONS = {alert:'🚨',anomaly:'📈',deployment:'🚀',config:'⚙️',restart:'🔄'};
+const ROOT_CAUSES = [
+  'Memory leak in inference pipeline','GPU throttling under load','Config drift after deploy',
+  'Upstream API latency spike','Token budget exhaustion','Model version mismatch',
+  'Connection pool saturation','Cache invalidation cascade','Rate limiter misconfiguration',
+  'Deadlock in async handler','SSL certificate near-expiry','Database connection timeout'
+];
+
+function genEvents(count) {
+  const now = Date.now(); const events = [];
+  for (let i = 0; i < count; i++) {
+    const t = now - Math.random() * 6 * 3600000;
+    const type = EVENT_TYPES[Math.floor(Math.random() * EVENT_TYPES.length)];
+    const sev = type === 'deployment' ? 'low' : SEVERITIES[Math.floor(Math.random() * SEVERITIES.length)];
+    events.push({ id: i, timestamp: t, type, severity: sev, agent: AGENTS[Math.floor(Math.random() * AGENTS.length)],
+      message: TYPE_ICONS[type] + ' ' + type.charAt(0).toUpperCase() + type.slice(1),
+      detail: ROOT_CAUSES[Math.floor(Math.random() * ROOT_CAUSES.length)] });
+  }
+  return events.sort((a, b) => a.timestamp - b.timestamp);
+}
+
+let allEvents = genEvents(80);
+let incidents = [];
+let selectedIncident = null;
+let monitorActive = false;
+let monitorInterval = null;
+
+const agentSet = new Set(allEvents.map(e => e.agent));
+const agentSel = document.getElementById('filterAgent');
+agentSet.forEach(a => { const o = document.createElement('option'); o.value = a; o.textContent = a; agentSel.appendChild(o); });
+
+function clusterEvents(events, windowMin) {
+  if (!events.length) return [];
+  const windowMs = windowMin * 60000; const clusters = [];
+  let cur = { events: [events[0]], start: events[0].timestamp, end: events[0].timestamp };
+  for (let i = 1; i < events.length; i++) {
+    if (events[i].timestamp - cur.end <= windowMs) { cur.events.push(events[i]); cur.end = events[i].timestamp; }
+    else { clusters.push(cur); cur = { events: [events[i]], start: events[i].timestamp, end: events[i].timestamp }; }
+  }
+  clusters.push(cur);
+  return clusters.map((c, idx) => {
+    const agents = [...new Set(c.events.map(e => e.agent))];
+    const sevOrder = { critical: 4, high: 3, medium: 2, low: 1 };
+    const maxSev = c.events.reduce((m, e) => sevOrder[e.severity] > sevOrder[m] ? e.severity : m, 'low');
+    const duration = Math.max(1, Math.round((c.end - c.start) / 60000));
+    const impact = Math.round(sevOrder[maxSev] * agents.length * Math.log2(duration + 1) * c.events.length / 2);
+    return { id: idx, events: c.events, start: c.start, end: c.end, agents, severity: maxSev, duration, impact,
+      rootCause: ROOT_CAUSES[c.events[0].id % ROOT_CAUSES.length], types: [...new Set(c.events.map(e => e.type))] };
+  });
+}
+
+function detectPatterns(incidents) {
+  const sigs = {};
+  incidents.forEach(inc => { const sig = inc.agents.sort().join(',') + '|' + inc.types.sort().join(','); sigs[sig] = (sigs[sig] || 0) + 1; });
+  return Object.entries(sigs).filter(([, c]) => c >= 2).map(([sig, count]) => {
+    const [agents, types] = sig.split('|');
+    return { agents: agents.split(','), types: types.split(','), count };
+  });
+}
+
+function getFilteredEvents() {
+  const typeF = document.getElementById('filterType').value;
+  const agentF = document.getElementById('filterAgent').value;
+  const sevF = document.getElementById('filterSeverity').value;
+  return allEvents.filter(e => (typeF === 'all' || e.type === typeF) && (agentF === 'all' || e.agent === agentF) && (sevF === 'all' || e.severity === sevF));
+}
+
+function renderStats() {
+  const critical = incidents.filter(i => i.severity === 'critical').length;
+  const totalEvents = getFilteredEvents().length;
+  const maxImpact = incidents.reduce((m, i) => Math.max(m, i.impact), 0);
+  const patterns = detectPatterns(incidents);
+  document.getElementById('statsGrid').innerHTML =
+    '<div class="stat-card"><h3>Incidents</h3><div class="value">' + incidents.length + '</div><div class="sub">' + critical + ' critical</div></div>' +
+    '<div class="stat-card"><h3>Events</h3><div class="value">' + totalEvents + '</div><div class="sub">across ' + AGENTS.length + ' agents</div></div>' +
+    '<div class="stat-card"><h3>Max Impact</h3><div class="value" style="color:' + (maxImpact > 50 ? 'var(--red)' : 'var(--yellow)') + '">' + maxImpact + '</div><div class="sub">highest score</div></div>' +
+    '<div class="stat-card"><h3>Patterns</h3><div class="value">' + patterns.length + '</div><div class="sub">' + patterns.reduce((s, p) => s + p.count, 0) + ' recurrences</div></div>';
+}
+
+function drawTimeline() {
+  const canvas = document.getElementById('timelineCanvas');
+  const ctx = canvas.getContext('2d');
+  const events = getFilteredEvents();
+  const W = canvas.width = canvas.parentElement.clientWidth;
+  const rowH = 36;
+  const H = canvas.height = Math.max(400, events.length * rowH + 80);
+  const isDark = document.documentElement.getAttribute('data-theme') === 'dark';
+  const bg = isDark ? '#1a1a2e' : '#ffffff';
+  const fg = isDark ? '#e0e0e0' : '#1a1a2e';
+  const line = isDark ? '#2a2a4a' : '#e0e0e0';
+  ctx.fillStyle = bg; ctx.fillRect(0, 0, W, H);
+  if (!events.length) { ctx.fillStyle = fg; ctx.font = '14px sans-serif'; ctx.fillText('No events match filters', W / 2 - 80, H / 2); return; }
+  const axisX = 160;
+  ctx.strokeStyle = line; ctx.lineWidth = 2;
+  ctx.beginPath(); ctx.moveTo(axisX, 30); ctx.lineTo(axisX, H - 20); ctx.stroke();
+  const eventIncident = {};
+  incidents.forEach(inc => inc.events.forEach(e => { eventIncident[e.id] = inc; }));
+  events.forEach((e, i) => {
+    const y = 50 + i * rowH;
+    const inc = eventIncident[e.id];
+    const isSelected = selectedIncident && inc && inc.id === selectedIncident.id;
+    if (isSelected) { ctx.fillStyle = isDark ? 'rgba(80,180,255,0.08)' : 'rgba(80,180,255,0.12)'; ctx.fillRect(0, y - 12, W, rowH); }
+    const d = new Date(e.timestamp);
+    ctx.fillStyle = isDark ? '#888' : '#999'; ctx.font = '11px monospace';
+    ctx.fillText(d.toLocaleTimeString([], { hour: '2-digit', minute: '2-digit', second: '2-digit' }), 10, y + 4);
+    ctx.beginPath(); ctx.arc(axisX, y, 6, 0, Math.PI * 2); ctx.fillStyle = SEV_COLORS[e.severity]; ctx.fill();
+    if (isSelected) { ctx.strokeStyle = '#50b4ff'; ctx.lineWidth = 2; ctx.stroke(); }
+    ctx.strokeStyle = line; ctx.lineWidth = 1;
+    ctx.beginPath(); ctx.moveTo(axisX + 8, y); ctx.lineTo(axisX + 20, y); ctx.stroke();
+    ctx.fillStyle = fg; ctx.font = '12px sans-serif';
+    ctx.fillText(TYPE_ICONS[e.type] + ' ' + e.agent + ' — ' + e.detail.substring(0, 50), axisX + 24, y + 4);
+    ctx.fillStyle = SEV_COLORS[e.severity]; ctx.font = 'bold 10px sans-serif';
+    ctx.fillText(e.severity.toUpperCase(), W - 60, y + 4);
+  });
+  incidents.forEach(inc => {
+    if (inc.events.length < 2) return;
+    const firstIdx = events.indexOf(inc.events[0]);
+    const lastIdx = events.indexOf(inc.events[inc.events.length - 1]);
+    if (firstIdx < 0 || lastIdx < 0) return;
+    const y1 = 50 + firstIdx * rowH, y2 = 50 + lastIdx * rowH, bx = axisX - 20;
+    ctx.strokeStyle = SEV_COLORS[inc.severity]; ctx.lineWidth = 2;
+    ctx.beginPath(); ctx.moveTo(bx + 6, y1); ctx.lineTo(bx, y1); ctx.lineTo(bx, y2); ctx.lineTo(bx + 6, y2); ctx.stroke();
+    ctx.fillStyle = SEV_COLORS[inc.severity]; ctx.font = 'bold 9px sans-serif';
+    ctx.fillText('INC-' + inc.id, bx - 35, (y1 + y2) / 2 + 3);
+  });
+}
+
+function renderIncidents() {
+  const list = document.getElementById('incidentList');
+  const maxImpact = incidents.reduce((m, i) => Math.max(m, i.impact), 0) || 1;
+  list.innerHTML = incidents.sort((a, b) => b.impact - a.impact).map(inc =>
+    '<div class="incident-card ' + (selectedIncident && selectedIncident.id === inc.id ? 'selected' : '') + '" onclick="selectIncident(' + inc.id + ')">' +
+    '<div class="ic-title"><span class="badge ' + inc.severity + '">' + inc.severity.toUpperCase() + '</span> INC-' + inc.id + ' — ' + inc.events.length + ' events</div>' +
+    '<div class="ic-meta">⏱ ' + inc.duration + ' min · Impact: ' + inc.impact + ' · ' + inc.types.map(t => TYPE_ICONS[t]).join(' ') + '</div>' +
+    '<div class="ic-meta" style="font-style:italic">💡 ' + inc.rootCause + '</div>' +
+    '<div class="ic-agents">' + inc.agents.map(a => '<span class="agent-tag">' + a + '</span>').join('') + '</div>' +
+    '<div class="impact-bar"><div class="fill" style="width:' + Math.round(inc.impact / maxImpact * 100) + '%;background:' + SEV_COLORS[inc.severity] + '"></div></div></div>'
+  ).join('');
+  document.getElementById('incidentCount').textContent = '(' + incidents.length + ')';
+}
+
+function selectIncident(id) { selectedIncident = incidents.find(i => i.id === id) || null; renderIncidents(); drawTimeline(); renderDetail(); }
+
+function renderDetail() {
+  const panel = document.getElementById('detailPanel'), content = document.getElementById('detailContent');
+  if (!selectedIncident) { panel.style.display = 'none'; return; }
+  panel.style.display = 'block'; const inc = selectedIncident;
+  content.innerHTML =
+    '<div style="margin-bottom:12px"><span class="badge ' + inc.severity + '">' + inc.severity.toUpperCase() + '</span> <strong>INC-' + inc.id + '</strong> · Impact: <strong>' + inc.impact + '</strong></div>' +
+    '<div style="font-size:0.85rem;margin-bottom:8px"><strong>Root Cause:</strong> ' + inc.rootCause + '</div>' +
+    '<div style="font-size:0.85rem;margin-bottom:8px"><strong>Duration:</strong> ' + inc.duration + ' min · <strong>Events:</strong> ' + inc.events.length + '</div>' +
+    '<div style="font-size:0.85rem;margin-bottom:12px"><strong>Agents:</strong> ' + inc.agents.join(', ') + '</div>' +
+    '<div class="detail-section"><h3>Event Log</h3>' +
+    inc.events.map(e => '<div class="event-row"><span class="event-dot" style="background:' + SEV_COLORS[e.severity] + '"></span>' +
+      '<span style="color:var(--text-secondary);font-family:monospace;font-size:0.75rem">' + new Date(e.timestamp).toLocaleTimeString() + '</span> ' +
+      TYPE_ICONS[e.type] + ' ' + e.agent + ' — <span style="color:var(--text-secondary)">' + e.detail + '</span></div>').join('') + '</div>';
+}
+
+function renderPatterns() {
+  const patterns = detectPatterns(incidents);
+  const container = document.getElementById('patternAlerts');
+  if (!patterns.length) { container.innerHTML = ''; return; }
+  container.innerHTML = patterns.map(p =>
+    '<div class="pattern-alert">⚠️ <strong>Recurring pattern (' + p.count + '×)</strong><br>Agents: ' + p.agents.join(', ') + ' · Types: ' + p.types.map(t => TYPE_ICONS[t] + ' ' + t).join(', ') + '</div>'
+  ).join('');
+}
+
+function toggleMonitor() {
+  monitorActive = !monitorActive;
+  const btn = document.getElementById('monitorBtn');
+  btn.classList.toggle('active', monitorActive);
+  btn.innerHTML = monitorActive ? '<span class="monitor-pulse"></span> Monitoring' : '📡 Auto-Monitor';
+  if (monitorActive) {
+    monitorInterval = setInterval(() => {
+      const now = Date.now(); const type = EVENT_TYPES[Math.floor(Math.random() * EVENT_TYPES.length)];
+      const sev = SEVERITIES[Math.floor(Math.random() * SEVERITIES.length)];
+      allEvents.push({ id: allEvents.length, timestamp: now, type, severity: sev,
+        agent: AGENTS[Math.floor(Math.random() * AGENTS.length)], message: TYPE_ICONS[type] + ' New ' + type,
+        detail: ROOT_CAUSES[Math.floor(Math.random() * ROOT_CAUSES.length)] });
+      allEvents.sort((a, b) => a.timestamp - b.timestamp); refresh();
+      if (sev === 'critical' || sev === 'high') { document.title = '🔴 NEW INCIDENT — AgentLens'; setTimeout(() => { document.title = 'AgentLens — Incident Timeline'; }, 3000); }
+    }, 4000);
+  } else { clearInterval(monitorInterval); }
+}
+
+function exportJSON() {
+  const data = { exported: new Date().toISOString(), incidents: incidents.map(inc => ({
+    id: 'INC-' + inc.id, severity: inc.severity, impact: inc.impact, duration_min: inc.duration,
+    root_cause: inc.rootCause, agents: inc.agents, event_types: inc.types, event_count: inc.events.length,
+    start: new Date(inc.start).toISOString(), end: new Date(inc.end).toISOString(),
+    events: inc.events.map(e => ({ timestamp: new Date(e.timestamp).toISOString(), type: e.type, severity: e.severity, agent: e.agent, detail: e.detail }))
+  })) };
+  const blob = new Blob([JSON.stringify(data, null, 2)], { type: 'application/json' });
+  const a = document.createElement('a'); a.href = URL.createObjectURL(blob);
+  a.download = 'agentlens-incidents-' + Date.now() + '.json'; a.click();
+}
+
+function refresh() {
+  const filtered = getFilteredEvents();
+  const windowMin = parseInt(document.getElementById('clusterWindow').value) || 5;
+  incidents = clusterEvents(filtered, windowMin);
+  renderStats(); renderIncidents(); renderPatterns(); drawTimeline();
+  if (selectedIncident) { selectedIncident = incidents.find(i => i.id === selectedIncident.id) || null; renderDetail(); }
+}
+
+['filterType', 'filterAgent', 'filterSeverity', 'clusterWindow'].forEach(id => {
+  document.getElementById(id).addEventListener('change', refresh);
+  if (id === 'clusterWindow') document.getElementById(id).addEventListener('input', refresh);
+});
+window.addEventListener('resize', drawTimeline);
+refresh();
+</script>
+</body>
+</html>
