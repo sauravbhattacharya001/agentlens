@@ -1,0 +1,320 @@
+<!DOCTYPE html>
+<html lang="en">
+<head>
+  <meta charset="UTF-8">
+  <meta name="viewport" content="width=device-width, initial-scale=1.0">
+  <title>AgentLens — Quota Manager</title>
+  <link rel="stylesheet" href="styles.css">
+  <style>
+    .quota-container { padding: 24px; max-width: 1400px; margin: 0 auto; }
+    .quota-header { margin-bottom: 24px; }
+    .quota-header h1 { font-size: 1.5rem; display: flex; align-items: center; gap: 10px; }
+    .quota-header p { color: var(--text-secondary); font-size: 0.85rem; margin-top: 4px; }
+    .back-link { color: var(--text-secondary); text-decoration: none; font-size: 0.85rem; }
+    .back-link:hover { color: var(--text-primary); }
+
+    .stats-grid { display: grid; grid-template-columns: repeat(4, 1fr); gap: 16px; margin-bottom: 24px; }
+    .stat-card { background: var(--bg-secondary); border: 1px solid var(--border); border-radius: var(--radius); padding: 20px; text-align: center; }
+    .stat-card h3 { font-size: 0.75rem; color: var(--text-secondary); text-transform: uppercase; letter-spacing: 0.5px; margin-bottom: 8px; }
+    .stat-card .value { font-size: 2rem; font-weight: 700; }
+    .stat-card .sub { font-size: 0.8rem; color: var(--text-secondary); margin-top: 4px; }
+
+    .gauge-row { display: grid; grid-template-columns: repeat(3, 1fr); gap: 16px; margin-bottom: 24px; }
+    .gauge-card { background: var(--bg-secondary); border: 1px solid var(--border); border-radius: var(--radius); padding: 20px; text-align: center; }
+    .gauge-card h3 { font-size: 0.85rem; margin-bottom: 12px; }
+    .gauge-card canvas { display: block; margin: 0 auto; }
+    .gauge-card .gauge-label { font-size: 0.8rem; color: var(--text-secondary); margin-top: 8px; }
+
+    .panel-row { display: grid; grid-template-columns: 2fr 1fr; gap: 16px; margin-bottom: 24px; }
+    .panel { background: var(--bg-secondary); border: 1px solid var(--border); border-radius: var(--radius); padding: 20px; }
+    .panel h2 { font-size: 1rem; margin-bottom: 16px; display: flex; align-items: center; gap: 8px; }
+
+    .agent-table { width: 100%; border-collapse: collapse; font-size: 0.85rem; }
+    .agent-table th { text-align: left; padding: 8px 12px; border-bottom: 2px solid var(--border); color: var(--text-secondary); font-weight: 600; font-size: 0.75rem; text-transform: uppercase; }
+    .agent-table td { padding: 10px 12px; border-bottom: 1px solid var(--border); }
+    .agent-table tr:hover { background: var(--bg-tertiary); }
+
+    .usage-bar-bg { width: 100%; height: 8px; background: var(--bg-tertiary); border-radius: 4px; overflow: hidden; }
+    .usage-bar-fill { height: 100%; border-radius: 4px; transition: width 0.5s ease; }
+    .usage-bar-fill.safe { background: var(--green); }
+    .usage-bar-fill.warning { background: var(--yellow, #f0ad4e); }
+    .usage-bar-fill.danger { background: var(--red); }
+
+    .status-badge { padding: 2px 8px; border-radius: 10px; font-size: 0.75rem; font-weight: 600; }
+    .status-badge.ok { background: rgba(40,167,69,0.15); color: var(--green); }
+    .status-badge.warning { background: rgba(255,193,7,0.15); color: var(--yellow, #f0ad4e); }
+    .status-badge.throttled { background: rgba(220,53,69,0.15); color: var(--red); }
+
+    .forecast-badge { font-size: 0.75rem; font-weight: 600; }
+    .forecast-badge.safe { color: var(--green); }
+    .forecast-badge.at-risk { color: var(--yellow, #f0ad4e); }
+    .forecast-badge.will-exceed { color: var(--red); }
+
+    .event-log { max-height: 400px; overflow-y: auto; font-size: 0.8rem; }
+    .event-item { padding: 8px 12px; border-bottom: 1px solid var(--border); display: flex; gap: 10px; align-items: flex-start; }
+    .event-item .event-time { color: var(--text-secondary); white-space: nowrap; font-family: monospace; font-size: 0.75rem; }
+    .event-item .event-msg { flex: 1; }
+    .event-item.throttle { border-left: 3px solid var(--red); }
+    .event-item.unthrottle { border-left: 3px solid var(--green); }
+    .event-item.warning { border-left: 3px solid var(--yellow, #f0ad4e); }
+    .event-item.optimize { border-left: 3px solid var(--blue, #007bff); }
+
+    .controls { display: flex; gap: 12px; align-items: center; margin-bottom: 24px; flex-wrap: wrap; }
+    .controls .btn { padding: 8px 16px; border-radius: var(--radius-sm); border: 1px solid var(--border); background: var(--bg-secondary); color: var(--text-primary); cursor: pointer; font-size: 0.85rem; }
+    .controls .btn:hover { background: var(--bg-tertiary); }
+    .controls .btn.active { background: var(--green); color: #fff; border-color: var(--green); }
+    .controls .btn.primary { background: var(--blue, #007bff); color: #fff; border-color: var(--blue, #007bff); }
+
+    .optimizer-results { margin-top: 16px; font-size: 0.8rem; }
+    .optimizer-results table { width: 100%; border-collapse: collapse; }
+    .optimizer-results th, .optimizer-results td { padding: 6px 10px; border-bottom: 1px solid var(--border); text-align: left; }
+    .optimizer-results .change-up { color: var(--green); }
+    .optimizer-results .change-down { color: var(--red); }
+
+    @media (max-width: 900px) {
+      .stats-grid { grid-template-columns: repeat(2, 1fr); }
+      .gauge-row { grid-template-columns: 1fr; }
+      .panel-row { grid-template-columns: 1fr; }
+    }
+  </style>
+</head>
+<body>
+  <div class="quota-container">
+    <a href="index.html" class="back-link">← Back to Dashboard</a>
+    <div class="quota-header">
+      <h1>📊 Agent Quota Manager</h1>
+      <p>Per-agent usage quotas with autonomous throttle enforcement, forecasting, and budget optimization</p>
+    </div>
+
+    <div class="controls">
+      <button class="btn" id="monitorBtn" onclick="toggleMonitor()">▶ Auto-Monitor</button>
+      <button class="btn primary" onclick="runOptimizer()">🧠 Optimize Quotas</button>
+      <button class="btn" onclick="resetAll()">🔄 Reset Usage</button>
+      <button class="btn" onclick="exportQuotas()">📥 Export JSON</button>
+      <button class="theme-toggle" onclick="toggleTheme()" title="Toggle theme" id="themeToggleBtn" style="border:1px solid var(--border);background:var(--bg-secondary);padding:8px 12px;border-radius:var(--radius-sm);cursor:pointer;">🌙</button>
+    </div>
+
+    <div class="stats-grid" id="statsGrid"></div>
+    <div class="gauge-row" id="gaugeRow">
+      <div class="gauge-card"><h3>Requests / Hour</h3><canvas id="gaugeReqs" width="180" height="180"></canvas><div class="gauge-label" id="gaugeLabelReqs"></div></div>
+      <div class="gauge-card"><h3>Tokens / Day</h3><canvas id="gaugeTokens" width="180" height="180"></canvas><div class="gauge-label" id="gaugeLabelTokens"></div></div>
+      <div class="gauge-card"><h3>Cost / Day ($)</h3><canvas id="gaugeCost" width="180" height="180"></canvas><div class="gauge-label" id="gaugeLabelCost"></div></div>
+    </div>
+
+    <div class="panel-row">
+      <div class="panel">
+        <h2>🤖 Agent Quotas & Usage</h2>
+        <table class="agent-table">
+          <thead>
+            <tr><th>Agent</th><th>Requests</th><th>Usage</th><th>Tokens</th><th>Cost</th><th>Error %</th><th>Status</th><th>Forecast</th></tr>
+          </thead>
+          <tbody id="agentTableBody"></tbody>
+        </table>
+      </div>
+      <div class="panel">
+        <h2>📜 Throttle Event Log</h2>
+        <div class="event-log" id="eventLog">
+          <div style="color:var(--text-secondary);padding:20px;text-align:center;">No events yet. Start auto-monitor to begin tracking.</div>
+        </div>
+      </div>
+    </div>
+
+    <div class="panel" id="optimizerPanel" style="display:none;">
+      <h2>🧠 Budget Allocation Optimizer</h2>
+      <p style="font-size:0.85rem;color:var(--text-secondary);margin-bottom:12px;">Suggested quota redistribution based on usage patterns to minimize throttling.</p>
+      <div class="optimizer-results" id="optimizerResults"></div>
+    </div>
+  </div>
+
+  <script>
+    function toggleTheme() {
+      const body = document.body;
+      const isDark = body.getAttribute('data-theme') === 'dark';
+      body.setAttribute('data-theme', isDark ? 'light' : 'dark');
+      document.getElementById('themeToggleBtn').textContent = isDark ? '🌙' : '☀️';
+      localStorage.setItem('agentlens-theme', isDark ? 'light' : 'dark');
+    }
+    (function() {
+      const saved = localStorage.getItem('agentlens-theme') || 'dark';
+      document.body.setAttribute('data-theme', saved);
+      document.getElementById('themeToggleBtn').textContent = saved === 'dark' ? '🌙' : '☀️';
+    })();
+
+    const agents = [
+      { name: 'ReSearchBot', reqQuota: 500, tokenQuota: 200000, costQuota: 25, errorThreshold: 5 },
+      { name: 'CodeAssist', reqQuota: 800, tokenQuota: 500000, costQuota: 60, errorThreshold: 3 },
+      { name: 'DataPipeline', reqQuota: 300, tokenQuota: 150000, costQuota: 15, errorThreshold: 8 },
+      { name: 'ChatAgent', reqQuota: 1200, tokenQuota: 800000, costQuota: 90, errorThreshold: 2 },
+      { name: 'Summarizer', reqQuota: 400, tokenQuota: 250000, costQuota: 30, errorThreshold: 5 },
+      { name: 'Classifier', reqQuota: 600, tokenQuota: 300000, costQuota: 35, errorThreshold: 4 },
+      { name: 'Embedder', reqQuota: 1000, tokenQuota: 600000, costQuota: 20, errorThreshold: 6 },
+      { name: 'Orchestrator', reqQuota: 200, tokenQuota: 100000, costQuota: 45, errorThreshold: 3 }
+    ];
+
+    agents.forEach(a => {
+      a.reqUsage = Math.floor(Math.random() * a.reqQuota * 0.7);
+      a.tokenUsage = Math.floor(Math.random() * a.tokenQuota * 0.7);
+      a.costUsage = +(Math.random() * a.costQuota * 0.7).toFixed(2);
+      a.errorRate = +(Math.random() * a.errorThreshold * 1.2).toFixed(1);
+      a.throttled = false;
+      a.reqRate = Math.floor(Math.random() * 20 + 5);
+      a.tokenRate = Math.floor(Math.random() * 5000 + 1000);
+      a.costRate = +(Math.random() * 2 + 0.3).toFixed(2);
+    });
+
+    let events = [];
+    let monitorInterval = null;
+    let monitorActive = false;
+
+    function addEvent(type, msg) {
+      events.unshift({ type, msg, ts: new Date().toLocaleTimeString() });
+      if (events.length > 200) events.pop();
+      renderEventLog();
+    }
+
+    function getQuotaPercent(usage, quota) { return Math.min((usage / quota) * 100, 100); }
+
+    function getStatusLabel(pct, throttled) {
+      if (throttled) return '<span class="status-badge throttled">🛑 Throttled</span>';
+      if (pct >= 95) return '<span class="status-badge throttled">⚠️ Throttle Soon</span>';
+      if (pct >= 80) return '<span class="status-badge warning">⚡ Warning</span>';
+      return '<span class="status-badge ok">✅ OK</span>';
+    }
+
+    function getForecast(usage, quota, rate) {
+      if (rate <= 0) return { label: 'Safe', cls: 'safe', time: '—' };
+      const remaining = quota - usage;
+      if (remaining <= 0) return { label: 'Exceeded', cls: 'will-exceed', time: 'Now' };
+      const hoursLeft = ((remaining / rate) * 3 / 3600).toFixed(1);
+      if (hoursLeft > 4) return { label: 'Safe', cls: 'safe', time: hoursLeft + 'h' };
+      if (hoursLeft > 1) return { label: 'At Risk', cls: 'at-risk', time: hoursLeft + 'h' };
+      return { label: 'Will Exceed', cls: 'will-exceed', time: hoursLeft + 'h' };
+    }
+
+    function renderStats() {
+      const totalReqs = agents.reduce((s, a) => s + a.reqUsage, 0);
+      const totalReqQuota = agents.reduce((s, a) => s + a.reqQuota, 0);
+      const totalCost = agents.reduce((s, a) => s + a.costUsage, 0);
+      const totalCostQuota = agents.reduce((s, a) => s + a.costQuota, 0);
+      const throttled = agents.filter(a => a.throttled).length;
+      const avgError = (agents.reduce((s, a) => s + a.errorRate, 0) / agents.length).toFixed(1);
+      document.getElementById('statsGrid').innerHTML = `
+        <div class="stat-card"><h3>Total Requests</h3><div class="value">${totalReqs.toLocaleString()}</div><div class="sub">of ${totalReqQuota.toLocaleString()} quota</div></div>
+        <div class="stat-card"><h3>Total Cost</h3><div class="value">$${totalCost.toFixed(2)}</div><div class="sub">of $${totalCostQuota.toFixed(2)} budget</div></div>
+        <div class="stat-card"><h3>Throttled Agents</h3><div class="value" style="color:${throttled > 0 ? 'var(--red)' : 'var(--green)'}">${throttled}</div><div class="sub">of ${agents.length} agents</div></div>
+        <div class="stat-card"><h3>Avg Error Rate</h3><div class="value">${avgError}%</div><div class="sub">fleet-wide</div></div>`;
+    }
+
+    function drawGauge(canvasId, labelId, usage, quota, unit) {
+      const canvas = document.getElementById(canvasId);
+      const ctx = canvas.getContext('2d');
+      const w = canvas.width, h = canvas.height, cx = w / 2, cy = h / 2, r = 70;
+      const pct = Math.min(usage / quota, 1);
+      ctx.clearRect(0, 0, w, h);
+      ctx.beginPath(); ctx.arc(cx, cy, r, 0.75 * Math.PI, 2.25 * Math.PI);
+      ctx.strokeStyle = getComputedStyle(document.body).getPropertyValue('--border') || '#333';
+      ctx.lineWidth = 14; ctx.lineCap = 'round'; ctx.stroke();
+      const startA = 0.75 * Math.PI;
+      ctx.beginPath(); ctx.arc(cx, cy, r, startA, startA + pct * 1.5 * Math.PI);
+      ctx.strokeStyle = pct >= 1 ? '#dc3545' : pct >= 0.8 ? '#f0ad4e' : '#28a745';
+      ctx.lineWidth = 14; ctx.lineCap = 'round'; ctx.stroke();
+      ctx.fillStyle = getComputedStyle(document.body).getPropertyValue('--text-primary') || '#fff';
+      ctx.font = 'bold 24px system-ui'; ctx.textAlign = 'center'; ctx.textBaseline = 'middle';
+      ctx.fillText(Math.round(pct * 100) + '%', cx, cy - 8);
+      ctx.font = '11px system-ui';
+      ctx.fillStyle = getComputedStyle(document.body).getPropertyValue('--text-secondary') || '#888';
+      ctx.fillText(unit, cx, cy + 16);
+      const fmt = v => typeof v === 'number' && v % 1 !== 0 ? v.toFixed(2) : Math.floor(v).toLocaleString();
+      document.getElementById(labelId).textContent = fmt(usage) + ' / ' + fmt(quota);
+    }
+
+    function renderGauges() {
+      const sum = (k) => agents.reduce((s, a) => s + a[k], 0);
+      drawGauge('gaugeReqs', 'gaugeLabelReqs', sum('reqUsage'), sum('reqQuota'), 'requests');
+      drawGauge('gaugeTokens', 'gaugeLabelTokens', sum('tokenUsage'), sum('tokenQuota'), 'tokens');
+      drawGauge('gaugeCost', 'gaugeLabelCost', sum('costUsage'), sum('costQuota'), 'USD');
+    }
+
+    function renderTable() {
+      document.getElementById('agentTableBody').innerHTML = agents.map(a => {
+        const pct = getQuotaPercent(a.reqUsage, a.reqQuota);
+        const barCls = pct >= 95 ? 'danger' : pct >= 80 ? 'warning' : 'safe';
+        const forecast = getForecast(a.reqUsage, a.reqQuota, a.reqRate);
+        const errorCls = a.errorRate > a.errorThreshold ? 'style="color:var(--red);font-weight:600"' : '';
+        return `<tr>
+          <td><strong>${a.name}</strong>${a.throttled ? ' 🛑' : ''}</td>
+          <td>${a.reqUsage.toLocaleString()} / ${a.reqQuota.toLocaleString()}</td>
+          <td><div class="usage-bar-bg"><div class="usage-bar-fill ${barCls}" style="width:${pct}%"></div></div></td>
+          <td>${(a.tokenUsage / 1000).toFixed(0)}k / ${(a.tokenQuota / 1000).toFixed(0)}k</td>
+          <td>$${a.costUsage.toFixed(2)} / $${a.costQuota}</td>
+          <td ${errorCls}>${a.errorRate}%</td>
+          <td>${getStatusLabel(pct, a.throttled)}</td>
+          <td><span class="forecast-badge ${forecast.cls}">${forecast.label} ${forecast.time !== '—' ? '(' + forecast.time + ')' : ''}</span></td>
+        </tr>`;
+      }).join('');
+    }
+
+    function renderEventLog() {
+      const el = document.getElementById('eventLog');
+      if (!events.length) { el.innerHTML = '<div style="color:var(--text-secondary);padding:20px;text-align:center;">No events yet. Start auto-monitor to begin tracking.</div>'; return; }
+      el.innerHTML = events.slice(0, 50).map(e => `<div class="event-item ${e.type}"><span class="event-time">${e.ts}</span><span class="event-msg">${e.msg}</span></div>`).join('');
+    }
+
+    function tick() {
+      agents.forEach(a => {
+        if (a.throttled) return;
+        const j = 0.5 + Math.random();
+        a.reqUsage = Math.min(a.reqUsage + Math.floor(a.reqRate * j), Math.floor(a.reqQuota * 1.05));
+        a.tokenUsage = Math.min(a.tokenUsage + Math.floor(a.tokenRate * j), Math.floor(a.tokenQuota * 1.05));
+        a.costUsage = Math.min(+(a.costUsage + a.costRate * j).toFixed(2), +(a.costQuota * 1.05).toFixed(2));
+        a.errorRate = +Math.max(0, a.errorRate + (Math.random() - 0.5) * 0.8).toFixed(1);
+        const pct = getQuotaPercent(a.reqUsage, a.reqQuota);
+        if (pct >= 100 && !a.throttled) { a.throttled = true; addEvent('throttle', `🛑 <strong>${a.name}</strong> auto-throttled — quota exceeded (${a.reqUsage}/${a.reqQuota})`); }
+        else if (pct >= 95) addEvent('warning', `⚠️ <strong>${a.name}</strong> at ${pct.toFixed(0)}% — throttle imminent`);
+        else if (pct >= 80 && Math.random() < 0.3) addEvent('warning', `⚡ <strong>${a.name}</strong> at ${pct.toFixed(0)}% of quota`);
+        if (a.errorRate > a.errorThreshold * 1.5 && Math.random() < 0.4) addEvent('warning', `🐛 <strong>${a.name}</strong> error spike: ${a.errorRate}%`);
+      });
+      renderAll();
+    }
+
+    function renderAll() { renderStats(); renderGauges(); renderTable(); }
+
+    function toggleMonitor() {
+      monitorActive = !monitorActive;
+      const btn = document.getElementById('monitorBtn');
+      if (monitorActive) { btn.textContent = '⏸ Stop Monitor'; btn.classList.add('active'); addEvent('optimize', '🟢 Auto-monitor started'); monitorInterval = setInterval(tick, 3000); }
+      else { btn.textContent = '▶ Auto-Monitor'; btn.classList.remove('active'); addEvent('optimize', '⏹ Auto-monitor stopped'); clearInterval(monitorInterval); }
+    }
+
+    function resetAll() {
+      agents.forEach(a => { a.reqUsage = 0; a.tokenUsage = 0; a.costUsage = 0; a.errorRate = +(Math.random() * 2).toFixed(1); a.throttled = false; });
+      addEvent('unthrottle', '🔄 All quotas reset — agents unthrottled'); renderAll();
+    }
+
+    function runOptimizer() {
+      document.getElementById('optimizerPanel').style.display = 'block';
+      const totalReqBudget = agents.reduce((s, a) => s + a.reqQuota, 0);
+      const totalCostBudget = agents.reduce((s, a) => s + a.costQuota, 0);
+      const totalReqRate = agents.reduce((s, a) => s + a.reqRate, 0);
+      const totalCostRate = agents.reduce((s, a) => s + parseFloat(a.costRate), 0);
+      const sugg = agents.map(a => {
+        const rShare = totalReqRate > 0 ? a.reqRate / totalReqRate : 1 / agents.length;
+        const cShare = totalCostRate > 0 ? parseFloat(a.costRate) / totalCostRate : 1 / agents.length;
+        const nR = Math.round(totalReqBudget * rShare * 1.15), nC = +(totalCostBudget * cShare * 1.15).toFixed(2);
+        return { name: a.name, oldReq: a.reqQuota, newReq: nR, reqD: nR - a.reqQuota, oldCost: a.costQuota, newCost: nC, costD: +(nC - a.costQuota).toFixed(2) };
+      });
+      document.getElementById('optimizerResults').innerHTML = `<table><thead><tr><th>Agent</th><th>Req Quota</th><th>Suggested</th><th>Δ</th><th>Cost Quota</th><th>Suggested</th><th>Δ</th></tr></thead><tbody>${sugg.map(s => `<tr><td><strong>${s.name}</strong></td><td>${s.oldReq.toLocaleString()}</td><td>${s.newReq.toLocaleString()}</td><td class="${s.reqD >= 0 ? 'change-up' : 'change-down'}">${s.reqD >= 0 ? '+' : ''}${s.reqD.toLocaleString()}</td><td>$${s.oldCost}</td><td>$${s.newCost}</td><td class="${s.costD >= 0 ? 'change-up' : 'change-down'}">${s.costD >= 0 ? '+' : ''}$${s.costD}</td></tr>`).join('')}</tbody></table><p style="margin-top:12px;color:var(--text-secondary);font-size:0.8rem;">💡 Based on consumption rates with 15% headroom.</p>`;
+      addEvent('optimize', '🧠 Budget optimizer suggested redistribution for ' + agents.length + ' agents');
+    }
+
+    function exportQuotas() {
+      const data = agents.map(a => ({ name: a.name, reqQuota: a.reqQuota, tokenQuota: a.tokenQuota, costQuota: a.costQuota, reqUsage: a.reqUsage, tokenUsage: a.tokenUsage, costUsage: a.costUsage, errorRate: a.errorRate, throttled: a.throttled }));
+      const blob = new Blob([JSON.stringify({ agents: data, events: events.slice(0, 50), exportedAt: new Date().toISOString() }, null, 2)], { type: 'application/json' });
+      const url = URL.createObjectURL(blob); const a = document.createElement('a'); a.href = url; a.download = 'agentlens-quotas.json'; a.click(); URL.revokeObjectURL(url);
+      addEvent('optimize', '📥 Quota data exported');
+    }
+
+    renderAll(); renderEventLog();
+  </script>
+</body>
+</html>
