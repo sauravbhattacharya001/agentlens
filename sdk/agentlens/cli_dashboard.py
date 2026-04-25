@@ -10,6 +10,7 @@ import json
 from typing import Any
 
 from agentlens.cli_common import get_client as _get_client
+from agentlens.exporter import _escape
 
 
 def cmd_dashboard(args: argparse.Namespace) -> None:
@@ -130,18 +131,18 @@ def _render_html(sessions: list[dict], summary: dict[str, Any], endpoint: str) -
     for r in rows[:50]:
         css = ' class="error"' if r["status"] in ("error", "failed") else ""
         table_html += (
-            f'<tr{css}><td>{r["id"][:16]}</td><td>{r["agent"]}</td>'
-            f'<td>{r["status"]}</td><td>{r["events"]}</td>'
+            f'<tr{css}><td>{_escape(str(r["id"][:16]))}</td><td>{_escape(str(r["agent"]))}</td>'
+            f'<td>{_escape(str(r["status"]))}</td><td>{r["events"]}</td>'
             f'<td>{r["tokens"]:,}</td><td>${r["cost"]:.4f}</td>'
-            f'<td>{r["created"][:19]}</td></tr>\n'
+            f'<td>{_escape(str(r["created"][:19]))}</td></tr>\n'
         )
 
     now_str = datetime.now(timezone.utc).strftime("%Y-%m-%d %H:%M UTC")
     error_rate = (error_count / len(sessions) * 100) if sessions else 0
 
     return _DASHBOARD_TEMPLATE.format(
-        now_str=now_str,
-        endpoint=endpoint,
+        now_str=_escape(now_str),
+        endpoint=_escape(endpoint),
         session_count=len(sessions),
         total_events=f"{total_events:,}",
         total_tokens=f"{total_tokens:,}",
