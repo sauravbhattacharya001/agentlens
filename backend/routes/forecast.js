@@ -2,19 +2,16 @@ const express = require("express");
 const { getDb } = require("../db");
 const { wrapRoute, parseDays, daysAgoCutoff } = require("../lib/request-helpers");
 const { loadPricingMap, computeCost } = require("../lib/pricing");
+const { createLazyStatements } = require("../lib/lazy-statements");
+const { round } = require("../lib/stats");
 
 const router = express.Router();
 
 // ── Cached prepared statements for forecast queries ─────────────
-// Pre-compile all 4 filter variants (none, agent-only, model-only, both)
-// once per process lifetime, avoiding repeated SQL compilation on every
-// request — same pattern used by analytics.js getPerfStatements().
-let _forecastStmts = null;
-
-function getForecastStatements() {
-  if (_forecastStmts) return _forecastStmts;
-  const db = getDb();
-
+// Uses createLazyStatements for consistent lazy-init pattern across
+// all route files. Pre-compiles all 4 filter variants (none,
+// agent-only, model-only, both) once per process lifetime.
+const getForecastStatements = createLazyStatements((db) => {
   const baseSelect = `
     SELECT
       DATE(e.timestamp) AS date,
@@ -57,9 +54,7 @@ function getForecastStatements() {
       agent: db.prepare(`SELECT e.model, SUM(e.tokens_in) AS tokens_in, SUM(e.tokens_out) AS tokens_out, COUNT(*) AS event_count, COUNT(DISTINCT e.session_id) AS session_count FROM events e JOIN sessions s ON e.session_id = s.session_id WHERE e.timestamp >= datetime('now', '-' || ? || ' days') AND s.agent_name = ? GROUP BY e.model ORDER BY tokens_in + tokens_out DESC`),
     },
   };
-
-  return _forecastStmts;
-}
+});
 
 // ── Helpers ─────────────────────────────────────────────────────
 
@@ -263,11 +258,6 @@ function detectTrend(values, regression) {
   if (pct > 5) return { trend: "increasing", pctPerDay: round(pct, 2) };
   if (pct < -5) return { trend: "decreasing", pctPerDay: round(pct, 2) };
   return { trend: "stable", pctPerDay: round(pct, 2) };
-}
-
-function round(val, decimals) {
-  const factor = 10 ** (decimals || 2);
-  return Math.round(val * factor) / factor;
 }
 
 // ── Routes ──────────────────────────────────────────────────────

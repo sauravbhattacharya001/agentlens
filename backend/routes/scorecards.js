@@ -1,6 +1,7 @@
 const express = require("express");
 const { wrapRoute, parseDays, daysAgoCutoff } = require("../lib/request-helpers");
 const { createLazyStatements } = require("../lib/lazy-statements");
+const { round2, clamp } = require("../lib/stats");
 
 const router = express.Router();
 
@@ -27,9 +28,6 @@ function gradeColor(grade) {
   if (grade.startsWith("D")) return "#f97316";
   return "#ef4444";
 }
-
-function clamp(v, lo, hi) { return Math.max(lo, Math.min(hi, v)); }
-function round2(v) { return Math.round(v * 100) / 100; }
 
 // ── Cached prepared statements for scorecards ───────────────────────
 // Uses createLazyStatements for consistent lazy-init pattern across

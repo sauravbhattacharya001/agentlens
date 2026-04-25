@@ -117,10 +117,34 @@ function round2(n) {
   return Math.round(n * 100) / 100;
 }
 
+/**
+ * Round to an arbitrary number of decimal places.
+ * @param {number} val - Value to round.
+ * @param {number} [decimals=2] - Number of decimal places.
+ * @returns {number}
+ */
+function round(val, decimals) {
+  const factor = 10 ** (decimals || 2);
+  return Math.round(val * factor) / factor;
+}
+
+/**
+ * Clamp a value between a lower and upper bound.
+ * @param {number} v - Value to clamp.
+ * @param {number} lo - Lower bound.
+ * @param {number} hi - Upper bound.
+ * @returns {number}
+ */
+function clamp(v, lo, hi) {
+  return Math.max(lo, Math.min(hi, v));
+}
+
 module.exports = {
   percentile,
   latencyStats,
   groupEventStats,
   buildGroupPerf,
   round2,
+  round,
+  clamp,
 };
