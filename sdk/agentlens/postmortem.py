@@ -583,22 +583,30 @@ class PostmortemGenerator:
         else:
             severity = Severity.SEV4
 
+        # Single-pass aggregation over errors — replaces 5 separate
+        # iterations (tool/model set-building + 3 sum() + 1 any()).
         affected_tools: set[str] = set()
         affected_models: set[str] = set()
+        downtime = 0.0
+        tokens_in_w = 0
+        tokens_out_w = 0
+        user_facing = False
+        _user_facing_types = frozenset(("tool_error", "agent_error", "error"))
         for e in errors:
             tc = e.get("tool_call", {})
             if isinstance(tc, dict) and tc.get("tool_name"):
                 affected_tools.add(tc["tool_name"])
-            if e.get("model"):
-                affected_models.add(e["model"])
-
-        downtime = sum(e.get("duration_ms", 0) or 0 for e in errors)
-        tokens_in_w = sum(e.get("tokens_in", 0) or 0 for e in errors)
-        tokens_out_w = sum(e.get("tokens_out", 0) or 0 for e in errors)
+            m = e.get("model")
+            if m:
+                affected_models.add(m)
+            downtime += e.get("duration_ms", 0) or 0
+            tokens_in_w += e.get("tokens_in", 0) or 0
+            tokens_out_w += e.get("tokens_out", 0) or 0
+            if not user_facing and e.get("event_type") in _user_facing_types:
+                user_facing = True
         tokens_wasted = tokens_in_w + tokens_out_w
         cost = (tokens_in_w / 1000 * self.config.cost_per_1k_input
                 + tokens_out_w / 1000 * self.config.cost_per_1k_output)
-        user_facing = any(e.get("event_type") in ("tool_error", "agent_error", "error") for e in errors)
 
         return ImpactAssessment(
             severity=severity, error_count=error_count, total_events=total,
