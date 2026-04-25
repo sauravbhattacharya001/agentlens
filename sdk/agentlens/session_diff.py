@@ -272,6 +272,28 @@ def _session_duration_ms(s: Session) -> float | None:
     return total if total else None
 
 
+def _event_key(e: AgentEvent) -> str:
+    """Compute a structural key for event alignment."""
+    if e.tool_call:
+        return f"{e.event_type}:{e.tool_call.tool_name}"
+    return e.event_type
+
+
+def _diff_event_pair(b: AgentEvent, c: AgentEvent) -> dict[str, Any]:
+    """Compute field-level changes between two matched events."""
+    changes: dict[str, Any] = {}
+    if b.tokens_in != c.tokens_in:
+        changes["tokens_in"] = f"{b.tokens_in}→{c.tokens_in}"
+    if b.tokens_out != c.tokens_out:
+        changes["tokens_out"] = f"{b.tokens_out}→{c.tokens_out}"
+    if b.model != c.model:
+        changes["model"] = f"{b.model}→{c.model}"
+    if b.duration_ms and c.duration_ms:
+        if abs(b.duration_ms - c.duration_ms) > 10:
+            changes["duration_ms"] = f"{b.duration_ms:.0f}→{c.duration_ms:.0f}"
+    return changes
+
+
 def _align_events(
     baseline: list[AgentEvent],
     candidate: list[AgentEvent],
@@ -280,59 +302,112 @@ def _align_events(
 
     Events are matched by event_type (and tool name if present) in order.
     Unmatched events are marked as added/removed.
+
+    Performance notes vs previous implementation:
+    - Pre-computes event keys once (O(n+m)) instead of recomputing
+      _key() per DP cell and again during backtracking — eliminates
+      O(n·m) redundant string formatting and attribute lookups.
+    - Fast path for identical key sequences: when both sessions have
+      the same event structure (common in A/B tests and regression
+      checks), skips the O(n·m) DP entirely and runs in O(n).
+    - Strips common prefix and suffix before running DP, reducing the
+      effective problem size for sessions that diverge only in the
+      middle (e.g. an extra retry or tool call).
     """
-
-    def _key(e: AgentEvent) -> str:
-        if e.tool_call:
-            return f"{e.event_type}:{e.tool_call.tool_name}"
-        return e.event_type
-
-    # LCS via DP
     n, m = len(baseline), len(candidate)
-    dp = [[0] * (m + 1) for _ in range(n + 1)]
-    for i in range(n - 1, -1, -1):
-        for j in range(m - 1, -1, -1):
-            if _key(baseline[i]) == _key(candidate[j]):
-                dp[i][j] = dp[i + 1][j + 1] + 1
-            else:
-                dp[i][j] = max(dp[i + 1][j], dp[i][j + 1])
 
-    pairs: list[EventPair] = []
-    i, j = 0, 0
-    while i < n and j < m:
-        if _key(baseline[i]) == _key(candidate[j]):
-            changes: dict[str, Any] = {}
-            if baseline[i].tokens_in != candidate[j].tokens_in:
-                changes["tokens_in"] = f"{baseline[i].tokens_in}→{candidate[j].tokens_in}"
-            if baseline[i].tokens_out != candidate[j].tokens_out:
-                changes["tokens_out"] = f"{baseline[i].tokens_out}→{candidate[j].tokens_out}"
-            if baseline[i].model != candidate[j].model:
-                changes["model"] = f"{baseline[i].model}→{candidate[j].model}"
-            if baseline[i].duration_ms and candidate[j].duration_ms:
-                if abs(baseline[i].duration_ms - candidate[j].duration_ms) > 10:
-                    changes["duration_ms"] = f"{baseline[i].duration_ms:.0f}→{candidate[j].duration_ms:.0f}"
+    # ── Pre-compute keys once: O(n + m) ──
+    b_keys = [_event_key(e) for e in baseline]
+    c_keys = [_event_key(e) for e in candidate]
+
+    # ── Fast path: identical key sequences → O(n), skip DP entirely ──
+    if b_keys == c_keys:
+        pairs: list[EventPair] = []
+        for bi, ci in zip(baseline, candidate):
+            changes = _diff_event_pair(bi, ci)
             status = AlignmentStatus.MODIFIED if changes else AlignmentStatus.MATCHED
-            pairs.append(EventPair(baseline=baseline[i], candidate=candidate[j],
+            pairs.append(EventPair(baseline=bi, candidate=ci,
+                                   status=status, changes=changes))
+        return pairs
+
+    # ── Strip common prefix and suffix to shrink the DP problem ──
+    prefix_len = 0
+    limit = min(n, m)
+    while prefix_len < limit and b_keys[prefix_len] == c_keys[prefix_len]:
+        prefix_len += 1
+
+    suffix_len = 0
+    while (suffix_len < (limit - prefix_len)
+           and b_keys[n - 1 - suffix_len] == c_keys[m - 1 - suffix_len]):
+        suffix_len += 1
+
+    # The "core" sub-sequences that actually need LCS alignment
+    b_core = b_keys[prefix_len: n - suffix_len]
+    c_core = c_keys[prefix_len: m - suffix_len]
+    cn, cm = len(b_core), len(c_core)
+
+    # ── LCS DP on the reduced core ──
+    dp = [[0] * (cm + 1) for _ in range(cn + 1)]
+    for i in range(cn - 1, -1, -1):
+        dp_i = dp[i]
+        dp_i1 = dp[i + 1]
+        bk = b_core[i]
+        for j in range(cm - 1, -1, -1):
+            if bk == c_core[j]:
+                dp_i[j] = dp_i1[j + 1] + 1
+            else:
+                a, b_val = dp_i1[j], dp_i[j + 1]
+                dp_i[j] = a if a >= b_val else b_val
+
+    # ── Build result: prefix + core alignment + suffix ──
+    pairs = []
+
+    # Prefix pairs (always matched)
+    for idx in range(prefix_len):
+        changes = _diff_event_pair(baseline[idx], candidate[idx])
+        status = AlignmentStatus.MODIFIED if changes else AlignmentStatus.MATCHED
+        pairs.append(EventPair(baseline=baseline[idx], candidate=candidate[idx],
+                               status=status, changes=changes))
+
+    # Core backtracking using pre-computed keys
+    b_off = prefix_len
+    c_off = prefix_len
+    i, j = 0, 0
+    while i < cn and j < cm:
+        if b_core[i] == c_core[j]:
+            changes = _diff_event_pair(baseline[b_off + i], candidate[c_off + j])
+            status = AlignmentStatus.MODIFIED if changes else AlignmentStatus.MATCHED
+            pairs.append(EventPair(baseline=baseline[b_off + i],
+                                   candidate=candidate[c_off + j],
                                    status=status, changes=changes))
             i += 1
             j += 1
         elif dp[i + 1][j] >= dp[i][j + 1]:
-            pairs.append(EventPair(baseline=baseline[i], candidate=None,
+            pairs.append(EventPair(baseline=baseline[b_off + i], candidate=None,
                                    status=AlignmentStatus.REMOVED))
             i += 1
         else:
-            pairs.append(EventPair(baseline=None, candidate=candidate[j],
+            pairs.append(EventPair(baseline=None, candidate=candidate[c_off + j],
                                    status=AlignmentStatus.ADDED))
             j += 1
 
-    while i < n:
-        pairs.append(EventPair(baseline=baseline[i], candidate=None,
+    while i < cn:
+        pairs.append(EventPair(baseline=baseline[b_off + i], candidate=None,
                                status=AlignmentStatus.REMOVED))
         i += 1
-    while j < m:
-        pairs.append(EventPair(baseline=None, candidate=candidate[j],
+    while j < cm:
+        pairs.append(EventPair(baseline=None, candidate=candidate[c_off + j],
                                status=AlignmentStatus.ADDED))
         j += 1
+
+    # Suffix pairs (always matched)
+    for idx in range(suffix_len):
+        bi = n - suffix_len + idx
+        ci = m - suffix_len + idx
+        changes = _diff_event_pair(baseline[bi], candidate[ci])
+        status = AlignmentStatus.MODIFIED if changes else AlignmentStatus.MATCHED
+        pairs.append(EventPair(baseline=baseline[bi], candidate=candidate[ci],
+                               status=status, changes=changes))
 
     return pairs
 
