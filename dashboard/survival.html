@@ -1,0 +1,518 @@
+<!DOCTYPE html>
+<html lang="en">
+<head>
+  <meta charset="UTF-8">
+  <meta name="viewport" content="width=device-width, initial-scale=1.0">
+  <title>AgentLens — Survival Analysis</title>
+  <link rel="stylesheet" href="styles.css">
+  <style>
+    .survival-page { padding: 20px; max-width: 1400px; margin: 0 auto; }
+    .controls-bar { display: flex; gap: 12px; align-items: center; margin-bottom: 20px; flex-wrap: wrap; }
+    .section-title { font-size: 20px; font-weight: bold; margin-bottom: 16px; }
+    .card { background: var(--card-bg, #1e1e2e); border-radius: 12px; padding: 16px; margin-bottom: 16px; border: 1px solid var(--border, #333); }
+    .card h3 { margin: 0 0 12px 0; font-size: 16px; }
+    .metrics-grid { display: grid; grid-template-columns: repeat(auto-fill, minmax(200px, 1fr)); gap: 16px; margin-bottom: 20px; }
+    .metric-card { background: var(--card-bg, #1e1e2e); border-radius: 12px; padding: 16px; text-align: center; border: 1px solid var(--border, #333); }
+    .metric-value { font-size: 32px; font-weight: bold; }
+    .metric-label { font-size: 12px; opacity: 0.7; margin-top: 4px; }
+    .metric-trend { font-size: 13px; margin-top: 6px; }
+    .chart-container { position: relative; margin-bottom: 16px; }
+    .chart-container canvas { width: 100%; border-radius: 8px; }
+    .fleet-table { width: 100%; border-collapse: collapse; font-size: 13px; }
+    .fleet-table th, .fleet-table td { padding: 8px 12px; text-align: left; border-bottom: 1px solid var(--border, #333); }
+    .fleet-table th { font-weight: 600; opacity: 0.7; font-size: 11px; text-transform: uppercase; }
+    .fleet-table tr:hover { background: rgba(255,255,255,0.03); }
+    .risk-badge { padding: 2px 8px; border-radius: 10px; font-size: 11px; font-weight: 600; }
+    .risk-critical { background: #ff4444; color: #fff; }
+    .risk-high { background: #ff8800; color: #fff; }
+    .risk-medium { background: #ffcc00; color: #222; }
+    .risk-low { background: #44cc44; color: #fff; }
+    .rec-item { padding: 8px 0; font-size: 14px; border-bottom: 1px solid var(--border, #333); }
+    .rec-item:last-child { border-bottom: none; }
+    .rec-priority { display: inline-block; width: 8px; height: 8px; border-radius: 50%; margin-right: 8px; }
+    .cohort-grid { display: grid; grid-template-columns: repeat(auto-fill, minmax(300px, 1fr)); gap: 16px; margin-bottom: 20px; }
+    .auto-toggle { display: flex; align-items: center; gap: 6px; cursor: pointer; font-size: 14px; }
+    .auto-toggle input { cursor: pointer; }
+    .log-feed { max-height: 200px; overflow-y: auto; font-size: 12px; font-family: monospace; background: rgba(0,0,0,0.2); border-radius: 8px; padding: 10px; }
+    .log-entry { padding: 2px 0; opacity: 0.8; }
+    :root { --card-bg: #1e1e2e; --border: #333; --text: #e0e0e0; }
+    @media (prefers-color-scheme: light) { :root { --card-bg: #fff; --border: #ddd; --text: #222; } }
+  </style>
+</head>
+<body>
+  <div id="app">
+    <header class="header">
+      <div class="header-left">
+        <a href="index.html" style="text-decoration:none"><h1 class="logo">🔍 AgentLens</h1></a>
+        <span class="tagline">Agent Survival Analysis</span>
+      </div>
+      <div class="header-right">
+        <a href="index.html" class="btn btn-alert-header" style="text-decoration:none">📊 Dashboard</a>
+        <a href="topology.html" class="btn btn-alert-header" style="text-decoration:none">🗺️ Topology</a>
+        <a href="resource-optimizer.html" class="btn btn-alert-header" style="text-decoration:none">⚡ Resources</a>
+        <a href="mood-ring.html" class="btn btn-alert-header" style="text-decoration:none">💍 Mood Ring</a>
+        <button class="theme-toggle" onclick="toggleTheme()" title="Toggle theme" id="themeToggleBtn">🌙</button>
+      </div>
+    </header>
+
+    <main class="survival-page">
+      <div class="controls-bar">
+        <select id="cohortSelect" class="select-input" onchange="updateAll()">
+          <option value="all">All Agents</option>
+          <option value="by-version">By Version</option>
+          <option value="by-region">By Region</option>
+          <option value="by-model">By Model</option>
+        </select>
+        <select id="timeWindow" class="select-input" onchange="updateAll()">
+          <option value="7">Last 7 Days</option>
+          <option value="30" selected>Last 30 Days</option>
+          <option value="90">Last 90 Days</option>
+        </select>
+        <label class="auto-toggle">
+          <input type="checkbox" id="autoMonitor" onchange="toggleAutoMonitor()">
+          🔄 Auto-Monitor
+        </label>
+        <button class="btn btn-secondary" onclick="exportJSON()">📥 Export JSON</button>
+      </div>
+
+      <!-- Key Metrics -->
+      <div class="metrics-grid" id="metricsGrid"></div>
+
+      <!-- Kaplan-Meier Survival Curve -->
+      <div class="card">
+        <h3>📉 Kaplan-Meier Survival Curve</h3>
+        <div class="chart-container">
+          <canvas id="kmChart" width="900" height="350"></canvas>
+        </div>
+      </div>
+
+      <!-- Hazard Rate + Reliability -->
+      <div class="cohort-grid">
+        <div class="card">
+          <h3>⚠️ Hazard Rate Over Time</h3>
+          <canvas id="hazardChart" width="400" height="250"></canvas>
+        </div>
+        <div class="card">
+          <h3>🛡️ Reliability Forecast</h3>
+          <canvas id="reliabilityChart" width="400" height="250"></canvas>
+        </div>
+      </div>
+
+      <!-- Fleet Risk Table -->
+      <div class="card">
+        <h3>🏥 Fleet Health & Risk Assessment</h3>
+        <table class="fleet-table">
+          <thead>
+            <tr>
+              <th>Agent</th>
+              <th>Uptime</th>
+              <th>Sessions</th>
+              <th>Failures</th>
+              <th>MTBF</th>
+              <th>Survival %</th>
+              <th>Risk</th>
+              <th>Next Maintenance</th>
+            </tr>
+          </thead>
+          <tbody id="fleetBody"></tbody>
+        </table>
+      </div>
+
+      <!-- Proactive Recommendations -->
+      <div class="card">
+        <h3>🧠 Proactive Maintenance Recommendations</h3>
+        <div id="recommendations"></div>
+      </div>
+
+      <!-- Auto-Monitor Log -->
+      <div class="card" id="monitorCard" style="display:none">
+        <h3>🔄 Auto-Monitor Activity Log</h3>
+        <div class="log-feed" id="logFeed"></div>
+      </div>
+    </main>
+  </div>
+
+  <script>
+    // ========== Theme ==========
+    function toggleTheme() {
+      const body = document.body;
+      body.classList.toggle('light-theme');
+      const btn = document.getElementById('themeToggleBtn');
+      btn.textContent = body.classList.contains('light-theme') ? '☀️' : '🌙';
+      localStorage.setItem('theme', body.classList.contains('light-theme') ? 'light' : 'dark');
+    }
+    if (localStorage.getItem('theme') === 'light') { document.body.classList.add('light-theme'); document.getElementById('themeToggleBtn').textContent = '☀️'; }
+
+    // ========== Simulated Fleet Data ==========
+    const AGENTS = ['agent-alpha','agent-beta','agent-gamma','agent-delta','agent-epsilon','agent-zeta','agent-eta','agent-theta'];
+    const VERSIONS = ['v2.1','v2.2','v2.3'];
+    const REGIONS = ['us-west','us-east','eu-central','ap-south'];
+    const MODELS = ['gpt-4o','claude-3','gemini-pro'];
+
+    function seededRandom(seed) {
+      let s = seed;
+      return function() { s = (s * 16807 + 0) % 2147483647; return s / 2147483647; };
+    }
+
+    function generateFleetData(days) {
+      const rand = seededRandom(42 + days);
+      return AGENTS.map((name, i) => {
+        const totalSessions = Math.floor(50 + rand() * 300);
+        const failureRate = 0.02 + rand() * 0.15;
+        const failures = Math.floor(totalSessions * failureRate);
+        const uptimeHrs = Math.floor(days * 24 * (0.85 + rand() * 0.14));
+        const mtbf = failures > 0 ? Math.floor(uptimeHrs / failures) : uptimeHrs;
+        const survival = Math.max(0.4, 1 - failureRate - rand() * 0.1);
+        const version = VERSIONS[i % VERSIONS.length];
+        const region = REGIONS[i % REGIONS.length];
+        const model = MODELS[i % MODELS.length];
+        const maintenanceDays = Math.floor(1 + rand() * 14);
+        return { name, totalSessions, failures, uptimeHrs, mtbf, survival, failureRate, version, region, model, maintenanceDays };
+      });
+    }
+
+    // ========== Kaplan-Meier Estimator ==========
+    function computeKM(fleet, days) {
+      const rand = seededRandom(77 + days);
+      const timePoints = [];
+      for (let t = 0; t <= days; t++) timePoints.push(t);
+
+      const curves = {};
+      const cohort = document.getElementById('cohortSelect').value;
+
+      function getGroup(agent) {
+        if (cohort === 'by-version') return agent.version;
+        if (cohort === 'by-region') return agent.region;
+        if (cohort === 'by-model') return agent.model;
+        return 'all';
+      }
+
+      fleet.forEach(a => {
+        const g = getGroup(a);
+        if (!curves[g]) curves[g] = [];
+      });
+
+      for (const g of Object.keys(curves)) {
+        const agents = fleet.filter(a => getGroup(a) === g);
+        const avgFailRate = agents.reduce((s, a) => s + a.failureRate, 0) / agents.length;
+        let survival = 1.0;
+        curves[g] = timePoints.map(t => {
+          const hazard = avgFailRate / days * (1 + 0.3 * Math.sin(t / days * Math.PI));
+          survival *= (1 - hazard);
+          return { t, survival: Math.max(0, survival) };
+        });
+      }
+      return curves;
+    }
+
+    // ========== Hazard Rate ==========
+    function computeHazard(fleet, days) {
+      const points = [];
+      const avgFailRate = fleet.reduce((s, a) => s + a.failureRate, 0) / fleet.length;
+      for (let t = 0; t <= days; t++) {
+        const h = avgFailRate / days * (1 + 0.5 * Math.sin(t / days * Math.PI * 2)) * 100;
+        points.push({ t, hazard: Math.max(0.01, h) });
+      }
+      return points;
+    }
+
+    // ========== Reliability Forecast ==========
+    function computeReliability(fleet, days) {
+      const points = [];
+      const avgMTBF = fleet.reduce((s, a) => s + a.mtbf, 0) / fleet.length;
+      for (let t = 0; t <= days * 1.5; t++) {
+        const rel = Math.exp(-t / (avgMTBF * 0.5));
+        points.push({ t, reliability: rel, forecast: t > days });
+      }
+      return points;
+    }
+
+    // ========== Drawing ==========
+    function drawKM(canvas, curves, days) {
+      const ctx = canvas.getContext('2d');
+      const W = canvas.width, H = canvas.height;
+      const pad = { top: 20, right: 20, bottom: 40, left: 60 };
+      const cw = W - pad.left - pad.right, ch = H - pad.top - pad.bottom;
+      ctx.clearRect(0, 0, W, H);
+
+      ctx.strokeStyle = 'rgba(255,255,255,0.08)';
+      ctx.lineWidth = 1;
+      for (let i = 0; i <= 4; i++) {
+        const y = pad.top + ch * i / 4;
+        ctx.beginPath(); ctx.moveTo(pad.left, y); ctx.lineTo(W - pad.right, y); ctx.stroke();
+      }
+
+      ctx.fillStyle = 'rgba(255,255,255,0.6)';
+      ctx.font = '11px sans-serif';
+      ctx.textAlign = 'right';
+      for (let i = 0; i <= 4; i++) {
+        const y = pad.top + ch * i / 4;
+        ctx.fillText((100 - i * 25) + '%', pad.left - 8, y + 4);
+      }
+      ctx.textAlign = 'center';
+      for (let i = 0; i <= 5; i++) {
+        const x = pad.left + cw * i / 5;
+        ctx.fillText(Math.round(days * i / 5) + 'd', x, H - 8);
+      }
+      ctx.fillText('Survival Probability', pad.left + cw / 2, H - 22);
+
+      const COLORS = ['#4fc3f7','#ff7043','#66bb6a','#ab47bc','#ffa726','#26c6da','#ef5350','#9ccc65'];
+      const groups = Object.keys(curves);
+      groups.forEach((g, gi) => {
+        const pts = curves[g];
+        ctx.strokeStyle = COLORS[gi % COLORS.length];
+        ctx.lineWidth = 2.5;
+        ctx.beginPath();
+        pts.forEach((p, i) => {
+          const x = pad.left + (p.t / days) * cw;
+          const y = pad.top + (1 - p.survival) * ch;
+          if (i === 0) ctx.moveTo(x, y); else ctx.lineTo(x, y);
+        });
+        ctx.stroke();
+
+        ctx.fillStyle = COLORS[gi % COLORS.length] + '18';
+        ctx.beginPath();
+        pts.forEach((p, i) => {
+          const x = pad.left + (p.t / days) * cw;
+          const y = pad.top + (1 - Math.min(1, p.survival + 0.05)) * ch;
+          if (i === 0) ctx.moveTo(x, y); else ctx.lineTo(x, y);
+        });
+        for (let i = pts.length - 1; i >= 0; i--) {
+          const p = pts[i];
+          const x = pad.left + (p.t / days) * cw;
+          const y = pad.top + (1 - Math.max(0, p.survival - 0.05)) * ch;
+          ctx.lineTo(x, y);
+        }
+        ctx.closePath(); ctx.fill();
+      });
+
+      ctx.font = '12px sans-serif';
+      groups.forEach((g, gi) => {
+        const lx = pad.left + 10 + gi * 120;
+        ctx.fillStyle = COLORS[gi % COLORS.length];
+        ctx.fillRect(lx, pad.top + 4, 14, 10);
+        ctx.fillStyle = 'rgba(255,255,255,0.8)';
+        ctx.textAlign = 'left';
+        ctx.fillText(g, lx + 18, pad.top + 13);
+      });
+    }
+
+    function drawLineChart(canvas, points, key, color, forecastKey) {
+      const ctx = canvas.getContext('2d');
+      const W = canvas.width, H = canvas.height;
+      const pad = { top: 15, right: 15, bottom: 30, left: 50 };
+      const cw = W - pad.left - pad.right, ch = H - pad.top - pad.bottom;
+      ctx.clearRect(0, 0, W, H);
+
+      const maxT = points[points.length - 1].t;
+      const maxV = Math.max(...points.map(p => p[key])) * 1.1;
+
+      ctx.strokeStyle = 'rgba(255,255,255,0.08)';
+      for (let i = 0; i <= 3; i++) {
+        const y = pad.top + ch * i / 3;
+        ctx.beginPath(); ctx.moveTo(pad.left, y); ctx.lineTo(W - pad.right, y); ctx.stroke();
+      }
+
+      ctx.fillStyle = 'rgba(255,255,255,0.6)';
+      ctx.font = '10px sans-serif';
+      ctx.textAlign = 'right';
+      for (let i = 0; i <= 3; i++) {
+        const y = pad.top + ch * i / 3;
+        const v = maxV * (1 - i / 3);
+        ctx.fillText(v < 1 ? (v * 100).toFixed(0) + '%' : v.toFixed(1), pad.left - 6, y + 3);
+      }
+
+      ctx.lineWidth = 2;
+      ctx.beginPath();
+      let switchedToForecast = false;
+      points.forEach((p, i) => {
+        const x = pad.left + (p.t / maxT) * cw;
+        const y = pad.top + (1 - p[key] / maxV) * ch;
+        if (i === 0) ctx.moveTo(x, y); else ctx.lineTo(x, y);
+        if (forecastKey && p[forecastKey] && !switchedToForecast) {
+          ctx.strokeStyle = color;
+          ctx.stroke();
+          ctx.beginPath();
+          ctx.setLineDash([5, 5]);
+          ctx.moveTo(x, y);
+          switchedToForecast = true;
+        }
+      });
+      ctx.strokeStyle = color;
+      ctx.stroke();
+      ctx.setLineDash([]);
+
+      ctx.fillStyle = color + '20';
+      ctx.beginPath();
+      points.forEach((p, i) => {
+        const x = pad.left + (p.t / maxT) * cw;
+        const y = pad.top + (1 - p[key] / maxV) * ch;
+        if (i === 0) ctx.moveTo(x, y); else ctx.lineTo(x, y);
+      });
+      ctx.lineTo(pad.left + cw, pad.top + ch);
+      ctx.lineTo(pad.left, pad.top + ch);
+      ctx.closePath();
+      ctx.fill();
+    }
+
+    // ========== Metrics ==========
+    function renderMetrics(fleet) {
+      const grid = document.getElementById('metricsGrid');
+      const totalSessions = fleet.reduce((s, a) => s + a.totalSessions, 0);
+      const totalFailures = fleet.reduce((s, a) => s + a.failures, 0);
+      const avgMTBF = Math.floor(fleet.reduce((s, a) => s + a.mtbf, 0) / fleet.length);
+      const avgSurvival = (fleet.reduce((s, a) => s + a.survival, 0) / fleet.length * 100).toFixed(1);
+      const criticalCount = fleet.filter(a => a.survival < 0.6).length;
+      const avgUptime = (fleet.reduce((s, a) => s + a.uptimeHrs, 0) / fleet.length / 24).toFixed(1);
+
+      const metrics = [
+        { icon: '📊', value: totalSessions, label: 'Total Sessions', trend: '↑ 12% vs prior period', color: '#4fc3f7' },
+        { icon: '💥', value: totalFailures, label: 'Total Failures', trend: '↓ 8% improvement', color: '#ff7043' },
+        { icon: '⏱️', value: avgMTBF + 'h', label: 'Avg MTBF', trend: '↑ 15% better', color: '#66bb6a' },
+        { icon: '🛡️', value: avgSurvival + '%', label: 'Fleet Survival', trend: avgSurvival > 80 ? '✅ Healthy' : '⚠️ Watch', color: '#ab47bc' },
+        { icon: '🚨', value: criticalCount, label: 'Critical Agents', trend: criticalCount > 0 ? '⚠️ Action needed' : '✅ None', color: '#ef5350' },
+        { icon: '🕐', value: avgUptime + 'd', label: 'Avg Uptime', trend: '↑ Stable', color: '#ffa726' },
+      ];
+
+      grid.innerHTML = metrics.map(m => `
+        <div class="metric-card">
+          <div style="font-size:24px">${m.icon}</div>
+          <div class="metric-value" style="color:${m.color}">${m.value}</div>
+          <div class="metric-label">${m.label}</div>
+          <div class="metric-trend">${m.trend}</div>
+        </div>
+      `).join('');
+    }
+
+    // ========== Fleet Table ==========
+    function renderFleet(fleet) {
+      const body = document.getElementById('fleetBody');
+      body.innerHTML = fleet.sort((a, b) => a.survival - b.survival).map(a => {
+        const riskClass = a.survival < 0.6 ? 'risk-critical' : a.survival < 0.75 ? 'risk-high' : a.survival < 0.9 ? 'risk-medium' : 'risk-low';
+        const riskLabel = a.survival < 0.6 ? 'Critical' : a.survival < 0.75 ? 'High' : a.survival < 0.9 ? 'Medium' : 'Low';
+        return `<tr>
+          <td><strong>${a.name}</strong><br><span style="font-size:11px;opacity:0.6">${a.version} · ${a.region} · ${a.model}</span></td>
+          <td>${a.uptimeHrs}h</td>
+          <td>${a.totalSessions}</td>
+          <td>${a.failures}</td>
+          <td>${a.mtbf}h</td>
+          <td>${(a.survival * 100).toFixed(1)}%</td>
+          <td><span class="risk-badge ${riskClass}">${riskLabel}</span></td>
+          <td>in ${a.maintenanceDays}d</td>
+        </tr>`;
+      }).join('');
+    }
+
+    // ========== Recommendations Engine ==========
+    function renderRecommendations(fleet) {
+      const recs = [];
+      const critical = fleet.filter(a => a.survival < 0.6);
+      const high = fleet.filter(a => a.survival >= 0.6 && a.survival < 0.75);
+      const soonMaint = fleet.filter(a => a.maintenanceDays <= 3);
+      const lowMTBF = fleet.filter(a => a.mtbf < 20);
+
+      if (critical.length > 0) {
+        recs.push({ priority: '#ef5350', text: `🚨 <strong>${critical.length} critical agent(s)</strong> (${critical.map(a => a.name).join(', ')}) — survival below 60%. Recommend immediate restart cycle and root-cause analysis.` });
+      }
+      if (high.length > 0) {
+        recs.push({ priority: '#ff8800', text: `⚠️ <strong>${high.length} high-risk agent(s)</strong> (${high.map(a => a.name).join(', ')}) — survival below 75%. Schedule proactive maintenance within 48h.` });
+      }
+      if (soonMaint.length > 0) {
+        recs.push({ priority: '#ffcc00', text: `🔧 <strong>${soonMaint.length} agent(s)</strong> due for maintenance within 3 days. Pre-stage replacement capacity and schedule rolling restart.` });
+      }
+      if (lowMTBF.length > 0) {
+        recs.push({ priority: '#ff7043', text: `⏱️ <strong>${lowMTBF.length} agent(s)</strong> with MTBF under 20h — investigate memory leaks, connection pool exhaustion, or model timeout patterns.` });
+      }
+
+      const versionGroups = {};
+      fleet.forEach(a => { (versionGroups[a.version] = versionGroups[a.version] || []).push(a); });
+      for (const [v, agents] of Object.entries(versionGroups)) {
+        const avgSurv = agents.reduce((s, a) => s + a.survival, 0) / agents.length;
+        if (avgSurv < 0.75) {
+          recs.push({ priority: '#ab47bc', text: `📦 Version <strong>${v}</strong> shows degraded survival (${(avgSurv * 100).toFixed(0)}%). Consider rollback or expedited hotfix.` });
+        }
+      }
+
+      const avgFailRate = fleet.reduce((s, a) => s + a.failureRate, 0) / fleet.length;
+      if (avgFailRate > 0.08) {
+        recs.push({ priority: '#4fc3f7', text: `📈 Fleet-wide failure rate (${(avgFailRate * 100).toFixed(1)}%) exceeds 8% threshold. Recommend enabling adaptive circuit breakers.` });
+      }
+
+      if (recs.length === 0) {
+        recs.push({ priority: '#66bb6a', text: '✅ Fleet health is strong. No immediate maintenance actions recommended. Continue monitoring.' });
+      }
+
+      document.getElementById('recommendations').innerHTML = recs.map(r =>
+        `<div class="rec-item"><span class="rec-priority" style="background:${r.priority}"></span>${r.text}</div>`
+      ).join('');
+    }
+
+    // ========== Auto-Monitor ==========
+    let monitorInterval = null;
+    function toggleAutoMonitor() {
+      const on = document.getElementById('autoMonitor').checked;
+      const card = document.getElementById('monitorCard');
+      if (on) {
+        card.style.display = 'block';
+        addLog('🟢 Auto-monitor started — checking fleet every 30s');
+        monitorInterval = setInterval(() => {
+          const days = parseInt(document.getElementById('timeWindow').value);
+          const fleet = generateFleetData(days);
+          const critical = fleet.filter(a => a.survival < 0.6);
+          if (critical.length > 0) {
+            addLog(`🚨 ALERT: ${critical.length} critical agent(s) detected — ${critical.map(a => a.name).join(', ')}`);
+          } else {
+            addLog('✅ Fleet check OK — all agents within tolerance');
+          }
+          updateAll();
+        }, 30000);
+      } else {
+        card.style.display = 'none';
+        addLog('🔴 Auto-monitor stopped');
+        clearInterval(monitorInterval);
+        monitorInterval = null;
+      }
+    }
+
+    function addLog(msg) {
+      const feed = document.getElementById('logFeed');
+      const entry = document.createElement('div');
+      entry.className = 'log-entry';
+      entry.textContent = `[${new Date().toLocaleTimeString()}] ${msg}`;
+      feed.prepend(entry);
+      if (feed.children.length > 100) feed.removeChild(feed.lastChild);
+    }
+
+    // ========== Export ==========
+    function exportJSON() {
+      const days = parseInt(document.getElementById('timeWindow').value);
+      const fleet = generateFleetData(days);
+      const km = computeKM(fleet, days);
+      const data = { exportedAt: new Date().toISOString(), timeWindowDays: days, fleet, kaplanMeier: km };
+      const blob = new Blob([JSON.stringify(data, null, 2)], { type: 'application/json' });
+      const a = document.createElement('a');
+      a.href = URL.createObjectURL(blob);
+      a.download = `agentlens-survival-${new Date().toISOString().slice(0, 10)}.json`;
+      a.click();
+    }
+
+    // ========== Update All ==========
+    function updateAll() {
+      const days = parseInt(document.getElementById('timeWindow').value);
+      const fleet = generateFleetData(days);
+      const km = computeKM(fleet, days);
+      const hazard = computeHazard(fleet, days);
+      const reliability = computeReliability(fleet, days);
+
+      renderMetrics(fleet);
+      drawKM(document.getElementById('kmChart'), km, days);
+      drawLineChart(document.getElementById('hazardChart'), hazard, 'hazard', '#ff7043');
+      drawLineChart(document.getElementById('reliabilityChart'), reliability, 'reliability', '#66bb6a', 'forecast');
+      renderFleet(fleet);
+      renderRecommendations(fleet);
+    }
+
+    updateAll();
+  </script>
+</body>
+</html>
