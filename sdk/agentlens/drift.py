@@ -293,44 +293,12 @@ def _cohens_d(mean1: float, std1: float, n1: int,
 def _extract_session_metrics(session: Any) -> dict[str, float]:
     """Extract drift-relevant metrics from a session.
 
-    Uses a single pass over all events to collect durations, token
-    counts, error counts, and tool-call counts simultaneously,
-    replacing the previous 4 separate iterations.
+    Delegates to the shared :func:`agentlens._metrics.extract_session_metrics`
+    which performs a single-pass collection of durations, token counts,
+    error counts, and tool-call counts.
     """
-    events = getattr(session, "events", []) or []
-    event_count = len(events)
-
-    metrics: dict[str, float] = {"event_count": float(event_count)}
-
-    if event_count == 0:
-        for k in ("avg_latency_ms", "error_rate", "total_tokens",
-                   "tokens_per_event", "tool_call_rate"):
-            metrics[k] = 0.0
-        return metrics
-
-    # Single pass: collect durations, tokens, error count, tool count
-    durations: list[float] = []
-    total_tokens = 0
-    error_count = 0
-    tool_count = 0
-
-    for e in events:
-        dur = getattr(e, "duration_ms", None)
-        if dur is not None:
-            durations.append(dur)
-        total_tokens += (getattr(e, "tokens_in", 0) or 0) + (getattr(e, "tokens_out", 0) or 0)
-        if getattr(e, "event_type", "") == "error":
-            error_count += 1
-        if getattr(e, "tool_call", None) is not None:
-            tool_count += 1
-
-    metrics["avg_latency_ms"] = (sum(durations) / len(durations)) if durations else 0.0
-    metrics["total_tokens"] = float(total_tokens)
-    metrics["tokens_per_event"] = total_tokens / event_count
-    metrics["error_rate"] = error_count / event_count
-    metrics["tool_call_rate"] = tool_count / event_count
-
-    return metrics
+    from agentlens._metrics import extract_session_metrics
+    return extract_session_metrics(session)
 
 
 def _extract_tool_usage(sessions: list) -> dict[str, int]:

@@ -445,6 +445,10 @@ class AnomalyDetector:
     def extract_metrics(session) -> dict[str, float]:
         """Extract anomaly-detection metrics from a Session object.
 
+        Delegates to the shared :func:`agentlens._metrics.extract_session_metrics`
+        helper which performs a single pass over all events to collect durations,
+        token counts, error counts, and tool-failure counts simultaneously.
+
         Metrics extracted:
         - avg_latency_ms: average event duration
         - p95_latency_ms: 95th percentile event duration
@@ -453,78 +457,10 @@ class AnomalyDetector:
         - error_rate: fraction of error events
         - event_count: number of events
         - tool_failure_rate: fraction of tool events that are errors
-
-        Uses a single pass over all events to collect durations, token
-        counts, error counts, and tool-failure counts simultaneously,
-        avoiding the previous 4+ separate iterations.
+        - tool_call_rate: fraction of events with tool calls
         """
-        events = session.events if hasattr(session, "events") else []
-        event_count = len(events)
-
-        metrics: dict[str, float] = {
-            "event_count": float(event_count),
-        }
-
-        if event_count == 0:
-            metrics["avg_latency_ms"] = 0.0
-            metrics["p95_latency_ms"] = 0.0
-            metrics["total_tokens"] = 0.0
-            metrics["tokens_per_event"] = 0.0
-            metrics["error_rate"] = 0.0
-            metrics["tool_failure_rate"] = 0.0
-            return metrics
-
-        # Single-pass collection
-        durations: list[float] = []
-        total_tokens = 0
-        error_count = 0
-        tool_count = 0
-        tool_error_count = 0
-
-        for e in events:
-            # Latency
-            if hasattr(e, "duration_ms") and e.duration_ms is not None:
-                durations.append(e.duration_ms)
-
-            # Tokens
-            total_tokens += (getattr(e, "tokens_in", 0) or 0) + (getattr(e, "tokens_out", 0) or 0)
-
-            # Event type checks (errors + tool failures)
-            event_type = getattr(e, "event_type", None) or ""
-            event_type_lower = event_type.lower()
-            is_error = "error" in event_type_lower
-            is_tool = "tool" in event_type_lower
-
-            if is_error:
-                error_count += 1
-            if is_tool:
-                tool_count += 1
-                if is_error:
-                    tool_error_count += 1
-
-        # Latency metrics
-        if durations:
-            metrics["avg_latency_ms"] = sum(durations) / len(durations)
-            sorted_d = sorted(durations)
-            p95_idx = min(int(len(sorted_d) * 0.95), len(sorted_d) - 1)
-            metrics["p95_latency_ms"] = sorted_d[p95_idx]
-        else:
-            metrics["avg_latency_ms"] = 0.0
-            metrics["p95_latency_ms"] = 0.0
-
-        # Token metrics
-        metrics["total_tokens"] = float(total_tokens)
-        metrics["tokens_per_event"] = total_tokens / event_count
-
-        # Error metrics
-        metrics["error_rate"] = error_count / event_count
-
-        # Tool failure metrics
-        metrics["tool_failure_rate"] = (
-            tool_error_count / tool_count if tool_count > 0 else 0.0
-        )
-
-        return metrics
+        from agentlens._metrics import extract_session_metrics
+        return extract_session_metrics(session)
 
     # ── Private helpers ──
 
