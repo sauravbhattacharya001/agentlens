@@ -38,6 +38,7 @@ from typing import Any, Sequence
 
 from agentlens.models import AgentEvent, Session
 from agentlens.span import Span
+from agentlens._utils import parse_iso as _parse_iso_util
 
 
 # ---------------------------------------------------------------------------
@@ -86,7 +87,10 @@ def _parse_ts(ts: datetime | str | None) -> float | None:
     if ts is None:
         return None
     if isinstance(ts, str):
-        ts = datetime.fromisoformat(ts)
+        dt = _parse_iso_util(ts)
+        if dt is None:
+            return None
+        ts = dt
     return ts.timestamp() * 1000
 
 

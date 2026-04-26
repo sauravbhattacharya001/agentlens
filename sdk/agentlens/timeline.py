@@ -9,7 +9,10 @@ from __future__ import annotations
 
 import html as _html
 import os
+from datetime import datetime, timezone
 from typing import Any
+
+from agentlens._utils import format_duration as _format_duration_impl, parse_iso
 
 
 # ---------------------------------------------------------------------------
@@ -44,9 +47,7 @@ def _icon(event_type: str) -> str:
 def _format_duration(ms: float | None) -> str:
     if ms is None:
         return ""
-    if ms < 1000:
-        return f"{ms:.0f}ms"
-    return f"{ms / 1000:.1f}s"
+    return _format_duration_impl(ms)
 
 
 def _format_timestamp_offset(ms: float) -> str:
@@ -105,12 +106,7 @@ class TimelineRenderer:
 
     @staticmethod
     def _parse_iso(s: str) -> Any:
-        from datetime import datetime, timezone
-        s = s.replace("Z", "+00:00")
-        try:
-            return datetime.fromisoformat(s)
-        except Exception:
-            return datetime(2000, 1, 1, tzinfo=timezone.utc)
+        return parse_iso(s) or datetime(2000, 1, 1, tzinfo=timezone.utc)
 
     # -- Core rendering ------------------------------------------------------
 

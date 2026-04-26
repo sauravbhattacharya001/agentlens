@@ -34,10 +34,11 @@ import hashlib
 import statistics
 import uuid
 from dataclasses import dataclass, field
-from datetime import datetime, timezone
 from difflib import unified_diff
 from enum import Enum
 from typing import Any
+
+from agentlens._utils import percentile as _percentile_impl, utcnow as _utcnow
 
 
 class DiffKind(Enum):
@@ -187,16 +188,14 @@ def _hash_template(template: str) -> str:
 
 
 def _now_iso() -> str:
-    return datetime.now(timezone.utc).isoformat()
+    return _utcnow().isoformat()
 
 
 def _percentile(data: list[float], pct: float) -> float:
-    """Simple percentile (nearest-rank)."""
+    """Percentile via shared ``_utils.percentile`` (linear interpolation)."""
     if not data:
         return 0.0
-    sorted_data = sorted(data)
-    k = max(0, min(int(len(sorted_data) * pct / 100), len(sorted_data) - 1))
-    return sorted_data[k]
+    return _percentile_impl(sorted(data), pct)
 
 
 class PromptVersionTracker:
