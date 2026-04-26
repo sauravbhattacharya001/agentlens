@@ -163,6 +163,27 @@ class ProfilingSession:
         """Steps that failed."""
         return [s for s in self.steps if s.status == StepStatus.FAILED]
 
+    def step_counts(self) -> tuple[int, int, int, float]:
+        """Single-pass count of (total, completed, failed, total_duration_s).
+
+        Avoids 4 separate iterations over self.steps that happen when
+        callers access len(steps), completed_steps, failed_steps, and
+        total_duration_s independently (e.g. in fleet_summary).
+        """
+        total = completed = failed = 0
+        duration = 0.0
+        for s in self.steps:
+            total += 1
+            status = s.status
+            if status == StepStatus.COMPLETED:
+                completed += 1
+            elif status == StepStatus.FAILED:
+                failed += 1
+            d = s.duration_s
+            if d is not None:
+                duration += d
+        return total, completed, failed, duration
+
     @property
     def bottleneck(self) -> StepRecord | None:
         """The slowest completed step, or None if no steps completed."""
@@ -551,6 +572,11 @@ class LatencyProfiler:
     def fleet_summary(self) -> dict[str, Any]:
         """Aggregate statistics across all sessions.
 
+        Uses ProfilingSession.step_counts() to collect step totals,
+        completed/failed counts, and duration in a single pass per
+        session instead of 4 separate iterations (len(steps),
+        completed_steps, failed_steps, total_duration_s).
+
         Returns:
             Dict with total_sessions, total_steps, overall_duration,
             step_baselines, slowest_sessions, and failure_rate.
@@ -565,10 +591,10 @@ class LatencyProfiler:
             session = self._sessions.get(sid)
             if session is None:
                 continue
-            total_steps += len(session.steps)
-            total_completed += len(session.completed_steps)
-            total_failed += len(session.failed_steps)
-            dur = session.total_duration_s
+            steps, completed, failed, dur = session.step_counts()
+            total_steps += steps
+            total_completed += completed
+            total_failed += failed
             total_duration += dur
             session_durations.append((sid, dur))
 
