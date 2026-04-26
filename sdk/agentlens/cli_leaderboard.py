@@ -5,24 +5,11 @@ from __future__ import annotations
 import json
 from typing import Any
 
+from agentlens.cli_common import get_client, bar_chart, format_duration
+
 
 def _medal(rank: int) -> str:
     return {1: "\U0001f947", 2: "\U0001f948", 3: "\U0001f949"}.get(rank, f"#{rank}")
-
-
-def _bar(value: float, max_val: float, width: int = 20) -> str:
-    if max_val <= 0:
-        return " " * width
-    filled = int(round(value / max_val * width))
-    return "\u2588" * filled + "\u2591" * (width - filled)
-
-
-def _fmt_duration(ms: float) -> str:
-    if ms < 1000:
-        return f"{ms:.0f}ms"
-    if ms < 60000:
-        return f"{ms / 1000:.1f}s"
-    return f"{ms / 60000:.1f}m"
 
 
 def _fmt_cost(usd: float) -> str:
@@ -35,15 +22,8 @@ def _fmt_cost(usd: float) -> str:
 
 def cmd_leaderboard(args: Any) -> None:
     """Fetch and display the agent leaderboard."""
-    from agentlens.cli import _get_client
+    client, _ = get_client(args)
 
-    base_url, headers = _get_client(args)
-
-    import urllib.parse
-    import urllib.request
-
-    # Use urllib.parse.urlencode for proper URL-encoding of parameter
-    # values (CWE-74 — prevents query-string injection via CLI args).
     params: dict[str, str] = {}
     if args.sort:
         params["sort"] = args.sort
@@ -56,12 +36,9 @@ def cmd_leaderboard(args: Any) -> None:
     if args.order:
         params["order"] = args.order
 
-    qs = ("?" + urllib.parse.urlencode(params)) if params else ""
-    url = f"{base_url}/leaderboard{qs}"
-
-    req = urllib.request.Request(url, headers=headers)
-    with urllib.request.urlopen(req, timeout=30) as resp:
-        data = json.loads(resp.read().decode())
+    resp = client.get("/leaderboard", params=params)
+    resp.raise_for_status()
+    data = resp.json()
 
     agents = data.get("agents", [])
 
@@ -115,10 +92,10 @@ def cmd_leaderboard(args: Any) -> None:
         name = a.get("agent_name", "?")
         sessions = a.get("total_sessions", 0)
         success = f"{a.get('success_rate', 0):.0f}%"
-        duration = _fmt_duration(a.get("avg_session_duration_ms", 0))
+        duration = format_duration(a.get("avg_session_duration_ms", 0))
         cost = _fmt_cost(a.get("cost_per_session_usd", 0))
         eff = f"{a.get('efficiency_ratio', 0):.3f}"
-        bar = _bar(a.get(bar_key, 0), max_bar)
+        bar = bar_chart(a.get(bar_key, 0), max_bar)
 
         print(f"  {medal:<6} {name:<{name_w}}  {sessions:>8}  {success:>7}  "
               f"{duration:>12}  {cost:>10}  {eff:>10}  {bar}")
