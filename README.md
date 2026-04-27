@@ -83,6 +83,16 @@ AgentLens runs entirely on your infrastructure — SQLite for storage, no cloud 
 | ❌ **Error Analytics** | Error grouping by type, agent, and model with trend analysis |
 | 🎯 **Command Center** | Unified activity feed aggregating alerts, anomalies, budget warnings, and health signals |
 | 📋 **SLA Compliance** | Track SLA targets with compliance rings, violation alerts, and history |
+| 🩺 **Auto-Triage** | Unified session diagnostics — runs health, anomaly, drift, error, and cost analysis in one call with prioritized findings |
+| 📐 **Capacity Planning** | Fleet capacity planning — workload projection, resource sizing, scaling recommendations, bottleneck detection |
+| 🛡️ **Session Guardrails** | Constraint validation — token budgets, duration limits, tool allowlists, model restrictions, custom predicates |
+| 💡 **Cost Optimizer** | Intelligent model selection — task complexity scoring, cheaper-model recommendations, 30-70% savings estimation |
+| 📉 **Drift Detection** | Detect behavioral drift from baselines — metric shift analysis with significance scoring |
+| 📝 **Prompt Tracking** | Track prompt versions, A/B test variants, and measure prompt performance across sessions |
+| 🔄 **Retry Tracking** | Monitor retry patterns, detect retry storms, backoff strategy analysis |
+| 🚦 **Rate Limiting** | Client-side rate limiting with token bucket, sliding window, and adaptive strategies |
+| 🎲 **Sampling** | Probabilistic event sampling — head-based, tail-based, and priority sampling strategies |
+| ⏪ **Session Replay** | Replay recorded sessions step-by-step with configurable speed and event filtering |
 
 ## 🏗️ Architecture
 
@@ -207,6 +217,25 @@ agentlens sla --latency 2000 --error-rate 5 --token-budget 8000 --slo 95 --verbo
 
 # SLA compliance as JSON for CI/CD pipelines
 agentlens sla --policy production --json
+
+# Auto-triage a session — unified diagnostics with prioritized findings
+agentlens triage <session_id>
+agentlens triage <session_id> --severity high --json
+
+# Capacity planning — workload projection and resource sizing
+agentlens capacity --hours 72
+agentlens capacity --target-rpm 500 --target-latency 300
+
+# Cost optimization recommendations
+agentlens optimize <session_id>
+agentlens optimize <session_id> --budget 0.50
+
+# Replay a recorded session step-by-step
+agentlens replay <session_id> --speed 2x
+
+# Drift detection — compare current behavior to baselines
+agentlens baseline create <agent_name> --sessions 100
+agentlens baseline drift <agent_name> --window 24h
 ```
 
 > 📖 **Full CLI reference:** See [docs/CLI.md](docs/CLI.md) for all 50+ commands with options and examples.
@@ -499,6 +528,76 @@ result = tracker.purge()
 print(f"Purged {result['purged_sessions']} sessions")
 ```
 
+### Auto-Triage
+
+```python
+# One-call unified diagnostics — health, anomalies, drift, errors, and cost analysis
+import httpx
+
+resp = httpx.get(f"{endpoint}/api/triage/{session_id}")
+report = resp.json()
+
+print(f"Overall: {report['grade']} ({report['score']}/100)")
+for finding in report['findings']:
+    print(f"  [{finding['severity']}] {finding['category']}: {finding['message']}")
+    for fix in finding.get('remediations', []):
+        print(f"    → {fix}")
+```
+
+### Capacity Planning
+
+```python
+from agentlens import CapacityPlanner, WorkloadSample
+from datetime import datetime, timedelta
+
+planner = CapacityPlanner()
+planner.add_sample(WorkloadSample(
+    timestamp=datetime.now() - timedelta(hours=2),
+    active_sessions=50, requests_per_minute=120,
+    avg_latency_ms=450, token_throughput=8000,
+    error_rate=0.02, cpu_utilization=0.65, memory_utilization=0.55
+))
+
+projection = planner.project_workload(horizon_hours=72)
+sizing = planner.size_resources(target_rpm=500, target_latency_ms=300)
+bottlenecks = planner.detect_bottlenecks()
+report = planner.report()
+```
+
+### Session Guardrails
+
+```python
+from agentlens.guardrails import Guardrails
+
+g = (Guardrails("production-budget")
+     .max_total_tokens(50_000)
+     .max_duration_seconds(300)
+     .require_tools(["search", "calculator"])
+     .block_tools(["shell_exec"])
+     .allow_models(["gpt-4", "gpt-4-turbo"])
+     .max_errors(2)
+     .add_predicate("no_pii", lambda events: not any("SSN" in str(e) for e in events)))
+
+result = g.validate(session_events)
+print(f"Pass: {result.passed}, Violations: {len(result.violations)}")
+for v in result.violations:
+    print(f"  {v.rule}: {v.message}")
+```
+
+### Cost Optimizer
+
+```python
+from agentlens.cost_optimizer import CostOptimizer
+
+optimizer = CostOptimizer()
+recs = optimizer.analyze(session_events)
+
+print(f"Current: ${recs['current_cost']:.4f} → Optimized: ${recs['optimized_cost']:.4f}")
+print(f"Potential savings: {recs['savings_percent']:.0f}%")
+for rec in recs['recommendations']:
+    print(f"  {rec['current_model']} → {rec['suggested_model']} ({rec['reason']})")
+```
+
 ### Data Models
 
 | Model | Description |
@@ -510,6 +609,10 @@ print(f"Purged {result['purged_sessions']} sessions")
 | `AlertRule` | A configurable alert rule with metric and threshold |
 | `Anomaly` | A detected statistical anomaly in session metrics |
 | `HealthReport` | Graded health assessment of a session (A–F) |
+| `CapacityReport` | Fleet capacity assessment with projections and sizing |
+| `GuardrailResult` | Constraint validation result with pass/fail and violations |
+| `TriageReport` | Unified diagnostics with prioritized findings and remediations |
+| `WorkloadSample` | Historical workload data point for capacity planning |
 
 ## 📊 Dashboard
 
@@ -534,7 +637,7 @@ The dashboard is a lightweight HTML/CSS/JS app served directly by the backend �
 
 ## 🔌 API Endpoints
 
-The backend exposes a comprehensive REST API with **80+ endpoints** across 16 route groups:
+The backend exposes a comprehensive REST API with **90+ endpoints** across 21 route groups:
 
 | Route Group | Endpoints | Description |
 |-------------|-----------|-------------|
@@ -555,15 +658,21 @@ The backend exposes a comprehensive REST API with **80+ endpoints** across 16 ro
 | **Leaderboard** | 1 | Agent performance ranking |
 | **Postmortem** | 2 | Incident report generation and candidate listing |
 | **Retention** | 4 | Retention config, stats, manual purge |
+| **Triage** | 3 | Auto-triage engine, finding details, remediation suggestions |
+| **Profiler** | 4 | Session profiling, flamegraph data, bottleneck analysis |
+| **Replay** | 4 | Session replay, step-by-step playback, event filtering |
+| **Scorecards** | 3 | Per-agent performance grading with composite scores |
+| **Forecast** | 4 | Cost forecasting, budget projections, what-if simulation |
 | **Health** | 1 | Health check |
 
 > 📖 **Full API reference with request/response examples:** [docs/API.md](docs/API.md)
 
 ## 🛠️ Tech Stack
 
-- **Python SDK**: Pydantic for data validation, httpx for async HTTP
-- **Backend**: Express.js with better-sqlite3 for zero-config persistence
+- **Python SDK**: Pydantic for data validation, httpx for async HTTP, 70+ modules
+- **Backend**: Express.js with better-sqlite3 for zero-config persistence, 90+ API endpoints
 - **Dashboard**: Vanilla JS with Canvas-based charts (no framework dependencies)
+- **CLI**: 50+ subcommands — triage, capacity, optimize, replay, sla, forecast, and more
 - **Database**: SQLite (embedded, no external DB setup needed)
 
 ## 🤝 Contributing
