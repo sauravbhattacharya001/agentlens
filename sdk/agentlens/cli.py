@@ -104,6 +104,7 @@ from agentlens.cli_retention import cmd_retention, register_retention_parser  # 
 from agentlens.cli_scatter import cmd_scatter, register_scatter_parser  # terminal scatter plots
 from agentlens.cli_bottleneck import cmd_bottleneck, register as register_bottleneck_parser  # bottleneck analysis
 from agentlens.cli_config import cmd_config, register_config_parser, apply_config_defaults  # persistent config
+from agentlens.cli_triage import cmd_triage, register_triage_parser  # auto-triage engine
 
 
 def _print_table(rows: list[dict], columns: list[str], *, max_width: int = 40) -> None:
@@ -905,6 +906,9 @@ def main() -> None:
     # -- bottleneck --
     register_bottleneck_parser(sub)
 
+    # -- triage --
+    register_triage_parser(sub)
+
     # -- forecast --
     p = sub.add_parser("forecast", help="Predict future costs/usage from historical trends")
     p.add_argument("--days", type=int, default=7, help="Number of days to forecast (default: 7)")
@@ -972,6 +976,7 @@ def main() -> None:
         "scatter": cmd_scatter,
         "config": cmd_config,
         "bottleneck": cmd_bottleneck,
+        "triage": cmd_triage,
     }
     commands[args.command](args)
 

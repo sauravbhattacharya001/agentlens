@@ -66,6 +66,7 @@ const routeDefs = [
   ["/diff",         "./routes/diff"],
   ["/command-center", "./routes/command-center"],
   ["/profiler",       "./routes/profiler"],
+  ["/triage",         "./routes/triage"],
   // Session-scoped annotation routes
   ["/sessions",     "./routes/annotations"],
 ];
