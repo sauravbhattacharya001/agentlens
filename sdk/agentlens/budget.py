@@ -41,23 +41,89 @@ from agentlens._utils import new_id as _new_id, utcnow as _utcnow
 
 
 # ── Model pricing (per 1M tokens, USD) ──────────────────────────
+# Last verified: 2026-04-27
+# Sources: OpenAI, Anthropic, Google, Meta, Mistral, DeepSeek pricing pages
+#
+# To override or extend at runtime, call set_custom_pricing() before
+# creating budgets.  Custom entries take precedence over defaults.
 
 MODEL_PRICING: dict[str, dict[str, float]] = {
-    "gpt-4":            {"input": 30.00, "output": 60.00},
-    "gpt-4-turbo":      {"input": 10.00, "output": 30.00},
-    "gpt-4o":           {"input": 2.50,  "output": 10.00},
-    "gpt-4o-mini":      {"input": 0.15,  "output": 0.60},
-    "gpt-3.5-turbo":    {"input": 0.50,  "output": 1.50},
-    "claude-3-opus":    {"input": 15.00, "output": 75.00},
-    "claude-3-sonnet":  {"input": 3.00,  "output": 15.00},
-    "claude-3-haiku":   {"input": 0.25,  "output": 1.25},
-    "claude-3.5-sonnet": {"input": 3.00, "output": 15.00},
-    "claude-4-opus":    {"input": 15.00, "output": 75.00},
-    "claude-4-sonnet":  {"input": 3.00,  "output": 15.00},
-    "gemini-pro":       {"input": 0.50,  "output": 1.50},
-    "gemini-1.5-pro":   {"input": 1.25,  "output": 5.00},
-    "gemini-1.5-flash": {"input": 0.075, "output": 0.30},
+    # ── OpenAI: GPT-4 family ─────────────────────────────────
+    "gpt-4":              {"input": 30.00,  "output": 60.00},
+    "gpt-4-turbo":        {"input": 10.00,  "output": 30.00},
+    "gpt-4o":             {"input":  2.50,  "output": 10.00},
+    "gpt-4o-mini":        {"input":  0.15,  "output":  0.60},
+    "gpt-4.1":            {"input":  2.00,  "output":  8.00},
+    "gpt-4.1-mini":       {"input":  0.40,  "output":  1.60},
+    "gpt-4.1-nano":       {"input":  0.10,  "output":  0.40},
+    "gpt-3.5-turbo":      {"input":  0.50,  "output":  1.50},
+    # ── OpenAI: reasoning models ─────────────────────────────
+    "o1":                 {"input": 15.00,  "output": 60.00},
+    "o1-mini":            {"input":  1.10,  "output":  4.40},
+    "o3":                 {"input": 10.00,  "output": 40.00},
+    "o3-mini":            {"input":  1.10,  "output":  4.40},
+    "o4-mini":            {"input":  1.10,  "output":  4.40},
+    # ── Anthropic: Claude ────────────────────────────────────
+    "claude-3-opus":      {"input": 15.00,  "output": 75.00},
+    "claude-3-sonnet":    {"input":  3.00,  "output": 15.00},
+    "claude-3-haiku":     {"input":  0.25,  "output":  1.25},
+    "claude-3.5-sonnet":  {"input":  3.00,  "output": 15.00},
+    "claude-3.5-haiku":   {"input":  0.80,  "output":  4.00},
+    "claude-4-opus":      {"input": 15.00,  "output": 75.00},
+    "claude-4-sonnet":    {"input":  3.00,  "output": 15.00},
+    "claude-4-haiku":     {"input":  0.80,  "output":  4.00},
+    # ── Google: Gemini ───────────────────────────────────────
+    "gemini-pro":         {"input":  0.50,  "output":  1.50},
+    "gemini-1.5-pro":     {"input":  1.25,  "output":  5.00},
+    "gemini-1.5-flash":   {"input":  0.075, "output":  0.30},
+    "gemini-2.0-flash":   {"input":  0.10,  "output":  0.40},
+    "gemini-2.5-pro":     {"input":  1.25,  "output":  10.00},
+    "gemini-2.5-flash":   {"input":  0.15,  "output":  0.60},
+    # ── Meta: Llama (hosted API pricing varies; these are typical) ──
+    "llama-3.1-8b":       {"input":  0.10,  "output":  0.10},
+    "llama-3.1-70b":      {"input":  0.60,  "output":  0.60},
+    "llama-3.1-405b":     {"input":  3.00,  "output":  3.00},
+    "llama-4-scout":      {"input":  0.15,  "output":  0.15},
+    "llama-4-maverick":   {"input":  0.50,  "output":  0.50},
+    # ── Mistral ──────────────────────────────────────────────
+    "mistral-large":      {"input":  2.00,  "output":  6.00},
+    "mistral-medium":     {"input":  0.40,  "output":  1.20},
+    "mistral-small":      {"input":  0.10,  "output":  0.30},
+    "codestral":          {"input":  0.30,  "output":  0.90},
+    # ── DeepSeek ─────────────────────────────────────────────
+    "deepseek-chat":      {"input":  0.14,  "output":  0.28},
+    "deepseek-reasoner":  {"input":  0.55,  "output":  2.19},
 }
+
+# Runtime-override registry (populated via set_custom_pricing)
+_custom_pricing: dict[str, dict[str, float]] = {}
+
+
+def set_custom_pricing(overrides: dict[str, dict[str, float]]) -> None:
+    """Register custom or updated model pricing at runtime.
+
+    Entries in *overrides* take precedence over the built-in
+    ``MODEL_PRICING`` table.  Call with an empty dict to clear.
+
+    Example::
+
+        set_custom_pricing({
+            "my-fine-tune": {"input": 5.00, "output": 15.00},
+        })
+    """
+    _custom_pricing.clear()
+    _custom_pricing.update(overrides)
+
+
+def get_pricing(model: str | None) -> dict[str, float] | None:
+    """Look up per-1M-token pricing for *model*.
+
+    Checks custom overrides first, then built-in defaults.
+    Returns ``None`` if the model is unknown.
+    """
+    if not model:
+        return None
+    return _custom_pricing.get(model) or MODEL_PRICING.get(model)
 
 
 class BudgetStatus(str, Enum):
@@ -229,11 +295,12 @@ class BudgetReport:
 def estimate_cost(tokens_in: int, tokens_out: int, model: str | None) -> float:
     """Estimate cost in USD for a given token count and model.
 
+    Checks custom pricing overrides first, then built-in defaults.
     Returns 0.0 if the model is unknown or not provided.
     """
-    if not model or model not in MODEL_PRICING:
+    pricing = get_pricing(model)
+    if pricing is None:
         return 0.0
-    pricing = MODEL_PRICING[model]
     cost_in = (tokens_in / 1_000_000) * pricing["input"]
     cost_out = (tokens_out / 1_000_000) * pricing["output"]
     return cost_in + cost_out

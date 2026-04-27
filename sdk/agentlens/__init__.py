@@ -9,7 +9,7 @@ from agentlens.health import HealthScorer, HealthReport, HealthGrade, HealthThre
 from agentlens.anomaly import AnomalyDetector, AnomalyDetectorConfig, Anomaly, AnomalyKind, AnomalySeverity, AnomalyReport, MetricBaseline
 from agentlens.timeline import TimelineRenderer
 from agentlens.span import Span
-from agentlens.budget import TokenBudget, BudgetTracker, BudgetReport, BudgetStatus, BudgetExceededError, BudgetEntry, estimate_cost
+from agentlens.budget import TokenBudget, BudgetTracker, BudgetReport, BudgetStatus, BudgetExceededError, BudgetEntry, estimate_cost, set_custom_pricing, get_pricing
 from agentlens.forecast import CostForecaster, UsageRecord, ForecastResult, SpendingSummary, BudgetAlert, DailyPrediction
 from agentlens.compliance import ComplianceChecker, CompliancePolicy, ComplianceReport, ComplianceRule, RuleKind, RuleVerdict, RuleResult, strict_policy, permissive_policy
 from agentlens.drift import DriftDetector, DriftReport, DriftStatus, DriftDirection, MetricDrift, ToolUsageDrift
@@ -82,6 +82,8 @@ __all__ = [
     "BudgetExceededError",
     "BudgetEntry",
     "estimate_cost",
+    "set_custom_pricing",
+    "get_pricing",
     "CostForecaster",
     "UsageRecord",
     "ForecastResult",
