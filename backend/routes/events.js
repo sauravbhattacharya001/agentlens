@@ -96,6 +96,7 @@ router.post("/", wrapRoute("ingest events", (req, res) => {
   const transaction = db.transaction((eventList) => {
     let processed = 0;
     let skipped = 0;
+    const truncationTracker = { truncated: 0 };
 
     // Track sessions already ensured within this batch to avoid
     // redundant INSERT OR IGNORE calls. In a 500-event batch with
@@ -131,7 +132,7 @@ router.post("/", wrapRoute("ingest events", (req, res) => {
           sessionId,
           sanitizeString(event.agent_name || "default-agent", 256),
           sanitizeString(event.timestamp || nowIso, 64),
-          safeJsonStringify(event.metadata || {}),
+          safeJsonStringify(event.metadata || {}, undefined, truncationTracker),
           "active"
         );
         ensuredSessions.add(sessionId);
@@ -179,13 +180,13 @@ router.post("/", wrapRoute("ingest events", (req, res) => {
         sessionId,
         eventType,
         eventTs,
-        safeJsonStringify(event.input_data),
-        safeJsonStringify(event.output_data),
+        safeJsonStringify(event.input_data, undefined, truncationTracker),
+        safeJsonStringify(event.output_data, undefined, truncationTracker),
         sanitizeString(event.model, 128),
         tokensIn,
         tokensOut,
-        safeJsonStringify(event.tool_call),
-        safeJsonStringify(event.decision_trace),
+        safeJsonStringify(event.tool_call, undefined, truncationTracker),
+        safeJsonStringify(event.decision_trace, undefined, truncationTracker),
         durationMs
       );
 
@@ -208,11 +209,14 @@ router.post("/", wrapRoute("ingest events", (req, res) => {
       }
     }
 
-    return { processed, skipped };
+    return { processed, skipped, truncated_fields: truncationTracker.truncated };
   });
 
   try {
     const result = transaction(events);
+    if (result.truncated_fields > 0) {
+      res.set("X-AgentLens-Truncated", String(result.truncated_fields));
+    }
     res.json({ status: "ok", ...result });
   } catch (err) {
     console.error("Error ingesting events:", err);

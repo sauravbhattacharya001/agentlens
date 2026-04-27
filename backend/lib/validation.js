@@ -79,11 +79,12 @@ function isValidSessionId(id) {
  * @param {number} maxLen – hard cap in characters (default 256 KB)
  * @returns {string|null}
  */
-function safeJsonStringify(data, maxLen = MAX_DATA_LENGTH) {
+function safeJsonStringify(data, maxLen = MAX_DATA_LENGTH, tracker = null) {
   if (data == null) return null;
   try {
     const str = JSON.stringify(data);
     if (str.length > maxLen) {
+      if (tracker) tracker.truncated++;
       return JSON.stringify({ _truncated: true, _original_size: str.length });
     }
     return str;
