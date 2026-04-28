@@ -8,7 +8,6 @@
  */
 
 const express = require("express");
-const { getDb } = require("../db");
 const { safeJsonParse } = require("../lib/validation");
 const { wrapRoute, parseLimit, parseDays, daysAgoCutoff } = require("../lib/request-helpers");
 

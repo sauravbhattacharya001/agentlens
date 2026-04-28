@@ -16,7 +16,7 @@
 
 const express = require("express");
 const { getDb } = require("../db");
-const { parseLimit, parseDays, daysAgoCutoff, wrapRoute } = require("../lib/request-helpers");
+const { parseDays, daysAgoCutoff, wrapRoute } = require("../lib/request-helpers");
 
 const router = express.Router();
 

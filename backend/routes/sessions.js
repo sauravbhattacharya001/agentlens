@@ -2,10 +2,10 @@ const express = require("express");
 const { getDb } = require("../db");
 const { isValidSessionId, isValidStatus, safeJsonParse, validateTag, escapeLikeWildcards } = require("../lib/validation");
 const { generateExplanation } = require("../lib/explain");
-const { computeSessionMetrics, pctDelta, computeDeltas } = require("../lib/session-metrics");
+const { computeSessionMetrics, computeDeltas } = require("../lib/session-metrics");
 const { getTagStatements } = require("../lib/tag-statements");
 const { parsePagination, requireSessionId, wrapRoute } = require("../lib/request-helpers");
-const { toExportEvent, eventsToCsv, eventToCsvRow, buildJsonExport, ndjsonSessionLine, CSV_HEADERS } = require("../lib/csv-export");
+const { toExportEvent, eventToCsvRow, buildJsonExport, ndjsonSessionLine, CSV_HEADERS } = require("../lib/csv-export");
 const { createLazyStatements } = require("../lib/lazy-statements");
 const { createStatementCache } = require("../lib/statement-cache");
 

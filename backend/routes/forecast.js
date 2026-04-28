@@ -1,6 +1,6 @@
 const express = require("express");
 const { getDb } = require("../db");
-const { wrapRoute, parseDays, daysAgoCutoff } = require("../lib/request-helpers");
+const { wrapRoute, parseDays } = require("../lib/request-helpers");
 const { loadPricingMap, computeCost } = require("../lib/pricing");
 const { createLazyStatements } = require("../lib/lazy-statements");
 const { round } = require("../lib/stats");

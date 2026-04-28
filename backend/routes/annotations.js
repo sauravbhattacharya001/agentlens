@@ -4,7 +4,7 @@ const express = require("express");
 const crypto = require("crypto");
 const router = express.Router();
 const { getDb } = require("../db");
-const { isValidSessionId, safeJsonParse } = require("../lib/validation");
+const { isValidSessionId } = require("../lib/validation");
 const { parsePagination, wrapRoute } = require("../lib/request-helpers");
 
 // Shared session ID validation for annotation routes.
