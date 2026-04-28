@@ -63,6 +63,7 @@ const routeDefs = [
   ["/replay",       "./routes/replay"],
   ["/forecast",     "./routes/forecast"],
   ["/scorecards",   "./routes/scorecards"],
+  ["/competency",   "./routes/competency"],
   ["/diff",         "./routes/diff"],
   ["/command-center", "./routes/command-center"],
   ["/profiler",       "./routes/profiler"],
