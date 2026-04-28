@@ -1,0 +1,317 @@
+<!DOCTYPE html>
+<html lang="en">
+<head>
+  <meta charset="UTF-8">
+  <meta name="viewport" content="width=device-width, initial-scale=1.0">
+  <title>Alerts &amp; Webhooks - AgentLens Docs</title>
+  <link rel="stylesheet" href="style.css">
+</head>
+<body>
+
+<header class="header">
+  <button class="menu-toggle" onclick="document.querySelector('.sidebar').classList.toggle('open')">&#9776;</button>
+  <a href="index.html" class="header-logo">&#128270; <span>AgentLens</span> Docs</a>
+  <nav class="header-nav">
+    <a href="getting-started.html">Getting Started</a>
+    <a href="sdk-reference.html">SDK</a>
+    <a href="api.html">API</a>
+    <a href="https://github.com/sauravbhattacharya001/agentlens" class="github-link" target="_blank">&#128279; GitHub</a>
+  </nav>
+</header>
+
+<aside class="sidebar">
+  <div class="sidebar-section">
+    <div class="sidebar-section-title">Overview</div>
+    <a href="index.html">Introduction</a>
+    <a href="architecture.html">Architecture</a>
+  </div>
+  <div class="sidebar-section">
+    <div class="sidebar-section-title">Guides</div>
+    <a href="getting-started.html">Getting Started</a>
+    <a href="quickstart.html">5-Minute Quickstart</a>
+    <a href="deployment.html">Deployment</a>
+  </div>
+  <div class="sidebar-section">
+    <div class="sidebar-section-title">SDK</div>
+    <a href="sdk-reference.html">Python SDK Reference</a>
+    <a href="decorators.html">Decorators</a>
+    <a href="models.html">Data Models</a>
+    <a href="transport.html">Transport &amp; Batching</a>
+    <a href="sampling.html">Sampling &amp; Rate Limiting</a>
+  </div>
+  <div class="sidebar-section">
+    <div class="sidebar-section-title">Backend</div>
+    <a href="api.html">REST API</a>
+    <a href="database.html">Database Schema</a>
+    <a href="dashboard.html">Dashboard</a>
+  </div>
+  <div class="sidebar-section">
+    <div class="sidebar-section-title">Advanced</div>
+    <a href="explainability.html">Explainability</a>
+    <a href="integrations.html">Integrations</a>
+    <a href="monitoring.html">Monitoring &amp; Analysis</a>
+    <a href="alerts.html" class="active">Alerts &amp; Webhooks</a>
+    <a href="reliability.html">Reliability &amp; SLA</a>
+    <a href="cost-optimization.html">Cost Optimization</a>
+    <a href="session-replay.html">Session Replay</a>
+  </div>
+</aside>
+
+<main class="main">
+  <h1>Alerts &amp; Webhooks</h1>
+  <p class="subtitle">Threshold-based alerting, automatic evaluation, event acknowledgement, and outbound webhook delivery for agent observability.</p>
+
+  <div class="info-box">
+    <strong>Key concepts:</strong> Alert <em>rules</em> define conditions. When <code>POST /alerts/evaluate</code> runs, matching rules produce alert <em>events</em>. Events can be acknowledged, and webhooks deliver notifications to external systems (Slack, PagerDuty, custom endpoints).
+  </div>
+
+  <nav class="toc">
+    <h3>On this page</h3>
+    <ul>
+      <li><a href="#overview">Overview</a></li>
+      <li><a href="#metrics">Supported Metrics</a></li>
+      <li><a href="#rules">Alert Rules API</a></li>
+      <li><a href="#evaluation">Evaluation</a></li>
+      <li><a href="#events">Alert Events</a></li>
+      <li><a href="#webhooks">Webhooks</a></li>
+      <li><a href="#examples">End-to-End Examples</a></li>
+      <li><a href="#limits">Security &amp; Limits</a></li>
+    </ul>
+  </nav>
+
+  <!-- ───── Overview ───── -->
+  <h2 id="overview">Overview</h2>
+  <p>The alerting subsystem is built around three components:</p>
+  <ol>
+    <li><strong>Rules</strong> &mdash; declarative conditions like &ldquo;fire when <code>error_rate &gt; 0.15</code> in the last 60 minutes.&rdquo;</li>
+    <li><strong>Evaluation</strong> &mdash; an on-demand endpoint that checks all enabled rules against live session/event data and emits alert events for any breaches.</li>
+    <li><strong>Webhooks</strong> &mdash; outbound HTTP notifications dispatched when alerts fire (or on demand via test delivery).</li>
+  </ol>
+  <p>AgentLens does not run a background scheduler by default. Call <code>POST /alerts/evaluate</code> from a cron job, a monitoring loop, or the dashboard to trigger evaluation.</p>
+
+  <!-- ───── Metrics ───── -->
+  <h2 id="metrics">Supported Metrics</h2>
+  <p>Rules can target any of the following metrics, computed over a sliding time window:</p>
+
+  <table>
+    <thead>
+      <tr><th>Metric</th><th>Type</th><th>Description</th></tr>
+    </thead>
+    <tbody>
+      <tr><td><code>total_tokens</code></td><td>Counter</td><td>Sum of input + output tokens across all sessions in the window</td></tr>
+      <tr><td><code>avg_tokens_per_session</code></td><td>Gauge</td><td>Mean token usage per session</td></tr>
+      <tr><td><code>error_rate</code></td><td>Ratio (0&ndash;1)</td><td>Fraction of events that are errors</td></tr>
+      <tr><td><code>avg_duration_ms</code></td><td>Gauge</td><td>Average event latency in milliseconds</td></tr>
+      <tr><td><code>max_duration_ms</code></td><td>Gauge</td><td>Worst-case event latency in the window</td></tr>
+      <tr><td><code>session_count</code></td><td>Counter</td><td>Number of new sessions started</td></tr>
+      <tr><td><code>event_count</code></td><td>Counter</td><td>Total events recorded</td></tr>
+      <tr><td><code>token_rate</code></td><td>Rate</td><td>Tokens per minute</td></tr>
+    </tbody>
+  </table>
+
+  <p>Get the full list programmatically:</p>
+  <pre><code>GET /alerts/metrics
+# Returns: { metrics: ["total_tokens", "avg_tokens_per_session", ...] }</code></pre>
+
+  <!-- ───── Rules API ───── -->
+  <h2 id="rules">Alert Rules API</h2>
+
+  <h3>List rules</h3>
+  <pre><code>GET /alerts/rules?enabled=true&amp;metric=error_rate</code></pre>
+  <p>Optional filters: <code>enabled</code> (true/false), <code>metric</code> (one of the supported metrics).</p>
+
+  <h3>Create a rule</h3>
+  <pre><code>POST /alerts/rules
+Content-Type: application/json
+
+{
+  "name": "High error rate",
+  "metric": "error_rate",
+  "operator": "&gt;",
+  "threshold": 0.15,
+  "window_minutes": 60,
+  "agent_filter": "gpt-4-agent",
+  "cooldown_minutes": 30
+}</code></pre>
+
+  <table>
+    <thead>
+      <tr><th>Field</th><th>Required</th><th>Description</th></tr>
+    </thead>
+    <tbody>
+      <tr><td><code>name</code></td><td>Yes</td><td>Human-readable label (max 128 chars)</td></tr>
+      <tr><td><code>metric</code></td><td>Yes</td><td>One of the <a href="#metrics">supported metrics</a></td></tr>
+      <tr><td><code>operator</code></td><td>Yes</td><td>Comparison: <code>&lt;</code>, <code>&gt;</code>, <code>&lt;=</code>, <code>&gt;=</code>, <code>==</code>, <code>!=</code></td></tr>
+      <tr><td><code>threshold</code></td><td>Yes</td><td>Numeric threshold value</td></tr>
+      <tr><td><code>window_minutes</code></td><td>No</td><td>Lookback window (default: 60, max: 10080 / 7 days)</td></tr>
+      <tr><td><code>agent_filter</code></td><td>No</td><td>Scope the rule to a specific agent name (max 256 chars)</td></tr>
+      <tr><td><code>cooldown_minutes</code></td><td>No</td><td>Minimum gap between re-fires (default: 15, max: 10080)</td></tr>
+    </tbody>
+  </table>
+
+  <h3>Update a rule</h3>
+  <pre><code>PUT /alerts/rules/:ruleId
+Content-Type: application/json
+
+{ "threshold": 0.20, "enabled": false }</code></pre>
+  <p>Partial updates are supported &mdash; send only the fields you want to change.</p>
+
+  <h3>Delete a rule</h3>
+  <pre><code>DELETE /alerts/rules/:ruleId</code></pre>
+  <p>Cascading: all alert events linked to the rule are also deleted.</p>
+
+  <!-- ───── Evaluation ───── -->
+  <h2 id="evaluation">Evaluation</h2>
+  <pre><code>POST /alerts/evaluate</code></pre>
+  <p>Checks <strong>all enabled rules</strong> against current data. For each rule:</p>
+  <ol>
+    <li>Computes the metric value over the configured time window.</li>
+    <li>If the threshold condition is met <em>and</em> the cooldown period has elapsed since the last fire, an <code>alert_event</code> is created.</li>
+    <li>If webhooks are configured, they receive the alert payload.</li>
+  </ol>
+  <p>Response example:</p>
+  <pre><code>{
+  "evaluated": 5,
+  "triggered": 1,
+  "alerts": [
+    {
+      "alert_id": "al_abc123",
+      "rule_id": "rl_xyz789",
+      "metric": "error_rate",
+      "metric_value": 0.23,
+      "threshold": 0.15,
+      "triggered_at": "2026-04-28T12:00:00Z"
+    }
+  ]
+}</code></pre>
+
+  <div class="warning-box">
+    <strong>Tip:</strong> Call <code>/alerts/evaluate</code> on a schedule (e.g., every 5 minutes via cron) for continuous monitoring. The cooldown mechanism prevents duplicate alerts.
+  </div>
+
+  <!-- ───── Events ───── -->
+  <h2 id="events">Alert Events</h2>
+
+  <h3>List events</h3>
+  <pre><code>GET /alerts/events?acknowledged=false&amp;rule_id=rl_xyz789&amp;limit=50</code></pre>
+  <p>Filters: <code>acknowledged</code> (true/false), <code>rule_id</code>, <code>limit</code> (default 50, max 200).</p>
+
+  <h3>Acknowledge an event</h3>
+  <pre><code>PUT /alerts/events/:alertId/acknowledge</code></pre>
+  <p>Marks the event as acknowledged with a timestamp. Idempotent &mdash; acknowledging twice is harmless.</p>
+
+  <!-- ───── Webhooks ───── -->
+  <h2 id="webhooks">Webhooks</h2>
+  <p>Webhooks deliver alert payloads to external HTTP endpoints. They&rsquo;re used for Slack notifications, PagerDuty integration, custom dashboards, and more.</p>
+
+  <h3>List webhooks</h3>
+  <pre><code>GET /webhooks</code></pre>
+
+  <h3>Create a webhook</h3>
+  <pre><code>POST /webhooks
+Content-Type: application/json
+
+{
+  "url": "https://hooks.slack.com/services/T00/B00/xxx",
+  "events": ["alert.triggered"],
+  "secret": "my-hmac-secret",
+  "enabled": true
+}</code></pre>
+  <p>The <code>secret</code> field, if provided, is used to generate an HMAC-SHA256 signature in the <code>X-AgentLens-Signature</code> header for payload verification.</p>
+
+  <h3>Update a webhook</h3>
+  <pre><code>PUT /webhooks/:webhookId
+{ "enabled": false }</code></pre>
+
+  <h3>Delete a webhook</h3>
+  <pre><code>DELETE /webhooks/:webhookId</code></pre>
+
+  <h3>Test delivery</h3>
+  <pre><code>POST /webhooks/:webhookId/test</code></pre>
+  <p>Sends a synthetic test payload to verify the endpoint is reachable. Rate-limited to prevent abuse.</p>
+
+  <h3>Delivery history</h3>
+  <pre><code>GET /webhooks/:webhookId/deliveries?limit=20</code></pre>
+  <p>Returns recent delivery attempts with status codes, response times, and any errors.</p>
+
+  <!-- ───── End-to-End Examples ───── -->
+  <h2 id="examples">End-to-End Examples</h2>
+
+  <h3>1. Alert on high error rate with Slack notification</h3>
+  <pre><code># Step 1: Create a webhook for Slack
+curl -X POST http://localhost:3000/webhooks \
+  -H "Content-Type: application/json" \
+  -d '{
+    "url": "https://hooks.slack.com/services/T00/B00/xxx",
+    "events": ["alert.triggered"],
+    "secret": "slack-verify-secret"
+  }'
+
+# Step 2: Create an alert rule
+curl -X POST http://localhost:3000/alerts/rules \
+  -H "Content-Type: application/json" \
+  -d '{
+    "name": "Error spike",
+    "metric": "error_rate",
+    "operator": ">",
+    "threshold": 0.10,
+    "window_minutes": 30,
+    "cooldown_minutes": 60
+  }'
+
+# Step 3: Evaluate (run on a cron schedule)
+curl -X POST http://localhost:3000/alerts/evaluate
+
+# Step 4: Check unacknowledged alerts
+curl http://localhost:3000/alerts/events?acknowledged=false</code></pre>
+
+  <h3>2. Monitor token consumption per agent</h3>
+  <pre><code>curl -X POST http://localhost:3000/alerts/rules \
+  -H "Content-Type: application/json" \
+  -d '{
+    "name": "GPT-4 token budget exceeded",
+    "metric": "total_tokens",
+    "operator": ">",
+    "threshold": 500000,
+    "window_minutes": 1440,
+    "agent_filter": "gpt-4-agent",
+    "cooldown_minutes": 1440
+  }'</code></pre>
+
+  <h3>3. Detect latency degradation</h3>
+  <pre><code>curl -X POST http://localhost:3000/alerts/rules \
+  -H "Content-Type: application/json" \
+  -d '{
+    "name": "Slow responses",
+    "metric": "max_duration_ms",
+    "operator": ">",
+    "threshold": 30000,
+    "window_minutes": 15
+  }'</code></pre>
+
+  <!-- ───── Limits ───── -->
+  <h2 id="limits">Security &amp; Limits</h2>
+  <table>
+    <thead>
+      <tr><th>Constraint</th><th>Value</th></tr>
+    </thead>
+    <tbody>
+      <tr><td>Max alert rules</td><td>100</td></tr>
+      <tr><td>Max window</td><td>10,080 minutes (7 days)</td></tr>
+      <tr><td>Max cooldown</td><td>10,080 minutes (7 days)</td></tr>
+      <tr><td>Rule name length</td><td>128 characters</td></tr>
+      <tr><td>Agent filter length</td><td>256 characters</td></tr>
+      <tr><td>Rule/alert IDs</td><td>Validated format &mdash; invalid IDs return 400</td></tr>
+      <tr><td>Webhook test endpoint</td><td>Rate-limited</td></tr>
+    </tbody>
+  </table>
+
+</main>
+
+<script>
+document.querySelectorAll('.sidebar a').forEach(a => {
+  if (a.href === location.href) a.classList.add('active');
+});
+</script>
+</body>
+</html>

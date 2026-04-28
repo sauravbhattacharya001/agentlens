@@ -1,0 +1,318 @@
+<!DOCTYPE html>
+<html lang="en">
+<head>
+  <meta charset="UTF-8">
+  <meta name="viewport" content="width=device-width, initial-scale=1.0">
+  <title>Reliability &amp; SLA - AgentLens Docs</title>
+  <link rel="stylesheet" href="style.css">
+</head>
+<body>
+
+<header class="header">
+  <button class="menu-toggle" onclick="document.querySelector('.sidebar').classList.toggle('open')">&#9776;</button>
+  <a href="index.html" class="header-logo">&#128270; <span>AgentLens</span> Docs</a>
+  <nav class="header-nav">
+    <a href="getting-started.html">Getting Started</a>
+    <a href="sdk-reference.html">SDK</a>
+    <a href="api.html">API</a>
+    <a href="https://github.com/sauravbhattacharya001/agentlens" class="github-link" target="_blank">&#128279; GitHub</a>
+  </nav>
+</header>
+
+<aside class="sidebar">
+  <div class="sidebar-section">
+    <div class="sidebar-section-title">Overview</div>
+    <a href="index.html">Introduction</a>
+    <a href="architecture.html">Architecture</a>
+  </div>
+  <div class="sidebar-section">
+    <div class="sidebar-section-title">Guides</div>
+    <a href="getting-started.html">Getting Started</a>
+    <a href="quickstart.html">5-Minute Quickstart</a>
+    <a href="deployment.html">Deployment</a>
+  </div>
+  <div class="sidebar-section">
+    <div class="sidebar-section-title">SDK</div>
+    <a href="sdk-reference.html">Python SDK Reference</a>
+    <a href="decorators.html">Decorators</a>
+    <a href="models.html">Data Models</a>
+    <a href="transport.html">Transport &amp; Batching</a>
+    <a href="sampling.html">Sampling &amp; Rate Limiting</a>
+  </div>
+  <div class="sidebar-section">
+    <div class="sidebar-section-title">Backend</div>
+    <a href="api.html">REST API</a>
+    <a href="database.html">Database Schema</a>
+    <a href="dashboard.html">Dashboard</a>
+  </div>
+  <div class="sidebar-section">
+    <div class="sidebar-section-title">Advanced</div>
+    <a href="explainability.html">Explainability</a>
+    <a href="integrations.html">Integrations</a>
+    <a href="monitoring.html">Monitoring &amp; Analysis</a>
+    <a href="alerts.html">Alerts &amp; Webhooks</a>
+    <a href="reliability.html" class="active">Reliability &amp; SLA</a>
+    <a href="cost-optimization.html">Cost Optimization</a>
+    <a href="session-replay.html">Session Replay</a>
+  </div>
+</aside>
+
+<main class="main">
+  <h1>Reliability &amp; SLA</h1>
+  <p class="subtitle">SLA targets, compliance tracking, agent scorecards, leaderboards, data retention, and postmortem analysis.</p>
+
+  <div class="info-box">
+    <strong>This page covers four interconnected systems:</strong> SLA targets define what &ldquo;good&rdquo; looks like; scorecards grade each agent; leaderboards rank agents competitively; retention policies manage data lifecycle. Together they form AgentLens&rsquo;s reliability layer.
+  </div>
+
+  <nav class="toc">
+    <h3>On this page</h3>
+    <ul>
+      <li><a href="#sla-targets">SLA Targets</a></li>
+      <li><a href="#sla-compliance">Compliance Checks</a></li>
+      <li><a href="#sla-history">SLA History &amp; Summary</a></li>
+      <li><a href="#scorecards">Agent Scorecards</a></li>
+      <li><a href="#leaderboard">Leaderboard</a></li>
+      <li><a href="#postmortem">Postmortem Analysis</a></li>
+      <li><a href="#retention">Data Retention</a></li>
+      <li><a href="#workflow">Recommended Workflow</a></li>
+    </ul>
+  </nav>
+
+  <!-- ───── SLA Targets ───── -->
+  <h2 id="sla-targets">SLA Targets</h2>
+  <p>SLA targets are per-agent, per-metric thresholds that define acceptable performance. AgentLens evaluates live session data against these targets to compute compliance scores.</p>
+
+  <h3>Supported SLA metrics</h3>
+  <table>
+    <thead>
+      <tr><th>Metric</th><th>Description</th></tr>
+    </thead>
+    <tbody>
+      <tr><td><code>p50_latency_ms</code></td><td>Median event latency</td></tr>
+      <tr><td><code>p95_latency_ms</code></td><td>95th percentile latency</td></tr>
+      <tr><td><code>p99_latency_ms</code></td><td>99th percentile latency</td></tr>
+      <tr><td><code>error_rate_pct</code></td><td>Error rate as a percentage (0&ndash;100)</td></tr>
+      <tr><td><code>avg_tokens_in</code></td><td>Average input tokens per session</td></tr>
+      <tr><td><code>avg_tokens_out</code></td><td>Average output tokens per session</td></tr>
+      <tr><td><code>max_duration_ms</code></td><td>Maximum allowed event duration</td></tr>
+      <tr><td><code>min_throughput</code></td><td>Minimum events per evaluation window</td></tr>
+    </tbody>
+  </table>
+
+  <h3>Create / update a target</h3>
+  <pre><code>PUT /sla/targets
+Content-Type: application/json
+
+{
+  "agent_name": "gpt-4-agent",
+  "metric": "p95_latency_ms",
+  "threshold": 5000,
+  "comparison": "lte"
+}</code></pre>
+  <p>Comparisons: <code>lte</code> (≤), <code>gte</code> (≥), <code>lt</code>, <code>gt</code>, <code>eq</code>. Upserts on the <code>(agent_name, metric)</code> pair.</p>
+
+  <h3>List targets</h3>
+  <pre><code>GET /sla/targets
+GET /sla/targets?agent_name=gpt-4-agent</code></pre>
+
+  <h3>Delete a target</h3>
+  <pre><code>DELETE /sla/targets
+Content-Type: application/json
+
+{ "agent_name": "gpt-4-agent", "metric": "p95_latency_ms" }</code></pre>
+
+  <!-- ───── Compliance ───── -->
+  <h2 id="sla-compliance">Compliance Checks</h2>
+  <pre><code>POST /sla/check
+Content-Type: application/json
+
+{
+  "agent_name": "gpt-4-agent",
+  "window_hours": 24
+}</code></pre>
+  <p>Evaluates all SLA targets for the given agent over the specified window. Returns per-metric compliance with pass/fail status and the actual measured value.</p>
+  <pre><code>{
+  "agent_name": "gpt-4-agent",
+  "window_hours": 24,
+  "compliance_pct": 87.5,
+  "metrics": [
+    {
+      "metric": "p95_latency_ms",
+      "threshold": 5000,
+      "comparison": "lte",
+      "actual": 4200,
+      "passed": true
+    },
+    {
+      "metric": "error_rate_pct",
+      "threshold": 5,
+      "comparison": "lte",
+      "actual": 7.3,
+      "passed": false
+    }
+  ]
+}</code></pre>
+  <p>Each check is also persisted as a <strong>snapshot</strong> for historical tracking.</p>
+
+  <!-- ───── SLA History ───── -->
+  <h2 id="sla-history">SLA History &amp; Summary</h2>
+
+  <h3>Snapshot history</h3>
+  <pre><code>GET /sla/history?agent_name=gpt-4-agent&amp;limit=50</code></pre>
+  <p>Returns stored compliance snapshots ordered by creation date (newest first). Use for trend charts and audit trails.</p>
+
+  <h3>Summary across agents</h3>
+  <pre><code>GET /sla/summary</code></pre>
+  <p>Aggregates the latest compliance snapshot for every agent that has SLA targets configured. Useful for executive dashboards and fleet-wide health overviews.</p>
+
+  <!-- ───── Scorecards ───── -->
+  <h2 id="scorecards">Agent Scorecards</h2>
+  <p>Scorecards provide a letter-grade assessment (A+ through F) for each agent based on multiple performance dimensions: completion rate, error rate, token efficiency, and latency.</p>
+
+  <h3>List all scorecards</h3>
+  <pre><code>GET /scorecards?days=30</code></pre>
+  <p>Returns a scorecard for every active agent in the lookback window.</p>
+
+  <h3>Single agent scorecard</h3>
+  <pre><code>GET /scorecards/:agent?days=30</code></pre>
+
+  <h3>Grading scale</h3>
+  <table>
+    <thead>
+      <tr><th>Score</th><th>Grade</th><th>Indicator</th></tr>
+    </thead>
+    <tbody>
+      <tr><td>95&ndash;100</td><td>A+</td><td style="color:#22c55e">&#9679; Excellent</td></tr>
+      <tr><td>90&ndash;94</td><td>A</td><td style="color:#22c55e">&#9679; Great</td></tr>
+      <tr><td>85&ndash;89</td><td>A&minus;</td><td style="color:#22c55e">&#9679; Good</td></tr>
+      <tr><td>80&ndash;84</td><td>B+</td><td style="color:#3b82f6">&#9679; Above average</td></tr>
+      <tr><td>75&ndash;79</td><td>B</td><td style="color:#3b82f6">&#9679; Average</td></tr>
+      <tr><td>70&ndash;74</td><td>B&minus;</td><td style="color:#3b82f6">&#9679; Below average</td></tr>
+      <tr><td>60&ndash;69</td><td>C+/C/C&minus;</td><td style="color:#eab308">&#9679; Needs improvement</td></tr>
+      <tr><td>50&ndash;59</td><td>D</td><td style="color:#f97316">&#9679; Poor</td></tr>
+      <tr><td>&lt;50</td><td>F</td><td style="color:#ef4444">&#9679; Failing</td></tr>
+    </tbody>
+  </table>
+
+  <p>Scorecards include: total sessions, completion rate, error count, average token usage, first/last seen dates, and per-dimension breakdowns.</p>
+
+  <!-- ───── Leaderboard ───── -->
+  <h2 id="leaderboard">Leaderboard</h2>
+  <p>The leaderboard ranks agents competitively across five dimensions. Results are cached for 30 seconds to keep aggregation queries fast.</p>
+
+  <pre><code>GET /leaderboard?sort=efficiency&amp;days=30&amp;limit=20&amp;min_sessions=2</code></pre>
+
+  <h3>Sort dimensions</h3>
+  <table>
+    <thead>
+      <tr><th>Dimension</th><th>What it measures</th><th>Default order</th></tr>
+    </thead>
+    <tbody>
+      <tr><td><code>efficiency</code></td><td>Tokens per successful completion (lower = better)</td><td>Ascending</td></tr>
+      <tr><td><code>speed</code></td><td>Average event latency</td><td>Ascending</td></tr>
+      <tr><td><code>reliability</code></td><td>Completion rate, error-free sessions</td><td>Descending</td></tr>
+      <tr><td><code>cost</code></td><td>Estimated dollar cost per session</td><td>Ascending</td></tr>
+      <tr><td><code>volume</code></td><td>Total sessions processed</td><td>Descending</td></tr>
+    </tbody>
+  </table>
+
+  <p>Parameters: <code>days</code> (1&ndash;365, default 30), <code>limit</code> (1&ndash;100, default 20), <code>min_sessions</code> (minimum sessions to qualify, default 2), <code>order</code> (<code>asc</code>/<code>desc</code>, overrides default).</p>
+
+  <!-- ───── Postmortem ───── -->
+  <h2 id="postmortem">Postmortem Analysis</h2>
+  <p>Automated postmortem reports for failed or degraded sessions. Analyzes event timelines, identifies error cascades, classifies severity, and computes cost impact.</p>
+
+  <h3>Generate a postmortem</h3>
+  <pre><code>POST /postmortem
+Content-Type: application/json
+
+{ "session_id": "sess_abc123" }</code></pre>
+
+  <p>Response includes:</p>
+  <ul>
+    <li><strong>Timeline</strong> &mdash; Key events (first, last, errors, slow calls) with elapsed-time markers</li>
+    <li><strong>Severity</strong> &mdash; SEV-1 through SEV-4 based on error rate thresholds</li>
+    <li><strong>Root cause candidates</strong> &mdash; The first error event with context</li>
+    <li><strong>Cost analysis</strong> &mdash; Token consumption and estimated dollar cost for the session</li>
+    <li><strong>Tool call breakdown</strong> &mdash; Which tools were invoked and which failed</li>
+  </ul>
+
+  <h3>List recent error sessions</h3>
+  <pre><code>GET /postmortem?min_errors=3&amp;limit=20</code></pre>
+  <p>Returns sessions that have at least <code>min_errors</code> error events, suitable for triage and batch postmortem generation.</p>
+
+  <h3>Severity classification</h3>
+  <table>
+    <thead>
+      <tr><th>Level</th><th>Error rate threshold</th><th>Meaning</th></tr>
+    </thead>
+    <tbody>
+      <tr><td>SEV-1</td><td>&ge; 50%</td><td>Critical &mdash; majority of events failed</td></tr>
+      <tr><td>SEV-2</td><td>&ge; 25%</td><td>High &mdash; significant error rate</td></tr>
+      <tr><td>SEV-3</td><td>&ge; 10%</td><td>Medium &mdash; elevated errors</td></tr>
+      <tr><td>SEV-4</td><td>&lt; 10%</td><td>Low &mdash; isolated failures</td></tr>
+    </tbody>
+  </table>
+
+  <!-- ───── Retention ───── -->
+  <h2 id="retention">Data Retention</h2>
+  <p>Configurable data lifecycle management. Purge old sessions and events to control database growth while protecting tagged sessions from deletion.</p>
+
+  <h3>View current config</h3>
+  <pre><code>GET /retention/config
+
+{
+  "max_age_days": 90,
+  "max_sessions": 0,
+  "exempt_tags": [],
+  "auto_purge": false
+}</code></pre>
+
+  <h3>Update retention policy</h3>
+  <pre><code>PUT /retention/config
+Content-Type: application/json
+
+{
+  "max_age_days": 60,
+  "exempt_tags": ["production", "incident"]
+}</code></pre>
+  <p>Sessions tagged with any <code>exempt_tags</code> value are never purged, regardless of age.</p>
+
+  <h3>Database statistics</h3>
+  <pre><code>GET /retention/stats</code></pre>
+  <p>Returns: total sessions, total events, oldest session date, database size estimate, and counts of sessions eligible for purge under current settings.</p>
+
+  <h3>Manual purge</h3>
+  <pre><code>POST /retention/purge
+Content-Type: application/json
+
+{ "dry_run": true }</code></pre>
+  <p>With <code>dry_run: true</code>, returns what <em>would</em> be deleted without actually removing anything. Set to <code>false</code> (or omit) to execute the purge.</p>
+
+  <div class="warning-box">
+    <strong>Caution:</strong> Purge operations are irreversible. Always run a dry-run first and verify the counts before executing.
+  </div>
+
+  <!-- ───── Recommended Workflow ───── -->
+  <h2 id="workflow">Recommended Workflow</h2>
+  <ol>
+    <li><strong>Define SLA targets</strong> for each production agent (<code>PUT /sla/targets</code>).</li>
+    <li><strong>Set up alert rules</strong> for the most critical metrics: error rate, latency, token budget (<code>POST /alerts/rules</code>).</li>
+    <li><strong>Configure webhooks</strong> for Slack/PagerDuty notifications (<code>POST /webhooks</code>).</li>
+    <li><strong>Schedule evaluation</strong> &mdash; call <code>POST /alerts/evaluate</code> and <code>POST /sla/check</code> every 5&ndash;15 minutes via cron.</li>
+    <li><strong>Review scorecards</strong> weekly to track agent health trends (<code>GET /scorecards</code>).</li>
+    <li><strong>Investigate incidents</strong> using postmortem analysis (<code>POST /postmortem</code>).</li>
+    <li><strong>Monitor leaderboard</strong> to compare agent efficiency and identify regression (<code>GET /leaderboard</code>).</li>
+    <li><strong>Configure retention</strong> to keep database size manageable (<code>PUT /retention/config</code>).</li>
+  </ol>
+
+</main>
+
+<script>
+document.querySelectorAll('.sidebar a').forEach(a => {
+  if (a.href === location.href) a.classList.add('active');
+});
+</script>
+</body>
+</html>
