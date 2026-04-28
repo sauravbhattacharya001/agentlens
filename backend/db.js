@@ -1,5 +1,6 @@
 const Database = require("better-sqlite3");
 const path = require("path");
+const { runMigrations } = require("./migrations");
 
 const DB_PATH = process.env.DB_PATH || path.join(__dirname, "agentlens.db");
 
@@ -10,105 +11,17 @@ function getDb() {
     db = new Database(DB_PATH);
     db.pragma("journal_mode = WAL");
     db.pragma("foreign_keys = ON");
-    initSchema();
+    runMigrations(db);
+    setPragmas();
   }
   return db;
 }
 
-function initSchema() {
-  db.exec(`
-    CREATE TABLE IF NOT EXISTS sessions (
-      session_id TEXT PRIMARY KEY,
-      agent_name TEXT NOT NULL DEFAULT 'default-agent',
-      started_at TEXT NOT NULL,
-      ended_at TEXT,
-      metadata TEXT DEFAULT '{}',
-      total_tokens_in INTEGER DEFAULT 0,
-      total_tokens_out INTEGER DEFAULT 0,
-      status TEXT DEFAULT 'active'
-    );
-
-    CREATE TABLE IF NOT EXISTS events (
-      event_id TEXT PRIMARY KEY,
-      session_id TEXT NOT NULL,
-      event_type TEXT NOT NULL DEFAULT 'generic',
-      timestamp TEXT NOT NULL,
-      input_data TEXT,
-      output_data TEXT,
-      model TEXT,
-      tokens_in INTEGER DEFAULT 0,
-      tokens_out INTEGER DEFAULT 0,
-      tool_call TEXT,
-      decision_trace TEXT,
-      duration_ms REAL,
-      FOREIGN KEY (session_id) REFERENCES sessions(session_id)
-    );
-
-    CREATE INDEX IF NOT EXISTS idx_events_session ON events(session_id);
-    CREATE INDEX IF NOT EXISTS idx_events_timestamp ON events(timestamp);
-    CREATE INDEX IF NOT EXISTS idx_sessions_status ON sessions(status);
-
-    -- Indexes for analytics aggregation queries
-    CREATE INDEX IF NOT EXISTS idx_events_model ON events(model) WHERE model IS NOT NULL AND model != '';
-    CREATE INDEX IF NOT EXISTS idx_events_type ON events(event_type);
-    CREATE INDEX IF NOT EXISTS idx_sessions_agent ON sessions(agent_name);
-    CREATE INDEX IF NOT EXISTS idx_sessions_started ON sessions(started_at);
-
-    -- Composite index for session-scoped event ordering (used by session detail)
-    CREATE INDEX IF NOT EXISTS idx_events_session_ts ON events(session_id, timestamp);
-
-    -- Covering index for /analytics/performance endpoint.
-    -- The performance query fetches (model, event_type, duration_ms) for all
-    -- events with duration_ms > 0 after a timestamp cutoff, joined to sessions.
-    -- This composite index lets SQLite satisfy the WHERE filter and return all
-    -- needed columns directly from the index B-tree without touching the main
-    -- events table rows, reducing I/O from O(rows × row_size) to O(rows × 3_cols).
-    CREATE INDEX IF NOT EXISTS idx_events_perf_covering
-      ON events(timestamp, duration_ms, model, event_type, session_id)
-      WHERE duration_ms IS NOT NULL AND duration_ms > 0;
-
-    -- Model pricing for cost estimation
-    CREATE TABLE IF NOT EXISTS model_pricing (
-      model TEXT PRIMARY KEY,
-      input_cost_per_1m REAL NOT NULL DEFAULT 0,
-      output_cost_per_1m REAL NOT NULL DEFAULT 0,
-      currency TEXT NOT NULL DEFAULT 'USD',
-      updated_at TEXT NOT NULL
-    );
-
-    -- Session tags for filtering and organization
-    CREATE TABLE IF NOT EXISTS session_tags (
-      session_id TEXT NOT NULL,
-      tag TEXT NOT NULL,
-      created_at TEXT NOT NULL DEFAULT (datetime('now')),
-      PRIMARY KEY (session_id, tag),
-      FOREIGN KEY (session_id) REFERENCES sessions(session_id) ON DELETE CASCADE
-    );
-    CREATE INDEX IF NOT EXISTS idx_session_tags_tag ON session_tags(tag);
-    CREATE INDEX IF NOT EXISTS idx_session_tags_session ON session_tags(session_id);
-
-    -- Cost budgets for spending limits
-    CREATE TABLE IF NOT EXISTS cost_budgets (
-      scope TEXT NOT NULL,
-      period TEXT NOT NULL CHECK(period IN ('daily', 'weekly', 'monthly', 'total')),
-      limit_usd REAL NOT NULL,
-      warn_pct REAL NOT NULL DEFAULT 80,
-      created_at TEXT NOT NULL DEFAULT (datetime('now')),
-      updated_at TEXT NOT NULL DEFAULT (datetime('now')),
-      PRIMARY KEY (scope, period)
-    );
-    CREATE INDEX IF NOT EXISTS idx_cost_budgets_scope ON cost_budgets(scope);
-
-    -- Session bookmarks for starring important sessions
-    CREATE TABLE IF NOT EXISTS session_bookmarks (
-      session_id TEXT PRIMARY KEY,
-      note TEXT DEFAULT '',
-      created_at TEXT NOT NULL DEFAULT (datetime('now')),
-      FOREIGN KEY (session_id) REFERENCES sessions(session_id) ON DELETE CASCADE
-    );
-  `);
-
-  // Performance: optimize for read-heavy analytics workload
+/**
+ * Performance pragmas for read-heavy analytics workload.
+ * Separated from schema init so they can be set after migrations.
+ */
+function setPragmas() {
   db.pragma("cache_size = -8000"); // 8 MB page cache (default is ~2 MB)
   db.pragma("temp_store = MEMORY");
   db.pragma("mmap_size = 268435456"); // 256 MB mmap for faster reads
