@@ -6,7 +6,7 @@ Extracted from cli.py to keep the main CLI dispatcher lean.
 from __future__ import annotations
 
 import argparse
-from datetime import datetime, timezone
+from datetime import datetime
 from typing import Any
 
 from agentlens._utils import parse_iso_or_epoch, utcnow

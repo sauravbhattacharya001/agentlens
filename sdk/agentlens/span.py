@@ -18,7 +18,7 @@ session timeline and can be queried.
 from __future__ import annotations
 
 from dataclasses import dataclass, field
-from datetime import datetime, timezone
+from datetime import datetime
 from functools import partial
 from typing import Any
 

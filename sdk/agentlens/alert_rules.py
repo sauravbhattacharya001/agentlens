@@ -11,7 +11,6 @@ Pure Python — no external dependencies beyond the standard library.
 from __future__ import annotations
 
 import operator as _op
-import re
 import threading
 import time
 from dataclasses import dataclass, field
