@@ -106,6 +106,7 @@ from agentlens.cli_bottleneck import cmd_bottleneck, register as register_bottle
 from agentlens.cli_config import cmd_config, register_config_parser, apply_config_defaults  # persistent config
 from agentlens.cli_triage import cmd_triage, register_triage_parser  # auto-triage engine
 from agentlens.cli_autopsy import cmd_autopsy, register_autopsy_parser  # session autopsy
+from agentlens.cli_stamina import cmd_stamina, register_stamina  # agent stamina profiling
 
 
 def _print_table(rows: list[dict], columns: list[str], *, max_width: int = 40) -> None:
@@ -912,6 +913,9 @@ def main() -> None:
 
     # -- autopsy --
     register_autopsy_parser(sub)
+
+    # -- stamina --
+    register_stamina(sub)
 
     # -- forecast --
     p = sub.add_parser("forecast", help="Predict future costs/usage from historical trends")
