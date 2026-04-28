@@ -36,6 +36,7 @@ from agentlens.flamegraph import Flamegraph, flamegraph_html
 from agentlens.quota import QuotaManager, QuotaPolicy, QuotaCheck, QuotaReport, QuotaScope, QuotaWindow, QuotaAction
 from agentlens.retry_tracker import RetryTracker, RetryReport, RetryChain, RetryStorm, RetryRecommendation, RetryOutcome
 from agentlens.alert_rules import AlertRulesEngine, AlertRule as AlertRuleDef, AlertCondition, ThresholdCondition, RateCondition, AlertResult, AlertSeverity as RuleSeverity
+from agentlens.autopsy import SessionAutopsy, AutopsyConfig, AutopsyReport, Evidence, EvidenceSource, Hypothesis, RemediationAction, IncidentPriority, EffortLevel, CausalRelation, CausalLink
 
 __version__ = "0.1.0"
 __all__ = [
