@@ -28,6 +28,7 @@ from agentlens.error_fingerprint import ErrorFingerprinter, ErrorCluster, ErrorR
 from agentlens.session_diff import SessionDiff, DiffReport, EventPair, AlignmentStatus, ToolCallDelta
 from agentlens.group_analyzer import SessionGroupAnalyzer, GroupStats, ComparisonReport
 from agentlens.heatmap import HeatmapBuilder, HeatmapBucket
+from agentlens.collaboration import CollaborationAnalyzer, CollaborationConfig, CollaborationReport, CollaborationEvent, CollaborationPattern, TeamworkGrade, HandoffDetail, HandoffVerdict, BottleneckAgent, BottleneckSeverity, DelegationNode, WorkloadEntry, EngineResult
 from agentlens.narrative import NarrativeGenerator, NarrativeConfig, NarrativeStyle, Narrative, NarrativeSection, ToolSummary
 from agentlens.guardrails import Guardrails, GuardrailSuite, Violation, ValidationResult, SuiteReport, Severity as GuardrailSeverity
 from agentlens.replayer import SessionReplayer, ReplayFrame, ReplayStats

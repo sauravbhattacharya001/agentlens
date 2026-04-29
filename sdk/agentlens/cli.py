@@ -107,6 +107,7 @@ from agentlens.cli_config import cmd_config, register_config_parser, apply_confi
 from agentlens.cli_triage import cmd_triage, register_triage_parser  # auto-triage engine
 from agentlens.cli_autopsy import cmd_autopsy, register_autopsy_parser  # session autopsy
 from agentlens.cli_stamina import cmd_stamina, register_stamina  # agent stamina profiling
+from agentlens.cli_collaboration import cmd_collaboration, register_collaboration  # multi-agent collaboration
 
 
 def _print_table(rows: list[dict], columns: list[str], *, max_width: int = 40) -> None:
@@ -916,6 +917,9 @@ def main() -> None:
 
     # -- stamina --
     register_stamina(sub)
+
+    # -- collaboration --
+    register_collaboration(sub)
 
     # -- forecast --
     p = sub.add_parser("forecast", help="Predict future costs/usage from historical trends")

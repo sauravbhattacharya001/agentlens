@@ -1,0 +1,374 @@
+<!DOCTYPE html>
+<html lang="en">
+<head>
+  <meta charset="UTF-8">
+  <meta name="viewport" content="width=device-width, initial-scale=1.0">
+  <title>AgentLens — Collaboration Analyzer</title>
+  <link rel="stylesheet" href="styles.css">
+  <script src="https://cdn.jsdelivr.net/npm/chart.js@4"></script>
+  <style>
+    .collab-grid { display: grid; grid-template-columns: repeat(auto-fit, minmax(300px, 1fr)); gap: 1rem; margin: 1rem 0; }
+    .collab-card { background: var(--card-bg, #1e1e2e); border-radius: 12px; padding: 1.2rem; border: 1px solid var(--border, #333); }
+    .collab-card h3 { margin: 0 0 0.8rem 0; font-size: 1rem; color: var(--text-secondary, #aaa); }
+    .score-gauge { text-align: center; padding: 1rem 0; }
+    .score-value { font-size: 3rem; font-weight: 700; }
+    .score-label { font-size: 0.9rem; color: var(--text-secondary, #aaa); margin-top: 0.3rem; }
+    .grade-badge { display: inline-block; padding: 0.3rem 0.8rem; border-radius: 20px; font-weight: 600; font-size: 0.85rem; }
+    .grade-elite { background: #22c55e33; color: #22c55e; }
+    .grade-strong { background: #3b82f633; color: #3b82f6; }
+    .grade-functional { background: #eab30833; color: #eab308; }
+    .grade-struggling { background: #f9731633; color: #f97316; }
+    .grade-dysfunctional { background: #ef444433; color: #ef4444; }
+    .pattern-badge { display: inline-block; padding: 0.3rem 0.8rem; border-radius: 20px; background: var(--accent-bg, #4f46e533); color: var(--accent, #818cf8); font-weight: 600; font-size: 0.85rem; }
+    .handoff-list { list-style: none; padding: 0; margin: 0; }
+    .handoff-list li { padding: 0.5rem 0; border-bottom: 1px solid var(--border, #333); display: flex; justify-content: space-between; align-items: center; }
+    .handoff-list li:last-child { border-bottom: none; }
+    .verdict-clean { color: #22c55e; }
+    .verdict-acceptable { color: #eab308; }
+    .verdict-lossy { color: #f97316; }
+    .verdict-failed { color: #ef4444; }
+    .bottleneck-item { padding: 0.6rem; margin: 0.3rem 0; background: var(--warning-bg, #f9731610); border-radius: 8px; border-left: 3px solid #f97316; }
+    .agent-bar { display: flex; align-items: center; gap: 0.5rem; margin: 0.3rem 0; }
+    .agent-bar .bar { height: 20px; background: var(--accent, #818cf8); border-radius: 4px; min-width: 4px; transition: width 0.3s; }
+    .agent-bar .label { min-width: 120px; font-size: 0.85rem; }
+    .agent-bar .count { font-size: 0.8rem; color: var(--text-secondary, #aaa); }
+    .network-canvas { width: 100%; height: 300px; background: var(--card-bg, #1e1e2e); border-radius: 8px; }
+    .session-select { width: 100%; padding: 0.5rem; border-radius: 8px; border: 1px solid var(--border, #333); background: var(--input-bg, #2a2a3e); color: var(--text, #eee); margin-bottom: 1rem; }
+    .engine-row { display: flex; align-items: center; gap: 0.5rem; margin: 0.3rem 0; }
+    .engine-row .name { min-width: 180px; font-size: 0.85rem; }
+    .engine-row .bar-bg { flex: 1; height: 18px; background: var(--border, #333); border-radius: 4px; overflow: hidden; }
+    .engine-row .bar-fill { height: 100%; border-radius: 4px; transition: width 0.3s; }
+    .engine-row .val { min-width: 40px; text-align: right; font-size: 0.85rem; font-weight: 600; }
+    .empty-state { text-align: center; padding: 3rem; color: var(--text-secondary, #aaa); }
+    .loading { text-align: center; padding: 2rem; color: var(--text-secondary, #aaa); }
+  </style>
+</head>
+<body>
+  <div id="app">
+    <header class="header">
+      <div class="header-left">
+        <a href="index.html" style="text-decoration:none"><h1 class="logo">🔍 AgentLens</h1></a>
+        <span class="tagline">🤝 Collaboration Analyzer</span>
+      </div>
+      <div class="header-right">
+        <a href="index.html" class="btn btn-alert-header" style="text-decoration:none">📋 Dashboard</a>
+        <a href="profiler.html" class="btn btn-alert-header" style="text-decoration:none">🧬 Profiler</a>
+        <a href="triage.html" class="btn btn-alert-header" style="text-decoration:none">🚦 Triage</a>
+        <button class="theme-toggle" onclick="toggleTheme()" title="Toggle theme" id="themeToggleBtn">🌙</button>
+      </div>
+    </header>
+
+    <main class="main" style="padding: 1rem 2rem;">
+      <h2>Multi-Agent Collaboration Analysis</h2>
+
+      <div style="display:flex; gap:1rem; align-items:center; margin-bottom:1rem;">
+        <select id="sessionSelect" class="session-select" style="max-width:400px;" onchange="loadSession()">
+          <option value="">Select a multi-agent session...</option>
+        </select>
+        <button class="btn btn-secondary" onclick="loadSessions()">↻ Refresh</button>
+      </div>
+
+      <div id="loading" class="loading" style="display:none;">Analyzing collaboration...</div>
+      <div id="emptyState" class="empty-state">Select a session to analyze multi-agent collaboration.</div>
+
+      <div id="analysisView" style="display:none;">
+        <!-- Overview cards -->
+        <div class="collab-grid" style="grid-template-columns: repeat(4, 1fr);">
+          <div class="collab-card">
+            <div class="score-gauge">
+              <div class="score-value" id="teamworkScore">—</div>
+              <div class="score-label">Teamwork Score</div>
+              <div id="gradeBadge" class="grade-badge" style="margin-top:0.5rem;">—</div>
+            </div>
+          </div>
+          <div class="collab-card">
+            <div class="score-gauge">
+              <div class="score-value" id="agentCount">—</div>
+              <div class="score-label">Agents</div>
+              <div id="patternBadge" class="pattern-badge" style="margin-top:0.5rem;">—</div>
+            </div>
+          </div>
+          <div class="collab-card">
+            <div class="score-gauge">
+              <div class="score-value" id="eventCount">—</div>
+              <div class="score-label">Events</div>
+              <div class="score-label" id="coordOverhead" style="margin-top:0.3rem;">—</div>
+            </div>
+          </div>
+          <div class="collab-card">
+            <div class="score-gauge">
+              <div class="score-value" id="giniValue">—</div>
+              <div class="score-label">Gini Coefficient</div>
+              <div class="score-label" id="giniDesc" style="margin-top:0.3rem;">—</div>
+            </div>
+          </div>
+        </div>
+
+        <!-- Engine scores + Network graph -->
+        <div class="collab-grid" style="grid-template-columns: 1fr 1fr;">
+          <div class="collab-card">
+            <h3>🔬 Engine Scores</h3>
+            <div id="engineScores"></div>
+          </div>
+          <div class="collab-card">
+            <h3>🕸️ Agent Network</h3>
+            <canvas id="networkCanvas" class="network-canvas"></canvas>
+          </div>
+        </div>
+
+        <!-- Handoffs + Bottlenecks -->
+        <div class="collab-grid">
+          <div class="collab-card">
+            <h3>🤝 Handoff Quality</h3>
+            <canvas id="handoffChart" height="200"></canvas>
+            <ul class="handoff-list" id="handoffList"></ul>
+          </div>
+          <div class="collab-card">
+            <h3>⚠️ Communication Bottlenecks</h3>
+            <div id="bottleneckList"></div>
+          </div>
+          <div class="collab-card">
+            <h3>📊 Workload Balance</h3>
+            <div id="workloadBars"></div>
+          </div>
+        </div>
+      </div>
+    </main>
+  </div>
+
+  <script>
+    const API = window.location.origin;
+    let currentData = null;
+
+    // Theme
+    function toggleTheme() {
+      document.body.classList.toggle('light-theme');
+      const btn = document.getElementById('themeToggleBtn');
+      btn.textContent = document.body.classList.contains('light-theme') ? '☀️' : '🌙';
+      localStorage.setItem('theme', document.body.classList.contains('light-theme') ? 'light' : 'dark');
+    }
+    if (localStorage.getItem('theme') === 'light') { document.body.classList.add('light-theme'); document.getElementById('themeToggleBtn').textContent = '☀️'; }
+
+    async function loadSessions() {
+      try {
+        const resp = await fetch(`${API}/collaboration?limit=50`);
+        const sessions = await resp.json();
+        const select = document.getElementById('sessionSelect');
+        select.innerHTML = '<option value="">Select a multi-agent session...</option>';
+        for (const s of sessions) {
+          const opt = document.createElement('option');
+          opt.value = s.session_id;
+          const gradeIcon = {elite:'🏆',strong:'💪',functional:'✅',struggling:'⚠️',dysfunctional:'🔴'}[s.grade] || '•';
+          opt.textContent = `${s.session_id.slice(0,20)} — ${s.agent_count} agents, score ${s.teamwork_score} ${gradeIcon}`;
+          select.appendChild(opt);
+        }
+      } catch (e) { console.error('Failed to load sessions:', e); }
+    }
+
+    async function loadSession() {
+      const sid = document.getElementById('sessionSelect').value;
+      if (!sid) { document.getElementById('analysisView').style.display = 'none'; document.getElementById('emptyState').style.display = ''; return; }
+
+      document.getElementById('emptyState').style.display = 'none';
+      document.getElementById('loading').style.display = '';
+      document.getElementById('analysisView').style.display = 'none';
+
+      try {
+        const resp = await fetch(`${API}/collaboration/${encodeURIComponent(sid)}`);
+        currentData = await resp.json();
+        renderAnalysis(currentData);
+      } catch (e) {
+        console.error('Analysis failed:', e);
+        document.getElementById('emptyState').style.display = '';
+        document.getElementById('emptyState').textContent = 'Failed to load analysis.';
+      } finally {
+        document.getElementById('loading').style.display = 'none';
+      }
+    }
+
+    function renderAnalysis(data) {
+      document.getElementById('analysisView').style.display = '';
+
+      // Overview
+      document.getElementById('teamworkScore').textContent = Math.round(data.teamwork_score);
+      const gb = document.getElementById('gradeBadge');
+      gb.textContent = data.grade;
+      gb.className = `grade-badge grade-${data.grade}`;
+
+      document.getElementById('agentCount').textContent = data.agent_count;
+      const patternLabels = {orchestrated:'🎯 Orchestrated',peer_to_peer:'🤝 Peer-to-Peer',pipeline:'➡️ Pipeline',swarm:'🐝 Swarm',hierarchical:'🏛️ Hierarchical',solo:'👤 Solo'};
+      document.getElementById('patternBadge').textContent = patternLabels[data.collaboration_pattern] || data.collaboration_pattern;
+
+      document.getElementById('eventCount').textContent = data.event_count;
+      document.getElementById('coordOverhead').textContent = `${data.coordination_overhead_pct || 0}% coordination overhead`;
+
+      const gini = data.gini_coefficient || 0;
+      document.getElementById('giniValue').textContent = gini.toFixed(3);
+      document.getElementById('giniDesc').textContent = gini < 0.2 ? 'Well balanced' : gini < 0.4 ? 'Moderate imbalance' : 'High imbalance';
+
+      // Engine scores
+      const engDiv = document.getElementById('engineScores');
+      engDiv.innerHTML = '';
+      const colors = ['#22c55e','#3b82f6','#8b5cf6','#eab308','#f97316','#ef4444'];
+      (data.engines || []).forEach((eng, i) => {
+        const color = eng.score >= 75 ? '#22c55e' : eng.score >= 50 ? '#eab308' : '#ef4444';
+        engDiv.innerHTML += `<div class="engine-row">
+          <span class="name">${eng.engine}</span>
+          <div class="bar-bg"><div class="bar-fill" style="width:${eng.score}%;background:${color}"></div></div>
+          <span class="val">${Math.round(eng.score)}</span>
+        </div>`;
+      });
+
+      // Agent network (simple force-directed on canvas)
+      renderNetwork(data);
+
+      // Handoffs
+      renderHandoffs(data);
+
+      // Bottlenecks
+      renderBottlenecks(data);
+
+      // Workload
+      renderWorkload(data);
+    }
+
+    function renderNetwork(data) {
+      const canvas = document.getElementById('networkCanvas');
+      const ctx = canvas.getContext('2d');
+      canvas.width = canvas.offsetWidth;
+      canvas.height = 300;
+      ctx.clearRect(0, 0, canvas.width, canvas.height);
+
+      const agents = new Set();
+      const edges = [];
+      for (const h of (data.handoffs || [])) {
+        agents.add(h.source_agent);
+        agents.add(h.target_agent);
+        edges.push([h.source_agent, h.target_agent, h.verdict]);
+      }
+      for (const w of (data.workload || [])) agents.add(w.agent_id);
+
+      const agentList = [...agents];
+      if (agentList.length === 0) { ctx.fillStyle = '#666'; ctx.fillText('No agent interactions', canvas.width/2-60, 150); return; }
+
+      // Position agents in a circle
+      const cx = canvas.width / 2, cy = canvas.height / 2, r = Math.min(cx, cy) - 50;
+      const pos = {};
+      agentList.forEach((a, i) => {
+        const angle = (2 * Math.PI * i) / agentList.length - Math.PI / 2;
+        pos[a] = { x: cx + r * Math.cos(angle), y: cy + r * Math.sin(angle) };
+      });
+
+      // Draw edges
+      const verdictColors = {clean:'#22c55e',acceptable:'#eab308',lossy:'#f97316',failed:'#ef4444'};
+      for (const [src, tgt, verdict] of edges) {
+        const s = pos[src], t = pos[tgt];
+        if (!s || !t) continue;
+        ctx.beginPath();
+        ctx.moveTo(s.x, s.y);
+        ctx.lineTo(t.x, t.y);
+        ctx.strokeStyle = verdictColors[verdict] || '#555';
+        ctx.lineWidth = 2;
+        ctx.stroke();
+        // Arrow
+        const angle = Math.atan2(t.y - s.y, t.x - s.x);
+        const ax = t.x - 25 * Math.cos(angle), ay = t.y - 25 * Math.sin(angle);
+        ctx.beginPath();
+        ctx.moveTo(ax, ay);
+        ctx.lineTo(ax - 8 * Math.cos(angle - 0.4), ay - 8 * Math.sin(angle - 0.4));
+        ctx.lineTo(ax - 8 * Math.cos(angle + 0.4), ay - 8 * Math.sin(angle + 0.4));
+        ctx.closePath();
+        ctx.fillStyle = verdictColors[verdict] || '#555';
+        ctx.fill();
+      }
+
+      // Draw agents
+      for (const a of agentList) {
+        const p = pos[a];
+        ctx.beginPath();
+        ctx.arc(p.x, p.y, 18, 0, 2 * Math.PI);
+        ctx.fillStyle = '#4f46e5';
+        ctx.fill();
+        ctx.strokeStyle = '#818cf8';
+        ctx.lineWidth = 2;
+        ctx.stroke();
+        ctx.fillStyle = '#eee';
+        ctx.font = '11px system-ui';
+        ctx.textAlign = 'center';
+        ctx.textBaseline = 'middle';
+        const short = a.length > 8 ? a.slice(0, 7) + '…' : a;
+        ctx.fillText(short, p.x, p.y);
+      }
+    }
+
+    function renderHandoffs(data) {
+      const list = document.getElementById('handoffList');
+      list.innerHTML = '';
+      const handoffs = data.handoffs || [];
+      if (handoffs.length === 0) { list.innerHTML = '<li style="color:var(--text-secondary)">No handoffs</li>'; return; }
+
+      for (const h of handoffs.slice(0, 15)) {
+        const icon = {clean:'✅',acceptable:'🟡',lossy:'🟠',failed:'🔴'}[h.verdict] || '•';
+        list.innerHTML += `<li>
+          <span>${icon} ${h.source_agent} → ${h.target_agent}</span>
+          <span class="verdict-${h.verdict}">${h.verdict} (${h.latency_ms}ms)</span>
+        </li>`;
+      }
+
+      // Chart
+      if (handoffs.length > 1) {
+        const ctx = document.getElementById('handoffChart').getContext('2d');
+        new Chart(ctx, {
+          type: 'bar',
+          data: {
+            labels: handoffs.map((_, i) => `#${i+1}`),
+            datasets: [{
+              label: 'Quality',
+              data: handoffs.map(h => h.quality),
+              backgroundColor: handoffs.map(h => ({clean:'#22c55e88',acceptable:'#eab30888',lossy:'#f9731688',failed:'#ef444488'})[h.verdict]),
+              borderRadius: 4,
+            }]
+          },
+          options: { responsive: true, plugins: { legend: { display: false } }, scales: { y: { max: 100 } } }
+        });
+      }
+    }
+
+    function renderBottlenecks(data) {
+      const div = document.getElementById('bottleneckList');
+      div.innerHTML = '';
+      const bns = data.bottlenecks || [];
+      if (bns.length === 0) { div.innerHTML = '<p style="color:var(--text-secondary)">No bottlenecks detected ✅</p>'; return; }
+
+      for (const b of bns) {
+        div.innerHTML += `<div class="bottleneck-item">
+          <strong>⚠️ ${b.agent_id}</strong> <span style="color:var(--text-secondary)">[${b.severity}]</span><br>
+          <small>Fan-in: ${b.fan_in} | Fan-out: ${b.fan_out} | Waiting: ${b.waiting_agents.join(', ')}</small>
+        </div>`;
+      }
+    }
+
+    function renderWorkload(data) {
+      const div = document.getElementById('workloadBars');
+      div.innerHTML = '';
+      const workload = data.workload || [];
+      if (workload.length === 0) { div.innerHTML = '<p style="color:var(--text-secondary)">No workload data</p>'; return; }
+
+      const maxCount = Math.max(...workload.map(w => w.event_count), 1);
+      const statusIcons = {overloaded:'🔴',balanced:'✅',idle:'💤'};
+      for (const w of workload) {
+        const pct = (w.event_count / maxCount * 100).toFixed(0);
+        const color = w.status === 'overloaded' ? '#ef4444' : w.status === 'idle' ? '#666' : '#818cf8';
+        div.innerHTML += `<div class="agent-bar">
+          <span class="label">${statusIcons[w.status]||'•'} ${w.agent_id}</span>
+          <div class="bar" style="width:${pct}%;background:${color}"></div>
+          <span class="count">${w.event_count} events</span>
+        </div>`;
+      }
+    }
+
+    // Init
+    loadSessions();
+  </script>
+</body>
+</html>
