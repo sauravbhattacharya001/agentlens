@@ -38,6 +38,7 @@ from agentlens.quota import QuotaManager, QuotaPolicy, QuotaCheck, QuotaReport, 
 from agentlens.retry_tracker import RetryTracker, RetryReport, RetryChain, RetryStorm, RetryRecommendation, RetryOutcome
 from agentlens.alert_rules import AlertRulesEngine, AlertRule as AlertRuleDef, AlertCondition, ThresholdCondition, RateCondition, AlertResult, AlertSeverity as RuleSeverity
 from agentlens.autopsy import SessionAutopsy, AutopsyConfig, AutopsyReport, Evidence, EvidenceSource, Hypothesis, RemediationAction, IncidentPriority, EffortLevel, CausalRelation, CausalLink
+from agentlens.memory_leak import MemoryLeakDetector, LeakDetectorConfig, MemoryLeakReport, LeakSignal, LeakSeverity, LeakCategory, TrendDirection as LeakTrendDirection, GrowthSegment, ExhaustionForecast, AccumulationProfile
 
 __version__ = "0.1.0"
 __all__ = [
