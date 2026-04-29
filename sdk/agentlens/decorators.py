@@ -8,11 +8,60 @@ import time
 from typing import Any, Callable
 
 
+# Keyword argument names that likely contain secrets or credentials.
+# Values matching these keys are redacted before being sent to the
+# tracking backend, preventing CWE-532 (Sensitive Information in Logs).
+# Matching is case-insensitive to catch variations like api_Key, API_KEY, etc.
+_SENSITIVE_KWARG_PATTERNS: frozenset[str] = frozenset({
+    "api_key", "apikey", "api_secret", "apisecret",
+    "secret", "secret_key", "secretkey",
+    "password", "passwd", "pwd",
+    "token", "access_token", "refresh_token", "auth_token",
+    "bearer", "authorization",
+    "credential", "credentials",
+    "private_key", "privatekey",
+    "connection_string", "connectionstring", "dsn",
+    "ssn", "social_security",
+})
+
+_REDACTED = "[REDACTED]"
+
+
+def _is_sensitive_key(key: str) -> bool:
+    """Check if a keyword argument name looks like it holds a secret."""
+    return key.lower().replace("-", "_") in _SENSITIVE_KWARG_PATTERNS
+
+
+def _safe_repr(value: Any, *, max_length: int = 200) -> str:
+    """Convert a value to a bounded string representation.
+
+    Truncates long values to prevent unbounded payload sizes and
+    masks objects whose ``repr`` contains common secret markers.
+    """
+    try:
+        s = str(value)
+    except Exception:
+        return "<unrepresentable>"
+    if len(s) > max_length:
+        s = s[:max_length] + f"...[truncated, {len(s)} chars]"
+    return s
+
+
 def _build_input(args: tuple, kwargs: dict) -> dict:
-    """Serialize function arguments for tracking."""
+    """Serialize function arguments for tracking.
+
+    Redacts keyword arguments whose names match common secret/credential
+    patterns (api_key, password, token, etc.) to prevent sensitive data
+    from being captured in observability events (CWE-532).  Positional
+    arguments are included as-is since they lack semantic names, but are
+    truncated to a safe length.
+    """
     return {
-        "args": [str(a) for a in args],
-        "kwargs": {k: str(v) for k, v in kwargs.items()},
+        "args": [_safe_repr(a) for a in args],
+        "kwargs": {
+            k: _REDACTED if _is_sensitive_key(k) else _safe_repr(v)
+            for k, v in kwargs.items()
+        },
     }
 
 
@@ -25,13 +74,35 @@ def _make_tracker(
     track_name: str,
     model: str | None = None,
     make_reasoning: Callable[[str, float], str] | None = None,
+    redact_keys: frozenset[str] | None = None,
 ) -> Callable:
     """Build a sync or async wrapper that tracks function calls.
 
     This is the shared implementation behind :func:`track_agent` and
     :func:`track_tool_call`, eliminating the duplicated sync/async
     wrapper code that previously existed in each decorator.
+
+    Args:
+        redact_keys: Optional additional keyword argument names to redact.
+            These are merged with the built-in sensitive patterns.
     """
+    # Merge caller-specified redact keys into the global set for this
+    # tracker instance so the check is a single set lookup per kwarg.
+    if redact_keys:
+        _extra_keys = _SENSITIVE_KWARG_PATTERNS | frozenset(
+            k.lower().replace("-", "_") for k in redact_keys
+        )
+    else:
+        _extra_keys = _SENSITIVE_KWARG_PATTERNS
+
+    def _build_safe_input(args: tuple, kwargs: dict) -> dict:
+        return {
+            "args": [_safe_repr(a) for a in args],
+            "kwargs": {
+                k: _REDACTED if k.lower().replace("-", "_") in _extra_keys else _safe_repr(v)
+                for k, v in kwargs.items()
+            },
+        }
 
     def _do_track(
         *,
@@ -70,7 +141,7 @@ def _make_tracker(
 
         @functools.wraps(fn)
         async def async_wrapper(*args: Any, **kwargs: Any) -> Any:
-            input_data = _build_input(args, kwargs)
+            input_data = _build_safe_input(args, kwargs)
             start = time.perf_counter()
             try:
                 result = await fn(*args, **kwargs)
@@ -97,7 +168,7 @@ def _make_tracker(
 
     @functools.wraps(fn)
     def wrapper(*args: Any, **kwargs: Any) -> Any:
-        input_data = _build_input(args, kwargs)
+        input_data = _build_safe_input(args, kwargs)
         start = time.perf_counter()
         try:
             result = fn(*args, **kwargs)
@@ -128,10 +199,19 @@ def track_agent(
     *,
     model: str | None = None,
     name: str | None = None,
+    redact_keys: frozenset[str] | None = None,
 ):
     """Decorator to automatically track an agent function call.
 
     Supports both synchronous and asynchronous functions.
+    Keyword arguments whose names match common secret patterns
+    (api_key, password, token, etc.) are automatically redacted.
+
+    Args:
+        model: Model name to associate with tracked events.
+        name: Override the agent name (defaults to function name).
+        redact_keys: Optional additional keyword argument names to redact
+            on top of the built-in sensitive patterns.
 
     Usage::
 
@@ -141,6 +221,10 @@ def track_agent(
 
         @track_agent(model="gpt-4")
         async def my_agent(prompt):
+            ...
+
+        @track_agent(redact_keys={"patient_id", "ssn"})
+        def healthcare_agent(prompt, patient_id=None):
             ...
     """
 
@@ -158,6 +242,7 @@ def track_agent(
                 if status == "succeeded"
                 else f"Agent '{agent_name}' failed"
             ),
+            redact_keys=redact_keys,
         )
 
     if func is not None:
@@ -169,10 +254,18 @@ def track_tool_call(
     func: Callable | None = None,
     *,
     tool_name: str | None = None,
+    redact_keys: frozenset[str] | None = None,
 ):
     """Decorator to automatically track a tool/function call.
 
     Supports both synchronous and asynchronous functions.
+    Keyword arguments whose names match common secret patterns
+    (api_key, password, token, etc.) are automatically redacted.
+
+    Args:
+        tool_name: Override the tool name (defaults to function name).
+        redact_keys: Optional additional keyword argument names to redact
+            on top of the built-in sensitive patterns.
 
     Usage::
 
@@ -193,6 +286,7 @@ def track_tool_call(
             error_event_type="tool_error",
             track_name_key="tool",
             track_name=resolved_name,
+            redact_keys=redact_keys,
         )
 
     if func is not None:

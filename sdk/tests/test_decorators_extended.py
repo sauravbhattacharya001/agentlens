@@ -339,6 +339,145 @@ class TestTrackToolCallDuration:
             assert kw["duration_ms"] > 0
 
 
+# ── Sensitive data redaction (CWE-532 fix) ───────────────────────
+
+class TestSensitiveDataRedaction:
+    """Verify that secret/credential kwargs are redacted before tracking."""
+
+    def test_api_key_redacted(self):
+        @track_agent
+        def agent(prompt, api_key="sk-secret"):
+            return "ok"
+
+        with patch("agentlens.track") as mock_track:
+            agent("hello", api_key="sk-secret-key-12345")
+            kw = mock_track.call_args[1]
+            assert kw["input_data"]["kwargs"]["api_key"] == "[REDACTED]"
+
+    def test_password_redacted(self):
+        @track_tool_call
+        def login(user, password=""):
+            return True
+
+        with patch("agentlens.track") as mock_track:
+            login("admin", password="hunter2")
+            kw = mock_track.call_args[1]
+            assert kw["tool_input"]["kwargs"]["password"] == "[REDACTED]"
+
+    def test_token_redacted(self):
+        @track_agent
+        def call_api(url, token=None):
+            return {}
+
+        with patch("agentlens.track") as mock_track:
+            call_api("https://api.example.com", token="ghp_xxx123")
+            kw = mock_track.call_args[1]
+            assert kw["input_data"]["kwargs"]["token"] == "[REDACTED]"
+
+    def test_secret_key_redacted(self):
+        @track_agent
+        def setup(config, secret_key=None):
+            return config
+
+        with patch("agentlens.track") as mock_track:
+            setup({"a": 1}, secret_key="super-secret")
+            kw = mock_track.call_args[1]
+            assert kw["input_data"]["kwargs"]["secret_key"] == "[REDACTED]"
+
+    def test_non_sensitive_kwargs_preserved(self):
+        @track_agent
+        def agent(prompt, model="gpt-4", temperature=0.7):
+            return "ok"
+
+        with patch("agentlens.track") as mock_track:
+            agent("hello", model="gpt-4", temperature=0.7)
+            kw = mock_track.call_args[1]
+            assert kw["input_data"]["kwargs"]["model"] == "gpt-4"
+            assert kw["input_data"]["kwargs"]["temperature"] == "0.7"
+
+    def test_multiple_sensitive_keys(self):
+        @track_agent
+        def multi(api_key="", password="", token="", name=""):
+            return True
+
+        with patch("agentlens.track") as mock_track:
+            multi(api_key="k", password="p", token="t", name="alice")
+            kw = mock_track.call_args[1]
+            kwargs = kw["input_data"]["kwargs"]
+            assert kwargs["api_key"] == "[REDACTED]"
+            assert kwargs["password"] == "[REDACTED]"
+            assert kwargs["token"] == "[REDACTED]"
+            assert kwargs["name"] == "alice"
+
+    def test_case_insensitive_matching(self):
+        @track_agent
+        def agent(API_KEY="", Password=""):
+            return True
+
+        with patch("agentlens.track") as mock_track:
+            agent(API_KEY="key", Password="pass")
+            kw = mock_track.call_args[1]
+            kwargs = kw["input_data"]["kwargs"]
+            assert kwargs["API_KEY"] == "[REDACTED]"
+            assert kwargs["Password"] == "[REDACTED]"
+
+    def test_custom_redact_keys(self):
+        @track_agent(redact_keys={"patient_id", "ssn"})
+        def healthcare(prompt, patient_id=None, ssn=None):
+            return "ok"
+
+        with patch("agentlens.track") as mock_track:
+            healthcare("check", patient_id="P123", ssn="123-45-6789")
+            kw = mock_track.call_args[1]
+            kwargs = kw["input_data"]["kwargs"]
+            assert kwargs["patient_id"] == "[REDACTED]"
+            assert kwargs["ssn"] == "[REDACTED]"
+
+    def test_custom_redact_keys_tool(self):
+        @track_tool_call(redact_keys={"db_password"})
+        def connect(host, db_password=None):
+            return True
+
+        with patch("agentlens.track") as mock_track:
+            connect("localhost", db_password="secret")
+            kw = mock_track.call_args[1]
+            assert kw["tool_input"]["kwargs"]["db_password"] == "[REDACTED]"
+
+    def test_positional_args_not_redacted_but_truncated(self):
+        """Positional args can't be redacted by name but are length-bounded."""
+        @track_agent
+        def agent(prompt):
+            return "ok"
+
+        long_value = "x" * 500
+        with patch("agentlens.track") as mock_track:
+            agent(long_value)
+            kw = mock_track.call_args[1]
+            arg_str = kw["input_data"]["args"][0]
+            assert len(arg_str) < 500  # truncated
+            assert "truncated" in arg_str
+
+    def test_async_redaction(self):
+        @track_agent
+        async def async_agent(prompt, api_key=None):
+            return "ok"
+
+        with patch("agentlens.track") as mock_track:
+            asyncio.run(async_agent("hello", api_key="secret"))
+            kw = mock_track.call_args[1]
+            assert kw["input_data"]["kwargs"]["api_key"] == "[REDACTED]"
+
+    def test_connection_string_redacted(self):
+        @track_tool_call
+        def connect(connection_string=""):
+            return True
+
+        with patch("agentlens.track") as mock_track:
+            connect(connection_string="postgresql://user:pass@host/db")
+            kw = mock_track.call_args[1]
+            assert kw["tool_input"]["kwargs"]["connection_string"] == "[REDACTED]"
+
+
 # ── track_tool_call: edge cases ──────────────────────────────────
 
 class TestTrackToolCallEdgeCases:
