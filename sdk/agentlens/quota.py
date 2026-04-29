@@ -44,6 +44,7 @@ Usage::
 
 from __future__ import annotations
 
+import bisect
 import uuid
 from collections import defaultdict
 from dataclasses import dataclass, field
@@ -243,8 +244,13 @@ class QuotaManager:
         # Per-entity index for O(entity_records) lookups instead of
         # O(all_records) linear scans in record_usage/check_usage/report.
         self._entity_records: dict[str, list[UsageRecord]] = defaultdict(list)
+        # Per-entity timestamp index (parallel to _entity_records) for
+        # O(log n) window-start lookups via bisect instead of O(n) linear scan.
+        self._entity_timestamps: dict[str, list[datetime]] = defaultdict(list)
         self._pools: dict[str, SharedPool] = {}
         self._pool_usage: dict[str, list[UsageRecord]] = defaultdict(list)
+        # Per-pool timestamp index for O(log n) window filtering.
+        self._pool_timestamps: dict[str, list[datetime]] = defaultdict(list)
         self._callbacks: list[Any] = []
         self._now_fn = now_fn or (lambda: datetime.now(timezone.utc))
 
@@ -331,17 +337,32 @@ class QuotaManager:
         Centralises the window-filter-and-sum logic that was previously
         duplicated across ``record_usage``, ``check_usage``, and
         ``report``.
+
+        Uses bisect on the per-entity timestamp index to skip records
+        before the window start in O(log n) instead of scanning all
+        entity records linearly.  For entities with large histories
+        (thousands of records) and narrow windows (hourly/rolling_1h),
+        this eliminates the majority of iteration work.
         """
         start, end = self._window_bounds(window, now)
         entity_recs = self._entity_records.get(entity_id, [])
+        if not entity_recs:
+            return 0, 0.0, 0, []
+
+        # O(log n) bisect to find the first record >= start
+        timestamps = self._entity_timestamps.get(entity_id, [])
+        lo = bisect.bisect_left(timestamps, start)
+
         tokens_used = 0
         cost_used = 0.0
         matched: list[UsageRecord] = []
-        for r in entity_recs:
-            if start <= r.timestamp < end:
-                tokens_used += r.tokens
-                cost_used += r.cost_usd
-                matched.append(r)
+        for i in range(lo, len(entity_recs)):
+            r = entity_recs[i]
+            if r.timestamp >= end:
+                break
+            tokens_used += r.tokens
+            cost_used += r.cost_usd
+            matched.append(r)
         return tokens_used, cost_used, len(matched), matched
 
     def record_usage(self, entity_id: str, *, tokens: int = 0, cost_usd: float = 0.0,
@@ -421,6 +442,7 @@ class QuotaManager:
 
         self._records.append(record)
         self._entity_records[entity_id].append(record)
+        self._entity_timestamps[entity_id].append(record.timestamp)
 
         for cb in self._callbacks:
             cb(entity_id, check)
@@ -558,6 +580,7 @@ class QuotaManager:
 
     def reset_usage(self, entity_id: str) -> int:
         removed = self._entity_records.pop(entity_id, [])
+        self._entity_timestamps.pop(entity_id, None)
         count = len(removed)
         if count:
             # Rebuild the flat list only when records were actually removed.
@@ -608,12 +631,24 @@ class QuotaManager:
         return (start, start + duration)
 
     def _pool_used_tokens(self, pool_name: str, window: QuotaWindow, now: datetime) -> int:
-        """Sum tokens drawn from *pool_name* in the current window."""
+        """Sum tokens drawn from *pool_name* in the current window.
+
+        Uses bisect on the per-pool timestamp index for O(log n) start
+        lookup instead of scanning all pool records linearly.
+        """
         start, end = self._window_bounds(window, now)
-        return sum(
-            r.tokens for r in self._pool_usage.get(pool_name, [])
-            if start <= r.timestamp < end
-        )
+        pool_recs = self._pool_usage.get(pool_name, [])
+        if not pool_recs:
+            return 0
+        timestamps = self._pool_timestamps.get(pool_name, [])
+        lo = bisect.bisect_left(timestamps, start)
+        total = 0
+        for i in range(lo, len(pool_recs)):
+            r = pool_recs[i]
+            if r.timestamp >= end:
+                break
+            total += r.tokens
+        return total
 
     def _try_pool_borrow(self, entity_id: str, tokens: int, now: datetime) -> int:
         for pool in self._pools.values():
@@ -622,7 +657,8 @@ class QuotaManager:
             pool_used = self._pool_used_tokens(pool.name, pool.window, now)
             available = pool.pool_tokens - pool_used
             if available >= tokens:
-                self._pool_usage[pool.name].append(
-                    UsageRecord(timestamp=now, entity_id=entity_id, tokens=tokens))
+                record = UsageRecord(timestamp=now, entity_id=entity_id, tokens=tokens)
+                self._pool_usage[pool.name].append(record)
+                self._pool_timestamps[pool.name].append(record.timestamp)
                 return tokens
         return 0
