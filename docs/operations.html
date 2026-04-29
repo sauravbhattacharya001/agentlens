@@ -1,0 +1,341 @@
+<!DOCTYPE html>
+<html lang="en">
+<head>
+  <meta charset="UTF-8">
+  <meta name="viewport" content="width=device-width, initial-scale=1.0">
+  <title>Operations &amp; Incident Response — AgentLens Docs</title>
+  <link rel="stylesheet" href="style.css">
+</head>
+<body>
+
+<header class="header">
+  <button class="menu-toggle" onclick="document.querySelector('.sidebar').classList.toggle('open')">☰</button>
+  <a href="index.html" class="header-logo">🔍 <span>AgentLens</span> Docs</a>
+  <nav class="header-nav">
+    <a href="getting-started.html">Getting Started</a>
+    <a href="sdk-reference.html">SDK</a>
+    <a href="api.html">API</a>
+    <a href="../demo/" class="demo-link">🎯 Live Demo</a>
+    <a href="../dashboard/" class="demo-link">📊 Dashboard</a>
+    <a href="https://github.com/sauravbhattacharya001/agentlens" class="github-link" target="_blank">⭐ GitHub</a>
+  </nav>
+</header>
+
+<aside class="sidebar">
+  <div class="sidebar-section">
+    <div class="sidebar-section-title">Overview</div>
+    <a href="index.html">Introduction</a>
+    <a href="architecture.html">Architecture</a>
+  </div>
+  <div class="sidebar-section">
+    <div class="sidebar-section-title">Guides</div>
+    <a href="getting-started.html">Getting Started</a>
+    <a href="quickstart.html">5-Minute Quickstart</a>
+    <a href="deployment.html">Deployment</a>
+  </div>
+  <div class="sidebar-section">
+    <div class="sidebar-section-title">SDK</div>
+    <a href="sdk-reference.html">Python SDK Reference</a>
+    <a href="decorators.html">Decorators</a>
+    <a href="models.html">Data Models</a>
+    <a href="transport.html">Transport &amp; Batching</a>
+    <a href="sampling.html">Sampling &amp; Rate Limiting</a>
+  </div>
+  <div class="sidebar-section">
+    <div class="sidebar-section-title">Backend</div>
+    <a href="api.html">REST API</a>
+    <a href="cli.html">CLI Reference</a>
+    <a href="database.html">Database Schema</a>
+    <a href="dashboard.html">Dashboard</a>
+  </div>
+  <div class="sidebar-section">
+    <div class="sidebar-section-title">Advanced</div>
+    <a href="explainability.html">Explainability</a>
+    <a href="integrations.html">Integrations</a>
+    <a href="monitoring.html">Monitoring &amp; Analysis</a>
+    <a href="cost-optimization.html">Cost Optimization</a>
+    <a href="session-replay.html">Session Replay</a>
+    <a href="operations.html" class="active">Operations &amp; Incidents</a>
+  </div>
+</aside>
+
+<main class="main">
+  <h1>Operations &amp; Incident Response</h1>
+  <p class="subtitle">Alerts, auto-triage, postmortems, SLA tracking, and agent scorecards — everything you need to run agents in production.</p>
+
+  <p>AgentLens ships with five interconnected operational subsystems that form a closed-loop incident lifecycle:</p>
+
+  <div class="arch-diagram">  ┌─────────┐    fires     ┌──────────┐   diagnoses   ┌──────────┐
+  │ Alerts  │ ──────────► │  Triage  │ ─────────────► │Postmortem│
+  └─────────┘             └──────────┘                └──────────┘
+       ▲                       │                           │
+       │                       ▼                           ▼
+  ┌─────────┐            ┌──────────┐              ┌───────────┐
+  │   SLA   │ ◄───────── │Scorecards│ ◄────────────│  Learnings │
+  │ Targets │   informs  │  (A-F)   │   feeds back │           │
+  └─────────┘            └──────────┘              └───────────┘</div>
+
+  <!-- ════════════════════════════════════════════════════════════ -->
+  <h2 id="alerts">1. Alert Rules</h2>
+  <p>Define threshold-based rules that fire when agent metrics exceed boundaries. Alerts can trigger webhooks for Slack, PagerDuty, or custom endpoints.</p>
+
+  <h3>Concepts</h3>
+  <table>
+    <thead><tr><th>Field</th><th>Description</th></tr></thead>
+    <tbody>
+      <tr><td><code>metric</code></td><td>What to measure: <code>avg_duration_ms</code>, <code>error_rate</code>, <code>avg_tokens</code>, <code>session_count</code>, <code>avg_cost</code>, <code>p95_duration_ms</code>, <code>tool_error_rate</code></td></tr>
+      <tr><td><code>operator</code></td><td>Comparison: <code>&lt;</code> <code>&gt;</code> <code>&lt;=</code> <code>&gt;=</code> <code>==</code> <code>!=</code></td></tr>
+      <tr><td><code>threshold</code></td><td>Numeric boundary value</td></tr>
+      <tr><td><code>window_minutes</code></td><td>Lookback window for metric evaluation (default: 60)</td></tr>
+      <tr><td><code>agent_filter</code></td><td>Optional — scope rule to a specific agent name</td></tr>
+      <tr><td><code>cooldown_minutes</code></td><td>Minimum gap between repeated firings (default: 15)</td></tr>
+    </tbody>
+  </table>
+
+  <h3>API Endpoints</h3>
+
+  <h4><code>POST /alerts/rules</code> — Create a rule</h4>
+  <pre><code><span class="code-label">curl</span>curl -X POST http://localhost:3000/alerts/rules \
+  -H "Content-Type: application/json" \
+  -d '{
+    "name": "High error rate",
+    "metric": "error_rate",
+    "operator": ">",
+    "threshold": 0.15,
+    "window_minutes": 30,
+    "cooldown_minutes": 10
+  }'</code></pre>
+
+  <h4><code>GET /alerts/rules</code> — List all rules</h4>
+  <p>Returns all configured alert rules with their current enabled/disabled state.</p>
+
+  <h4><code>PUT /alerts/rules/:ruleId</code> — Update a rule</h4>
+  <p>Modify any field on an existing rule. Supports partial updates.</p>
+
+  <h4><code>DELETE /alerts/rules/:ruleId</code> — Delete a rule</h4>
+  <p>Removes the rule and cascades deletion to all its fired alert events.</p>
+
+  <h4><code>POST /alerts/evaluate</code> — Evaluate all rules now</h4>
+  <p>Manually triggers evaluation of all enabled rules against current metrics. Returns which rules fired and their metric values. Call this on a schedule (e.g., every minute via cron) for continuous monitoring.</p>
+
+  <h4><code>GET /alerts/events</code> — List fired alerts</h4>
+  <p>Query parameters: <code>?limit=50&amp;unacknowledged=true&amp;rule_id=...</code></p>
+
+  <h4><code>PUT /alerts/events/:alertId/acknowledge</code> — Acknowledge an alert</h4>
+  <p>Marks an alert event as acknowledged with a timestamp. Acknowledged alerts are excluded from unacknowledged queries.</p>
+
+  <h4><code>GET /alerts/metrics</code> — List available metrics</h4>
+  <p>Returns the set of metric names you can use when creating rules, with descriptions.</p>
+
+  <div class="callout callout-tip">
+    <div class="callout-title">💡 Webhook integration</div>
+    <p>When an alert fires, AgentLens automatically calls any configured <a href="integrations.html">webhooks</a> with the alert details. Set up a Slack incoming webhook to get instant notifications.</p>
+  </div>
+
+  <!-- ════════════════════════════════════════════════════════════ -->
+  <h2 id="triage">2. Auto-Triage</h2>
+  <p>Auto-triage runs a battery of diagnostics on a session and returns a prioritized report with severity-ranked findings and remediation suggestions. It combines health scoring, anomaly detection, baseline drift analysis, error grouping, and cost analysis in a single call.</p>
+
+  <h3>API Endpoints</h3>
+
+  <h4><code>GET /triage/:sessionId</code> — Triage a single session</h4>
+  <pre><code><span class="code-label">curl</span>curl http://localhost:3000/triage/sess_abc123</code></pre>
+
+  <p>Returns a structured report:</p>
+  <pre><code><span class="code-label">JSON (abbreviated)</span>{
+  "session_id": "sess_abc123",
+  "health_score": 62,
+  "severity": "warning",
+  "findings": [
+    {
+      "category": "errors",
+      "severity": "critical",
+      "title": "3 tool errors in 12 events",
+      "detail": "web_search failed 3× with timeout",
+      "suggestion": "Increase tool timeout or add retry logic"
+    },
+    {
+      "category": "cost",
+      "severity": "warning",
+      "title": "Cost 2.4× above baseline",
+      "detail": "$0.48 vs $0.20 average for this agent",
+      "suggestion": "Review token usage — possible prompt inflation"
+    }
+  ],
+  "metrics": { "duration_ms": 14200, "total_tokens": 8400, "error_count": 3 }
+}</code></pre>
+
+  <h4><code>GET /triage/batch</code> — Triage recent sessions</h4>
+  <p>Query parameters: <code>?limit=20&amp;min_events=3</code></p>
+  <p>Runs triage on multiple recent sessions and returns them sorted by health score (worst first). Useful for daily operational reviews.</p>
+
+  <div class="callout callout-tip">
+    <div class="callout-title">💡 Triage + Alerts</div>
+    <p>Set up an alert rule on <code>error_rate &gt; 0.1</code>, then call <code>/triage/:sessionId</code> on the flagged session for instant root-cause analysis.</p>
+  </div>
+
+  <!-- ════════════════════════════════════════════════════════════ -->
+  <h2 id="postmortem">3. Postmortems</h2>
+  <p>Generate structured postmortem reports from session data. The postmortem engine analyzes event traces to reconstruct timelines, identify error cascades, compute cost impact, and surface contributing factors.</p>
+
+  <h3>API Endpoints</h3>
+
+  <h4><code>POST /postmortem/:sessionId</code> — Generate a postmortem</h4>
+  <pre><code><span class="code-label">curl</span>curl -X POST http://localhost:3000/postmortem/sess_abc123</code></pre>
+
+  <p>Returns a comprehensive report including:</p>
+  <ul>
+    <li><strong>Timeline</strong> — Chronological event sequence with durations and error markers</li>
+    <li><strong>Error cascade analysis</strong> — How one failure propagated to downstream steps</li>
+    <li><strong>Cost breakdown</strong> — Token-level cost attribution by model and event type</li>
+    <li><strong>Tool performance</strong> — Per-tool success rates, latencies, and failure modes</li>
+    <li><strong>Contributing factors</strong> — Identified root causes ranked by likelihood</li>
+    <li><strong>Recommendations</strong> — Actionable suggestions to prevent recurrence</li>
+  </ul>
+
+  <h4><code>GET /postmortem/candidates</code> — List sessions worth investigating</h4>
+  <p>Query parameters: <code>?min_errors=2&amp;limit=20</code></p>
+  <p>Returns recent sessions with high error counts, sorted by severity. Use this to find sessions that warrant a full postmortem.</p>
+
+  <!-- ════════════════════════════════════════════════════════════ -->
+  <h2 id="sla">4. SLA Targets</h2>
+  <p>Define service-level targets for your agents and track compliance over time. SLA targets let you set expectations for latency, error rates, cost, and throughput — then continuously measure whether agents meet them.</p>
+
+  <h3>Target Configuration</h3>
+  <table>
+    <thead><tr><th>Field</th><th>Type</th><th>Description</th></tr></thead>
+    <tbody>
+      <tr><td><code>agent_name</code></td><td>string</td><td>Agent to track (required)</td></tr>
+      <tr><td><code>metric</code></td><td>string</td><td>Same metrics as alerts: <code>avg_duration_ms</code>, <code>error_rate</code>, <code>avg_cost</code>, etc.</td></tr>
+      <tr><td><code>target_value</code></td><td>number</td><td>The SLA boundary (e.g., error_rate ≤ 0.05)</td></tr>
+      <tr><td><code>operator</code></td><td>string</td><td><code>&lt;=</code> or <code>&gt;=</code> depending on the metric</td></tr>
+    </tbody>
+  </table>
+
+  <h3>API Endpoints</h3>
+
+  <h4><code>PUT /sla/targets</code> — Create or update an SLA target</h4>
+  <pre><code><span class="code-label">curl</span>curl -X PUT http://localhost:3000/sla/targets \
+  -H "Content-Type: application/json" \
+  -d '{
+    "agent_name": "research-agent",
+    "metric": "error_rate",
+    "target_value": 0.05,
+    "operator": "<="
+  }'</code></pre>
+
+  <h4><code>GET /sla/targets</code> — List all SLA targets</h4>
+
+  <h4><code>DELETE /sla/targets</code> — Remove an SLA target</h4>
+  <p>Body: <code>{"agent_name": "...", "metric": "..."}</code></p>
+
+  <h4><code>POST /sla/check</code> — Check compliance now</h4>
+  <p>Evaluates all targets against current data and returns pass/fail status with actual metric values.</p>
+
+  <h4><code>GET /sla/history</code> — Compliance history</h4>
+  <p>Query parameters: <code>?agent_name=...&amp;hours=168</code> (default: 7 days)</p>
+  <p>Returns time-series compliance snapshots showing how SLA adherence trends over time.</p>
+
+  <h4><code>GET /sla/summary</code> — SLA dashboard summary</h4>
+  <p>Aggregated view of all agents' SLA compliance — overall pass rate, worst offenders, and targets at risk of breach.</p>
+
+  <!-- ════════════════════════════════════════════════════════════ -->
+  <h2 id="scorecards">5. Agent Scorecards</h2>
+  <p>Scorecards assign letter grades (A+ through F) to each agent based on multiple performance dimensions. They provide a quick health-at-a-glance view for operational dashboards.</p>
+
+  <h3>Grading Dimensions</h3>
+  <ul>
+    <li><strong>Reliability</strong> — Error rate and consistency (low errors = high score)</li>
+    <li><strong>Performance</strong> — Response latency relative to baseline</li>
+    <li><strong>Efficiency</strong> — Token usage and cost per session</li>
+    <li><strong>Throughput</strong> — Session volume and completion rate</li>
+  </ul>
+
+  <p>Each dimension scores 0–100, combined into an overall grade:</p>
+  <table>
+    <thead><tr><th>Score</th><th>Grade</th><th>Meaning</th></tr></thead>
+    <tbody>
+      <tr><td>95–100</td><td><span style="color: #22c55e;">A+</span></td><td>Exceptional — exceeding all targets</td></tr>
+      <tr><td>90–94</td><td><span style="color: #22c55e;">A</span></td><td>Excellent — consistently reliable</td></tr>
+      <tr><td>80–89</td><td><span style="color: #3b82f6;">B+/B</span></td><td>Good — minor improvements possible</td></tr>
+      <tr><td>70–79</td><td><span style="color: #3b82f6;">B-</span></td><td>Acceptable — some concerns</td></tr>
+      <tr><td>60–69</td><td><span style="color: #eab308;">C+/C</span></td><td>Needs attention — degraded performance</td></tr>
+      <tr><td>&lt;60</td><td><span style="color: #ef4444;">D/F</span></td><td>Critical — immediate action required</td></tr>
+    </tbody>
+  </table>
+
+  <h3>API Endpoints</h3>
+
+  <h4><code>GET /scorecards</code> — All agent scorecards</h4>
+  <p>Query parameters: <code>?days=7</code> (lookback window, default: 7 days)</p>
+  <pre><code><span class="code-label">curl</span>curl http://localhost:3000/scorecards?days=30</code></pre>
+
+  <p>Returns an array of scorecards sorted by overall score:</p>
+  <pre><code><span class="code-label">JSON</span>[
+  {
+    "agent": "research-agent",
+    "overall_score": 91,
+    "grade": "A",
+    "dimensions": {
+      "reliability": { "score": 95, "grade": "A+" },
+      "performance": { "score": 88, "grade": "B+" },
+      "efficiency": { "score": 92, "grade": "A" },
+      "throughput": { "score": 89, "grade": "B+" }
+    },
+    "sessions_analyzed": 142,
+    "period_days": 30
+  }
+]</code></pre>
+
+  <h4><code>GET /scorecards/:agent</code> — Single agent scorecard</h4>
+  <p>Detailed scorecard for one agent, including per-dimension breakdowns and trend data.</p>
+
+  <!-- ════════════════════════════════════════════════════════════ -->
+  <h2 id="workflow">Putting It All Together</h2>
+  <p>Here's a recommended operational workflow using all five systems:</p>
+
+  <ol>
+    <li><strong>Define SLA targets</strong> for each production agent (latency, error rate, cost).</li>
+    <li><strong>Create alert rules</strong> that fire when metrics approach SLA boundaries (e.g., alert at 80% of the SLA threshold).</li>
+    <li><strong>When an alert fires:</strong>
+      <ul>
+        <li>Run <code>/triage/:sessionId</code> for instant diagnostics</li>
+        <li>If the issue is significant, generate a <code>/postmortem/:sessionId</code></li>
+        <li>Acknowledge the alert via <code>/alerts/events/:id/acknowledge</code></li>
+      </ul>
+    </li>
+    <li><strong>Review scorecards weekly</strong> to catch gradual degradation before it becomes critical.</li>
+    <li><strong>Check SLA compliance history</strong> monthly to inform capacity planning and agent improvements.</li>
+  </ol>
+
+  <pre><code><span class="code-label">Example: Full incident response</span># 1. Alert fires — check what happened
+curl http://localhost:3000/alerts/events?unacknowledged=true
+
+# 2. Auto-triage the flagged session
+curl http://localhost:3000/triage/sess_abc123
+
+# 3. Generate postmortem for the incident
+curl -X POST http://localhost:3000/postmortem/sess_abc123
+
+# 4. Acknowledge the alert
+curl -X PUT http://localhost:3000/alerts/events/alert_xyz/acknowledge
+
+# 5. Check if SLA was breached
+curl -X POST http://localhost:3000/sla/check
+
+# 6. Review overall agent health
+curl http://localhost:3000/scorecards</code></pre>
+
+  <div class="callout callout-tip">
+    <div class="callout-title">💡 Automation tip</div>
+    <p>Call <code>POST /alerts/evaluate</code> every minute from a cron job or monitoring scheduler. When alerts fire, they automatically trigger webhooks — wire these to your incident management platform (PagerDuty, Opsgenie, Slack) for a fully automated response pipeline.</p>
+  </div>
+
+  <div class="footer">
+    <span>AgentLens v0.1.0 — MIT License</span>
+    <span><a href="https://github.com/sauravbhattacharya001/agentlens">GitHub</a></span>
+  </div>
+</main>
+
+<script src="search.js"></script></body>
+</html>
