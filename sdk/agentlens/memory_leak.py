@@ -34,6 +34,7 @@ from __future__ import annotations
 import json
 import math
 import statistics
+from collections import defaultdict
 from dataclasses import dataclass, field
 from enum import Enum
 from typing import Any
@@ -818,12 +819,9 @@ class MemoryLeakDetector:
 
     def _compute_accumulation_profiles(self, events: list[Any]) -> list[AccumulationProfile]:
         """Profile token accumulation by event type."""
-        type_data: dict[str, list[int]] = {}
+        type_data: dict[str, list[int]] = defaultdict(list)
         for e in events:
-            et = e.event_type
-            if et not in type_data:
-                type_data[et] = []
-            type_data[et].append(e.tokens_in + e.tokens_out)
+            type_data[e.event_type].append(e.tokens_in + e.tokens_out)
 
         profiles = []
         for et, values in type_data.items():
@@ -941,23 +939,41 @@ class MemoryLeakDetector:
 
     @staticmethod
     def _linear_fit(series: list[float | int]) -> tuple[float, float]:
-        """Simple linear regression. Returns (slope, r_squared)."""
+        """Simple linear regression. Returns (slope, r_squared).
+
+        Uses closed-form ss_xx = n(n²-1)/12 and single-pass sums for
+        ss_xy and ss_yy to avoid three separate O(n) generator passes.
+        """
         n = len(series)
         if n < 2:
             return 0.0, 0.0
 
+        # Closed-form: sum((i - x_mean)^2 for i in 0..n-1) = n*(n*n - 1)/12
+        ss_xx = n * (n * n - 1) / 12.0
+        if ss_xx == 0:
+            return 0.0, 0.0
+
+        # Single pass to compute sum_y, sum_y2, sum_iy
+        sum_y = 0.0
+        sum_y2 = 0.0
+        sum_iy = 0.0
+        for i, y in enumerate(series):
+            sum_y += y
+            sum_y2 += y * y
+            sum_iy += i * y
+
+        y_mean = sum_y / n
+        # ss_xy = sum(i*y[i]) - n * x_mean * y_mean
         x_mean = (n - 1) / 2.0
-        y_mean = statistics.mean(series)
+        ss_xy = sum_iy - n * x_mean * y_mean
+        # ss_yy = sum(y[i]^2) - n * y_mean^2
+        ss_yy = sum_y2 - n * y_mean * y_mean
 
-        ss_xy = sum((i - x_mean) * (series[i] - y_mean) for i in range(n))
-        ss_xx = sum((i - x_mean) ** 2 for i in range(n))
-        ss_yy = sum((series[i] - y_mean) ** 2 for i in range(n))
-
-        if ss_xx == 0 or ss_yy == 0:
+        if ss_yy == 0:
             return 0.0, 0.0
 
         slope = ss_xy / ss_xx
-        r_squared = (ss_xy ** 2) / (ss_xx * ss_yy)
+        r_squared = (ss_xy * ss_xy) / (ss_xx * ss_yy)
 
         return slope, r_squared
 
@@ -969,11 +985,14 @@ class MemoryLeakDetector:
 
     @staticmethod
     def _jaccard(a: set[str], b: set[str]) -> float:
-        """Jaccard similarity between two sets."""
+        """Jaccard similarity between two sets.
+
+        Avoids allocating a union set by computing |A∪B| = |A| + |B| - |A∩B|.
+        """
         if not a and not b:
             return 0.0
         intersection = len(a & b)
-        union = len(a | b)
+        union = len(a) + len(b) - intersection
         return intersection / union if union > 0 else 0.0
 
     @staticmethod
