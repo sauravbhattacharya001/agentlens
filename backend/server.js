@@ -68,6 +68,7 @@ const routeDefs = [
   ["/command-center", "./routes/command-center"],
   ["/profiler",       "./routes/profiler"],
   ["/collaboration",  "./routes/collaboration"],
+  ["/tempo",          "./routes/tempo"],
   ["/triage",         "./routes/triage"],
   // Session-scoped annotation routes
   ["/sessions",     "./routes/annotations"],
