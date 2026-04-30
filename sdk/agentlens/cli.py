@@ -109,6 +109,7 @@ from agentlens.cli_autopsy import cmd_autopsy, register_autopsy_parser  # sessio
 from agentlens.cli_stamina import cmd_stamina, register_stamina  # agent stamina profiling
 from agentlens.cli_collaboration import cmd_collaboration, register_collaboration  # multi-agent collaboration
 from agentlens.cli_memory_leak import cmd_memory_leak, register_subcommand as register_memory_leak  # memory leak detection
+from agentlens.cli_self_correction import cmd_self_correction, register_self_correction_parser  # self-correction tracking
 
 
 def _print_table(rows: list[dict], columns: list[str], *, max_width: int = 40) -> None:
@@ -924,6 +925,9 @@ def main() -> None:
 
     # -- memory-leak --
     register_memory_leak(sub)
+
+    # -- self-correction --
+    register_self_correction_parser(sub)
 
     # -- forecast --
     p = sub.add_parser("forecast", help="Predict future costs/usage from historical trends")
