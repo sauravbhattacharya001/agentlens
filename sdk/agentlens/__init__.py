@@ -40,6 +40,7 @@ from agentlens.alert_rules import AlertRulesEngine, AlertRule as AlertRuleDef, A
 from agentlens.autopsy import SessionAutopsy, AutopsyConfig, AutopsyReport, Evidence, EvidenceSource, Hypothesis, RemediationAction, IncidentPriority, EffortLevel, CausalRelation, CausalLink
 from agentlens.memory_leak import MemoryLeakDetector, LeakDetectorConfig, MemoryLeakReport, LeakSignal, LeakSeverity, LeakCategory, TrendDirection as LeakTrendDirection, GrowthSegment, ExhaustionForecast, AccumulationProfile
 from agentlens.self_correction import SelfCorrectionTracker, SelfCorrectionReport, CorrectionCategory, CorrectionEvent, CorrectionPattern, Grade as CorrectionGrade
+from agentlens.cognitive_bias import CognitiveBiasDetector, CognitiveBiasReport, BiasCategory, BiasSignal, BiasProfile, BiasSeverity, BiasGrade, TrendDirection as BiasTrendDirection
 
 __version__ = "0.1.0"
 __all__ = [
