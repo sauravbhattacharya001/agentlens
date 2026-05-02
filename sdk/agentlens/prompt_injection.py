@@ -254,8 +254,16 @@ class PromptInjectionReport:
 
 # ── Pattern libraries ───────────────────────────────────────────────
 
-# Each pattern: (regex_pattern, confidence, description)
-_DIRECT_OVERRIDE_PATTERNS: List[Tuple[str, float, str]] = [
+# Each pattern: (compiled_regex, confidence, description)
+# Patterns are pre-compiled at module load time to avoid redundant
+# re.compile() calls on every scan — O(patterns) compilation once
+# instead of O(events × fields × patterns) per analyze() invocation.
+
+def _compile_patterns(raw: List[Tuple[str, float, str]]) -> List[Tuple["re.Pattern[str]", float, str]]:
+    """Pre-compile raw regex pattern tuples into compiled pattern tuples."""
+    return [(re.compile(pat, re.IGNORECASE), conf, desc) for pat, conf, desc in raw]
+
+_DIRECT_OVERRIDE_PATTERNS = _compile_patterns([
     (r"ignore\s+(all\s+)?(previous|prior|above|earlier)\s+(instructions?|prompts?|rules?|context)", 0.95, "Ignore previous instructions"),
     (r"disregard\s+(all\s+)?(previous|prior|above)\s+(instructions?|prompts?|rules?)", 0.90, "Disregard prior rules"),
     (r"forget\s+(everything|all)\s+(you|that)\s+(know|were\s+told|learned)", 0.90, "Forget all prior context"),
@@ -264,9 +272,9 @@ _DIRECT_OVERRIDE_PATTERNS: List[Tuple[str, float, str]] = [
     (r"your\s+(real|actual|true)\s+instructions?\s+(are|is)\s*:", 0.90, "Fake instruction replacement"),
     (r"do\s+not\s+follow\s+(your|the|any)\s+(original|system|safety)\s+(prompt|instructions?)", 0.95, "Block original instructions"),
     (r"from\s+now\s+on[,.]?\s+(you\s+)?(will|must|should|are)", 0.70, "Temporal override"),
-]
+])
 
-_ROLE_HIJACK_PATTERNS: List[Tuple[str, float, str]] = [
+_ROLE_HIJACK_PATTERNS = _compile_patterns([
     (r"you\s+are\s+(now|actually|really)\s+(a|an|the)\s+\w+", 0.85, "Role reassignment"),
     (r"pretend\s+(you\s+are|to\s+be)\s+(a|an)\s+\w+", 0.80, "Pretend role play"),
     (r"act\s+as\s+(a|an|if\s+you\s+were)\s+\w+", 0.70, "Act-as directive"),
@@ -274,9 +282,9 @@ _ROLE_HIJACK_PATTERNS: List[Tuple[str, float, str]] = [
     (r"switch\s+to\s+(\w+)\s+mode", 0.75, "Mode switch attempt"),
     (r"enable\s+(developer|admin|debug|god|unrestricted)\s+mode", 0.90, "Privileged mode request"),
     (r"enter\s+(jailbreak|unrestricted|uncensored)\s+mode", 0.95, "Jailbreak mode request"),
-]
+])
 
-_CONTEXT_MANIPULATION_PATTERNS: List[Tuple[str, float, str]] = [
+_CONTEXT_MANIPULATION_PATTERNS = _compile_patterns([
     (r"\[system\]|\[SYSTEM\]|<<\s*system\s*>>|<\|system\|>", 0.90, "Fake system message tag"),
     (r"system\s*prompt\s*:", 0.80, "System prompt injection"),
     (r"<\|im_start\|>|<\|im_end\|>", 0.95, "Chat ML delimiter injection"),
@@ -284,9 +292,9 @@ _CONTEXT_MANIPULATION_PATTERNS: List[Tuple[str, float, str]] = [
     (r"the\s+(user|human|admin)\s+(previously|earlier)\s+(said|asked|instructed)", 0.75, "Fake conversation history"),
     (r"(assistant|ai|bot)\s*:\s*", 0.70, "Fake assistant turn"),
     (r"<\|?endoftext\|?>|<\|?sep\|?>", 0.90, "Token boundary injection"),
-]
+])
 
-_INSTRUCTION_SMUGGLING_PATTERNS: List[Tuple[str, float, str]] = [
+_INSTRUCTION_SMUGGLING_PATTERNS = _compile_patterns([
     (r"base64\s*:", 0.70, "Base64-encoded instruction"),
     (r"\\x[0-9a-fA-F]{2}", 0.60, "Hex-encoded payload"),
     (r"&#\d{2,4};", 0.60, "HTML entity encoding"),
@@ -294,18 +302,18 @@ _INSTRUCTION_SMUGGLING_PATTERNS: List[Tuple[str, float, str]] = [
     (r"(hidden|secret|invisible)\s+instruction", 0.85, "Hidden instruction marker"),
     (r"ignore\s+the\s+above.*?instead\s+(do|perform|execute)", 0.90, "Override-then-execute"),
     (r"(?:zero[-\s]?width|invisible)\s+(?:char|text|space)", 0.80, "Zero-width character mention"),
-]
+])
 
-_GOAL_DIVERSION_PATTERNS: List[Tuple[str, float, str]] = [
+_GOAL_DIVERSION_PATTERNS = _compile_patterns([
     (r"(but\s+)?first[,.]?\s+(do|tell|show|write|create|generate)\s+", 0.60, "Task prepend diversion"),
     (r"(before|instead\s+of)\s+(that|answering|responding)[,.]?\s+", 0.65, "Task replacement"),
     (r"(actually|wait)[,.]?\s+(can\s+you|I\s+need\s+you\s+to)\s+", 0.50, "Redirect via 'actually'"),
     (r"(also|additionally|while\s+you.re\s+at\s+it)[,.]?\s+(please\s+)?", 0.40, "Scope expansion"),
     (r"(most\s+important|urgent|critical)\s*:", 0.55, "Priority override"),
     (r"forget\s+(about\s+)?(the|that|my)\s+(previous|original|first)\s+(request|question|task)", 0.85, "Explicit task abandonment"),
-]
+])
 
-_PRIVILEGE_ESCALATION_PATTERNS: List[Tuple[str, float, str]] = [
+_PRIVILEGE_ESCALATION_PATTERNS = _compile_patterns([
     (r"(disable|turn\s+off|remove)\s+(your\s+)?(safety|content|ethical)\s+(filters?|guardrails?|restrictions?)", 0.95, "Disable safety filters"),
     (r"(no|without)\s+(restrictions?|limitations?|censorship|filters?)", 0.85, "Remove restrictions"),
     (r"(admin|sudo|root|superuser)\s+(access|mode|privileges?|command)", 0.90, "Admin privilege request"),
@@ -313,9 +321,9 @@ _PRIVILEGE_ESCALATION_PATTERNS: List[Tuple[str, float, str]] = [
     (r"(unlock|enable)\s+(all|full)\s+(capabilities?|features?|permissions?)", 0.80, "Unlock capabilities"),
     (r"(i\s+am|i.m)\s+(an?\s+)?(admin|administrator|developer|owner|moderator)", 0.75, "False authority claim"),
     (r"(execute|run)\s+(this\s+)?(code|command|script)\s+(as|with)\s+(admin|root|elevated)", 0.90, "Elevated execution"),
-]
+])
 
-_INFORMATION_EXTRACTION_PATTERNS: List[Tuple[str, float, str]] = [
+_INFORMATION_EXTRACTION_PATTERNS = _compile_patterns([
     (r"(what|show|reveal|display|print|output)\s+(is\s+)?(your|the)\s+(system\s+prompt|instructions?|rules?|guidelines?)", 0.90, "System prompt extraction"),
     (r"(repeat|echo|recite|write\s+out)\s+(your\s+)?(system\s+prompt|instructions?|initial\s+prompt)", 0.95, "Prompt echo request"),
     (r"(what|show)\s+(me\s+)?(are\s+)?(your|the)\s+(api\s+keys?|credentials?|secrets?|tokens?|passwords?)", 0.95, "Credential extraction"),
@@ -323,16 +331,16 @@ _INFORMATION_EXTRACTION_PATTERNS: List[Tuple[str, float, str]] = [
     (r"(what|how)\s+(do\s+you|can\s+you)\s+(access|connect\s+to|reach)", 0.50, "Access probe"),
     (r"(tell|show)\s+me\s+(about\s+)?(your|the)\s+(architecture|backend|infrastructure|internal)", 0.70, "Architecture probe"),
     (r"(what|which)\s+(model|version|framework)\s+are\s+you", 0.45, "Model identification"),
-]
+])
 
-_RECURSIVE_INJECTION_PATTERNS: List[Tuple[str, float, str]] = [
+_RECURSIVE_INJECTION_PATTERNS = _compile_patterns([
     (r"(when\s+)?(you|someone)\s+(summarize|forward|copy|repeat)\s+this", 0.80, "Summarization-surviving payload"),
     (r"(include|embed|insert)\s+this\s+(instruction|text|message)\s+in\s+(every|all|your)", 0.85, "Self-propagating instruction"),
     (r"(if|when)\s+(asked|prompted|queried)\s+(about|for)\s+.{5,30}[,.]?\s+(say|respond|answer|reply)", 0.75, "Conditional trigger payload"),
     (r"(always|forever)\s+(remember|include|add)\s+this\s+(in|to)\s+(your|every|all)", 0.80, "Persistence payload"),
     (r"(this\s+is\s+a\s+)?(permanent|persistent)\s+(instruction|rule|directive)", 0.85, "Persistence claim"),
     (r"(append|prepend|inject)\s+(this|the\s+following)\s+(to|into|in)\s+(every|all|each)", 0.90, "Injection propagation directive"),
-]
+])
 
 _ALL_PATTERNS: Dict[InjectionCategory, List[Tuple[str, float, str]]] = {
     InjectionCategory.DIRECT_OVERRIDE: _DIRECT_OVERRIDE_PATTERNS,
@@ -404,18 +412,20 @@ def _extract_text_fields(event: Dict[str, Any]) -> List[Tuple[str, str]]:
 
 
 def _scan_patterns(text: str, category: InjectionCategory,
-                   patterns: List[Tuple[str, float, str]],
+                   patterns: List[Tuple["re.Pattern[str]", float, str]],
                    min_confidence: float) -> List[Tuple[float, str, str]]:
-    """Scan text against patterns for a category.
+    """Scan text against pre-compiled patterns for a category.
+
+    Patterns are already compiled at module load time, so each call
+    performs only ``pattern.search()`` — no per-call ``re.compile()``.
 
     Returns list of (confidence, description, matched_text) tuples.
     """
     results = []
-    text_lower = text.lower()
-    for pat, conf, desc in patterns:
+    for compiled_pat, conf, desc in patterns:
         if conf < min_confidence:
             continue
-        match = re.search(pat, text_lower)
+        match = compiled_pat.search(text)
         if match:
             results.append((conf, desc, match.group(0)))
     return results

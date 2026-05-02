@@ -39,6 +39,27 @@ from dataclasses import dataclass, field
 from enum import Enum
 from typing import Any, Dict, List, Optional, Tuple
 
+# Pre-compiled regex patterns used in hot-path helper methods.
+# Avoids redundant re.compile() on every call to _mentions_error,
+# _has_confidence_language, _get_content_keywords, and _keyword_overlap.
+_RE_WORD_BOUNDARY = re.compile(r'\b[a-zA-Z]{4,}\b')
+
+_RE_ERROR_PATTERNS = [
+    re.compile(p) for p in [
+        r'\berror\b', r'\bfail', r'\bsorry\b', r'\bcannot\b',
+        r'\bunable\b', r'\bproblem\b', r'\bissue\b', r'\bretry\b',
+    ]
+]
+
+_RE_CONFIDENCE_PATTERNS = [
+    re.compile(p) for p in [
+        r'\bcertainly\b', r'\bdefinitely\b', r'\babsolutely\b',
+        r'\bguarantee\b', r'\bno doubt\b', r'\bsurely\b',
+        r'\b100%\b', r'\bperfect\b', r'\bconfident\b',
+        r'\bwithout question\b', r'\bclearly\b',
+    ]
+]
+
 
 # ── Enums ───────────────────────────────────────────────────────────
 
@@ -746,7 +767,7 @@ class CognitiveBiasDetector:
         for e in events:
             content = self._get_content(e)
             if content:
-                tokens = re.findall(r'\b[a-zA-Z]{4,}\b', content.lower())
+                tokens = _RE_WORD_BOUNDARY.findall(content.lower())
                 words.update(tokens[:20])  # Cap per event
         return words
 
@@ -754,7 +775,7 @@ class CognitiveBiasDetector:
         """Measure keyword overlap ratio."""
         if not keywords:
             return 0.0
-        content_words = set(re.findall(r'\b[a-zA-Z]{4,}\b', content.lower()))
+        content_words = set(_RE_WORD_BOUNDARY.findall(content.lower()))
         if not content_words:
             return 0.0
         overlap = len(keywords & content_words)
@@ -776,24 +797,22 @@ class CognitiveBiasDetector:
         return False
 
     def _mentions_error(self, content: str) -> bool:
-        """Check if content acknowledges an error."""
-        error_patterns = [
-            r'\berror\b', r'\bfail', r'\bsorry\b', r'\bcannot\b',
-            r'\bunable\b', r'\bproblem\b', r'\bissue\b', r'\bretry\b',
-        ]
+        """Check if content acknowledges an error.
+
+        Uses module-level pre-compiled patterns to avoid redundant
+        re.compile() on every call.
+        """
         lower = content.lower()
-        return any(re.search(p, lower) for p in error_patterns)
+        return any(p.search(lower) for p in _RE_ERROR_PATTERNS)
 
     def _has_confidence_language(self, content: str) -> bool:
-        """Check if content contains high-confidence language."""
-        patterns = [
-            r'\bcertainly\b', r'\bdefinitely\b', r'\babsolutely\b',
-            r'\bguarantee\b', r'\bno doubt\b', r'\bsurely\b',
-            r'\b100%\b', r'\bperfect\b', r'\bconfident\b',
-            r'\bwithout question\b', r'\bclearly\b',
-        ]
+        """Check if content contains high-confidence language.
+
+        Uses module-level pre-compiled patterns to avoid redundant
+        re.compile() on every call.
+        """
         lower = content.lower()
-        return any(re.search(p, lower) for p in patterns)
+        return any(p.search(lower) for p in _RE_CONFIDENCE_PATTERNS)
 
     def _sequence_similarity(self, seq_a: List[str], seq_b: List[str]) -> float:
         """Compute Jaccard similarity between two sequences."""
