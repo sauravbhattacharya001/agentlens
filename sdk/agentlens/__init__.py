@@ -41,6 +41,7 @@ from agentlens.autopsy import SessionAutopsy, AutopsyConfig, AutopsyReport, Evid
 from agentlens.memory_leak import MemoryLeakDetector, LeakDetectorConfig, MemoryLeakReport, LeakSignal, LeakSeverity, LeakCategory, TrendDirection as LeakTrendDirection, GrowthSegment, ExhaustionForecast, AccumulationProfile
 from agentlens.self_correction import SelfCorrectionTracker, SelfCorrectionReport, CorrectionCategory, CorrectionEvent, CorrectionPattern, Grade as CorrectionGrade
 from agentlens.cognitive_bias import CognitiveBiasDetector, CognitiveBiasReport, BiasCategory, BiasSignal, BiasProfile, BiasSeverity, BiasGrade, TrendDirection as BiasTrendDirection
+from agentlens.context_utilization import ContextUtilizationAnalyzer, ContextUtilizationReport, ContextUtilizationConfig, EfficiencyGrade, PollutionType, InsightSeverity, InsightCategory
 from agentlens.prompt_injection import PromptInjectionDetector, PromptInjectionReport, InjectionCategory, InjectionSignal, CategoryProfile, AttackerProfile, ThreatLevel, SafetyGrade, TrendDirection as InjectionTrendDirection
 
 __version__ = "0.1.0"
