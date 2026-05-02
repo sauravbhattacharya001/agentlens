@@ -218,35 +218,42 @@ class SelfCorrectionReport:
 
 # ── Detection Patterns ──────────────────────────────────────────────
 
-# Apology/correction phrases
-_CORRECTION_PHRASES = [
-    r"\bi apologize\b", r"\blet me fix\b", r"\blet me correct\b",
-    r"\bactually[,.]", r"\bcorrection:", r"\bmy mistake\b",
-    r"\bi was wrong\b", r"\blet me try again\b", r"\bsorry[,.].*(?:wrong|incorrect|mistake)",
-    r"\bon second thought\b", r"\bwait[,.].*(?:that's not|that isn't)",
-    r"\bi made an error\b", r"\blet me redo\b",
-]
+# Pre-compiled pattern alternations — one compiled regex per category
+# eliminates per-event re.compile overhead (was O(events × patterns_per_cat)
+# regex compilations; now O(events) pre-compiled match calls per category).
 
-_ASSUMPTION_PHRASES = [
-    r"\bi assumed\b.*\bbut\b", r"\bi incorrectly assumed\b",
-    r"\bmy assumption.*wrong\b", r"\bthat assumption.*incorrect\b",
-    r"\bi shouldn't have assumed\b", r"\bcontrary to.*assumption\b",
-]
+_CORRECTION_RE = re.compile(
+    r"\bi apologize\b|\blet me fix\b|\blet me correct\b"
+    r"|\bactually[,.]|\bcorrection:|\bmy mistake\b"
+    r"|\bi was wrong\b|\blet me try again\b|\bsorry[,.].*(?:wrong|incorrect|mistake)"
+    r"|\bon second thought\b|\bwait[,.].*(?:that's not|that isn't)"
+    r"|\bi made an error\b|\blet me redo\b",
+    re.IGNORECASE,
+)
 
-_HALLUCINATION_PHRASES = [
-    r"\bthat('s| is) not (actually |)correct\b",
-    r"\bi (was |)hallucinated?\b", r"\bthat.*doesn't (actually |)exist\b",
-    r"\bi fabricated\b", r"\bi made that up\b",
-    r"\bupon (checking|verification|review)\b",
-    r"\bafter verif", r"\bi incorrectly (stated|claimed|said)\b",
-]
+_ASSUMPTION_RE = re.compile(
+    r"\bi assumed\b.*\bbut\b|\bi incorrectly assumed\b"
+    r"|\bmy assumption.*wrong\b|\bthat assumption.*incorrect\b"
+    r"|\bi shouldn't have assumed\b|\bcontrary to.*assumption\b",
+    re.IGNORECASE,
+)
 
-_BACKTRACK_PHRASES = [
-    r"\blet me go back\b", r"\bgoing back to\b",
-    r"\breturning to.*earlier\b", r"\bthat approach.*didn't work\b",
-    r"\blet me try.*different\b", r"\bscrap that\b",
-    r"\bstarting over\b", r"\blet me rethink\b",
-]
+_HALLUCINATION_RE = re.compile(
+    r"\bthat(?:'s| is) not (?:actually )?correct\b"
+    r"|\bi (?:was )?hallucinated?\b|\bthat.*doesn't (?:actually )?exist\b"
+    r"|\bi fabricated\b|\bi made that up\b"
+    r"|\bupon (?:checking|verification|review)\b"
+    r"|\bafter verif|\bi incorrectly (?:stated|claimed|said)\b",
+    re.IGNORECASE,
+)
+
+_BACKTRACK_RE = re.compile(
+    r"\blet me go back\b|\bgoing back to\b"
+    r"|\breturning to.*earlier\b|\bthat approach.*didn't work\b"
+    r"|\blet me try.*different\b|\bscrap that\b"
+    r"|\bstarting over\b|\blet me rethink\b",
+    re.IGNORECASE,
+)
 
 
 # ── Core Engine ─────────────────────────────────────────────────────
@@ -399,8 +406,7 @@ class SelfCorrectionTracker:
             content = self._get_content(ev)
             if not content:
                 continue
-            for pattern in _CORRECTION_PHRASES:
-                if re.search(pattern, content, re.IGNORECASE):
+            if _CORRECTION_RE.search(content):
                     # Find what triggered it (look back for errors or user messages)
                     trigger_idx = max(0, i - 1)
                     for j in range(i - 1, max(i - 5, -1), -1):
@@ -419,7 +425,6 @@ class SelfCorrectionTracker:
                         trigger_summary="Previous error or issue",
                         correction_summary="Explicit correction acknowledgment",
                     ))
-                    break  # One detection per event
         return corrections
 
     def _detect_backtrack_corrections(self, events: List[Dict]) -> List[CorrectionEvent]:
@@ -429,22 +434,20 @@ class SelfCorrectionTracker:
             content = self._get_content(ev)
             if not content:
                 continue
-            for pattern in _BACKTRACK_PHRASES:
-                if re.search(pattern, content, re.IGNORECASE):
-                    trigger_idx = max(0, i - 2)
-                    effectiveness = self._check_post_correction_success(events, i)
-                    corrections.append(CorrectionEvent(
-                        category=CorrectionCategory.BACKTRACK_CORRECTION,
-                        trigger_event_index=trigger_idx,
-                        correction_event_index=i,
-                        latency_events=i - trigger_idx,
-                        effectiveness=effectiveness,
-                        confidence=0.65,
-                        description="Agent backtracked to a different approach",
-                        trigger_summary="Dead-end approach",
-                        correction_summary="Returned to alternative strategy",
-                    ))
-                    break
+            if _BACKTRACK_RE.search(content):
+                trigger_idx = max(0, i - 2)
+                effectiveness = self._check_post_correction_success(events, i)
+                corrections.append(CorrectionEvent(
+                    category=CorrectionCategory.BACKTRACK_CORRECTION,
+                    trigger_event_index=trigger_idx,
+                    correction_event_index=i,
+                    latency_events=i - trigger_idx,
+                    effectiveness=effectiveness,
+                    confidence=0.65,
+                    description="Agent backtracked to a different approach",
+                    trigger_summary="Dead-end approach",
+                    correction_summary="Returned to alternative strategy",
+                ))
         return corrections
 
     def _detect_error_recovery(self, events: List[Dict]) -> List[CorrectionEvent]:
@@ -548,22 +551,20 @@ class SelfCorrectionTracker:
             content = self._get_content(ev)
             if not content:
                 continue
-            for pattern in _ASSUMPTION_PHRASES:
-                if re.search(pattern, content, re.IGNORECASE):
-                    trigger_idx = max(0, i - 3)
-                    effectiveness = self._check_post_correction_success(events, i)
-                    corrections.append(CorrectionEvent(
-                        category=CorrectionCategory.ASSUMPTION_CORRECTION,
-                        trigger_event_index=trigger_idx,
-                        correction_event_index=i,
-                        latency_events=i - trigger_idx,
-                        effectiveness=effectiveness,
-                        confidence=0.75,
-                        description="Agent corrected an incorrect assumption",
-                        trigger_summary="Incorrect assumption made",
-                        correction_summary="Assumption explicitly corrected",
-                    ))
-                    break
+            if _ASSUMPTION_RE.search(content):
+                trigger_idx = max(0, i - 3)
+                effectiveness = self._check_post_correction_success(events, i)
+                corrections.append(CorrectionEvent(
+                    category=CorrectionCategory.ASSUMPTION_CORRECTION,
+                    trigger_event_index=trigger_idx,
+                    correction_event_index=i,
+                    latency_events=i - trigger_idx,
+                    effectiveness=effectiveness,
+                    confidence=0.75,
+                    description="Agent corrected an incorrect assumption",
+                    trigger_summary="Incorrect assumption made",
+                    correction_summary="Assumption explicitly corrected",
+                ))
         return corrections
 
     def _detect_hallucination_fixes(self, events: List[Dict]) -> List[CorrectionEvent]:
@@ -573,29 +574,27 @@ class SelfCorrectionTracker:
             content = self._get_content(ev)
             if not content:
                 continue
-            for pattern in _HALLUCINATION_PHRASES:
-                if re.search(pattern, content, re.IGNORECASE):
-                    trigger_idx = max(0, i - 4)
-                    # Higher confidence if preceded by a verification tool call
-                    conf = 0.7
-                    for j in range(max(0, i - 3), i):
-                        if events[j].get("type") in ("tool_call", "tool_result"):
-                            conf = 0.85
-                            trigger_idx = j
-                            break
-                    effectiveness = self._check_post_correction_success(events, i)
-                    corrections.append(CorrectionEvent(
-                        category=CorrectionCategory.HALLUCINATION_FIX,
-                        trigger_event_index=trigger_idx,
-                        correction_event_index=i,
-                        latency_events=i - trigger_idx,
-                        effectiveness=effectiveness,
-                        confidence=conf,
-                        description="Agent corrected a hallucinated/incorrect claim",
-                        trigger_summary="Factual claim made",
-                        correction_summary="Claim retracted after verification",
-                    ))
-                    break
+            if _HALLUCINATION_RE.search(content):
+                trigger_idx = max(0, i - 4)
+                # Higher confidence if preceded by a verification tool call
+                conf = 0.7
+                for j in range(max(0, i - 3), i):
+                    if events[j].get("type") in ("tool_call", "tool_result"):
+                        conf = 0.85
+                        trigger_idx = j
+                        break
+                effectiveness = self._check_post_correction_success(events, i)
+                corrections.append(CorrectionEvent(
+                    category=CorrectionCategory.HALLUCINATION_FIX,
+                    trigger_event_index=trigger_idx,
+                    correction_event_index=i,
+                    latency_events=i - trigger_idx,
+                    effectiveness=effectiveness,
+                    confidence=conf,
+                    description="Agent corrected a hallucinated/incorrect claim",
+                    trigger_summary="Factual claim made",
+                    correction_summary="Claim retracted after verification",
+                ))
         return corrections
 
     # ── Helpers ─────────────────────────────────────────────────────
