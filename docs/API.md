@@ -37,6 +37,10 @@ All endpoints require API key authentication via the `x-api-key` header unless o
 - [Agent Scorecards](#agent-scorecards)
 - [Agent Profiler](#agent-profiler)
 - [Command Center](#command-center)
+- [Collaboration](#collaboration)
+- [Competency Map](#competency-map)
+- [Operational Tempo](#operational-tempo)
+- [Auto-Triage](#auto-triage)
 
 ---
 
@@ -1478,5 +1482,676 @@ Returns a quick stats overview of system health.
   "budgetWarnings": 0,
   "errorRate": 0.035,
   "period": { "days": 7, "from": "2026-04-11", "to": "2026-04-18" }
+}
+```
+
+---
+
+## Collaboration
+
+Multi-agent collaboration analysis — detects teamwork patterns, handoff quality, communication bottlenecks, delegation chains, workload balance, and collective intelligence across sessions with 2+ agents.
+
+### `GET /collaboration`
+
+List multi-agent sessions with collaboration scores.
+
+**Query Parameters:**
+
+| Parameter | Type | Default | Description |
+|-----------|------|---------|-------------|
+| `days` | number | 30 | Lookback window in days |
+| `limit` | number | 50 | Max sessions to return (max 200) |
+
+**Response:**
+
+```json
+[
+  {
+    "session_id": "sess-abc123",
+    "agent_count": 3,
+    "event_count": 47,
+    "teamwork_score": 82.5,
+    "grade": "strong",
+    "collaboration_pattern": "orchestrated",
+    "first_event": "2026-04-10T08:00:00Z",
+    "last_event": "2026-04-10T08:15:00Z"
+  }
+]
+```
+
+**Collaboration Patterns:** `solo`, `orchestrated`, `pipeline`, `hierarchical`, `swarm`, `peer_to_peer`
+
+**Grades:** `elite` (≥90), `strong` (≥75), `functional` (≥60), `struggling` (≥40), `dysfunctional` (<40)
+
+### `GET /collaboration/:session_id`
+
+Detailed collaboration analysis for a single session. Returns the full breakdown including all 6 scoring engines.
+
+**Response:**
+
+```json
+{
+  "session_id": "sess-abc123",
+  "agent_count": 3,
+  "event_count": 47,
+  "teamwork_score": 82.5,
+  "grade": "strong",
+  "collaboration_pattern": "orchestrated",
+  "gini_coefficient": 0.1523,
+  "coordination_overhead_pct": 34.2,
+  "abandoned_delegations": 0,
+  "handoffs": [
+    {
+      "source_agent": "planner",
+      "target_agent": "coder",
+      "timestamp": "2026-04-10T08:02:00Z",
+      "latency_ms": 230,
+      "context_loss": 0.02,
+      "verdict": "clean",
+      "quality": 100
+    }
+  ],
+  "bottlenecks": [],
+  "workload": [
+    { "agent_id": "planner", "event_count": 15, "load_fraction": 0.32, "status": "balanced" },
+    { "agent_id": "coder", "event_count": 20, "load_fraction": 0.43, "status": "balanced" },
+    { "agent_id": "reviewer", "event_count": 12, "load_fraction": 0.25, "status": "balanced" }
+  ],
+  "engines": [
+    { "engine": "Handoff Quality", "score": 95.0 },
+    { "engine": "Communication Bottleneck", "score": 100.0 },
+    { "engine": "Delegation Chain", "score": 100.0 },
+    { "engine": "Workload Balance", "score": 84.8 },
+    { "engine": "Teamwork Rhythm", "score": 55.0 },
+    { "engine": "Collective Intelligence", "score": 75.0 }
+  ]
+}
+```
+
+**Scoring Engines (weighted composite):**
+- **Handoff Quality** (20%) — latency and context loss at each agent-to-agent handoff
+- **Communication Bottleneck** (15%) — fan-in congestion detection
+- **Delegation Chain** (15%) — abandoned delegation penalty
+- **Workload Balance** (20%) — Gini coefficient of event distribution
+- **Teamwork Rhythm** (15%) — coordination overhead vs productive work
+- **Collective Intelligence** (15%) — cross-agent error correction rate
+
+### `GET /collaboration/:session_id/handoffs`
+
+Handoff timeline and quality analysis for a session.
+
+**Response:**
+
+```json
+{
+  "session_id": "sess-abc123",
+  "handoff_count": 4,
+  "handoff_quality_score": 95.0,
+  "handoffs": [
+    {
+      "source_agent": "planner",
+      "target_agent": "coder",
+      "timestamp": "2026-04-10T08:02:00Z",
+      "latency_ms": 230,
+      "context_loss": 0.02,
+      "verdict": "clean",
+      "quality": 100
+    }
+  ]
+}
+```
+
+**Handoff Verdicts:** `clean` (loss ≤5%), `acceptable` (loss ≤20%), `lossy` (loss ≤50% or latency >5s), `failed` (loss >50% or latency >10s)
+
+### `GET /collaboration/:session_id/bottlenecks`
+
+Communication bottleneck analysis — identifies agents with high fan-in that may be blocking other agents.
+
+**Response:**
+
+```json
+{
+  "session_id": "sess-abc123",
+  "bottleneck_count": 1,
+  "bottleneck_score": 80.0,
+  "bottlenecks": [
+    {
+      "agent_id": "reviewer",
+      "fan_in": 4,
+      "fan_out": 1,
+      "severity": "moderate",
+      "waiting_agents": ["coder-1", "coder-2", "coder-3", "tester"]
+    }
+  ]
+}
+```
+
+### `POST /collaboration/analyze`
+
+Trigger collaboration analysis for a session by ID, or supply events directly.
+
+**Body (by session ID):**
+
+```json
+{ "session_id": "sess-abc123" }
+```
+
+**Body (inline events):**
+
+```json
+{
+  "events": [
+    { "timestamp": "...", "agent_id": "planner", "event_type": "handoff", "target_agent": "coder" }
+  ]
+}
+```
+
+---
+
+## Competency Map
+
+Autonomous skill profiling for AI agents. Analyzes behavioral data across 6 dimensions (reliability, speed, efficiency, tool mastery, error recovery, consistency) to build skill profiles, identify strengths/weaknesses, and generate optimal task-routing recommendations.
+
+### `GET /competency`
+
+Fleet-wide competency overview — all agents ranked with dimension scores and task routing suggestions.
+
+**Query Parameters:**
+
+| Parameter | Type | Default | Description |
+|-----------|------|---------|-------------|
+| `days` | number | 30 | Lookback window in days |
+
+**Response:**
+
+```json
+{
+  "competency_map": [
+    {
+      "agent_name": "claude-3.5-sonnet",
+      "competency_score": 87.3,
+      "grade": "A-",
+      "grade_color": "#22c55e",
+      "dimensions": {
+        "reliability": { "score": 92.1, "percentile": 85.0 },
+        "speed": { "score": 78.4, "percentile": 60.0 },
+        "efficiency": { "score": 88.2, "percentile": 90.0 },
+        "tool_mastery": { "score": 81.5, "percentile": 75.0 },
+        "error_recovery": { "score": 80.0, "percentile": 50.0 },
+        "consistency": { "score": 91.0, "percentile": 95.0 }
+      },
+      "strengths": ["reliability", "consistency"],
+      "weaknesses": ["speed", "error_recovery"],
+      "recommended_tasks": ["long-running critical workflows", "steady-state monitoring"],
+      "session_count": 250,
+      "last_active": "2026-04-18T12:00:00Z"
+    }
+  ],
+  "routing_suggestions": [
+    {
+      "task_type": "long-running critical workflows",
+      "best_agent": "claude-3.5-sonnet",
+      "confidence": 87.3,
+      "reason": "Highest reliability (92.1) and consistency (91.0)",
+      "alternatives": ["gpt-4o", "gemini-pro"]
+    }
+  ],
+  "meta": { "days": 30, "generated_at": "2026-04-18T12:00:00Z", "agent_count": 5 }
+}
+```
+
+**Dimensions (weighted composite score):**
+- **Reliability** (25%) — success rate, volume-adjusted
+- **Speed** (15%) — inverse latency, log-normalized (200ms=100, 10s=0)
+- **Efficiency** (20%) — completed sessions per million tokens
+- **Tool Mastery** (15%) — breadth and volume of tool usage
+- **Error Recovery** (10%) — sessions with errors that still completed
+- **Consistency** (15%) — inverse coefficient of variation of daily success rates
+
+**Grades:** `A+` (≥95), `A` (≥90), `A-` (≥85), `B+` (≥80), `B` (≥75), `B-` (≥70), `C+` (≥65), `C` (≥60), `C-` (≥55), `D` (≥50), `F` (<50)
+
+### `GET /competency/routing`
+
+Autonomous routing recommendations — which agent should handle which task types.
+
+**Query Parameters:**
+
+| Parameter | Type | Default | Description |
+|-----------|------|---------|-------------|
+| `days` | number | 30 | Lookback window in days |
+
+**Response:**
+
+```json
+{
+  "routing_table": [
+    {
+      "task_pattern": "long-running critical workflows",
+      "recommended_agent": "claude-3.5-sonnet",
+      "confidence": 87.3,
+      "fallback_agents": ["gpt-4o"],
+      "reason": "Highest competency score (87.3) for this task type"
+    }
+  ],
+  "coverage_score": 71.4,
+  "meta": { "days": 30, "generated_at": "2026-04-18T12:00:00Z", "agent_count": 5 }
+}
+```
+
+**Task Profiles (used for routing):**
+- Long-running critical workflows (reliability ≥80, consistency ≥75)
+- High-throughput batch processing (speed ≥80, efficiency ≥75)
+- Complex multi-tool orchestrations (tool mastery ≥75, reliability ≥70)
+- Error-prone exploratory tasks (error recovery ≥75)
+- Token-sensitive operations (efficiency ≥85)
+- Latency-critical real-time tasks (speed ≥85, reliability ≥70)
+- Steady-state monitoring (consistency ≥80, reliability ≥70)
+
+### `GET /competency/:agent`
+
+Detailed competency profile for a single agent — includes growth trajectory, tool breakdown, model affinity, and peer comparison.
+
+**Query Parameters:**
+
+| Parameter | Type | Default | Description |
+|-----------|------|---------|-------------|
+| `days` | number | 30 | Lookback window in days |
+
+**Response:**
+
+```json
+{
+  "agent_name": "claude-3.5-sonnet",
+  "competency_score": 87.3,
+  "grade": "A-",
+  "grade_color": "#22c55e",
+  "dimensions": {
+    "reliability": { "score": 92.1, "peer_rank": { "rank": 1, "of": 5, "score": 92.1 } }
+  },
+  "strengths": ["reliability", "consistency"],
+  "weaknesses": ["speed", "error_recovery"],
+  "recommended_tasks": ["long-running critical workflows"],
+  "growth_trajectory": {
+    "success_rate_trend": 0.35,
+    "token_usage_trend": -12.5,
+    "direction": "improving",
+    "weeks_analyzed": 8
+  },
+  "tools": [
+    { "tool": "code_search", "calls": 150, "avg_latency_ms": 340.5, "min_latency_ms": 50.0, "max_latency_ms": 2100.0 }
+  ],
+  "model_affinity": [
+    { "model": "claude-3.5-sonnet", "calls": 200, "tokens_in": 50000, "tokens_out": 30000, "avg_latency_ms": 420.0, "efficiency_score": 78.5 }
+  ],
+  "peer_comparison": {
+    "reliability": { "rank": 1, "of": 5, "score": 92.1 }
+  },
+  "weekly_trend": [
+    { "week": "2026-15", "sessions": 30, "success_rate": 93.3, "avg_tokens": 4500 }
+  ],
+  "metrics": {
+    "total_sessions": 250,
+    "completed": 232,
+    "errors": 8,
+    "active": 3,
+    "avg_tokens_in": 2500,
+    "avg_tokens_out": 1800,
+    "total_tokens": 1075000
+  },
+  "first_seen": "2026-01-15T00:00:00Z",
+  "last_seen": "2026-04-18T12:00:00Z",
+  "meta": { "days": 30, "generated_at": "2026-04-18T12:00:00Z" }
+}
+```
+
+---
+
+## Operational Tempo
+
+Agent pace and rhythm analysis — measures operational cadence, detects rushing/stalling, identifies optimal tempos, and generates pace recommendations.
+
+7 analysis engines: Cadence Profiler, Rush Detector, Stall Detector, Task Tempo Optimizer, Rhythm Regularity Scorer, Tempo Drift Tracker, and Pace Recommendation Engine.
+
+### `GET /tempo`
+
+Fleet-wide tempo overview — tempo score, rhythm classification, and rush/stall counts per agent.
+
+**Query Parameters:**
+
+| Parameter | Type | Default | Description |
+|-----------|------|---------|-------------|
+| `days` | number | 7 | Lookback window in days |
+
+**Response:**
+
+```json
+{
+  "period": { "days": 7, "cutoff": "2026-04-11T00:00:00Z" },
+  "fleetTempoScore": 78,
+  "fleetTempoHealth": "good",
+  "agentCount": 3,
+  "agents": [
+    {
+      "agent": "claude-3.5-sonnet",
+      "sessionCount": 45,
+      "eventCount": 380,
+      "tempoScore": 85,
+      "tempoHealth": "excellent",
+      "cadenceCategory": "moderate",
+      "rhythmScore": 72,
+      "rhythmClass": "steady",
+      "rushEpisodeCount": 1,
+      "stallEpisodeCount": 0
+    }
+  ],
+  "summary": { "rushing": 1, "stalling": 0, "chaotic": 0, "healthy": 2 }
+}
+```
+
+**Tempo Health:** `excellent` (≥85), `good` (≥70), `fair` (≥50), `poor` (≥30), `critical` (<30)
+
+**Cadence Categories:** `hyper-fast` (<500ms), `fast` (<2s), `moderate` (<10s), `deliberate` (<30s), `slow` (<2m), `stalled` (≥2m)
+
+**Rhythm Classifications:** `metronome` (≥80), `steady` (≥60), `variable` (≥40), `erratic` (≥20), `chaotic` (<20)
+
+### `GET /tempo/:agent`
+
+Detailed tempo profile for a single agent — cadence, rhythm, rush/stall episodes, optimal tempos, and pace recommendations.
+
+**Query Parameters:**
+
+| Parameter | Type | Default | Description |
+|-----------|------|---------|-------------|
+| `days` | number | 14 | Lookback window in days |
+
+**Response:**
+
+```json
+{
+  "agent": "claude-3.5-sonnet",
+  "period": { "days": 14, "cutoff": "2026-04-04T00:00:00Z" },
+  "tempoScore": 85,
+  "tempoHealth": "excellent",
+  "cadence": {
+    "eventCount": 380,
+    "intervalCount": 379,
+    "medianIntervalMs": 4200,
+    "meanIntervalMs": 5800,
+    "stddevMs": 3100,
+    "p10Ms": 800,
+    "p90Ms": 12000,
+    "minMs": 120,
+    "maxMs": 45000,
+    "coeffOfVariation": 0.534,
+    "tempoCategory": "moderate"
+  },
+  "rhythm": {
+    "score": 72,
+    "classification": "steady",
+    "coeffOfVariation": 0.534,
+    "autocorrelation": 0.312,
+    "burstRatio": 0.05,
+    "interpretation": "Agent maintains a reasonably steady operational rhythm"
+  },
+  "optimalTempos": {
+    "tool-use": {
+      "sampleSize": 20,
+      "successRate": 85,
+      "optimalPaceMs": 3500,
+      "riskyFastMs": 500,
+      "riskySlowMs": 15000,
+      "failedMeanPaceMs": 800,
+      "recommendation": "slow-down"
+    }
+  },
+  "rushEpisodes": [],
+  "stallEpisodes": [],
+  "recommendations": [
+    {
+      "type": "all-clear",
+      "priority": "low",
+      "message": "Operational tempo appears healthy — no pace issues detected",
+      "action": "Continue current operational patterns",
+      "confidence": 0.9
+    }
+  ],
+  "summary": { "totalEvents": 380, "totalSessions": 45, "rushCount": 0, "stallCount": 0 }
+}
+```
+
+**Recommendation Types:** `pace-warning`, `loop-detection`, `rhythm-coaching`, `consistency`, `tempo-optimization`, `all-clear`
+
+### `GET /tempo/:agent/rhythm`
+
+Rhythm regularity timeline — windowed tempo drift tracking showing how an agent's pace changes over time.
+
+**Query Parameters:**
+
+| Parameter | Type | Default | Description |
+|-----------|------|---------|-------------|
+| `days` | number | 14 | Lookback window in days |
+| `window` | number | 1 | Window size in days for drift calculation |
+
+**Response:**
+
+```json
+{
+  "agent": "claude-3.5-sonnet",
+  "period": { "days": 14, "cutoff": "2026-04-04T00:00:00Z", "windowDays": 1 },
+  "timeline": [
+    {
+      "windowStart": "2026-04-10T00:00:00Z",
+      "windowEnd": "2026-04-11T00:00:00Z",
+      "eventCount": 50,
+      "medianPaceMs": 4200,
+      "meanPaceMs": 5100,
+      "rhythm": { "score": 68, "classification": "steady" },
+      "driftPct": -8,
+      "driftDirection": "accelerating"
+    }
+  ],
+  "overallTrend": "stable"
+}
+```
+
+**Overall Trends:** `accelerating` (avg drift <-20%), `decelerating` (avg drift >+20%), `stable`, `insufficient-data`
+
+### `GET /tempo/:agent/anomalies`
+
+Rushing and stalling anomaly episodes for an agent.
+
+**Query Parameters:**
+
+| Parameter | Type | Default | Description |
+|-----------|------|---------|-------------|
+| `days` | number | 14 | Lookback window in days |
+
+**Response:**
+
+```json
+{
+  "agent": "claude-3.5-sonnet",
+  "period": { "days": 14, "cutoff": "2026-04-04T00:00:00Z" },
+  "anomalies": {
+    "rushing": {
+      "count": 2,
+      "episodes": [
+        {
+          "startTime": "2026-04-12T09:00:00Z",
+          "endTime": "2026-04-12T09:01:00Z",
+          "durationMs": 12000,
+          "meanIntervalMs": 150,
+          "severity": "medium"
+        }
+      ],
+      "bySeverity": { "critical": 0, "high": 0, "medium": 1, "low": 1 }
+    },
+    "stalling": {
+      "count": 1,
+      "episodes": [
+        {
+          "gapMs": 180000,
+          "gapFormatted": "3.0m",
+          "beforeEvent": "tool_call",
+          "afterEvent": "error",
+          "timestamp": "2026-04-13T14:22:00Z",
+          "severity": "medium",
+          "possibleCause": "external-dependency"
+        }
+      ],
+      "bySeverity": { "critical": 0, "high": 0, "medium": 1, "low": 0 },
+      "byCause": { "external-dependency": 1 }
+    }
+  }
+}
+```
+
+**Rush Severity:** `critical` (<5% of median), `high` (<10%), `medium` (<20%), `low` (≥20%)
+
+**Stall Severity:** `critical` (>50× median), `high` (>20×), `medium` (>10×), `low` (≥5×)
+
+**Stall Causes:** `error-recovery`, `possible-loop`, `session-timeout`, `external-dependency`, `processing-delay`
+
+### `POST /tempo/analyze`
+
+On-demand tempo analysis — supply your own event array for analysis without stored data.
+
+**Body:**
+
+```json
+{
+  "events": [
+    { "timestamp": "2026-04-10T08:00:00Z", "event_type": "llm_call" },
+    { "timestamp": "2026-04-10T08:00:05Z", "event_type": "tool_call" },
+    { "timestamp": "2026-04-10T08:00:08Z", "event_type": "llm_call" }
+  ]
+}
+```
+
+Requires at least 3 events. Returns `tempoScore`, `tempoHealth`, `cadence`, `rhythm`, `rushEpisodes`, `stallEpisodes`, and `recommendations`.
+
+---
+
+## Auto-Triage
+
+Unified session diagnostics — runs health scoring, anomaly detection, baseline drift analysis, error grouping, and cost analysis in a single call. Returns a prioritized triage report with severity-ranked findings and automated remediation suggestions.
+
+### `GET /triage/:sessionId`
+
+Full auto-triage for a single session.
+
+**Response:**
+
+```json
+{
+  "session_id": "sess-abc123",
+  "agent_name": "claude-3.5-sonnet",
+  "triage_at": "2026-04-18T12:00:00Z",
+  "overall_severity": "high",
+  "health_grade": "C",
+  "health_score": 62,
+  "summary": "Session has 1 high-severity findings that should be investigated.",
+  "findings": [
+    {
+      "severity": "high",
+      "category": "anomaly",
+      "title": "Token usage is anomalous (3.2σ above baseline)",
+      "detail": "Actual: 45000, Baseline mean: 12500, Z-score: 3.2",
+      "metric": { "name": "totalTokens", "value": 45000, "threshold": 12500, "unit": "count" },
+      "remediation": "Review prompt sizes and consider using smaller models for simple tasks. Check for unnecessary context in prompts."
+    }
+  ],
+  "metrics": {
+    "total_tokens": 45000,
+    "tokens_in": 30000,
+    "tokens_out": 15000,
+    "total_cost": 0.135,
+    "error_count": 3,
+    "event_count": 28,
+    "duration_ms": 45000,
+    "avg_event_duration_ms": 1607,
+    "models_used": ["claude-3.5-sonnet"],
+    "tools_used": ["code_search", "file_write"]
+  },
+  "anomaly_report": {
+    "isAnomaly": true,
+    "maxZScore": 3.2,
+    "dimensions": {
+      "totalTokens": { "value": 45000, "zScore": 3.2, "baseline_mean": 12500 },
+      "duration_ms": { "value": 45000, "zScore": 1.1, "baseline_mean": 30000 },
+      "eventCount": { "value": 28, "zScore": 0.5, "baseline_mean": 22 },
+      "errorCount": { "value": 3, "zScore": 1.8, "baseline_mean": 1.2 }
+    }
+  },
+  "baseline_comparison": {
+    "samples": 200,
+    "verdict": "regression",
+    "checks": {
+      "total_tokens": { "baseline": 12500, "actual": 45000, "delta_pct": 260, "status": "regression" }
+    }
+  },
+  "error_analysis": {
+    "count": 3,
+    "rate": 10.71,
+    "groups": [
+      { "type": "tool_error", "count": 2, "examples": ["Timeout waiting for response"] },
+      { "type": "error", "count": 1, "examples": ["Rate limit exceeded"] }
+    ]
+  },
+  "cost_analysis": {
+    "total_cost": 0.135,
+    "model_breakdown": { "claude-3.5-sonnet": { "cost": 0.135, "calls": 12 } },
+    "above_average": true,
+    "avg_cost_reference": 0.045
+  },
+  "health_details": {
+    "score": 62,
+    "grade": "C",
+    "components": {
+      "error_rate": { "score": 60, "value": 10.71, "weight": 0.4 },
+      "latency": { "score": 80, "value": 1607, "weight": 0.35 },
+      "tool_reliability": { "score": 60, "value": 12.5, "weight": 0.25 }
+    }
+  }
+}
+```
+
+**Finding Severities:** `critical`, `high`, `medium`, `low`
+
+**Finding Categories:** `errors`, `anomaly`, `drift`, `cost`, `latency`
+
+**Health Grades:** `A` (≥90), `B` (≥80), `C` (≥70), `D` (≥60), `F` (<60)
+
+### `GET /triage/batch`
+
+Triage multiple recent sessions — returns a summary view for quick fleet-wide diagnostics.
+
+**Query Parameters:**
+
+| Parameter | Type | Default | Description |
+|-----------|------|---------|-------------|
+| `limit` | number | 10 | Max sessions to triage (max 50) |
+| `agent` | string | — | Filter by agent name |
+| `severity` | string | — | Minimum severity to include (`critical`, `high`, `medium`, `low`) |
+
+**Response:**
+
+```json
+{
+  "triaged": [
+    {
+      "session_id": "sess-abc123",
+      "agent_name": "claude-3.5-sonnet",
+      "status": "completed",
+      "started_at": "2026-04-18T10:00:00Z",
+      "overall_severity": "high",
+      "health_grade": "C",
+      "health_score": 62,
+      "finding_count": 3,
+      "top_finding": "Token usage is anomalous (3.2σ above baseline)"
+    }
+  ],
+  "count": 1,
+  "triaged_at": "2026-04-18T12:00:00Z"
 }
 ```
