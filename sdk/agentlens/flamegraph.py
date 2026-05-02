@@ -352,7 +352,17 @@ class Flamegraph:
     def render_html(self) -> str:
         """Render a self-contained HTML flamegraph page."""
         data = self.to_data()
-        data_json = json.dumps(data, indent=None)
+        # Escape sequences that could break out of a <script> block:
+        # - "</" prevents premature script tag closure (CWE-79)
+        # - "<!--" prevents HTML comment injection inside script context
+        # json.dumps handles quotes/backslashes but does NOT escape these
+        # HTML-significant sequences, which can allow XSS if event data
+        # contains crafted strings like '</script><script>alert(1)//'.
+        data_json = (
+            json.dumps(data, indent=None)
+            .replace("</", r"<\/")
+            .replace("<!--", r"<\!--")
+        )
         return _HTML_TEMPLATE.replace("/* __DATA__ */", f"const DATA = {data_json};")
 
     def save(self, path: str) -> None:
