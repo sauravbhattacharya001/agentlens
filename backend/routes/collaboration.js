@@ -15,7 +15,8 @@
 
 const express = require("express");
 const { getDb } = require("../db");
-const { parseDays, daysAgoCutoff, wrapRoute } = require("../lib/request-helpers");
+const { isValidSessionId, safeJsonParse } = require("../lib/validation");
+const { parseDays, daysAgoCutoff, parseLimit, wrapRoute } = require("../lib/request-helpers");
 
 const router = express.Router();
 
@@ -241,13 +242,47 @@ function analyzeSession(events) {
   };
 }
 
+// ── Security: event cap to prevent OOM on huge sessions ────────────
+// Matches the defensive cap used by replay.js (5000) and sessions.js
+// diff endpoint (5000).  Without this, a session with millions of
+// events would be loaded entirely into memory.
+const COLLAB_EVENT_CAP = 5000;
+
+// ── Security: session ID validation ────────────────────────────────
+// All per-session routes must validate the :session_id path parameter
+// before using it in queries.  This matches the defense-in-depth
+// approach used by replay.js, annotations.js, and sessions.js.
+function requireValidSessionId(req, res, next) {
+  const id = req.params.session_id;
+  if (!id || !isValidSessionId(id)) {
+    return res.status(400).json({ error: "Invalid session ID format" });
+  }
+  next();
+}
+
+// ── Security: safe event metadata parsing ──────────────────────────
+// Replaces raw JSON.parse(e.metadata || "{}") which crashes on
+// malformed JSON, potentially taking down the entire Express process.
+function parseCollabEvent(e) {
+  const meta = typeof e.metadata === "string"
+    ? safeJsonParse(e.metadata, {})
+    : (e.metadata || {});
+  return {
+    timestamp: e.timestamp,
+    agent_id: e.agent_id || e.agent_name || "unknown",
+    event_type: e.event_type || e.type || "unknown",
+    target_agent: e.target_agent || null,
+    metadata: meta,
+  };
+}
+
 // ── Routes ─────────────────────────────────────────────────────────
 
-router.get("/", wrapRoute(async (req, res) => {
+router.get("/", wrapRoute("list collaboration sessions", async (req, res) => {
   const db = getDb();
-  const days = parseDays(req, 30);
+  const days = parseDays(req.query.days, 30, 90);
   const cutoff = daysAgoCutoff(days);
-  const limit = Math.min(parseInt(req.query.limit) || 50, 200);
+  const limit = parseLimit(req.query.limit, 50, 200);
 
   // Find sessions with multiple agents
   const rows = db.prepare(`
@@ -270,15 +305,10 @@ router.get("/", wrapRoute(async (req, res) => {
              JSON_EXTRACT(metadata, '$.target_agent') as target_agent
       FROM events WHERE session_id = ?
       ORDER BY timestamp
-    `).all(row.session_id);
+      LIMIT ?
+    `).all(row.session_id, COLLAB_EVENT_CAP);
 
-    const parsed = events.map(e => ({
-      timestamp: e.timestamp,
-      agent_id: e.agent_id || e.agent_name || "unknown",
-      event_type: e.event_type || e.type || "unknown",
-      target_agent: e.target_agent || null,
-      metadata: typeof e.metadata === "string" ? JSON.parse(e.metadata || "{}") : (e.metadata || {}),
-    }));
+    const parsed = events.map(parseCollabEvent);
 
     const analysis = analyzeSession(parsed);
     return {
@@ -296,7 +326,7 @@ router.get("/", wrapRoute(async (req, res) => {
   res.json(results);
 }));
 
-router.get("/:session_id", wrapRoute(async (req, res) => {
+router.get("/:session_id", requireValidSessionId, wrapRoute("analyze collaboration session", async (req, res) => {
   const db = getDb();
   const { session_id } = req.params;
 
@@ -305,25 +335,20 @@ router.get("/:session_id", wrapRoute(async (req, res) => {
            JSON_EXTRACT(metadata, '$.target_agent') as target_agent
     FROM events WHERE session_id = ?
     ORDER BY timestamp
-  `).all(session_id);
+    LIMIT ?
+  `).all(session_id, COLLAB_EVENT_CAP);
 
   if (events.length === 0) {
     return res.status(404).json({ error: "Session not found" });
   }
 
-  const parsed = events.map(e => ({
-    timestamp: e.timestamp,
-    agent_id: e.agent_id || e.agent_name || "unknown",
-    event_type: e.event_type || e.type || "unknown",
-    target_agent: e.target_agent || null,
-    metadata: typeof e.metadata === "string" ? JSON.parse(e.metadata || "{}") : (e.metadata || {}),
-  }));
+  const parsed = events.map(parseCollabEvent);
 
   const analysis = analyzeSession(parsed);
   res.json({ session_id, ...analysis });
 }));
 
-router.get("/:session_id/handoffs", wrapRoute(async (req, res) => {
+router.get("/:session_id/handoffs", requireValidSessionId, wrapRoute("analyze collaboration handoffs", async (req, res) => {
   const db = getDb();
   const { session_id } = req.params;
 
@@ -332,15 +357,10 @@ router.get("/:session_id/handoffs", wrapRoute(async (req, res) => {
            JSON_EXTRACT(metadata, '$.target_agent') as target_agent
     FROM events WHERE session_id = ?
     ORDER BY timestamp
-  `).all(session_id);
+    LIMIT ?
+  `).all(session_id, COLLAB_EVENT_CAP);
 
-  const parsed = events.map(e => ({
-    timestamp: e.timestamp,
-    agent_id: e.agent_id || e.agent_name || "unknown",
-    event_type: e.event_type || e.type || "unknown",
-    target_agent: e.target_agent || null,
-    metadata: typeof e.metadata === "string" ? JSON.parse(e.metadata || "{}") : (e.metadata || {}),
-  }));
+  const parsed = events.map(parseCollabEvent);
 
   const analysis = analyzeSession(parsed);
   res.json({
@@ -351,7 +371,7 @@ router.get("/:session_id/handoffs", wrapRoute(async (req, res) => {
   });
 }));
 
-router.get("/:session_id/bottlenecks", wrapRoute(async (req, res) => {
+router.get("/:session_id/bottlenecks", requireValidSessionId, wrapRoute("analyze collaboration bottlenecks", async (req, res) => {
   const db = getDb();
   const { session_id } = req.params;
 
@@ -360,15 +380,10 @@ router.get("/:session_id/bottlenecks", wrapRoute(async (req, res) => {
            JSON_EXTRACT(metadata, '$.target_agent') as target_agent
     FROM events WHERE session_id = ?
     ORDER BY timestamp
-  `).all(session_id);
+    LIMIT ?
+  `).all(session_id, COLLAB_EVENT_CAP);
 
-  const parsed = events.map(e => ({
-    timestamp: e.timestamp,
-    agent_id: e.agent_id || e.agent_name || "unknown",
-    event_type: e.event_type || e.type || "unknown",
-    target_agent: e.target_agent || null,
-    metadata: typeof e.metadata === "string" ? JSON.parse(e.metadata || "{}") : (e.metadata || {}),
-  }));
+  const parsed = events.map(parseCollabEvent);
 
   const analysis = analyzeSession(parsed);
   res.json({
@@ -379,12 +394,13 @@ router.get("/:session_id/bottlenecks", wrapRoute(async (req, res) => {
   });
 }));
 
-router.post("/analyze", wrapRoute(async (req, res) => {
+router.post("/analyze", wrapRoute("trigger collaboration analysis", async (req, res) => {
   const { session_id, events: rawEvents } = req.body || {};
 
   if (rawEvents && Array.isArray(rawEvents)) {
-    // Direct event input
-    const analysis = analyzeSession(rawEvents);
+    // Direct event input — cap to prevent DoS via huge payloads
+    const capped = rawEvents.slice(0, COLLAB_EVENT_CAP);
+    const analysis = analyzeSession(capped);
     res.json({ session_id: session_id || "inline", ...analysis });
     return;
   }
@@ -393,21 +409,20 @@ router.post("/analyze", wrapRoute(async (req, res) => {
     return res.status(400).json({ error: "Provide session_id or events array" });
   }
 
+  if (!isValidSessionId(session_id)) {
+    return res.status(400).json({ error: "Invalid session ID format" });
+  }
+
   const db = getDb();
   const events = db.prepare(`
     SELECT *, COALESCE(JSON_EXTRACT(metadata, '$.agent_id'), agent_name) as agent_id,
            JSON_EXTRACT(metadata, '$.target_agent') as target_agent
     FROM events WHERE session_id = ?
     ORDER BY timestamp
-  `).all(session_id);
+    LIMIT ?
+  `).all(session_id, COLLAB_EVENT_CAP);
 
-  const parsed = events.map(e => ({
-    timestamp: e.timestamp,
-    agent_id: e.agent_id || e.agent_name || "unknown",
-    event_type: e.event_type || e.type || "unknown",
-    target_agent: e.target_agent || null,
-    metadata: typeof e.metadata === "string" ? JSON.parse(e.metadata || "{}") : (e.metadata || {}),
-  }));
+  const parsed = events.map(parseCollabEvent);
 
   const analysis = analyzeSession(parsed);
   res.json({ session_id, ...analysis });
