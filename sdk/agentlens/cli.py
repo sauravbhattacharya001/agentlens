@@ -111,6 +111,7 @@ from agentlens.cli_collaboration import cmd_collaboration, register_collaboratio
 from agentlens.cli_memory_leak import cmd_memory_leak, register_subcommand as register_memory_leak  # memory leak detection
 from agentlens.cli_self_correction import cmd_self_correction, register_self_correction_parser  # self-correction tracking
 from agentlens.cli_cognitive_bias import cmd_cognitive_bias, register_cognitive_bias_parser  # cognitive bias detection
+from agentlens.cli_prompt_injection import cmd_prompt_injection, register_prompt_injection_parser  # prompt injection detection
 
 
 def _print_table(rows: list[dict], columns: list[str], *, max_width: int = 40) -> None:
@@ -932,6 +933,9 @@ def main() -> None:
 
     # -- cognitive-bias --
     register_cognitive_bias_parser(sub)
+
+    # -- prompt-injection --
+    register_prompt_injection_parser(sub)
 
     # -- forecast --
     p = sub.add_parser("forecast", help="Predict future costs/usage from historical trends")
