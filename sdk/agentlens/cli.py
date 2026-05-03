@@ -113,6 +113,7 @@ from agentlens.cli_self_correction import register_self_correction_parser  # sel
 from agentlens.cli_cognitive_bias import register_cognitive_bias_parser  # cognitive bias detection
 from agentlens.cli_prompt_injection import register_prompt_injection_parser  # prompt injection detection
 from agentlens.cli_context_utilization import register_context_utilization_parser  # context utilization analysis
+from agentlens.cli_tool_usage import register_tool_usage_parser  # tool usage profiling
 
 
 def _print_table(rows: list[dict], columns: list[str], *, max_width: int = 40) -> None:
@@ -938,6 +939,9 @@ def main() -> None:
     # -- prompt-injection --
     register_prompt_injection_parser(sub)
     register_context_utilization_parser(sub)
+
+    # -- tool-usage --
+    register_tool_usage_parser(sub)
 
     # -- forecast --
     p = sub.add_parser("forecast", help="Predict future costs/usage from historical trends")
