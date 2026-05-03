@@ -19,4 +19,18 @@ documentation:
 performance:
   - '(slow|performance|latency|memory|optimization|speed|bottleneck)'
 security:
-  - '(security|vulnerability|cve|auth|token|injection|xss|csrf)'
+  - '(security|vulnerability|cve|auth|token|injection|xss|csrf|guardrail)'
+cli:
+  - '(cli|command.line|terminal|agentlens\s+\w+|--\w+)'
+alerting:
+  - '(alert|notification|threshold|trigger|warn|alarm|monitor)'
+cost-optimization:
+  - '(cost|budget|pricing|quota|spend|billing|expensive|cheap)'
+observability:
+  - '(trace|span|metric|telemetry|export|sampling|observ)'
+ai-safety:
+  - '(safety|guardrail|prompt.injection|jailbreak|cognitive.bias|hallucination)'
+analytics:
+  - '(forecast|correlation|anomaly|trend|heatmap|drift|regression)'
+reliability:
+  - '(sla|uptime|reliability|retry|self.correct|health.check|stamina|failure)'

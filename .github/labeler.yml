@@ -23,6 +23,80 @@ demo:
     - any-glob-to-any-file:
       - 'demo/**'
 
+# Feature-area labels (SDK modules)
+cli:
+  - changed-files:
+    - any-glob-to-any-file:
+      - 'sdk/agentlens/cli*.py'
+
+alerting:
+  - changed-files:
+    - any-glob-to-any-file:
+      - 'sdk/agentlens/alert*.py'
+      - 'sdk/agentlens/cli_alert*.py'
+      - 'sdk/agentlens/tracker_alerts.py'
+      - 'backend/routes/alerts.js'
+      - 'dashboard/alerts.html'
+
+cost-optimization:
+  - changed-files:
+    - any-glob-to-any-file:
+      - 'sdk/agentlens/cost_optimizer.py'
+      - 'sdk/agentlens/budget.py'
+      - 'sdk/agentlens/cli_budget.py'
+      - 'sdk/agentlens/quota.py'
+      - 'backend/routes/budgets.js'
+      - 'backend/lib/pricing.js'
+      - 'backend/routes/pricing.js'
+      - 'dashboard/costs.html'
+      - 'dashboard/cost-anomaly.html'
+
+observability:
+  - changed-files:
+    - any-glob-to-any-file:
+      - 'sdk/agentlens/tracker.py'
+      - 'sdk/agentlens/transport.py'
+      - 'sdk/agentlens/decorators.py'
+      - 'sdk/agentlens/span.py'
+      - 'sdk/agentlens/_metrics.py'
+      - 'sdk/agentlens/sampling.py'
+      - 'sdk/agentlens/exporter.py'
+
+ai-safety:
+  - changed-files:
+    - any-glob-to-any-file:
+      - 'sdk/agentlens/guardrails.py'
+      - 'sdk/agentlens/prompt_injection.py'
+      - 'sdk/agentlens/cognitive_bias.py'
+      - 'sdk/agentlens/cli_prompt_injection.py'
+      - 'sdk/agentlens/cli_cognitive_bias.py'
+
+analytics:
+  - changed-files:
+    - any-glob-to-any-file:
+      - 'sdk/agentlens/forecast.py'
+      - 'sdk/agentlens/correlation.py'
+      - 'sdk/agentlens/anomaly.py'
+      - 'sdk/agentlens/heatmap.py'
+      - 'sdk/agentlens/flamegraph.py'
+      - 'sdk/agentlens/drift.py'
+      - 'sdk/agentlens/group_analyzer.py'
+      - 'backend/routes/analytics.js'
+      - 'backend/routes/anomalies.js'
+      - 'backend/routes/correlations.js'
+      - 'backend/routes/forecast.js'
+
+reliability:
+  - changed-files:
+    - any-glob-to-any-file:
+      - 'sdk/agentlens/sla.py'
+      - 'sdk/agentlens/stamina.py'
+      - 'sdk/agentlens/health.py'
+      - 'sdk/agentlens/failure_forecast.py'
+      - 'sdk/agentlens/retry_tracker.py'
+      - 'sdk/agentlens/self_correction.py'
+      - 'backend/routes/sla.js'
+
 # Documentation
 documentation:
   - changed-files:
@@ -51,6 +125,7 @@ tests:
     - any-glob-to-any-file:
       - 'backend/tests/**'
       - 'sdk/tests/**'
+      - 'tests/**'
       - '**/*.test.js'
       - '**/test_*.py'
 
@@ -85,3 +160,17 @@ security:
       - 'backend/middleware.js'
       - 'backend/lib/validation.js'
       - '.github/workflows/codeql.yml'
+      - 'sdk/agentlens/guardrails.py'
+      - 'sdk/agentlens/prompt_injection.py'
+      - 'sdk/agentlens/rate_limiter.py'
+      - 'SECURITY.md'
+
+# Database/storage
+database:
+  - changed-files:
+    - any-glob-to-any-file:
+      - 'backend/db.js'
+      - 'backend/migrations.js'
+      - 'backend/seed.js'
+      - 'backend/lib/statement-cache.js'
+      - 'backend/lib/response-cache.js'
