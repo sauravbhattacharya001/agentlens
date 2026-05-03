@@ -65,7 +65,7 @@
       "routes/**/*.js",
       "!**/node_modules/**"
     ],
-    "coverageThresholds": {
+    "coverageThreshold": {
       "global": {
         "branches": 60,
         "functions": 60,
