@@ -43,6 +43,7 @@ from agentlens.self_correction import SelfCorrectionTracker, SelfCorrectionRepor
 from agentlens.cognitive_bias import CognitiveBiasDetector, CognitiveBiasReport, BiasCategory, BiasSignal, BiasProfile, BiasSeverity, BiasGrade, TrendDirection as BiasTrendDirection
 from agentlens.context_utilization import ContextUtilizationAnalyzer, ContextUtilizationReport, ContextUtilizationConfig, EfficiencyGrade, PollutionType, InsightSeverity, InsightCategory
 from agentlens.prompt_injection import PromptInjectionDetector, PromptInjectionReport, InjectionCategory, InjectionSignal, CategoryProfile, AttackerProfile, ThreatLevel, SafetyGrade, TrendDirection as InjectionTrendDirection
+from agentlens.hallucination import HallucinationDetector, HallucinationReport, HallucinationType, HallucinationSignal, HallucinationProfile, HallucinationSeverity, VeracityTier
 
 __version__ = "0.1.0"
 __all__ = [

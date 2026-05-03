@@ -114,6 +114,7 @@ from agentlens.cli_cognitive_bias import register_cognitive_bias_parser  # cogni
 from agentlens.cli_prompt_injection import register_prompt_injection_parser  # prompt injection detection
 from agentlens.cli_context_utilization import register_context_utilization_parser  # context utilization analysis
 from agentlens.cli_tool_usage import register_tool_usage_parser  # tool usage profiling
+from agentlens.cli_hallucination import register_hallucination_parser  # hallucination detection
 
 
 def _print_table(rows: list[dict], columns: list[str], *, max_width: int = 40) -> None:
@@ -942,6 +943,9 @@ def main() -> None:
 
     # -- tool-usage --
     register_tool_usage_parser(sub)
+
+    # -- hallucination --
+    register_hallucination_parser(sub)
 
     # -- forecast --
     p = sub.add_parser("forecast", help="Predict future costs/usage from historical trends")
