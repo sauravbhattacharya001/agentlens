@@ -399,7 +399,13 @@ class HallucinationDetector:
     def _detect_self_contradiction(
         self, events: List[Dict[str, Any]]
     ) -> List[HallucinationSignal]:
-        """Detect conflicting claims within the session."""
+        """Detect conflicting claims within the session.
+
+        Precomputes keywords, numbers, and negation-pattern matches per
+        claim so the O(n²) pair loop does only set-intersection + dict
+        lookup instead of re-running regex and keyword extraction on
+        every pair (previously ~20 × N² redundant regex evaluations).
+        """
         signals: List[HallucinationSignal] = []
         claims: List[Tuple[int, str]] = []  # (index, content)
 
@@ -409,37 +415,61 @@ class HallucinationDetector:
                 continue
             claims.append((i, content.lower()))
 
+        if len(claims) < 2:
+            return signals
+
+        # Compile negation patterns once (list index → compiled pair)
         negation_pairs = [
-            (r'\bis\b', r'\bis not\b'),
-            (r'\bcan\b', r'\bcannot\b'),
-            (r'\bwill\b', r'\bwill not\b'),
-            (r'\bshould\b', r'\bshould not\b'),
-            (r'\btrue\b', r'\bfalse\b'),
-            (r'\byes\b', r'\bno\b'),
-            (r'\balways\b', r'\bnever\b'),
-            (r'\bsupports?\b', r'\bdoes not support\b'),
-            (r'\bexists?\b', r'\bdoes not exist\b'),
-            (r'\bworks?\b', r'\bdoes not work\b'),
+            (re.compile(r'\bis\b'), re.compile(r'\bis not\b')),
+            (re.compile(r'\bcan\b'), re.compile(r'\bcannot\b')),
+            (re.compile(r'\bwill\b'), re.compile(r'\bwill not\b')),
+            (re.compile(r'\bshould\b'), re.compile(r'\bshould not\b')),
+            (re.compile(r'\btrue\b'), re.compile(r'\bfalse\b')),
+            (re.compile(r'\byes\b'), re.compile(r'\bno\b')),
+            (re.compile(r'\balways\b'), re.compile(r'\bnever\b')),
+            (re.compile(r'\bsupports?\b'), re.compile(r'\bdoes not support\b')),
+            (re.compile(r'\bexists?\b'), re.compile(r'\bdoes not exist\b')),
+            (re.compile(r'\bworks?\b'), re.compile(r'\bdoes not work\b')),
         ]
 
+        # --- Precompute per-claim data (O(N × P)) ---
+        # Keywords and numbers: computed once per claim, not N-1 times.
+        claim_keywords: List[set] = []
+        claim_numbers: List[set] = []  # set of number strings
+        # Negation signature: list of (pos_match, neg_match) booleans per pattern
+        claim_negation: List[List[Tuple[bool, bool]]] = []
+
+        _RE_NUM = re.compile(r'\b(\d+(?:\.\d+)?)\b')
+
+        for _idx, text in claims:
+            claim_keywords.append(self._get_keywords(text))
+            claim_numbers.append(set(_RE_NUM.findall(text)))
+            claim_negation.append([
+                (bool(pos_re.search(text)), bool(neg_re.search(text)))
+                for pos_re, neg_re in negation_pairs
+            ])
+
+        # --- O(n²) pair comparison using precomputed data ---
         for idx_a in range(len(claims)):
+            i_a = claims[idx_a][0]
+            kw_a = claim_keywords[idx_a]
+            neg_a = claim_negation[idx_a]
+
             for idx_b in range(idx_a + 1, len(claims)):
-                i_a, text_a = claims[idx_a]
-                i_b, text_b = claims[idx_b]
+                i_b = claims[idx_b][0]
+                kw_b = claim_keywords[idx_b]
+                overlap = kw_a & kw_b
 
-                # Check negation-based contradictions
-                for pos_pat, neg_pat in negation_pairs:
-                    a_pos = bool(re.search(pos_pat, text_a))
-                    b_neg = bool(re.search(neg_pat, text_b))
-                    a_neg = bool(re.search(neg_pat, text_a))
-                    b_pos = bool(re.search(pos_pat, text_b))
+                if len(overlap) < 2:
+                    continue  # no shared topic — skip both checks
 
-                    # Need shared topic keywords
-                    kw_a = self._get_keywords(text_a)
-                    kw_b = self._get_keywords(text_b)
-                    overlap = kw_a & kw_b
-
-                    if len(overlap) >= 2 and ((a_pos and b_neg) or (a_neg and b_pos)):
+                # Check negation-based contradictions via precomputed flags
+                neg_b = claim_negation[idx_b]
+                found_negation = False
+                for p_idx in range(len(negation_pairs)):
+                    a_pos, a_neg = neg_a[p_idx]
+                    b_pos, b_neg = neg_b[p_idx]
+                    if (a_pos and b_neg) or (a_neg and b_pos):
                         conf = min(0.5 + len(overlap) * 0.1, 0.95)
                         signals.append(HallucinationSignal(
                             type=HallucinationType.SELF_CONTRADICTION,
@@ -449,30 +479,26 @@ class HallucinationDetector:
                             description=f"Contradicts claim from event {i_a}",
                             evidence=f"Shared topics: {', '.join(sorted(overlap)[:5])}",
                         ))
+                        found_negation = True
                         break  # one signal per pair
 
-                # Check numeric contradictions on same topic
-                nums_a = re.findall(r'\b(\d+(?:\.\d+)?)\b', text_a)
-                nums_b = re.findall(r'\b(\d+(?:\.\d+)?)\b', text_b)
-                if nums_a and nums_b:
-                    kw_a = self._get_keywords(text_a)
-                    kw_b = self._get_keywords(text_b)
-                    overlap = kw_a & kw_b
-                    if len(overlap) >= 2:
-                        # Compare numbers — if same topic but different numbers
-                        set_a = set(nums_a)
-                        set_b = set(nums_b)
-                        if set_a and set_b and not set_a.intersection(set_b):
-                            conf = min(0.4 + len(overlap) * 0.08, 0.85)
-                            if conf >= self.min_confidence:
-                                signals.append(HallucinationSignal(
-                                    type=HallucinationType.SELF_CONTRADICTION,
-                                    event_index=i_b,
-                                    confidence=conf,
-                                    severity=self._severity_from_conf(conf),
-                                    description=f"Numeric values conflict with event {i_a}",
-                                    evidence=f"Topic overlap: {', '.join(sorted(overlap)[:5])}",
-                                ))
+                if found_negation:
+                    continue
+
+                # Check numeric contradictions using precomputed number sets
+                nums_a = claim_numbers[idx_a]
+                nums_b = claim_numbers[idx_b]
+                if nums_a and nums_b and not nums_a & nums_b:
+                    conf = min(0.4 + len(overlap) * 0.08, 0.85)
+                    if conf >= self.min_confidence:
+                        signals.append(HallucinationSignal(
+                            type=HallucinationType.SELF_CONTRADICTION,
+                            event_index=i_b,
+                            confidence=conf,
+                            severity=self._severity_from_conf(conf),
+                            description=f"Numeric values conflict with event {i_a}",
+                            evidence=f"Topic overlap: {', '.join(sorted(overlap)[:5])}",
+                        ))
 
         return signals
 
