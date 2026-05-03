@@ -33,10 +33,9 @@ Pure Python, stdlib only (math, statistics, dataclasses, enum, json, collections
 from __future__ import annotations
 
 import json
-import math
 import re
 import statistics
-from collections import defaultdict, Counter
+from collections import defaultdict
 from dataclasses import dataclass, field
 from enum import Enum
 from typing import Any, Dict, List, Optional, Tuple

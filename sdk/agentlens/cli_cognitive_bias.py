@@ -9,7 +9,7 @@ from typing import Any
 
 import httpx
 
-from agentlens.cli_common import get_client, print_json
+from agentlens.cli_common import get_client
 from agentlens.cognitive_bias import CognitiveBiasDetector
 
 

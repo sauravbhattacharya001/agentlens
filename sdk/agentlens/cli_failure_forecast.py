@@ -14,10 +14,10 @@ from __future__ import annotations
 import argparse
 import json
 import sys
-from datetime import datetime, timezone
+from datetime import datetime
 from typing import List
 
-from agentlens.cli_common import add_common_args, get_client_config
+from agentlens.cli_common import add_common_args
 from agentlens.failure_forecast import (
     FailureForecaster,
     ForecastReport,

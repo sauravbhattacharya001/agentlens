@@ -106,13 +106,13 @@ from agentlens.cli_bottleneck import cmd_bottleneck, register as register_bottle
 from agentlens.cli_config import cmd_config, register_config_parser, apply_config_defaults  # persistent config
 from agentlens.cli_triage import cmd_triage, register_triage_parser  # auto-triage engine
 from agentlens.cli_autopsy import cmd_autopsy, register_autopsy_parser  # session autopsy
-from agentlens.cli_stamina import cmd_stamina, register_stamina  # agent stamina profiling
-from agentlens.cli_collaboration import cmd_collaboration, register_collaboration  # multi-agent collaboration
-from agentlens.cli_memory_leak import cmd_memory_leak, register_subcommand as register_memory_leak  # memory leak detection
-from agentlens.cli_self_correction import cmd_self_correction, register_self_correction_parser  # self-correction tracking
-from agentlens.cli_cognitive_bias import cmd_cognitive_bias, register_cognitive_bias_parser  # cognitive bias detection
-from agentlens.cli_prompt_injection import cmd_prompt_injection, register_prompt_injection_parser  # prompt injection detection
-from agentlens.cli_context_utilization import cmd_context_utilization, register_context_utilization_parser  # context utilization analysis
+from agentlens.cli_stamina import register_stamina  # agent stamina profiling
+from agentlens.cli_collaboration import register_collaboration  # multi-agent collaboration
+from agentlens.cli_memory_leak import register_subcommand as register_memory_leak  # memory leak detection
+from agentlens.cli_self_correction import register_self_correction_parser  # self-correction tracking
+from agentlens.cli_cognitive_bias import register_cognitive_bias_parser  # cognitive bias detection
+from agentlens.cli_prompt_injection import register_prompt_injection_parser  # prompt injection detection
+from agentlens.cli_context_utilization import register_context_utilization_parser  # context utilization analysis
 
 
 def _print_table(rows: list[dict], columns: list[str], *, max_width: int = 40) -> None:
