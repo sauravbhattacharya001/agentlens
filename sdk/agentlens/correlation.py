@@ -647,6 +647,7 @@ class SessionCorrelator:
             sweep.sort(key=lambda x: (x[0], x[1]))
 
             current = 0
+            peak_concurrent = 0
             active_sessions: Dict[str, int] = defaultdict(int)
             window_start: Optional[datetime] = None
             peak_sessions: Set[str] = set()
@@ -657,18 +658,14 @@ class SessionCorrelator:
                     current += 1
                     if current >= self.contention_threshold and window_start is None:
                         window_start = ts
-                    if current >= self.contention_threshold:
-                        # Snapshot active sessions at each new peak or same level
+                    if current > peak_concurrent:
+                        # Snapshot active sessions only at NEW peaks
+                        peak_concurrent = current
                         peak_sessions = set(active_sessions.keys())
                 else:
                     active_sessions[sid] -= 1
                     if active_sessions[sid] == 0:
                         del active_sessions[sid]
-
-                    if current >= self.contention_threshold and (current + delta) < self.contention_threshold:
-                        # Contention window closing — but we already decremented conceptually
-                        pass
-
                     current -= 1
 
                     # Emit contention when we drop below threshold
@@ -677,20 +674,19 @@ class SessionCorrelator:
                         if key not in seen:
                             seen.add(key)
                             window_end = ts
-                            # Use the peak_sessions snapshot captured at peak
-                            # instead of re-scanning all intervals O(n).
-                            involved = peak_sessions.copy()
                             contentions.append(ResourceContention(
                                 resource_name=resource,
                                 resource_type=rtype,
-                                sessions_involved=sorted(involved),
+                                sessions_involved=sorted(peak_sessions),
                                 contention_window_start=window_start,
                                 contention_window_end=window_end,
-                                concurrent_count=len(involved),
-                                severity=self._contention_severity(len(involved)),
-                                estimated_delay_ms=len(involved) * 50.0,
+                                concurrent_count=peak_concurrent,
+                                severity=self._contention_severity(peak_concurrent),
+                                estimated_delay_ms=peak_concurrent * 50.0,
                             ))
                         window_start = None
+                        peak_concurrent = 0
+                        peak_sessions = set()
 
             # Handle case where contention persists to the end
             if window_start is not None:
@@ -698,16 +694,15 @@ class SessionCorrelator:
                 if key not in seen:
                     seen.add(key)
                     last_ts = sweep[-1][0] if sweep else window_start
-                    involved_final = peak_sessions.copy()
                     contentions.append(ResourceContention(
                         resource_name=resource,
                         resource_type=rtype,
-                        sessions_involved=sorted(involved_final),
+                        sessions_involved=sorted(peak_sessions),
                         contention_window_start=window_start,
                         contention_window_end=last_ts,
-                        concurrent_count=len(involved_final),
-                        severity=self._contention_severity(len(involved_final)),
-                        estimated_delay_ms=len(involved_final) * 50.0,
+                        concurrent_count=peak_concurrent,
+                        severity=self._contention_severity(peak_concurrent),
+                        estimated_delay_ms=peak_concurrent * 50.0,
                     ))
 
         return sorted(contentions, key=lambda c: -c.concurrent_count)
