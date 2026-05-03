@@ -6,6 +6,9 @@ on:
     tags: ["v*"]
   pull_request:
     branches: [master, main]
+  schedule:
+    # Weekly rebuild to pick up base image security patches (Alpine, Node)
+    - cron: "15 4 * * 1"
 
 permissions:
   contents: read
@@ -26,6 +29,9 @@ jobs:
     steps:
       - name: Checkout
         uses: actions/checkout@v6
+
+      - name: Set up QEMU (multi-arch)
+        uses: docker/setup-qemu-action@v3
 
       - name: Set up Docker Buildx
         uses: docker/setup-buildx-action@v4
@@ -49,6 +55,7 @@ jobs:
             type=semver,pattern={{major}}.{{minor}}
             type=semver,pattern={{major}}
             type=sha,prefix=
+            type=schedule,pattern=weekly
 
       - name: Build and push
         id: build
@@ -63,7 +70,7 @@ jobs:
           cache-to: type=gha,mode=max
           platforms: ${{ github.event_name != 'pull_request' && 'linux/amd64,linux/arm64' || 'linux/amd64' }}
 
-      - name: Run Trivy vulnerability scanner
+      - name: Run Trivy vulnerability scanner (SARIF)
         uses: aquasecurity/trivy-action@v0.36.0
         with:
           image-ref: ${{ env.REGISTRY }}/${{ env.IMAGE_NAME }}:${{ github.sha }}
@@ -73,11 +80,20 @@ jobs:
           exit-code: 0
         if: github.event_name == 'pull_request'
 
-      - name: Upload Trivy scan results to GitHub Security
+      - name: Upload Trivy scan to GitHub Security
         uses: github/codeql-action/upload-sarif@v4
         with:
           sarif_file: trivy-results.sarif
         if: github.event_name == 'pull_request' && always()
+
+      - name: Run Trivy scan (push/schedule — table output)
+        uses: aquasecurity/trivy-action@v0.36.0
+        with:
+          image-ref: ${{ env.REGISTRY }}/${{ env.IMAGE_NAME }}:${{ github.sha }}
+          format: table
+          severity: CRITICAL,HIGH
+          exit-code: 0
+        if: github.event_name != 'pull_request'
 
       - name: Smoke test (PR only)
         if: github.event_name == 'pull_request'
@@ -91,7 +107,34 @@ jobs:
             docker logs smoke
             exit 1
           fi
+          # Verify health endpoint responds
+          HEALTH=$(curl -sf http://localhost:3000/health || echo '{}')
+          echo "Health check response: $HEALTH"
+          if ! echo "$HEALTH" | grep -q '"status":"ok"'; then
+            echo "::warning::Health endpoint did not return ok"
+          fi
           docker stop smoke && docker rm smoke
+
+      - name: Container structure test
+        if: github.event_name == 'pull_request'
+        run: |
+          IMAGE=$(echo "${{ steps.meta.outputs.tags }}" | head -1)
+          # Verify non-root user
+          USER=$(docker run --rm --entrypoint whoami "$IMAGE" 2>/dev/null || echo "unknown")
+          echo "Container user: $USER"
+          if [ "$USER" != "agentlens" ]; then
+            echo "::error::Container runs as $USER, expected agentlens"
+            exit 1
+          fi
+          # Verify required files exist
+          docker run --rm --entrypoint sh "$IMAGE" -c '
+            test -f /app/backend/server.js || { echo "Missing server.js"; exit 1; }
+            test -d /app/dashboard || { echo "Missing dashboard"; exit 1; }
+            test -d /app/data || { echo "Missing data dir"; exit 1; }
+            node -e "require(\"/app/backend/server.js\")" 2>/dev/null &
+            sleep 2 && kill %1 2>/dev/null
+            echo "Structure OK"
+          '
 
       - name: Generate SBOM
         if: github.event_name != 'pull_request'
