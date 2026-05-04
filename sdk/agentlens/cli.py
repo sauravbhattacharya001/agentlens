@@ -116,6 +116,7 @@ from agentlens.cli_context_utilization import register_context_utilization_parse
 from agentlens.cli_tool_usage import register_tool_usage_parser  # tool usage profiling
 from agentlens.cli_hallucination import register_hallucination_parser  # hallucination detection
 from agentlens.cli_reward_hacking import register_reward_hacking_parser  # reward hacking detection
+from agentlens.cli_delegation import register_delegation_parser  # delegation analysis
 
 
 def _print_table(rows: list[dict], columns: list[str], *, max_width: int = 40) -> None:
@@ -950,6 +951,9 @@ def main() -> None:
 
     # -- reward-hacking --
     register_reward_hacking_parser(sub)
+
+    # -- delegation --
+    register_delegation_parser(sub)
 
     # -- forecast --
     p = sub.add_parser("forecast", help="Predict future costs/usage from historical trends")
