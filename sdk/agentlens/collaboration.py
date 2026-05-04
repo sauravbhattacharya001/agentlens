@@ -824,32 +824,36 @@ class CollaborationAnalyzer:
         coord_types = set(self.config.coordination_event_types)
         work_types = set(self.config.work_event_types)
 
-        coord_count = sum(1 for e in events if e.event_type in coord_types)
-        work_count = sum(1 for e in events if e.event_type in work_types)
-        total = coord_count + work_count
-
-        coord_overhead = (coord_count / total * 100) if total > 0 else 0.0
-
-        # Sync analysis: do agents overlap in time windows?
+        # Single pass: classify events, build time windows, collect agents
+        coord_count = 0
+        work_count = 0
+        all_agents: set[str] = set()
         agents_per_window: list[set[str]] = []
-        if events:
-            window_size = max(
-                (events[-1].timestamp - events[0].timestamp) / 10,
-                1.0,
-            )
-            window_start = events[0].timestamp
-            current_window: set[str] = set()
-            for e in events:
-                if e.timestamp - window_start > window_size:
-                    if current_window:
-                        agents_per_window.append(current_window)
-                    current_window = set()
-                    window_start = e.timestamp
-                current_window.add(e.agent_id)
-            if current_window:
-                agents_per_window.append(current_window)
+        window_size = (
+            max((events[-1].timestamp - events[0].timestamp) / 10, 1.0)
+            if events else 1.0
+        )
+        window_start = events[0].timestamp if events else 0.0
+        current_window: set[str] = set()
 
-        all_agents = set(e.agent_id for e in events)
+        for e in events:
+            if e.event_type in coord_types:
+                coord_count += 1
+            elif e.event_type in work_types:
+                work_count += 1
+            all_agents.add(e.agent_id)
+            if e.timestamp - window_start > window_size:
+                if current_window:
+                    agents_per_window.append(current_window)
+                current_window = set()
+                window_start = e.timestamp
+            current_window.add(e.agent_id)
+
+        if current_window:
+            agents_per_window.append(current_window)
+
+        total = coord_count + work_count
+        coord_overhead = (coord_count / total * 100) if total > 0 else 0.0
         if agents_per_window and len(all_agents) > 1:
             avg_overlap = sum(len(w) for w in agents_per_window) / len(agents_per_window)
             sync_ratio = avg_overlap / len(all_agents)
@@ -928,18 +932,19 @@ class CollaborationAnalyzer:
                 agent_tools[e.agent_id].add(tool)
 
         if len(agent_tools) >= 2:
-            all_tools: set[str] = set()
+            # O(A×T) complementarity via tool-ownership counts
+            tool_owner_count: Counter = Counter()
             for tools in agent_tools.values():
-                all_tools.update(tools)
-            # Complementarity: ratio of unique tool contributions
-            unique_contributions = 0
-            for agent, tools in agent_tools.items():
-                other_tools = set()
-                for other, ot in agent_tools.items():
-                    if other != agent:
-                        other_tools.update(ot)
-                unique_contributions += len(tools - other_tools)
-            complementarity = unique_contributions / len(all_tools) if all_tools else 0.5
+                for t in tools:
+                    tool_owner_count[t] += 1
+            # A tool is a unique contribution if exactly one agent owns it
+            unique_contributions = sum(
+                1 for t, cnt in tool_owner_count.items() if cnt == 1
+            )
+            complementarity = (
+                unique_contributions / len(tool_owner_count)
+                if tool_owner_count else 0.5
+            )
         else:
             complementarity = 0.5
 
