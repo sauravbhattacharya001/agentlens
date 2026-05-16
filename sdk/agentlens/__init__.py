@@ -15,6 +15,7 @@ from agentlens.compliance import ComplianceChecker, CompliancePolicy, Compliance
 from agentlens.drift import DriftDetector, DriftReport, DriftStatus, DriftDirection, MetricDrift, ToolUsageDrift
 from agentlens.sla import SLAEvaluator, SLObjective, SLAPolicy, SLAReport, ObjectiveResult, ObjectiveKind, ComplianceStatus, production_policy, development_policy
 from agentlens.sampling import ProbabilisticSampler, RateLimitSampler, PrioritySampler, TailSampler, CompositeSampler, AlwaysSampler, NeverSampler, Sampler, SamplingDecision, SamplingReason, TraceContext, SamplerStats
+from agentlens.sampling_advisor import SamplingAdvisor, SamplingAdvice, WorkloadProfile
 from agentlens.evaluation import ResponseEvaluator, EvaluatorConfig, QualityReport, QualityTrend, QualityGrade, DimensionScore
 from agentlens.postmortem import PostmortemGenerator, PostmortemConfig, PostmortemReport, Severity as PostmortemSeverity, RootCause, ImpactAssessment, Remediation, RemediationCategory, LessonLearned, TimelineEntry, IncidentPhase
 from agentlens.rate_limiter import RateLimiter, RateLimit, RateLimitAction, RateLimitPolicy, CheckResult, RateLimitReport, WindowStats, openai_tier1_policy, anthropic_tier1_policy, conservative_policy
@@ -134,6 +135,9 @@ __all__ = [
     "SamplingReason",
     "TraceContext",
     "SamplerStats",
+    "SamplingAdvisor",
+    "SamplingAdvice",
+    "WorkloadProfile",
     "ResponseEvaluator",
     "EvaluatorConfig",
     "QualityReport",
