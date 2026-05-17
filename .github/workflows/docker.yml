@@ -22,6 +22,28 @@ env:
   IMAGE_NAME: ${{ github.repository }}
 
 jobs:
+  # ╔═ Dockerfile lint ═══════════════════════════════════════════
+  # Catches Dockerfile best-practice issues (pinned versions, COPY ordering,
+  # apt without --no-install-recommends, etc.) before we spend ~5 min on
+  # the multi-arch build. Runs in parallel with build-and-push; failures
+  # are reported but do not block the build (info-level only) so a single
+  # noisy rule cannot wedge releases.
+  hadolint:
+    name: Lint Dockerfile (hadolint)
+    runs-on: ubuntu-latest
+    steps:
+      - name: Checkout
+        uses: actions/checkout@v6
+      - name: Run hadolint
+        uses: hadolint/hadolint-action@v3.1.0
+        with:
+          dockerfile: Dockerfile
+          failure-threshold: warning
+          # Allow the workflow to continue on findings; surface as annotations.
+          ignore: DL3018
+          format: tty
+          no-fail: true
+
   build-and-push:
     name: Build & Push Docker Image
     runs-on: ubuntu-latest
@@ -164,3 +186,87 @@ jobs:
       - name: Image digest
         if: github.event_name != 'pull_request'
         run: echo "Pushed ${{ steps.meta.outputs.tags }}"
+
+      - name: Export image digest for downstream jobs
+        if: github.event_name != 'pull_request'
+        id: digest
+        run: echo "digest=${{ steps.build.outputs.digest }}" >> "$GITHUB_OUTPUT"
+
+    outputs:
+      digest: ${{ steps.build.outputs.digest }}
+
+  # ╔═ Post-push smoke test ═══════════════════════════════════
+  # The smoke test in the build job only runs on pull_request (where the
+  # image is loaded locally with `load: true`). On push / schedule the
+  # image is published to GHCR without ever being booted. This job pulls
+  # the freshly-pushed image by digest and verifies:
+  #   1. The container starts and the /health endpoint returns 200 "ok"
+  #   2. The runtime user is `agentlens` (non-root assertion)
+  # If either fails we mark the workflow red so the broken `latest` /
+  # `v*` tag is immediately visible instead of silently shipping.
+  post-push-smoke:
+    name: Smoke test pushed image
+    runs-on: ubuntu-latest
+    needs: build-and-push
+    if: github.event_name != 'pull_request' && needs.build-and-push.outputs.digest != ''
+    permissions:
+      contents: read
+      packages: read
+    steps:
+      - name: Log in to GHCR
+        uses: docker/login-action@v4
+        with:
+          registry: ${{ env.REGISTRY }}
+          username: ${{ github.actor }}
+          password: ${{ secrets.GITHUB_TOKEN }}
+
+      - name: Pull image by digest
+        id: pull
+        run: |
+          IMAGE="${{ env.REGISTRY }}/${{ env.IMAGE_NAME }}@${{ needs.build-and-push.outputs.digest }}"
+          echo "image=$IMAGE" >> "$GITHUB_OUTPUT"
+          docker pull "$IMAGE"
+
+      - name: Boot container and curl /health
+        run: |
+          IMAGE='${{ steps.pull.outputs.image }}'
+          docker run -d --name smoke -p 3000:3000 "$IMAGE"
+          # Poll /health for up to 30s instead of a fixed sleep so slow
+          # cold starts (native-module init, FS init) don't false-fail.
+          for i in $(seq 1 30); do
+            if curl -sf http://localhost:3000/health | grep -q '"status":"ok"'; then
+              echo "✅ /health responded ok after ${i}s"
+              HEALTH_OK=1
+              break
+            fi
+            sleep 1
+          done
+          if [ -z "${HEALTH_OK:-}" ]; then
+            echo "::error::/health never returned ok in 30s"
+            docker logs smoke || true
+            exit 1
+          fi
+          # Container must still be running (didn't crash post-health).
+          STATUS=$(docker inspect --format='{{.State.Running}}' smoke)
+          if [ "$STATUS" != "true" ]; then
+            echo "::error::Container exited after health check"
+            docker logs smoke || true
+            exit 1
+          fi
+
+      - name: Assert non-root runtime user
+        run: |
+          IMAGE='${{ steps.pull.outputs.image }}'
+          # Use --entrypoint to bypass the CMD and just probe whoami.
+          USER=$(docker run --rm --entrypoint whoami "$IMAGE")
+          echo "Container user: $USER"
+          if [ "$USER" != "agentlens" ]; then
+            echo "::error::Container runs as $USER, expected agentlens"
+            exit 1
+          fi
+
+      - name: Tear down
+        if: always()
+        run: |
+          docker stop smoke 2>/dev/null || true
+          docker rm smoke 2>/dev/null || true
