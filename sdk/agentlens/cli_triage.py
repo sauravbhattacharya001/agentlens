@@ -129,12 +129,17 @@ def _render_triage_report(data: dict) -> None:
     print(f"  Grade:     {grade} ({score}/100)")
     print(f"  Summary:   {data.get('summary', '')}")
 
+    # Pre-compute the underline string: backslash escapes inside
+    # f-string expressions are a Python 3.12+ feature and this
+    # package supports Python 3.9+.
+    sep = "\u2500" * 55
+
     # Key metrics
     metrics = data.get("metrics", {})
     if metrics:
-        print(f"\n  {'\u2500'*55}")
+        print(f"\n  {sep}")
         print("  KEY METRICS")
-        print(f"  {'\u2500'*55}")
+        print(f"  {sep}")
         print(f"    Events:      {metrics.get('event_count', 0):,}")
         print(f"    Errors:      {metrics.get('error_count', 0):,}")
         print(f"    Tokens:      {metrics.get('total_tokens', 0):,} ({metrics.get('tokens_in', 0):,} in / {metrics.get('tokens_out', 0):,} out)")
@@ -155,9 +160,9 @@ def _render_triage_report(data: dict) -> None:
     # Findings
     findings = data.get("findings", [])
     if findings:
-        print(f"\n  {'\u2500'*55}")
+        print(f"\n  {sep}")
         print(f"  FINDINGS ({len(findings)})")
-        print(f"  {'\u2500'*55}")
+        print(f"  {sep}")
         for i, f in enumerate(findings, 1):
             ficon = _severity_icon(f.get("severity", "low"))
             cat = f.get("category", "").upper()
@@ -175,9 +180,9 @@ def _render_triage_report(data: dict) -> None:
     # Anomaly report
     anomaly = data.get("anomaly_report")
     if anomaly and anomaly.get("isAnomaly"):
-        print(f"\n  {'\u2500'*55}")
+        print(f"\n  {sep}")
         print("  ANOMALY DETAILS")
-        print(f"  {'\u2500'*55}")
+        print(f"  {sep}")
         print(f"    Max Z-score: {anomaly.get('maxZScore', 0)}")
         for key, dim in anomaly.get("dimensions", {}).items():
             z = dim.get("zScore", 0)
@@ -187,9 +192,9 @@ def _render_triage_report(data: dict) -> None:
     # Baseline comparison
     baseline = data.get("baseline_comparison")
     if baseline:
-        print(f"\n  {'\u2500'*55}")
+        print(f"\n  {sep}")
         print(f"  BASELINE DRIFT (verdict: {baseline.get('verdict', 'N/A')}, samples: {baseline.get('samples', 0)})")
-        print(f"  {'\u2500'*55}")
+        print(f"  {sep}")
         for name, check in baseline.get("checks", {}).items():
             status = check.get("status", "normal")
             delta = check.get("delta_pct", 0)

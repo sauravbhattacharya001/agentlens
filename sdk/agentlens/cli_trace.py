@@ -99,8 +99,16 @@ def cmd_trace(args: argparse.Namespace) -> None:
 
     # Column header
     BAR_WIDTH = 30
+    # Pre-compute the underline strings: backslash escapes inside
+    # f-string expressions are a Python 3.12+ feature and this
+    # package supports Python 3.9+.
+    line = "\u2500"
+    u12 = line * 12
+    u20 = line * 20
+    u10 = line * 10
+    ubar = line * BAR_WIDTH
     print(f"   {'TYPE':<12} {'MODEL':<20} {'TOKENS':>12} {'DURATION':>10}  {'WATERFALL':<{BAR_WIDTH}}")
-    print(f"   {'\u2500' * 12} {'\u2500' * 20} {'\u2500' * 12} {'\u2500' * 10}  {'\u2500' * BAR_WIDTH}")
+    print(f"   {u12} {u20} {u12} {u10}  {ubar}")
 
     # Render each event
     for ev in events:
@@ -140,7 +148,8 @@ def cmd_trace(args: argparse.Namespace) -> None:
         print(f"   {color}{etype:<12}{RESET} {DIM}{name_display:<20}{RESET} {tokens_str:>12} {dur_str:>10}  {color}{bar}{RESET}{err_mark}")
 
     # Summary footer
-    print(f"\n   {'\u2500' * (12 + 20 + 12 + 10 + BAR_WIDTH + 6)}")
+    footer_line = line * (12 + 20 + 12 + 10 + BAR_WIDTH + 6)
+    print(f"\n   {footer_line}")
     type_counts: dict[str, int] = {}
     type_durations: dict[str, float] = {}
     for ev in events:

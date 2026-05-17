@@ -182,11 +182,14 @@ def _render_autopsy_report(data: dict) -> None:
     print(f"  Summary:    {data.get('summary', '')}")
 
     # Evidence
+    sep = "\u2500" * 55  # extracted: backslash escapes inside f-string
+                          # expressions are a Python 3.12+ feature and
+                          # this package supports 3.9+.
     evidence = data.get("evidence", [])
     if evidence:
-        print(f"\n  {'\u2500'*55}")
+        print(f"\n  {sep}")
         print(f"  EVIDENCE ({len(evidence)} findings)")
-        print(f"  {'\u2500'*55}")
+        print(f"  {sep}")
         for e in evidence:
             w = e.get("severity_weight", 0)
             sev = "\U0001f534" if w >= 0.7 else "\U0001f7e1" if w >= 0.4 else "\U0001f7e2"
@@ -196,9 +199,9 @@ def _render_autopsy_report(data: dict) -> None:
     # Causal links
     links = data.get("causal_links", [])
     if links:
-        print(f"\n  {'\u2500'*55}")
+        print(f"\n  {sep}")
         print(f"  CAUSAL CHAINS ({len(links)} links)")
-        print(f"  {'\u2500'*55}")
+        print(f"  {sep}")
         for link in links:
             rel = link.get("relation", "?")
             arrow = "\u2192" if rel == "causes" else "\u2194"
@@ -208,9 +211,9 @@ def _render_autopsy_report(data: dict) -> None:
     # Hypotheses
     hypotheses = data.get("hypotheses", [])
     if hypotheses:
-        print(f"\n  {'\u2500'*55}")
+        print(f"\n  {sep}")
         print(f"  ROOT-CAUSE HYPOTHESES ({len(hypotheses)})")
-        print(f"  {'\u2500'*55}")
+        print(f"  {sep}")
         for i, h in enumerate(hypotheses, 1):
             conf = h.get("confidence", 0)
             bar = "\u2588" * int(conf * 10) + "\u2591" * (10 - int(conf * 10))
@@ -222,9 +225,9 @@ def _render_autopsy_report(data: dict) -> None:
     # Playbook
     playbook = data.get("playbook", [])
     if playbook:
-        print(f"\n  {'\u2500'*55}")
+        print(f"\n  {sep}")
         print(f"  REMEDIATION PLAYBOOK ({len(playbook)} actions)")
-        print(f"  {'\u2500'*55}")
+        print(f"  {sep}")
         for a in playbook:
             effort = a.get("effort", "?")
             eicon = EFFORT_ICONS.get(effort, "\u2022")
