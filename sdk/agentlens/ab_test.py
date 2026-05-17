@@ -263,6 +263,9 @@ class TestResult:
     def to_dict(self) -> Dict:
         """Serialize the test result to a JSON-friendly dictionary."""
         return {
+            "experiment": self.experiment,
+            "metric": self.metric,
+            "variant_a": self.variant_a,
             "variant_b": self.variant_b,
             "mean_a": round(self.mean_a, 4),
             "mean_b": round(self.mean_b, 4),
