@@ -16,6 +16,13 @@ from agentlens.drift import DriftDetector, DriftReport, DriftStatus, DriftDirect
 from agentlens.sla import SLAEvaluator, SLObjective, SLAPolicy, SLAReport, ObjectiveResult, ObjectiveKind, ComplianceStatus, production_policy, development_policy
 from agentlens.sampling import ProbabilisticSampler, RateLimitSampler, PrioritySampler, TailSampler, CompositeSampler, AlwaysSampler, NeverSampler, Sampler, SamplingDecision, SamplingReason, TraceContext, SamplerStats
 from agentlens.sampling_advisor import SamplingAdvisor, SamplingAdvice, WorkloadProfile
+from agentlens.alert_rule_synthesizer import (
+    AlertRuleSynthesizer,
+    RuleSynthesisReport,
+    RuleSuggestion,
+    WorkloadProfile as SynthWorkloadProfile,
+    SuggestionPriority,
+)
 from agentlens.incident_radar import IncidentRiskRadar, RiskRadarReport, RiskSignal, RiskBand, RiskAction, ActionPriority, RadarInputs
 from agentlens.evaluation import ResponseEvaluator, EvaluatorConfig, QualityReport, QualityTrend, QualityGrade, DimensionScore
 from agentlens.postmortem import PostmortemGenerator, PostmortemConfig, PostmortemReport, Severity as PostmortemSeverity, RootCause, ImpactAssessment, Remediation, RemediationCategory, LessonLearned, TimelineEntry, IncidentPhase
@@ -139,6 +146,11 @@ __all__ = [
     "SamplingAdvisor",
     "SamplingAdvice",
     "WorkloadProfile",
+    "AlertRuleSynthesizer",
+    "RuleSynthesisReport",
+    "RuleSuggestion",
+    "SynthWorkloadProfile",
+    "SuggestionPriority",
     "IncidentRiskRadar",
     "RiskRadarReport",
     "RiskSignal",
