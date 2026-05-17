@@ -49,26 +49,36 @@ class TestCmdLeaderboard(unittest.TestCase):
         return types.SimpleNamespace(**defaults)
 
     def _mock_response(self, data):
+        """Build a mock ``httpx.Response``-shaped object."""
         resp = MagicMock()
-        resp.read.return_value = json.dumps(data).encode()
-        resp.__enter__ = lambda s: s
-        resp.__exit__ = MagicMock(return_value=False)
+        resp.json.return_value = data
+        resp.raise_for_status = MagicMock()
         return resp
 
-    @patch("urllib.request.urlopen")
-    @patch("agentlens.cli._get_client", return_value=("http://localhost:3000", {}))
-    def test_empty_leaderboard(self, _mock_client, mock_urlopen):
-        mock_urlopen.return_value = self._mock_response({
+    def _patch_client(self, response_data):
+        """Patch ``cli_common.get_client`` to return a mock httpx client.
+
+        ``cmd_leaderboard`` calls ``client.get('/leaderboard', params=...)``,
+        so the mock client only needs a ``.get`` that returns the canned
+        response.  Returns the patcher so the caller can ``.stop()`` it.
+        """
+        mock_client = MagicMock()
+        mock_client.get.return_value = self._mock_response(response_data)
+        return patch(
+            "agentlens.cli_leaderboard.get_client",
+            return_value=(mock_client, "http://localhost:3000"),
+        )
+
+    def test_empty_leaderboard(self):
+        data = {
             "period_days": 30, "sort": "efficiency", "order": "desc",
-            "min_sessions": 2, "total_qualifying_agents": 0, "agents": []
-        })
-        with patch("sys.stdout", new_callable=StringIO) as out:
+            "min_sessions": 2, "total_qualifying_agents": 0, "agents": [],
+        }
+        with self._patch_client(data), patch("sys.stdout", new_callable=StringIO) as out:
             cmd_leaderboard(self._make_args())
             self.assertIn("No qualifying agents", out.getvalue())
 
-    @patch("urllib.request.urlopen")
-    @patch("agentlens.cli._get_client", return_value=("http://localhost:3000", {}))
-    def test_json_output(self, _mock_client, mock_urlopen):
+    def test_json_output(self):
         data = {
             "period_days": 30, "sort": "efficiency", "order": "desc",
             "min_sessions": 2, "total_qualifying_agents": 1,
@@ -76,18 +86,15 @@ class TestCmdLeaderboard(unittest.TestCase):
                 "rank": 1, "agent_name": "test-agent", "total_sessions": 10,
                 "success_rate": 90, "avg_session_duration_ms": 5000,
                 "cost_per_session_usd": 0.05, "efficiency_ratio": 2.5,
-                "total_cost_usd": 0.5
-            }]
+                "total_cost_usd": 0.5,
+            }],
         }
-        mock_urlopen.return_value = self._mock_response(data)
-        with patch("sys.stdout", new_callable=StringIO) as out:
+        with self._patch_client(data), patch("sys.stdout", new_callable=StringIO) as out:
             cmd_leaderboard(self._make_args(json_output=True))
             parsed = json.loads(out.getvalue())
             self.assertEqual(len(parsed["agents"]), 1)
 
-    @patch("urllib.request.urlopen")
-    @patch("agentlens.cli._get_client", return_value=("http://localhost:3000", {}))
-    def test_table_output(self, _mock_client, mock_urlopen):
+    def test_table_output(self):
         data = {
             "period_days": 30, "sort": "reliability", "order": "desc",
             "min_sessions": 2, "total_qualifying_agents": 2,
@@ -100,10 +107,9 @@ class TestCmdLeaderboard(unittest.TestCase):
                  "success_rate": 80, "avg_session_duration_ms": 8000,
                  "cost_per_session_usd": 0.1, "efficiency_ratio": 0.8,
                  "total_cost_usd": 1.5},
-            ]
+            ],
         }
-        mock_urlopen.return_value = self._mock_response(data)
-        with patch("sys.stdout", new_callable=StringIO) as out:
+        with self._patch_client(data), patch("sys.stdout", new_callable=StringIO) as out:
             cmd_leaderboard(self._make_args(sort="reliability"))
             output = out.getvalue()
             self.assertIn("Leaderboard", output)

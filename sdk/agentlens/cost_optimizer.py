@@ -300,6 +300,18 @@ def _event_cost(event: AgentEvent, model_info: ModelInfo | None = None) -> float
     return _compute_cost(event.tokens_in, event.tokens_out, model_info)
 
 
+def _hypothetical_cost(event: AgentEvent, model_info: ModelInfo) -> float:
+    """Cost of *event* under an alternative *model_info*'s pricing.
+
+    Kept as a thin backwards-compatible wrapper around :func:`_compute_cost`
+    so callers (and the public test suite) can keep importing the legacy
+    name after the refactor that consolidated cost arithmetic.  Unlike
+    :func:`_event_cost`, this never falls back to the event's own model -
+    *model_info* is mandatory and is always the pricing applied.
+    """
+    return _compute_cost(event.tokens_in, event.tokens_out, model_info)
+
+
 class CostOptimizer:
     """Analyzes events and recommends cheaper model alternatives."""
 

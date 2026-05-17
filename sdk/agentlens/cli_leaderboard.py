@@ -20,6 +20,37 @@ def _fmt_cost(usd: float) -> str:
     return f"${usd:.2f}"
 
 
+# ---------------------------------------------------------------------------
+# Backwards-compatible private helpers
+#
+# These small wrappers exist solely so external callers (and the test suite
+# in ``tests/test_cli_leaderboard.py``) can keep importing the legacy names
+# ``_bar`` and ``_fmt_duration`` after the refactor that moved the canonical
+# implementations into :mod:`agentlens.cli_common`.  Prefer
+# ``cli_common.bar_chart`` / ``cli_common.format_duration`` in new code.
+#
+# ``_bar`` differs from :func:`cli_common.bar_chart` in one detail: when the
+# scale ``max_val`` is non-positive it returns a blank (space-padded) bar
+# rather than an all-empty (\u2591) bar.  That nuance is preserved here.
+# ---------------------------------------------------------------------------
+
+
+def _bar(value: float, max_val: float, width: int = 20) -> str:
+    """Render a fixed-width Unicode bar.
+
+    Returns ``" " * width`` when *max_val* is non-positive so callers can
+    distinguish "no scale available" from "value is zero".
+    """
+    if max_val <= 0:
+        return " " * width
+    return bar_chart(value, max_val, width)
+
+
+def _fmt_duration(ms: float) -> str:
+    """Legacy alias for :func:`agentlens.cli_common.format_duration`."""
+    return format_duration(ms)
+
+
 def cmd_leaderboard(args: Any) -> None:
     """Fetch and display the agent leaderboard."""
     client, _ = get_client(args)

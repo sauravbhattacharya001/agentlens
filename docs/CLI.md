@@ -4,14 +4,22 @@ The `agentlens` CLI provides command-line access to your AgentLens backend for q
 
 ## Global Options
 
-All commands accept these options:
+Most commands accept these options for talking to the backend:
 
 | Option | Env Variable | Default | Description |
 |--------|-------------|---------|-------------|
 | `--endpoint URL` | `AGENTLENS_ENDPOINT` | `http://localhost:3000` | Backend URL |
 | `--api-key KEY` | `AGENTLENS_API_KEY` | `default` | API authentication key |
 
+Resolution order for each option is: explicit CLI flag -> environment
+variable -> persistent config file (see below) -> built-in default. This
+means you can set `AGENTLENS_ENDPOINT` once in your shell profile and
+omit `--endpoint` from every invocation.
+
 ## Configuration
+
+AgentLens persists CLI defaults in a small JSON config file so you do not
+have to retype `--endpoint` / `--api-key` for every command.
 
 ```bash
 agentlens config show              # Show current config
@@ -27,6 +35,14 @@ Set `endpoint` and `api_key` to avoid passing them on every command:
 agentlens config set endpoint http://localhost:3000
 agentlens config set api_key your-secret-key
 ```
+
+**Config file location.** Defaults to `~/.agentlens/config.json` on Linux
+and macOS, and `%USERPROFILE%\.agentlens\config.json` on Windows. Run
+`agentlens config path` to print the exact path on your system.
+
+**Supported keys.** Any global option name is accepted; the two most
+useful are `endpoint` and `api_key`. Unknown keys are stored but ignored
+by the CLI, so it's safe to add notes for yourself.
 
 ## Session Commands
 
@@ -331,4 +347,148 @@ agentlens watch --metric cost --alert-threshold 10
 
 # Generate a weekly report
 agentlens digest --period week --format markdown --output weekly.md
+
+# One-shot triage of a problem session
+agentlens triage sess_abc123 --json
+
+# Full root-cause autopsy with anomaly detection
+agentlens autopsy sess_abc123 --baseline-count 30
+
+# Scan a session for prompt-injection signals
+agentlens prompt-injection sess_abc123 --verbose
+
+# Fleet capacity planning over the last 30 days
+agentlens capacity --days 30
 ```
+
+## Diagnostics & Triage
+
+These commands provide higher-level, opinionated analysis built on top of
+the raw session data. They are designed for incident response and ongoing
+quality monitoring.
+
+### Auto-Triage
+
+```bash
+agentlens triage [SESSION_ID] [--recent] [--limit N] [--agent NAME] \
+                 [--severity critical|high|medium|low] [--json]
+```
+
+Unified diagnostics that consolidate findings from multiple analyzers
+(cost, errors, bias, hallucination, ...) into a single ranked report with
+remediation hints. Pass a session ID for a single-session report, or use
+`--recent --limit N` to triage the most recent sessions in batch mode.
+
+### Session Autopsy
+
+```bash
+agentlens autopsy [SESSION_ID] [--no-baseline] [--baseline-count N] \
+                  [--min-baselines N] [--json]
+```
+
+Deep root-cause analysis for a single session. By default it pulls a
+rolling baseline (`--baseline-count 20`) of comparable sessions and
+highlights anomalies. Use `--no-baseline` to skip the comparison when you
+are investigating the first run of a new agent.
+
+### Capacity Planning
+
+```bash
+agentlens capacity [--days N] [--limit N] [--format table|json]
+```
+
+Fleet-wide capacity and bottleneck planning - identifies saturated
+resources, projects sizing requirements, and flags scaling candidates.
+
+## Safety & Quality Detectors
+
+Each detector targets a specific failure mode. All of them accept the
+standard global `--endpoint` / `--api-key` options in addition to the
+flags shown below.
+
+### Hallucination Detection
+
+```bash
+agentlens hallucination [SESSION_ID] [--demo] [--json] [--verbose]
+```
+
+Scans LLM outputs in a session for unsupported claims and contradictions
+between retrieved context and generated text. `--demo` runs against a
+built-in synthetic session, which is handy for trying the detector
+without a live backend.
+
+### Prompt Injection Detection
+
+```bash
+agentlens prompt-injection <session_id> [--json] [--verbose] \
+                            [--min-confidence F] [--no-tool-outputs]
+```
+
+Detects direct and indirect prompt-injection attempts. By default it
+scans both user inputs and tool outputs (the most common vector for
+indirect injection); pass `--no-tool-outputs` to limit the scan to user
+messages only. `--min-confidence` (0.0-1.0, default `0.5`) tunes recall
+vs. precision.
+
+### Cognitive Bias Detection
+
+```bash
+agentlens cognitive-bias <session_id> [--json] [--verbose] \
+                          [--min-confidence F]
+```
+
+Identifies common reasoning biases (anchoring, confirmation,
+availability, ...) in agent decision traces.
+
+### Reward Hacking Detection
+
+```bash
+agentlens reward-hacking [--demo] [--json] [--verbose]
+```
+
+Flags sessions where the agent appears to satisfy its objective metric
+while circumventing the intended task (specification gaming, metric
+over-optimization, ...).
+
+### Self-Correction Tracking
+
+```bash
+agentlens self-correction <session_id> [--json] [--verbose] \
+                           [--min-confidence F]
+```
+
+Measures how often, and how effectively, the agent revises its own
+intermediate outputs. Useful for evaluating reflection/critique loops.
+
+### Delegation Analysis
+
+```bash
+agentlens delegation [--demo] [--json] [--max-depth N] \
+                      [--bottleneck-threshold N] \
+                      [--over-delegation-threshold F]
+```
+
+Analyzes multi-agent delegation graphs to surface over-delegation,
+bottleneck sub-agents, and pathologically deep call chains.
+
+### Tool Usage Profiling
+
+```bash
+agentlens tool-usage [--demo] [--json] \
+                      [--overreliance-threshold F] [--failure-threshold F]
+```
+
+Profiles tool invocations across sessions: identifies tools the agent
+over-relies on, tools that fail too often, and unused tools that may be
+dead code.
+
+### Context Utilization
+
+```bash
+agentlens context-utilization <session_id> [--json] [--verbose] \
+                                [--context-limit N]
+```
+
+Reports how efficiently each LLM call uses its context window. The
+`--context-limit` flag (default `128000`) lets you scope the analysis to
+the model you actually deployed.
