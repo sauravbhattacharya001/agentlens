@@ -53,6 +53,17 @@ from agentlens.cognitive_bias import CognitiveBiasDetector, CognitiveBiasReport,
 from agentlens.context_utilization import ContextUtilizationAnalyzer, ContextUtilizationReport, ContextUtilizationConfig, EfficiencyGrade, PollutionType, InsightSeverity, InsightCategory
 from agentlens.prompt_injection import PromptInjectionDetector, PromptInjectionReport, InjectionCategory, InjectionSignal, CategoryProfile, AttackerProfile, ThreatLevel, SafetyGrade, TrendDirection as InjectionTrendDirection
 from agentlens.hallucination import HallucinationDetector, HallucinationReport, HallucinationType, HallucinationSignal, HallucinationProfile, HallucinationSeverity, VeracityTier
+from agentlens.model_migration_advisor import (
+    ModelMigrationAdvisor,
+    MigrationReport,
+    MigrationVerdict,
+    MigrationPriority,
+    RollbackRisk,
+    MigrationReason,
+    CallSiteProfile,
+    SitePlan,
+    PlaybookAction as MigrationPlaybookAction,
+)
 
 __version__ = "0.1.0"
 __all__ = [
