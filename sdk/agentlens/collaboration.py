@@ -21,7 +21,6 @@ Pure Python, stdlib only (math, dataclasses, enum, json, collections).
 from __future__ import annotations
 
 import json
-import math
 from collections import Counter, defaultdict
 from dataclasses import dataclass, field
 from enum import Enum

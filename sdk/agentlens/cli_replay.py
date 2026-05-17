@@ -70,7 +70,6 @@ def cmd_replay(args: argparse.Namespace) -> None:
     with optional speed control, type filtering, and multiple
     output formats.
     """
-    import time as _time
     from agentlens.replayer import SessionReplayer
 
     client, _ = _get_client(args)

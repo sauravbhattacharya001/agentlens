@@ -8,7 +8,6 @@ inflation, error rate increase, and tool success decay.
 from __future__ import annotations
 
 import argparse
-import json
 import sys
 from typing import Any
 
@@ -35,7 +34,6 @@ SIGNAL_ICONS = {
 
 def cmd_stamina(args: argparse.Namespace) -> None:
     """Profile agent stamina for a session or batch."""
-    from agentlens.stamina import StaminaProfiler, StaminaConfig
 
     if args.session_id:
         _profile_session(args)
@@ -151,7 +149,6 @@ def _profile_batch(args: argparse.Namespace) -> None:
 
 def _render_batch(profiler: Any, sessions: list[Any]) -> None:
     """Render batch stamina report."""
-    from agentlens.stamina import StaminaProfiler
 
     aggregate = profiler.aggregate_stamina(sessions)
     reports = [profiler.profile(s) for s in sessions]

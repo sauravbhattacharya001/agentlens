@@ -30,10 +30,7 @@ Pure Python, stdlib only (math, statistics, dataclasses, enum, json, collections
 
 from __future__ import annotations
 
-import json
-import math
 import re
-import statistics
 from collections import Counter, defaultdict
 from dataclasses import dataclass, field
 from enum import Enum

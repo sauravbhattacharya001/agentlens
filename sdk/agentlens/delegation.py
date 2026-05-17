@@ -33,7 +33,6 @@ Pure Python, stdlib only (math, statistics, dataclasses, enum, collections).
 
 from __future__ import annotations
 
-import math
 import statistics
 from collections import Counter, defaultdict
 from dataclasses import dataclass, field

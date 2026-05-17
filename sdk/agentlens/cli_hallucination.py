@@ -8,11 +8,10 @@ from __future__ import annotations
 
 import argparse
 import json
-import random
 import sys
 from typing import Any, List
 
-from agentlens.cli_common import get_client, print_json
+from agentlens.cli_common import print_json
 
 
 TIER_ICONS = {

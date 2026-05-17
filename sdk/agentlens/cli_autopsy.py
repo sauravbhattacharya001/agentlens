@@ -9,7 +9,6 @@ with a prioritized remediation playbook.
 from __future__ import annotations
 
 import argparse
-import json
 import sys
 from typing import Any
 
@@ -74,7 +73,6 @@ def cmd_autopsy(args: argparse.Namespace) -> None:
             pass  # Proceed without baselines
 
     # Run local autopsy using the SDK
-    from types import SimpleNamespace
     from agentlens.autopsy import SessionAutopsy, AutopsyConfig
 
     config = AutopsyConfig(

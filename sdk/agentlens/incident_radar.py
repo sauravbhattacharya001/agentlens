@@ -44,7 +44,7 @@ from datetime import datetime, timezone
 from enum import Enum
 from typing import Any, Optional
 
-from agentlens.anomaly import AnomalyReport, AnomalySeverity
+from agentlens.anomaly import AnomalyReport
 from agentlens.budget import BudgetReport
 from agentlens.drift import DriftReport
 from agentlens.error_fingerprint import ErrorReport

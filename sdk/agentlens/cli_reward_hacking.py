@@ -11,7 +11,7 @@ import json
 import sys
 from typing import Any, List
 
-from agentlens.cli_common import get_client, print_json
+from agentlens.cli_common import print_json
 
 
 TIER_ICONS = {

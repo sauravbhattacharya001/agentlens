@@ -11,7 +11,7 @@ import json
 import sys
 from typing import Any
 
-from agentlens.cli_common import get_client, print_json
+from agentlens.cli_common import print_json
 
 
 TIER_ICONS = {
@@ -36,7 +36,7 @@ PATTERN_ICONS = {
 
 def cmd_tool_usage(args: argparse.Namespace) -> None:
     """Profile tool usage patterns."""
-    from agentlens.tool_usage import ToolUsageProfiler, ToolUsageConfig, ToolEvent
+    from agentlens.tool_usage import ToolUsageProfiler, ToolUsageConfig
 
     if args.demo:
         _run_demo(args)
@@ -67,7 +67,7 @@ def cmd_tool_usage(args: argparse.Namespace) -> None:
 
 def _run_demo(args: argparse.Namespace) -> None:
     """Run with demo data to showcase the profiler."""
-    from agentlens.tool_usage import ToolUsageProfiler, ToolEvent
+    from agentlens.tool_usage import ToolUsageProfiler
 
     # Build realistic demo events
     events = _build_demo_events()

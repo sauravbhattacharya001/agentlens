@@ -9,7 +9,6 @@ window exhaustion.
 from __future__ import annotations
 
 import argparse
-import json
 import sys
 from typing import Any
 
@@ -37,7 +36,6 @@ CATEGORY_ICONS = {
 
 def cmd_memory_leak(args: argparse.Namespace) -> None:
     """Detect memory leaks in agent sessions."""
-    from agentlens.memory_leak import MemoryLeakDetector, LeakDetectorConfig
 
     if args.session_id:
         _analyze_session(args)

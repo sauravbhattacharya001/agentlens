@@ -11,7 +11,7 @@ import json
 import sys
 from typing import Any
 
-from agentlens.cli_common import get_client, print_json
+from agentlens.cli_common import print_json
 
 
 TIER_ICONS = {
@@ -25,7 +25,7 @@ TIER_ICONS = {
 
 def cmd_delegation(args: argparse.Namespace) -> None:
     """Analyze delegation patterns."""
-    from agentlens.delegation import DelegationAnalyzer, DelegationConfig, DelegationEvent
+    from agentlens.delegation import DelegationAnalyzer, DelegationConfig
 
     if args.demo:
         _run_demo(args)
@@ -58,7 +58,7 @@ def cmd_delegation(args: argparse.Namespace) -> None:
 
 def _run_demo(args: argparse.Namespace) -> None:
     """Run with demo data to showcase the analyzer."""
-    from agentlens.delegation import DelegationAnalyzer, DelegationEvent
+    from agentlens.delegation import DelegationAnalyzer
 
     events = _build_demo_events()
 

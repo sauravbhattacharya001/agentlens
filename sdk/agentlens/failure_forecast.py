@@ -44,7 +44,6 @@ Pure Python, stdlib only (math, statistics, dataclasses, enum).
 from __future__ import annotations
 
 import json
-import math
 import statistics
 from dataclasses import dataclass, field
 from datetime import datetime, timedelta, timezone
