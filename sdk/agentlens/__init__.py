@@ -35,6 +35,17 @@ from agentlens.slo_burn_rate_advisor import (
     ObjectivePlan,
     PlaybookAction as SLOBurnPlaybookAction,
 )
+from agentlens.trace_completion_advisor import (
+    TraceCompletionAdvisor,
+    TraceCompletionReport,
+    TraceSnapshot,
+    TraceIssue,
+    TraceIssueCode,
+    TraceVerdict,
+    PlaybookAction as TraceCompletionPlaybookAction,
+    ActionPriority as TraceCompletionPriority,
+    CompletionGrade,
+)
 from agentlens.evaluation import ResponseEvaluator, EvaluatorConfig, QualityReport, QualityTrend, QualityGrade, DimensionScore
 from agentlens.postmortem import PostmortemGenerator, PostmortemConfig, PostmortemReport, Severity as PostmortemSeverity, RootCause, ImpactAssessment, Remediation, RemediationCategory, LessonLearned, TimelineEntry, IncidentPhase
 from agentlens.rate_limiter import RateLimiter, RateLimit, RateLimitAction, RateLimitPolicy, CheckResult, RateLimitReport, WindowStats, openai_tier1_policy, anthropic_tier1_policy, conservative_policy
@@ -189,6 +200,15 @@ __all__ = [
     "BurnRateAssessment",
     "ObjectivePlan",
     "SLOBurnPlaybookAction",
+    "TraceCompletionAdvisor",
+    "TraceCompletionReport",
+    "TraceSnapshot",
+    "TraceIssue",
+    "TraceIssueCode",
+    "TraceVerdict",
+    "TraceCompletionPlaybookAction",
+    "TraceCompletionPriority",
+    "CompletionGrade",
     "ResponseEvaluator",
     "EvaluatorConfig",
     "QualityReport",
