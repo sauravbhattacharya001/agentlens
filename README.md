@@ -248,6 +248,15 @@ export AGENTLENS_API_KEY=your-key
 
 Or pass `--endpoint` and `--api-key` flags to any command.
 
+> 🛡️ **Running behind a reverse proxy?** When you front the backend with nginx,
+> Traefik, Caddy, an ALB, Cloud Run, Fly.io, or any other reverse proxy, set
+> `AGENTLENS_TRUST_PROXY=1` on the backend (or the number of proxy hops).
+> Without it, `req.ip` resolves to the proxy's address and the per-IP rate
+> limiters collapse into a single global bucket — one noisy client can DoS
+> the whole deployment. Do **not** set it to `true` in production; that would
+> let any caller spoof `X-Forwarded-For`. See
+> [`backend/.env.example`](backend/.env.example) for accepted values.
+
 ### 5. Instrument Your Agent
 
 ```python

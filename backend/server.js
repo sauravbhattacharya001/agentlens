@@ -12,6 +12,31 @@ const {
 const app = express();
 const PORT = process.env.PORT || 3000;
 
+// ── Reverse proxy trust ─────────────────────────────────────────────
+// When AgentLens runs behind a reverse proxy (nginx, Traefik, Caddy, an
+// ALB / Cloud Run / Fly.io ingress, etc.) the rate limiters and req.ip
+// only see the proxy's address unless we explicitly trust X-Forwarded-For.
+//
+// We intentionally do NOT enable this by default — blindly trusting the
+// header would let any caller spoof their source IP and bypass per-IP
+// rate limits / audit logs. Set AGENTLENS_TRUST_PROXY to opt in:
+//   AGENTLENS_TRUST_PROXY=1            → trust the immediate upstream hop
+//   AGENTLENS_TRUST_PROXY=2            → trust two hops (e.g. CDN → nginx)
+//   AGENTLENS_TRUST_PROXY=10.0.0.0/8   → trust a CIDR (comma-separated list ok)
+//   AGENTLENS_TRUST_PROXY=loopback     → Express named preset
+//
+// See https://expressjs.com/en/guide/behind-proxies.html for the full
+// set of supported values.
+const trustProxyRaw = process.env.AGENTLENS_TRUST_PROXY;
+if (trustProxyRaw && trustProxyRaw.trim() !== "") {
+  const trimmed = trustProxyRaw.trim();
+  const asNum = Number(trimmed);
+  app.set(
+    "trust proxy",
+    Number.isFinite(asNum) && /^-?\d+$/.test(trimmed) ? asNum : trimmed,
+  );
+}
+
 // ── Security middleware ─────────────────────────────────────────────
 app.use(createHelmetMiddleware());
 app.use(createCorsMiddleware());

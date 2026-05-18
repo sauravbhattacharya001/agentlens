@@ -84,6 +84,20 @@ function createCorsMiddleware() {
 
 // ── Rate limiters ───────────────────────────────────────────────────
 
+// When AGENTLENS_TRUST_PROXY is unset the app does not call
+// `app.set("trust proxy", ...)`, so express-rate-limit would otherwise
+// emit ERR_ERL_PERMISSIVE_TRUST_PROXY / ERR_ERL_UNEXPECTED_X_FORWARDED_FOR
+// warnings at startup that confuse operators. We opt out of those
+// validators only when the operator has not (yet) configured a proxy
+// hop count — once they do, express-rate-limit can validate the setup
+// normally.
+function _trustProxyValidate() {
+  const configured =
+    process.env.AGENTLENS_TRUST_PROXY &&
+    process.env.AGENTLENS_TRUST_PROXY.trim() !== "";
+  return configured ? undefined : { trustProxy: false, xForwardedForHeader: false };
+}
+
 function createApiLimiter() {
   return rateLimit({
     windowMs: 60 * 1000,
@@ -91,6 +105,7 @@ function createApiLimiter() {
     standardHeaders: true,
     legacyHeaders: false,
     message: { error: "Too many requests, please try again later" },
+    validate: _trustProxyValidate(),
   });
 }
 
@@ -101,6 +116,7 @@ function createIngestLimiter() {
     standardHeaders: true,
     legacyHeaders: false,
     message: { error: "Too many ingestion requests, please try again later" },
+    validate: _trustProxyValidate(),
   });
 }
 
