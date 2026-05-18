@@ -317,9 +317,7 @@ class StaminaProfiler:
                 stamina_score=100.0,
                 status=StaminaStatus.FRESH,
                 fatigue_onset_index=None,
-                recommendations=["Session too short to profile (need ≥{} events).".format(
-                    self.config.min_events
-                )],
+                recommendations=[f"Session too short to profile (need ≥{self.config.min_events} events)."],
             )
 
         # Build windows

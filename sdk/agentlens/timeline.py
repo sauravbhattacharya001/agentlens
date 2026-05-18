@@ -409,7 +409,7 @@ class TimelineRenderer:
 
         h = _html.escape
         parts: list[str] = []
-        parts.append(f"<!DOCTYPE html><html><head><meta charset='utf-8'>")
+        parts.append("<!DOCTYPE html><html><head><meta charset='utf-8'>")
         parts.append(f"<title>{h(title)}</title>")
         parts.append(f"<style>{css}</style></head><body>")
         parts.append(f"<div class='header'><h1>{h(title)}</h1>")
@@ -487,7 +487,7 @@ class TimelineRenderer:
         min_duration_ms: float | None = None,
         has_error: bool | None = None,
         model: str | None = None,
-    ) -> "TimelineRenderer":
+    ) -> TimelineRenderer:
         """Return a new TimelineRenderer with filtered events."""
         filtered = list(self.events)
 

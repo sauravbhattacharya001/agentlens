@@ -1044,7 +1044,7 @@ class SessionAutopsy:
                            for e in hyp.supporting_evidence
                            if e.metric_name.startswith("tool_failure:")]
                 actions.append(RemediationAction(
-                    description=f"Check tool availability and configuration"
+                    description="Check tool availability and configuration"
                                 + (f" ({', '.join(failing)})" if failing else ""),
                     effort=EffortLevel.QUICK_FIX,
                     priority=1,

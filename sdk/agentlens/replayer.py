@@ -20,7 +20,8 @@ from __future__ import annotations
 
 import json
 from dataclasses import dataclass, field
-from typing import Any, Callable, Iterator
+from typing import Any, Callable
+from collections.abc import Iterator
 
 from agentlens.models import AgentEvent, Session
 
@@ -186,45 +187,45 @@ class SessionReplayer:
 
     # -- Configuration -----------------------------------------------------
 
-    def set_speed(self, speed: float) -> "SessionReplayer":
+    def set_speed(self, speed: float) -> SessionReplayer:
         if speed <= 0:
             raise ValueError("speed must be positive")
         self._speed = speed
         return self
 
-    def add_filter(self, *event_types: str) -> "SessionReplayer":
+    def add_filter(self, *event_types: str) -> SessionReplayer:
         """Include only these event types (allowlist)."""
         self._filters.update(event_types)
         return self
 
-    def remove_filter(self, *event_types: str) -> "SessionReplayer":
+    def remove_filter(self, *event_types: str) -> SessionReplayer:
         for t in event_types:
             self._filters.discard(t)
         return self
 
-    def clear_filters(self) -> "SessionReplayer":
+    def clear_filters(self) -> SessionReplayer:
         self._filters.clear()
         self._exclude_filters.clear()
         return self
 
-    def exclude(self, *event_types: str) -> "SessionReplayer":
+    def exclude(self, *event_types: str) -> SessionReplayer:
         """Exclude these event types (blocklist)."""
         self._exclude_filters.update(event_types)
         return self
 
-    def add_breakpoint(self, predicate: BreakpointFn) -> "SessionReplayer":
+    def add_breakpoint(self, predicate: BreakpointFn) -> SessionReplayer:
         self._breakpoints.append(predicate)
         return self
 
-    def clear_breakpoints(self) -> "SessionReplayer":
+    def clear_breakpoints(self) -> SessionReplayer:
         self._breakpoints.clear()
         return self
 
-    def on_frame(self, callback: CallbackFn) -> "SessionReplayer":
+    def on_frame(self, callback: CallbackFn) -> SessionReplayer:
         self._callbacks.append(callback)
         return self
 
-    def annotate(self, event_id: str, note: str) -> "SessionReplayer":
+    def annotate(self, event_id: str, note: str) -> SessionReplayer:
         self._annotations.setdefault(event_id, []).append(note)
         return self
 
@@ -346,13 +347,13 @@ class SessionReplayer:
         self._position += 1
         return frames[0] if frames else None
 
-    def reset(self) -> "SessionReplayer":
+    def reset(self) -> SessionReplayer:
         """Reset step position."""
         self._position = 0
         self._stats = ReplayStats()
         return self
 
-    def seek(self, position: int) -> "SessionReplayer":
+    def seek(self, position: int) -> SessionReplayer:
         """Set step position."""
         self._position = max(0, position)
         return self

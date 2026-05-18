@@ -136,9 +136,9 @@ def _render_dashboard(
     elapsed = tick * interval
     elapsed_str = f"{elapsed // 60}m {elapsed % 60}s" if elapsed >= 60 else f"{elapsed}s"
 
-    lines.append(f"╔══════════════════════════════════════════════════════════╗")
+    lines.append("╔══════════════════════════════════════════════════════════╗")
     lines.append(f"║  🔭 AgentLens Watch — {now}  (elapsed: {elapsed_str:<8}) ║")
-    lines.append(f"╠══════════════════════════════════════════════════════════╣")
+    lines.append("╠══════════════════════════════════════════════════════════╣")
 
     # Core metrics
     sessions = snapshot.get("sessions", 0)
@@ -186,9 +186,9 @@ def _render_dashboard(
             if agent_filter:
                 filtered = [(k, v) for k, v in filtered if agent_filter.lower() in k.lower()]
             if filtered:
-                lines.append(f"╠══════════════════════════════════════════════════════════╣")
-                lines.append(f"║  Agent              Sessions   Cost       Errors        ║")
-                lines.append(f"║  ─────────────────── ────────── ────────── ──────        ║")
+                lines.append("╠══════════════════════════════════════════════════════════╣")
+                lines.append("║  Agent              Sessions   Cost       Errors        ║")
+                lines.append("║  ─────────────────── ────────── ────────── ──────        ║")
                 for agent_name, stats in sorted(filtered, key=lambda x: x[1]["cost"], reverse=True)[:10]:
                     name = agent_name[:19].ljust(19)
                     s = str(stats["sessions"]).ljust(10)
@@ -199,9 +199,9 @@ def _render_dashboard(
         # Model breakdown
         models = snapshot.get("models", {})
         if models:
-            lines.append(f"╠══════════════════════════════════════════════════════════╣")
-            lines.append(f"║  Model                         Cost       Tokens        ║")
-            lines.append(f"║  ────────────────────────────── ────────── ──────        ║")
+            lines.append("╠══════════════════════════════════════════════════════════╣")
+            lines.append("║  Model                         Cost       Tokens        ║")
+            lines.append("║  ────────────────────────────── ────────── ──────        ║")
             for model_name, stats in sorted(models.items(), key=lambda x: x[1]["cost"], reverse=True)[:5]:
                 name = model_name[:30].ljust(30)
                 c = _format_cost(stats["cost"]).ljust(10)
@@ -209,12 +209,12 @@ def _render_dashboard(
                 lines.append(f"║  {name} {c} {t}        ║")
 
     if alerts:
-        lines.append(f"╠══════════════════════════════════════════════════════════╣")
+        lines.append("╠══════════════════════════════════════════════════════════╣")
         for a in alerts:
             lines.append(f"║{a:<58}║")
 
-    lines.append(f"╚══════════════════════════════════════════════════════════╝")
-    lines.append(f"  Press Ctrl+C to stop")
+    lines.append("╚══════════════════════════════════════════════════════════╝")
+    lines.append("  Press Ctrl+C to stop")
 
     return "\n".join(lines)
 

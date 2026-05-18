@@ -40,7 +40,8 @@ from contextlib import contextmanager
 from dataclasses import dataclass, field
 from datetime import datetime
 from enum import Enum
-from typing import Any, Generator
+from typing import Any
+from collections.abc import Generator
 
 from agentlens._utils import new_id as _new_id, utcnow as _utcnow
 

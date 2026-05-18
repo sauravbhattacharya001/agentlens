@@ -273,9 +273,7 @@ class HealthScorer:
         rate = errors / total if total > 0 else 0.0
         threshold = self.thresholds.max_error_rate
 
-        if total == 0:
-            score = 100.0
-        elif rate <= 0:
+        if total == 0 or rate <= 0:
             score = 100.0
         else:
             score = max(0.0, 100.0 * (1.0 - rate / threshold))

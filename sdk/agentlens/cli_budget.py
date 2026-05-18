@@ -69,7 +69,7 @@ def _budget_list(args: argparse.Namespace, client: httpx.Client) -> None:
         return
 
     print(f"\n{'─' * 80}")
-    print(f"  💰 COST BUDGETS")
+    print("  💰 COST BUDGETS")
     print(f"{'─' * 80}\n")
 
     # Group by scope

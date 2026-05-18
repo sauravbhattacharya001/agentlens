@@ -78,7 +78,7 @@ class ComplianceRule:
     severity: str = "error"  # error, warning
 
     @classmethod
-    def from_dict(cls, d: dict[str, Any]) -> "ComplianceRule":
+    def from_dict(cls, d: dict[str, Any]) -> ComplianceRule:
         """Create a rule from a dictionary."""
         return cls(
             kind=d.get("kind", "custom"),
@@ -127,7 +127,7 @@ class CompliancePolicy:
     version: str = "1.0"
 
     @classmethod
-    def from_dict(cls, d: dict[str, Any]) -> "CompliancePolicy":
+    def from_dict(cls, d: dict[str, Any]) -> CompliancePolicy:
         """Create a policy from a dictionary."""
         rules = [ComplianceRule.from_dict(r) for r in d.get("rules", [])]
         return cls(
@@ -138,7 +138,7 @@ class CompliancePolicy:
         )
 
     @classmethod
-    def from_json(cls, json_str: str) -> "CompliancePolicy":
+    def from_json(cls, json_str: str) -> CompliancePolicy:
         """Parse a policy from a JSON string."""
         return cls.from_dict(json.loads(json_str))
 

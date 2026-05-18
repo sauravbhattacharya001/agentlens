@@ -420,7 +420,7 @@ class SelfCorrectionTracker:
                         latency_events=i - trigger_idx,
                         effectiveness=effectiveness,
                         confidence=0.7,
-                        description=f"Agent acknowledged mistake with correction language",
+                        description="Agent acknowledged mistake with correction language",
                         trigger_summary="Previous error or issue",
                         correction_summary="Explicit correction acknowledgment",
                     ))

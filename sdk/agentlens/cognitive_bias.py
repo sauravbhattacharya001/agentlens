@@ -567,7 +567,7 @@ class CognitiveBiasDetector:
                         confidence=confidence,
                         severity=BiasSeverity.MODERATE if consecutive_same >= 6 else BiasSeverity.MILD,
                         description=f"Repeated use of '{prev_tool}' {consecutive_same + 1} times consecutively",
-                        evidence=f"May indicate availability heuristic over task-optimal selection",
+                        evidence="May indicate availability heuristic over task-optimal selection",
                     ))
                 consecutive_same = 0
             prev_tool = tool_name
@@ -581,7 +581,7 @@ class CognitiveBiasDetector:
                 confidence=confidence,
                 severity=BiasSeverity.MODERATE if consecutive_same >= 6 else BiasSeverity.MILD,
                 description=f"Repeated use of '{prev_tool}' {consecutive_same + 1} times consecutively",
-                evidence=f"May indicate availability heuristic over task-optimal selection",
+                evidence="May indicate availability heuristic over task-optimal selection",
             ))
 
         return signals
@@ -689,7 +689,7 @@ class CognitiveBiasDetector:
                         confidence=confidence,
                         severity=BiasSeverity.MODERATE if overlap > 0.85 else BiasSeverity.MILD,
                         description=f"Agent '{agent_a}' tool pattern closely mirrors agent '{agent_b}' ({overlap:.0%} similarity)",
-                        evidence=f"Possible mimicry rather than independent reasoning",
+                        evidence="Possible mimicry rather than independent reasoning",
                     ))
 
         return signals

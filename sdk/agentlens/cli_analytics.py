@@ -135,23 +135,23 @@ def cmd_report(args: argparse.Namespace) -> None:
     elif fmt == "markdown":
         lines = [
             f"# 📊 AgentLens {period_label} Report",
-            f"",
+            "",
             f"**Period:** {since.strftime('%Y-%m-%d %H:%M')} → {now.strftime('%Y-%m-%d %H:%M')} UTC",
             f"**Endpoint:** {endpoint}",
-            f"",
-            f"## Summary",
-            f"",
-            f"| Metric | Value |",
-            f"|--------|-------|",
+            "",
+            "## Summary",
+            "",
+            "| Metric | Value |",
+            "|--------|-------|",
             f"| Sessions | {total_sessions} |",
             f"| Events | {total_events:,} |",
             f"| Tokens | {total_tokens:,} |",
             f"| Errors | {total_errors} |",
             f"| Error Rate | {error_rate:.1f}% |",
             f"| Est. Cost | ${total_cost:.4f} |",
-            f"",
-            f"## Status Breakdown",
-            f"",
+            "",
+            "## Status Breakdown",
+            "",
         ]
         for st, cnt in sorted(status_counts.items(), key=lambda x: x[1], reverse=True):
             lines.append(f"- **{st}**: {cnt}")
@@ -179,18 +179,18 @@ def cmd_report(args: argparse.Namespace) -> None:
     else:
         # table format
         lines = [
-            f"╔══════════════════════════════════════════════════╗",
+            "╔══════════════════════════════════════════════════╗",
             f"║  📊 AgentLens {period_label} Report{' ' * (34 - len(period_label))}║",
-            f"╠══════════════════════════════════════════════════╣",
+            "╠══════════════════════════════════════════════════╣",
             f"║  Period: {since.strftime('%Y-%m-%d')} → {now.strftime('%Y-%m-%d')}{' ' * 17}║",
-            f"╚══════════════════════════════════════════════════╝",
-            f"",
+            "╚══════════════════════════════════════════════════╝",
+            "",
             f"  Sessions:    {total_sessions}",
             f"  Events:      {total_events:,}",
             f"  Tokens:      {total_tokens:,}",
             f"  Errors:      {total_errors}  ({error_rate:.1f}%)",
             f"  Est. Cost:   ${total_cost:.4f}",
-            f"",
+            "",
         ]
 
         if status_counts:

@@ -288,7 +288,7 @@ class CollaborationReport:
         # Workload balance
         if self.workload_entries:
             lines.append("─" * 62)
-            lines.append("  WORKLOAD BALANCE (Gini={:.3f})".format(self.gini_coefficient))
+            lines.append(f"  WORKLOAD BALANCE (Gini={self.gini_coefficient:.3f})")
             lines.append("─" * 62)
             for w in self.workload_entries:
                 bar_len = int(w.load_fraction * 40)

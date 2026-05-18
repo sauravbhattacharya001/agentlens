@@ -21,7 +21,8 @@ import math
 import statistics
 from collections import defaultdict
 from datetime import datetime, timedelta
-from typing import Any, Callable, Sequence
+from typing import Any, Callable
+from collections.abc import Sequence
 
 from agentlens.models import Session
 

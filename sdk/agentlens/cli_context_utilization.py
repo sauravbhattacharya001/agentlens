@@ -59,7 +59,7 @@ def cmd_context_utilization(args: argparse.Namespace) -> None:
         print("  DETAILED ENGINE ANALYSIS")
         print("=" * 60)
 
-        print(f"\n  Token Density:")
+        print("\n  Token Density:")
         print(f"    Density ratio: {report.density.density_ratio:.4f}")
         print(f"    Filler %: {report.density.filler_pct:.1%}")
         print(f"    Unique concepts: {report.density.unique_concept_count}")
@@ -71,7 +71,7 @@ def cmd_context_utilization(args: argparse.Namespace) -> None:
 
         if report.working_memory_snapshots:
             last_wm = report.working_memory_snapshots[-1]
-            print(f"\n  Working Memory (final):")
+            print("\n  Working Memory (final):")
             print(f"    Active: {last_wm.active_tokens} tokens")
             print(f"    Dead weight: {last_wm.dead_weight_tokens} tokens")
             print(f"    Efficiency: {last_wm.efficiency_ratio:.1%}")

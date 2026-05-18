@@ -335,7 +335,7 @@ def cmd_postmortem(args: argparse.Namespace) -> None:
     impact = report.get("impact", {})
     if impact:
         print(f"\n  {'─'*50}")
-        print(f"  IMPACT")
+        print("  IMPACT")
         print(f"  {'─'*50}")
         print(f"    Errors:        {impact.get('error_count', 0)} / {impact.get('total_events', 0)} events ({_pct(impact.get('error_rate', 0))})")
         print(f"    Tokens wasted: {impact.get('tokens_wasted', 0):,}")
@@ -348,13 +348,13 @@ def cmd_postmortem(args: argparse.Namespace) -> None:
         if models:
             print(f"    Models:        {', '.join(models)}")
         if impact.get("user_facing"):
-            print(f"    ⚠ User-facing errors detected")
+            print("    ⚠ User-facing errors detected")
 
     # Root causes
     root_causes = report.get("root_causes", [])
     if root_causes:
         print(f"\n  {'─'*50}")
-        print(f"  ROOT CAUSES")
+        print("  ROOT CAUSES")
         print(f"  {'─'*50}")
         for i, rc in enumerate(root_causes, 1):
             conf = rc.get("confidence", 0)
@@ -370,7 +370,7 @@ def cmd_postmortem(args: argparse.Namespace) -> None:
     timeline = report.get("timeline", [])
     if timeline:
         print(f"\n  {'─'*50}")
-        print(f"  TIMELINE")
+        print("  TIMELINE")
         print(f"  {'─'*50}")
         for entry in timeline:
             sev_icon = {"error": "❌", "warning": "⚠️", "info": "┹️"}.get(entry.get("severity", ""), "•")
@@ -609,17 +609,17 @@ def cmd_flamegraph(args: argparse.Namespace) -> None:
 
     if args.stats:
         stats = fg.get_stats()
-        print(f"\n🔥 Flamegraph Statistics")
+        print("\n🔥 Flamegraph Statistics")
         print(f"   Total duration: {stats['total_ms']:.1f} ms")
         print(f"   Node count:     {stats['node_count']}")
         print(f"   Max depth:      {stats['max_depth']}")
         print(f"   Total tokens:   {stats['total_tokens']:,}")
         if stats.get("time_by_type"):
-            print(f"\n   Time by event type:")
+            print("\n   Time by event type:")
             for etype, ms in stats["time_by_type"].items():
                 print(f"     {etype}: {ms:.1f} ms")
         if stats.get("slowest_events"):
-            print(f"\n   Slowest events:")
+            print("\n   Slowest events:")
             for i, ev in enumerate(stats["slowest_events"][:5], 1):
                 print(f"     {i}. {ev.get('name', 'unknown')} — {ev.get('duration', 0):.1f} ms")
         return

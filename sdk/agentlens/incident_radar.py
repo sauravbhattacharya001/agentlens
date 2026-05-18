@@ -68,7 +68,7 @@ class RiskBand(Enum):
     CRITICAL = "critical"    # 80-100
 
     @classmethod
-    def from_score(cls, score: float) -> "RiskBand":
+    def from_score(cls, score: float) -> RiskBand:
         if score >= 80:
             return cls.CRITICAL
         if score >= 60:

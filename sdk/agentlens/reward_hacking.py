@@ -269,7 +269,7 @@ class RewardHackingReport:
         # Category breakdown
         if self.profile.category_counts:
             lines.append(f"  {'─' * 50}")
-            lines.append(f"  CATEGORY BREAKDOWN")
+            lines.append("  CATEGORY BREAKDOWN")
             lines.append(f"  {'─' * 50}")
             type_icons = {
                 "metric_gaming": "📊", "shortcut_exploitation": "⚡",
@@ -289,7 +289,7 @@ class RewardHackingReport:
         # Top signals
         if self.signals:
             lines.append(f"  {'─' * 50}")
-            lines.append(f"  TOP SIGNALS")
+            lines.append("  TOP SIGNALS")
             lines.append(f"  {'─' * 50}")
             sev_icons = {"low": "🟢", "medium": "🟡", "high": "🟠", "critical": "🔴"}
             top = sorted(self.signals, key=lambda s: _SEVERITY_WEIGHT.get(s.severity, 0),
@@ -306,7 +306,7 @@ class RewardHackingReport:
         # Insights
         if self.insights:
             lines.append(f"  {'─' * 50}")
-            lines.append(f"  INSIGHTS")
+            lines.append("  INSIGHTS")
             lines.append(f"  {'─' * 50}")
             for insight in self.insights:
                 lines.append(f"    💡 {insight}")

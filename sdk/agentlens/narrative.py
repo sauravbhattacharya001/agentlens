@@ -115,7 +115,7 @@ class Narrative:
         if self.error_count:
             lines.append(f"**Errors:** {self.error_count}  ")
         lines.append("")
-        lines.append(f"## Summary")
+        lines.append("## Summary")
         lines.append("")
         lines.append(self.summary)
         lines.append("")
@@ -340,10 +340,10 @@ class NarrativeGenerator:
         nb = self.generate(session_b, config)
 
         lines = [
-            f"# Session Comparison",
+            "# Session Comparison",
             "",
-            f"| Metric | Session A | Session B |",
-            f"|--------|-----------|-----------|",
+            "| Metric | Session A | Session B |",
+            "|--------|-----------|-----------|",
             f"| ID | {na.session_id} | {nb.session_id} |",
             f"| Agent | {na.agent_name} | {nb.agent_name} |",
             f"| Events | {na.total_events} | {nb.total_events} |",

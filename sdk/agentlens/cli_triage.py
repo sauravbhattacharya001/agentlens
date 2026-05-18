@@ -175,7 +175,7 @@ def _render_triage_report(data: dict) -> None:
                 print(f"       Metric: {val} (threshold: {thresh})")
             print(f"       \U0001f4a1 {f.get('remediation', '')}")
     else:
-        print(f"\n  \u2705 No findings — session looks healthy!")
+        print("\n  \u2705 No findings — session looks healthy!")
 
     # Anomaly report
     anomaly = data.get("anomaly_report")

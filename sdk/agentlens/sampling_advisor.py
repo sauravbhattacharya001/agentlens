@@ -53,7 +53,8 @@ import math
 import statistics
 from dataclasses import asdict, dataclass, field
 from datetime import datetime, timezone
-from typing import Any, Iterable, Sequence
+from typing import Any
+from collections.abc import Iterable, Sequence
 
 
 # ---------------------------------------------------------------------------
@@ -260,7 +261,7 @@ class SamplingAdvisor:
     # Observation
     # ------------------------------------------------------------------
 
-    def observe(self, events: Iterable[Any]) -> "SamplingAdvisor":
+    def observe(self, events: Iterable[Any]) -> SamplingAdvisor:
         """Add observed events to the rolling window."""
         for ev in events:
             self._events.append(ev)

@@ -11,7 +11,8 @@ import signal
 import sys
 import uuid
 from datetime import datetime, timezone
-from typing import Any, Optional, Pattern
+from typing import Any, Optional
+from re import Pattern
 
 __all__ = ["format_duration", "linear_regression", "new_id", "parse_iso", "parse_iso_or_epoch", "safe_compile", "safe_search", "percentile", "utcnow"]
 
@@ -35,7 +36,7 @@ def utcnow() -> datetime:
     return datetime.now(timezone.utc)
 
 
-def parse_iso(value: "str | Any") -> Optional[datetime]:
+def parse_iso(value: str | Any) -> Optional[datetime]:
     """Parse an ISO-8601 timestamp string into a timezone-aware datetime.
 
     Handles the common ``"Z"`` suffix (replacing it with ``"+00:00"``) and
@@ -51,7 +52,7 @@ def parse_iso(value: "str | Any") -> Optional[datetime]:
     except (ValueError, TypeError):
         return None
 
-def parse_iso_or_epoch(value: "str | int | float | datetime | Any") -> Optional[datetime]:
+def parse_iso_or_epoch(value: str | int | float | datetime | Any) -> Optional[datetime]:
     """Parse an ISO-8601 string *or* numeric epoch timestamp into a datetime.
 
     Handles:
@@ -99,7 +100,7 @@ def safe_compile(pattern: str, flags: int = 0) -> Optional[Pattern[str]]:
 
 
 def safe_search(
-    pattern: "Pattern[str] | str",
+    pattern: Pattern[str] | str,
     text: str,
     flags: int = 0,
     timeout: float = _REGEX_TIMEOUT_S,

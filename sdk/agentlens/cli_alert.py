@@ -228,7 +228,7 @@ def _cmd_stats(client, args: argparse.Namespace) -> None:
 
     by_severity = stats.get("by_severity", {})
     if by_severity:
-        print(f"\n  By severity:")
+        print("\n  By severity:")
         for sev in ["critical", "warning", "info"]:
             count = by_severity.get(sev, 0)
             if count > 0:
@@ -236,7 +236,7 @@ def _cmd_stats(client, args: argparse.Namespace) -> None:
 
     by_rule = stats.get("by_rule", {})
     if by_rule:
-        print(f"\n  Top rules:")
+        print("\n  Top rules:")
         sorted_rules = sorted(by_rule.items(), key=lambda x: x[1], reverse=True)
         for rule, count in sorted_rules[:10]:
             print(f"    {rule}: {count}")

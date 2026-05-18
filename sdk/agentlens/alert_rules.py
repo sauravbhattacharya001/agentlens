@@ -62,7 +62,7 @@ class AlertCondition:
         raise NotImplementedError
 
     @staticmethod
-    def from_dict(data: dict[str, Any]) -> "AlertCondition":
+    def from_dict(data: dict[str, Any]) -> AlertCondition:
         """Deserialize from a plain dict."""
         kind = data.get("type")
         if kind == "threshold":
@@ -365,7 +365,7 @@ class AlertRule:
         }
 
     @classmethod
-    def from_dict(cls, data: dict[str, Any]) -> "AlertRule":
+    def from_dict(cls, data: dict[str, Any]) -> AlertRule:
         """Deserialize an AlertRule from a dictionary."""
         return cls(
             name=data["name"],
@@ -533,7 +533,7 @@ class AlertRulesEngine:
             self._events.clear()
 
     @classmethod
-    def from_dict(cls, data: dict[str, Any]) -> "AlertRulesEngine":
+    def from_dict(cls, data: dict[str, Any]) -> AlertRulesEngine:
         """Reconstruct an engine from a serialized dictionary."""
         engine = cls()
         for rule_data in data.get("rules", []):

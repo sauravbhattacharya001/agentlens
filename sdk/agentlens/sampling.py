@@ -61,7 +61,8 @@ from abc import ABC, abstractmethod
 from collections import deque
 from dataclasses import dataclass, field
 from enum import Enum
-from typing import Any, Sequence
+from typing import Any
+from collections.abc import Sequence
 
 
 class SamplingReason(Enum):
@@ -237,7 +238,7 @@ class RateLimitSampler(Sampler):
         if max_traces < 0:
             raise ValueError(f"max_traces must be >= 0, got {max_traces}")
         if window_seconds <= 0:
-            raise ValueError(f"window_seconds must be > 0")
+            raise ValueError("window_seconds must be > 0")
         self._max_traces = max_traces
         self._window_seconds = window_seconds
         self._timestamps: deque[float] = deque()
@@ -306,7 +307,7 @@ class PrioritySampler(Sampler):
         self._slow_threshold = slow_threshold_ms
         self._priority_threshold = priority_threshold
         if not 0.0 <= fallback_rate <= 1.0:
-            raise ValueError(f"fallback_rate must be in [0, 1]")
+            raise ValueError("fallback_rate must be in [0, 1]")
         self._fallback_rate = fallback_rate
         self._important_tags = important_tags or {}
         self._rng = random.Random(seed)
@@ -364,7 +365,7 @@ class TailSampler(Sampler):
         self._slow_threshold = slow_threshold_ms
         self._min_spans = min_spans
         if not 0.0 <= fallback_rate <= 1.0:
-            raise ValueError(f"fallback_rate must be in [0, 1]")
+            raise ValueError("fallback_rate must be in [0, 1]")
         self._fallback_rate = fallback_rate
         self._rng = random.Random(seed)
 

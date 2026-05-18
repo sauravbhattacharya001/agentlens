@@ -257,7 +257,7 @@ class PromptInjectionReport:
 # re.compile() calls on every scan — O(patterns) compilation once
 # instead of O(events × fields × patterns) per analyze() invocation.
 
-def _compile_patterns(raw: List[Tuple[str, float, str]]) -> List[Tuple["re.Pattern[str]", float, str]]:
+def _compile_patterns(raw: List[Tuple[str, float, str]]) -> List[Tuple[re.Pattern[str], float, str]]:
     """Pre-compile raw regex pattern tuples into compiled pattern tuples."""
     return [(re.compile(pat, re.IGNORECASE), conf, desc) for pat, conf, desc in raw]
 
@@ -410,7 +410,7 @@ def _extract_text_fields(event: Dict[str, Any]) -> List[Tuple[str, str]]:
 
 
 def _scan_patterns(text: str, category: InjectionCategory,
-                   patterns: List[Tuple["re.Pattern[str]", float, str]],
+                   patterns: List[Tuple[re.Pattern[str], float, str]],
                    min_confidence: float) -> List[Tuple[float, str, str]]:
     """Scan text against pre-compiled patterns for a category.
 

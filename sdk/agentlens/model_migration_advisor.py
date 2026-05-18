@@ -66,11 +66,11 @@ from __future__ import annotations
 
 import json
 import math
-import statistics
 from dataclasses import dataclass, field
 from datetime import datetime, timezone
 from enum import Enum
-from typing import Any, Callable, Iterable, Sequence
+from typing import Any, Callable
+from collections.abc import Iterable, Sequence
 
 from agentlens.models import AgentEvent
 

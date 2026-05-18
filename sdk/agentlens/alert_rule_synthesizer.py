@@ -60,7 +60,8 @@ import json
 import math
 from dataclasses import dataclass, field
 from enum import Enum
-from typing import Any, Iterable, Optional, Sequence
+from typing import Any, Optional
+from collections.abc import Iterable, Sequence
 
 from agentlens._utils import parse_iso as _parse_iso
 from agentlens.alerts import AlertRule, Condition, Severity

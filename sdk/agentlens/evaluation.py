@@ -49,7 +49,7 @@ class QualityGrade(Enum):
     F = "F"
 
     @staticmethod
-    def from_score(score: float) -> "QualityGrade":
+    def from_score(score: float) -> QualityGrade:
         if score >= 0.9:
             return QualityGrade.A
         if score >= 0.75:
@@ -158,10 +158,7 @@ class EvaluatorConfig:
 _WORD_RE = re.compile(r"[a-z0-9]+(?:'[a-z]+)?", re.IGNORECASE)
 _SENTENCE_RE = re.compile(r"[^.!?\n]+[.!?]?")
 _STOP_WORDS = frozenset(
-    "a an the is are was were be been being have has had do does did "
-    "will would shall should may might can could and but or nor for "
-    "yet so at by in on to of it its i me my we us he she they them "
-    "his her this that these those with from as if not no".split()
+    ["a", "an", "the", "is", "are", "was", "were", "be", "been", "being", "have", "has", "had", "do", "does", "did", "will", "would", "shall", "should", "may", "might", "can", "could", "and", "but", "or", "nor", "for", "yet", "so", "at", "by", "in", "on", "to", "of", "it", "its", "i", "me", "my", "we", "us", "he", "she", "they", "them", "his", "her", "this", "that", "these", "those", "with", "from", "as", "if", "not", "no"]
 )
 
 

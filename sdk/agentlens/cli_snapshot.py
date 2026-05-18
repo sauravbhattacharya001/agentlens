@@ -117,7 +117,7 @@ def _print_snapshot_table(snap: dict) -> None:
     a = snap["alerts"]
 
     print(f"\n{'=' * 60}")
-    print(f"  AgentLens Snapshot")
+    print("  AgentLens Snapshot")
     print(f"  Timestamp: {snap['timestamp']}")
     if snap.get("label"):
         print(f"  Label:     {snap['label']}")
@@ -132,7 +132,7 @@ def _print_snapshot_table(snap: dict) -> None:
     if s["avg_health_score"] is not None:
         print(f"  Avg Health:     {s['avg_health_score']}/100")
     else:
-        print(f"  Avg Health:     n/a")
+        print("  Avg Health:     n/a")
 
     print(f"\n  Alerts: {a['total']}", end="")
     if a["by_severity"]:
@@ -185,7 +185,7 @@ def _diff_snapshots(a: dict, b: dict, fmt: str) -> None:
         return
 
     print(f"\n{'=' * 60}")
-    print(f"  Snapshot Diff")
+    print("  Snapshot Diff")
     print(f"  From: {a['timestamp']}" + (f"  ({a['label']})" if a.get("label") else ""))
     print(f"  To:   {b['timestamp']}" + (f"  ({b['label']})" if b.get("label") else ""))
     print(f"{'=' * 60}")

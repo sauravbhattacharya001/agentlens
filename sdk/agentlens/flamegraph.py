@@ -34,7 +34,8 @@ from __future__ import annotations
 import json
 from dataclasses import dataclass, field
 from datetime import datetime
-from typing import Any, Sequence
+from typing import Any
+from collections.abc import Sequence
 
 from agentlens.models import AgentEvent, Session
 from agentlens.span import Span
