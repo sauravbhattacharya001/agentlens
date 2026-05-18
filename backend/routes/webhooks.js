@@ -181,9 +181,16 @@ function formatPayload(format, alertData) {
 
 // ── Helper: sign payload with HMAC-SHA256 ───────────────────────────
 
-function signPayload(payload, secret) {
-  const body = JSON.stringify(payload);
-  return crypto.createHmac("sha256", secret).update(body).digest("hex");
+function signPayload(rawBody, timestamp, secret) {
+  // Stripe / Standard-Webhooks-style canonical signing string:
+  //   `${timestamp}.${rawBody}`
+  // Binding the timestamp into the MAC lets receivers reject replays of
+  // captured deliveries (see issue #185). `rawBody` MUST be the exact
+  // bytes shipped over the wire — do not re-stringify the payload after
+  // signing, or verification on the receiver will fail.
+  const signingString = `${timestamp}.${rawBody}`;
+  const v1 = crypto.createHmac("sha256", secret).update(signingString).digest("hex");
+  return `t=${timestamp},v1=${v1}`;
 }
 
 // ── Helper: validate resolved IPs against SSRF blocklist ────────────
@@ -308,7 +315,14 @@ async function deliverWebhook(webhook, alertData) {
 
       const headers = { "Content-Type": "application/json", "User-Agent": "AgentLens-Webhook/1.0" };
       if (webhook.secret) {
-        headers["X-AgentLens-Signature"] = signPayload(payload, webhook.secret);
+        // Bind a Unix-seconds timestamp into the MAC so receivers can
+        // reject replays (issue #185). The X-AgentLens-Timestamp header
+        // is mirrored from `t=...` inside the signature so receivers can
+        // recompute the canonical signing string without parsing the
+        // composite signature header first.
+        const ts = Math.floor(Date.now() / 1000);
+        headers["X-AgentLens-Timestamp"] = String(ts);
+        headers["X-AgentLens-Signature"] = signPayload(body, ts, webhook.secret);
       }
       headers["X-AgentLens-Delivery"] = deliveryId;
 
