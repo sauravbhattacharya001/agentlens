@@ -213,6 +213,18 @@ class MetricAggregator:
         with self._lock:
             self._events.clear()
 
+    @staticmethod
+    def _percentile(sorted_values: list[float], p: float) -> float:
+        """Compute the *p*-th percentile (0–100) of *sorted_values*.
+
+        Thin wrapper around :func:`agentlens._utils.percentile` exposed as a
+        static method for callers and tests that want to reach percentile
+        math through the aggregator surface without importing the private
+        ``_utils`` module.  *sorted_values* must already be sorted in
+        ascending order; returns ``0.0`` for empty input.
+        """
+        return _percentile(sorted_values, p)
+
 
 class AlertManager:
     """Evaluates alert rules against incoming events and dispatches notifications.
