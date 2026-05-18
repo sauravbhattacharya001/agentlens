@@ -531,6 +531,20 @@ describe("validateWebhookUrl", () => {
     expect(validateWebhookUrl("http://[fe80::1]/hook").valid).toBe(false);
   });
 
+  test("does NOT misclassify DNS hostnames that happen to start with fc/fd/fe80", () => {
+    // Regression: prior to the IPv6-literal gate, the private-IPv6 prefix
+    // check ran against the bare hostname for *any* URL, blocking legit
+    // domains like fcc.gov / fdic.gov / fc.example.com that have no
+    // relation to ULA addresses. Hostnames are only IPv6 literals when
+    // wrapped in […] in the original URL.
+    expect(validateWebhookUrl("https://fcc.gov/hook").valid).toBe(true);
+    expect(validateWebhookUrl("https://fdic.gov/hook").valid).toBe(true);
+    expect(validateWebhookUrl("https://fedex.com/hook").valid).toBe(true);
+    expect(validateWebhookUrl("https://fc.example.com/hook").valid).toBe(true);
+    expect(validateWebhookUrl("https://fcserver-prod.aws.example.com/hook").valid).toBe(true);
+    expect(validateWebhookUrl("https://fe80node.example.org/hook").valid).toBe(true);
+  });
+
   test("rejects non-standard IP notations (octal, hex, decimal)", () => {
     expect(validateWebhookUrl("http://0x7f000001/hook").valid).toBe(false);
     expect(validateWebhookUrl("http://2130706433/hook").valid).toBe(false);

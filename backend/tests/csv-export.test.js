@@ -40,6 +40,25 @@ describe("csv-export", () => {
       expect(csvEscape("42")).toBe("42");
     });
 
+    test("formula injection with leading whitespace is still escaped", () => {
+      // Some spreadsheet importers (LibreOffice with trim-whitespace,
+      // Google Sheets paste-as-plain) strip leading spaces/tabs before
+      // formula evaluation, so we must catch the trigger char after
+      // any leading whitespace, not just at position 0.
+      expect(csvEscape(" =SUM(1)")).toBe("'=SUM(1)");
+      expect(csvEscape("\t=SUM(1)")).toBe("'=SUM(1)");
+      expect(csvEscape("  +cmd|/c calc")).toBe("'+cmd|/c calc");
+      expect(csvEscape("\r\n@hi")).toBe("'@hi");
+      expect(csvEscape("   -1+1")).toBe("'-1+1");
+    });
+
+    test("plain text with leading whitespace is not treated as a formula", () => {
+      // Don’t over-escape: a sentence that begins with a space is
+      // legitimate user content and must not get an apostrophe.
+      expect(csvEscape(" hello")).toBe(" hello");
+      expect(csvEscape("  some note")).toBe("  some note");
+    });
+
     test("objects are JSON stringified", () => {
       const result = csvEscape({ key: "val" });
       expect(result).toContain("key");

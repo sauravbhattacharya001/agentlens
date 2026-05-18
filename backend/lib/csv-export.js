@@ -57,7 +57,12 @@ const CSV_HEADERS = [
  * - Objects → JSON stringified
  * - Formula injection defense (OWASP): prefixes formula-trigger chars
  *   (=, +, -, @, tab, CR) with a single quote so spreadsheet apps
- *   don't execute them as DDE / HYPERLINK injections
+ *   don't execute them as DDE / HYPERLINK injections. Also catches
+ *   the leading-whitespace bypass — values like " =SUM(1)" or
+ *   "  +cmd|/c calc" are still treated as formulas by some
+ *   spreadsheet importers (LibreOffice with "trim whitespace", Google
+ *   Sheets paste-as-plain, etc.), so the escape applies to the first
+ *   non-whitespace character, not just str.charAt(0).
  * - Numeric values are passed through without the formula prefix
  * - Values containing commas, quotes, or newlines are double-quote wrapped
  *
@@ -68,7 +73,9 @@ function csvEscape(val) {
   if (val == null) return "";
   let str = typeof val === "object" ? JSON.stringify(val) : String(val);
 
-  // Numeric values are safe data — skip formula-trigger prefix
+  // Numeric values are safe data — skip formula-trigger prefix.
+  // Note: trim() so things like " 1.5" still detect as numeric; isFinite
+  // already returns false for empty strings, so the .length guard stays.
   if (str.length > 0 && isFinite(Number(str))) {
     if (str.includes(",") || str.includes('"') || str.includes("\n")) {
       return `"${str.replace(/"/g, '""')}"`;
@@ -76,10 +83,22 @@ function csvEscape(val) {
     return str;
   }
 
-  // Formula injection defense
-  const first = str.charAt(0);
-  if (first === "=" || first === "+" || first === "-" || first === "@" ||
-      first === "\t" || first === "\r") {
+  // Formula injection defense — find the first non-whitespace character
+  // so leading spaces/tabs can't be used to slip past the guard.
+  let i = 0;
+  while (i < str.length && (str[i] === " " || str[i] === "\t" ||
+         str[i] === "\r" || str[i] === "\n")) {
+    i++;
+  }
+  const first = i < str.length ? str.charAt(i) : "";
+  if (first === "=" || first === "+" || first === "-" || first === "@") {
+    // Drop any leading whitespace so the apostrophe sits directly before
+    // the trigger char — otherwise importers that trim whitespace on
+    // load could re-expose the formula.
+    str = "'" + str.slice(i);
+  } else if (str.length > 0 && (str[0] === "\t" || str[0] === "\r")) {
+    // Preserve original behavior: leading tab/CR alone (no formula char)
+    // is still escaped because some importers treat them as control input.
     str = "'" + str;
   }
 

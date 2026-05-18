@@ -241,16 +241,26 @@ function validateWebhookUrl(url) {
     return { valid: false, error: "url must not use IPv6-mapped IPv4 addresses" };
   }
 
-  // Block IPv6 private ranges: ULA (fc00::/7) and link-local (fe80::/10)
+  // Block IPv6 private ranges: ULA (fc00::/7) and link-local (fe80::/10).
+  //
+  // IMPORTANT: only apply these prefix checks to actual IPv6 literals — the
+  // hostname is wrapped in [...] by `new URL(...)` when it's an IPv6 literal,
+  // and `parsed.hostname` returns the host *without* the brackets. We track
+  // the bracket presence on the original URL string so we don't mistake DNS
+  // names that happen to start with "fc", "fd", or "fe80" (e.g. fcc.gov,
+  // fdic.gov, fedex.com, fcserver.example.com) for private IPv6 addresses.
   const bareLower = bare.toLowerCase();
-  if (bareLower.startsWith("fc") || bareLower.startsWith("fd") || bareLower.startsWith("fe80")) {
-    return { valid: false, error: "url must not point to a private IPv6 address" };
-  }
+  const isIpv6Literal = url.includes("[") && url.includes("]") && bareLower.includes(":");
+  if (isIpv6Literal) {
+    if (bareLower.startsWith("fc") || bareLower.startsWith("fd") || bareLower.startsWith("fe80")) {
+      return { valid: false, error: "url must not point to a private IPv6 address" };
+    }
 
-  // Block non-canonical IPv6 loopback (e.g. 0:0:0:0:0:0:0:1)
-  const collapsed = bareLower.replace(/(^|:)0+/g, "$1").replace(/:{2,}/, "::");
-  if (collapsed === "::1" || collapsed === "0:0:0:0:0:0:0:1") {
-    return { valid: false, error: "url must not point to a loopback address" };
+    // Block non-canonical IPv6 loopback (e.g. 0:0:0:0:0:0:0:1)
+    const collapsed = bareLower.replace(/(^|:)0+/g, "$1").replace(/:{2,}/, "::");
+    if (collapsed === "::1" || collapsed === "0:0:0:0:0:0:0:1") {
+      return { valid: false, error: "url must not point to a loopback address" };
+    }
   }
 
   // Block non-standard IP representations that bypass regex checks:
