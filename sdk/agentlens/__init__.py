@@ -46,6 +46,17 @@ from agentlens.trace_completion_advisor import (
     ActionPriority as TraceCompletionPriority,
     CompletionGrade,
 )
+from agentlens.agent_loop_detector import (
+    AgentLoopDetector,
+    AgentLoopReport,
+    LoopSnapshot,
+    LoopIssue,
+    LoopIssueCode,
+    LoopVerdict,
+    LoopGrade,
+    PlaybookAction as AgentLoopPlaybookAction,
+    ActionPriority as AgentLoopPriority,
+)
 from agentlens.evaluation import ResponseEvaluator, EvaluatorConfig, QualityReport, QualityTrend, QualityGrade, DimensionScore
 from agentlens.postmortem import PostmortemGenerator, PostmortemConfig, PostmortemReport, Severity as PostmortemSeverity, RootCause, ImpactAssessment, Remediation, RemediationCategory, LessonLearned, TimelineEntry, IncidentPhase
 from agentlens.rate_limiter import RateLimiter, RateLimit, RateLimitAction, RateLimitPolicy, CheckResult, RateLimitReport, WindowStats, openai_tier1_policy, anthropic_tier1_policy, conservative_policy
@@ -209,6 +220,15 @@ __all__ = [
     "TraceCompletionPlaybookAction",
     "TraceCompletionPriority",
     "CompletionGrade",
+    "AgentLoopDetector",
+    "AgentLoopReport",
+    "LoopSnapshot",
+    "LoopIssue",
+    "LoopIssueCode",
+    "LoopVerdict",
+    "LoopGrade",
+    "AgentLoopPlaybookAction",
+    "AgentLoopPriority",
     "ResponseEvaluator",
     "EvaluatorConfig",
     "QualityReport",
