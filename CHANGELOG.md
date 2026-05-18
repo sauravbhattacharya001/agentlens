@@ -5,6 +5,30 @@ All notable changes to AgentLens will be documented in this file.
 The format is based on [Keep a Changelog](https://keepachangelog.com/en/1.1.0/),
 and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0.html).
 
+## [1.64.0] - 2026-05-18
+
+### Added
+
+- **AgentLoopDetector** — agentic in-flight loop / thrash / error-storm advisor that watches active sessions and flags pathological control flow before the user notices.
+- **TraceCompletionAdvisor** — agentic trace liveness/completion analyzer; classifies in-flight traces as healthy, stalled, abandoned, or completed with reasoning.
+- **SLOBurnRateAdvisor** — multi-window error-budget burn-rate analyzer with short/long window fast/slow burn classification.
+- **ModelMigrationAdvisor** — agentic per-site model migration planner that scores incumbent vs. candidate models against your live workload mix and emits a ranked migration plan.
+
+### Changed
+
+- **uuid / ISO timestamp helpers** centralized into `agentlens._utils` and adopted across `prompt_tracker`, `quota`, and `alert_rule_synthesizer` (eliminates drift between bespoke ID/clock fragments).
+- **SDK ruff sweep** across 33 modules (F, UP, SIM, B rule families) — modernized typing imports, removed unused vars, simplified branches.
+
+### CI / Tooling
+
+- **Dockerfile hadolint** workflow + post-push image smoke test guards Dockerfile regressions and verifies the published image actually boots.
+
+### Testing
+
+- **`agentlens._utils`** — comprehensive unit tests (93% coverage).
+- **`cli_audit`** — comprehensive `test_cli_audit.py`.
+- **`sampling_advisor`** — coverage raised **76% → 99%** (+54 tests) covering serialization helpers, constructor validation, dict-event ingestion, `output_data` error markers, `tool_call.duration_ms` fallback, `metadata.priority` fallback, numeric/string timestamps, recommend()-branch coverage (target_keep_pct, mandatory>target clamp, max_fallback cap, slow-threshold floor).
+
 ## [1.2.0] - 2026-03-06
 
 ### Added

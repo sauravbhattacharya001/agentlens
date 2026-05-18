@@ -98,7 +98,7 @@ from agentlens.model_migration_advisor import (
     PlaybookAction as MigrationPlaybookAction,
 )
 
-__version__ = "0.1.0"
+__version__ = "1.64.0"
 __all__ = [
     "init",
     "start_session",
