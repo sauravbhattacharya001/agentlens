@@ -45,12 +45,13 @@ Usage::
 from __future__ import annotations
 
 import bisect
-import uuid
 from collections import defaultdict
 from dataclasses import dataclass, field
 from datetime import datetime, timezone, timedelta
 from enum import Enum
 from typing import Any, Optional
+
+from agentlens._utils import new_id as _new_id
 
 
 class QuotaScope(Enum):
@@ -89,7 +90,7 @@ class QuotaAction(Enum):
 
 @dataclass
 class UsageRecord:
-    record_id: str = field(default_factory=lambda: uuid.uuid4().hex[:12])
+    record_id: str = field(default_factory=_new_id)
     timestamp: datetime = field(default_factory=lambda: datetime.now(timezone.utc))
     entity_id: str = ""
     tokens: int = 0
@@ -100,7 +101,7 @@ class UsageRecord:
 
 @dataclass
 class QuotaPolicy:
-    quota_id: str = field(default_factory=lambda: uuid.uuid4().hex[:12])
+    quota_id: str = field(default_factory=_new_id)
     entity_id: str = ""
     scope: QuotaScope = QuotaScope.AGENT
     max_tokens: Optional[int] = None
@@ -186,7 +187,7 @@ class QuotaReport:
 
 @dataclass
 class SharedPool:
-    pool_id: str = field(default_factory=lambda: uuid.uuid4().hex[:12])
+    pool_id: str = field(default_factory=_new_id)
     name: str = ""
     members: list[str] = field(default_factory=list)
     pool_tokens: int = 0

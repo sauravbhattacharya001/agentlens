@@ -31,13 +31,12 @@ Usage::
 from __future__ import annotations
 
 import hashlib
-import uuid
 from dataclasses import dataclass, field
 from difflib import unified_diff
 from enum import Enum
 from typing import Any
 
-from agentlens._utils import percentile as _percentile_impl, utcnow as _utcnow
+from agentlens._utils import new_id as _new_id, percentile as _percentile_impl, utcnow as _utcnow
 
 
 class DiffKind(Enum):
@@ -263,7 +262,7 @@ class PromptVersionTracker:
         parent = existing[-1].version_id if existing else None
 
         version = PromptVersion(
-            version_id=uuid.uuid4().hex[:16],
+            version_id=_new_id(16),
             prompt_name=prompt_name,
             version_number=version_number,
             template=template,
@@ -319,7 +318,7 @@ class PromptVersionTracker:
             raise ValueError("quality_score must be between 0.0 and 1.0")
 
         outcome = Outcome(
-            outcome_id=uuid.uuid4().hex[:16],
+            outcome_id=_new_id(16),
             version_id=version_id,
             timestamp=_now_iso(),
             tokens=tokens,

@@ -62,6 +62,7 @@ from dataclasses import dataclass, field
 from enum import Enum
 from typing import Any, Iterable, Optional, Sequence
 
+from agentlens._utils import parse_iso as _parse_iso
 from agentlens.alerts import AlertRule, Condition, Severity
 
 
@@ -492,9 +493,9 @@ class AlertRuleSynthesizer:
                     elif isinstance(ts, (int, float)):
                         timestamps.append(float(ts))
                     elif isinstance(ts, str):
-                        # Best-effort ISO parse without importing dateutil
-                        from datetime import datetime as _dt
-                        timestamps.append(_dt.fromisoformat(ts.replace("Z", "+00:00")).timestamp())
+                        parsed = _parse_iso(ts)
+                        if parsed is not None:
+                            timestamps.append(parsed.timestamp())
                 except Exception:
                     pass
 
