@@ -57,6 +57,18 @@ from agentlens.agent_loop_detector import (
     PlaybookAction as AgentLoopPlaybookAction,
     ActionPriority as AgentLoopPriority,
 )
+from agentlens.cost_attribution_advisor import (
+    CostAttributionAdvisor,
+    CostAttributionReport,
+    AttributionSlice,
+    PortfolioSummary as CostAttributionPortfolioSummary,
+    AttributionVerdict,
+    ConcentrationBand,
+    TrendLabel as CostAttributionTrendLabel,
+    CostGrade,
+    PlaybookAction as CostAttributionPlaybookAction,
+    ActionPriority as CostAttributionPriority,
+)
 from agentlens.evaluation import ResponseEvaluator, EvaluatorConfig, QualityReport, QualityTrend, QualityGrade, DimensionScore
 from agentlens.postmortem import PostmortemGenerator, PostmortemConfig, PostmortemReport, Severity as PostmortemSeverity, RootCause, ImpactAssessment, Remediation, RemediationCategory, LessonLearned, TimelineEntry, IncidentPhase
 from agentlens.rate_limiter import RateLimiter, RateLimit, RateLimitAction, RateLimitPolicy, CheckResult, RateLimitReport, WindowStats, openai_tier1_policy, anthropic_tier1_policy, conservative_policy
@@ -221,6 +233,16 @@ __all__ = [
     "TraceCompletionPriority",
     "CompletionGrade",
     "AgentLoopDetector",
+    "CostAttributionAdvisor",
+    "CostAttributionReport",
+    "AttributionSlice",
+    "CostAttributionPortfolioSummary",
+    "AttributionVerdict",
+    "ConcentrationBand",
+    "CostAttributionTrendLabel",
+    "CostGrade",
+    "CostAttributionPlaybookAction",
+    "CostAttributionPriority",
     "AgentLoopReport",
     "LoopSnapshot",
     "LoopIssue",
