@@ -24,6 +24,17 @@ from agentlens.alert_rule_synthesizer import (
     SuggestionPriority,
 )
 from agentlens.incident_radar import IncidentRiskRadar, RiskRadarReport, RiskSignal, RiskBand, RiskAction, ActionPriority, RadarInputs
+from agentlens.slo_burn_rate_advisor import (
+    SLOBurnRateAdvisor,
+    SLOBurnReport,
+    ObjectiveBurnSnapshot,
+    WindowSample,
+    WindowLabel,
+    BurnSeverity,
+    BurnRateAssessment,
+    ObjectivePlan,
+    PlaybookAction as SLOBurnPlaybookAction,
+)
 from agentlens.evaluation import ResponseEvaluator, EvaluatorConfig, QualityReport, QualityTrend, QualityGrade, DimensionScore
 from agentlens.postmortem import PostmortemGenerator, PostmortemConfig, PostmortemReport, Severity as PostmortemSeverity, RootCause, ImpactAssessment, Remediation, RemediationCategory, LessonLearned, TimelineEntry, IncidentPhase
 from agentlens.rate_limiter import RateLimiter, RateLimit, RateLimitAction, RateLimitPolicy, CheckResult, RateLimitReport, WindowStats, openai_tier1_policy, anthropic_tier1_policy, conservative_policy
@@ -169,6 +180,15 @@ __all__ = [
     "RiskAction",
     "ActionPriority",
     "RadarInputs",
+    "SLOBurnRateAdvisor",
+    "SLOBurnReport",
+    "ObjectiveBurnSnapshot",
+    "WindowSample",
+    "WindowLabel",
+    "BurnSeverity",
+    "BurnRateAssessment",
+    "ObjectivePlan",
+    "SLOBurnPlaybookAction",
     "ResponseEvaluator",
     "EvaluatorConfig",
     "QualityReport",
