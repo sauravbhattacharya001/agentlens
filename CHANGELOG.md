@@ -5,6 +5,21 @@ All notable changes to AgentLens will be documented in this file.
 The format is based on [Keep a Changelog](https://keepachangelog.com/en/1.1.0/),
 and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0.html).
 
+## [Unreleased]
+
+### Changed
+
+- **Sparkline rendering centralized.** `cli_trends`, `cli_watch` and `stamina` each shipped their own copy-pasted `_sparkline` helper with the same glyph table (`▁▂▃▄▅▆▇█`) and the same algorithm. All three now re-export `agentlens.cli_common.sparkline` so there is a single source of truth — behaviour is byte-for-byte identical (one glyph per input value) and no call sites needed changes.
+
+### Fixed
+
+- **`cli_common.sparkline(width=...)` is no longer silently ignored.** The `width` parameter existed in the signature but did nothing; supplying it now down-samples the series into at most `width` buckets. Default behaviour (no `width` argument) is unchanged.
+
+### Testing
+
+- **`agentlens._metrics`** — new `tests/test_metrics.py` (18 cases) covering the single-pass session-event scan used by both anomaly and drift detection: empty/None sessions, latency p95 at small and large N, `None` token fields, error-substring matching, tool detection via both the `tool_call` attribute and event-type substring, and the tool-failure rate's div-by-zero guard.
+- **`agentlens.cli_common`** — new `tests/test_cli_common.py` (26 cases) covering env-var/flag resolution for `get_client`, JSON pretty-printing, dict-vs-list session payloads from `fetch_sessions`, `percentile` interpolation, `(xs, ys)` ordering of `linear_regression`, `sparkline` constant-input and down-sampling, and `bar_chart` zero-max / overflow clamping.
+
 ## [1.64.0] - 2026-05-18
 
 ### Added

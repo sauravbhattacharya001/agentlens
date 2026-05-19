@@ -217,14 +217,10 @@ class StaminaReport:
 # ── Helpers ─────────────────────────────────────────────────────────
 
 
-def _sparkline(values: list[float]) -> str:
-    """Generate a sparkline string from values."""
-    if not values:
-        return ""
-    blocks = "▁▂▃▄▅▆▇█"
-    mn, mx = min(values), max(values)
-    rng = mx - mn if mx != mn else 1.0
-    return "".join(blocks[min(len(blocks) - 1, int((v - mn) / rng * (len(blocks) - 1)))] for v in values)
+# Sparkline rendering centralized in ``agentlens.cli_common``; re-exported
+# under the historical private name so existing tests/call sites keep
+# working with no behavioural change (same glyphs, same algorithm).
+from agentlens.cli_common import sparkline as _sparkline  # noqa: E402
 
 
 def _linear_regression(values: list[float]) -> tuple[float, float]:

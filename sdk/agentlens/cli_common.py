@@ -107,15 +107,47 @@ def linear_regression(xs: list[float], ys: list[float]) -> tuple[float, float]:
     return _lr(ys, xs)
 
 
-def sparkline(values: list[float], width: int = 30) -> str:
-    """Render a sparkline string from *values* using Unicode bar chars."""
+_SPARKLINE_BARS = "▁▂▃▄▅▆▇█"
+
+
+def sparkline(values: list[float], width: int | None = None) -> str:
+    """Render a sparkline string from *values* using Unicode bar chars.
+
+    Args:
+        values: Numeric series to visualise.
+        width: Optional maximum number of glyphs in the output. When more
+            than *width* values are supplied, the input is uniformly
+            down-sampled (bucketed) so the returned string is at most
+            *width* characters long. ``None`` (default) means no down-
+            sampling — emit one glyph per input value, matching the
+            historical behaviour relied on by callers in ``cli_trends``,
+            ``cli_watch`` and ``stamina``.
+
+    Returns:
+        A Unicode sparkline string. Returns ``""`` for empty input.
+
+    Notes:
+        Previously the ``width`` parameter existed in the signature but
+        was silently ignored — a foot-gun for anyone reading the API
+        and assuming truncation. The parameter now actually works while
+        keeping the default behaviour byte-for-byte identical to before.
+    """
     if not values:
         return ""
-    bars = "▁▂▃▄▅▆▇█"
+    if width is not None and width > 0 and len(values) > width:
+        n = len(values)
+        bucketed: list[float] = []
+        for i in range(width):
+            lo = i * n // width
+            hi = (i + 1) * n // width
+            chunk = values[lo:hi] if hi > lo else values[lo:lo + 1]
+            bucketed.append(sum(chunk) / len(chunk))
+        values = bucketed
     mn, mx = min(values), max(values)
     rng = mx - mn if mx != mn else 1.0
+    last = len(_SPARKLINE_BARS) - 1
     return "".join(
-        bars[min(int((v - mn) / rng * (len(bars) - 1)), len(bars) - 1)]
+        _SPARKLINE_BARS[min(int((v - mn) / rng * last), last)]
         for v in values
     )
 

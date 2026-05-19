@@ -14,14 +14,9 @@ from agentlens.cli_common import get_client_only as _get_client
 from agentlens._utils import parse_iso
 
 
-def _sparkline(values: list[float]) -> str:
-    """Render a list of numbers as a Unicode sparkline."""
-    if not values:
-        return ""
-    blocks = "▁▂▃▄▅▆▇█"
-    lo, hi = min(values), max(values)
-    spread = hi - lo if hi != lo else 1
-    return "".join(blocks[min(len(blocks) - 1, int((v - lo) / spread * (len(blocks) - 1)))] for v in values)
+# Sparkline rendering centralized in agentlens.cli_common; re-exported here
+# under the historical private name so existing call sites keep working.
+from agentlens.cli_common import sparkline as _sparkline  # noqa: E402
 
 
 def _change_str(current: float, previous: float) -> str:

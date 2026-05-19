@@ -22,22 +22,12 @@ from typing import Any
 import httpx
 
 from agentlens.cli_common import get_client_only as _get_client
+from agentlens.cli_common import sparkline as _sparkline  # re-export for backwards-compat
 
-
-# Sparkline characters for inline trend visualization
+# Sparkline characters retained as a module-level constant for any callers
+# that referenced it directly. The actual rendering now lives in
+# ``agentlens.cli_common.sparkline`` so we have a single source of truth.
 _SPARK_CHARS = "▁▂▃▄▅▆▇█"
-
-
-def _sparkline(values: list[float]) -> str:
-    """Render a list of numbers as a compact Unicode sparkline."""
-    if not values:
-        return ""
-    lo, hi = min(values), max(values)
-    spread = hi - lo if hi != lo else 1
-    return "".join(
-        _SPARK_CHARS[min(len(_SPARK_CHARS) - 1, int((v - lo) / spread * (len(_SPARK_CHARS) - 1)))]
-        for v in values
-    )
 
 
 def _format_cost(cost: float) -> str:
