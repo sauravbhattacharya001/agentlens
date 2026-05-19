@@ -69,6 +69,18 @@ from agentlens.cost_attribution_advisor import (
     PlaybookAction as CostAttributionPlaybookAction,
     ActionPriority as CostAttributionPriority,
 )
+from agentlens.tool_reliability_advisor import (
+    ToolReliabilityAdvisor,
+    ToolReliabilityReport,
+    ToolSnapshot,
+    ReliabilityPortfolioSummary,
+    ToolReliabilityPlaybookAction,
+    ToolVerdict,
+    ToolReliabilityGrade,
+    ReliabilityBand,
+    ActionPriority as ToolReliabilityPriority,
+    RiskAppetite as ToolReliabilityRiskAppetite,
+)
 from agentlens.evaluation import ResponseEvaluator, EvaluatorConfig, QualityReport, QualityTrend, QualityGrade, DimensionScore
 from agentlens.postmortem import PostmortemGenerator, PostmortemConfig, PostmortemReport, Severity as PostmortemSeverity, RootCause, ImpactAssessment, Remediation, RemediationCategory, LessonLearned, TimelineEntry, IncidentPhase
 from agentlens.rate_limiter import RateLimiter, RateLimit, RateLimitAction, RateLimitPolicy, CheckResult, RateLimitReport, WindowStats, openai_tier1_policy, anthropic_tier1_policy, conservative_policy
@@ -243,6 +255,16 @@ __all__ = [
     "CostGrade",
     "CostAttributionPlaybookAction",
     "CostAttributionPriority",
+    "ToolReliabilityAdvisor",
+    "ToolReliabilityReport",
+    "ToolSnapshot",
+    "ReliabilityPortfolioSummary",
+    "ToolReliabilityPlaybookAction",
+    "ToolVerdict",
+    "ToolReliabilityGrade",
+    "ReliabilityBand",
+    "ToolReliabilityPriority",
+    "ToolReliabilityRiskAppetite",
     "AgentLoopReport",
     "LoopSnapshot",
     "LoopIssue",
