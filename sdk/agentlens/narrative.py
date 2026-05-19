@@ -182,6 +182,80 @@ class Narrative:
 class NarrativeGenerator:
     """Generates human-readable narratives from agent sessions."""
 
+    @staticmethod
+    def _classify_events(
+        events: list[AgentEvent],
+    ) -> tuple[
+        list[AgentEvent], list[AgentEvent], list[AgentEvent], list[AgentEvent]
+    ]:
+        """Bucket events by event_type in a single pass.
+
+        Returns ``(llm_events, tool_events, decision_events, error_events)``.
+        Single-pass classification keeps the cost at O(E) regardless of
+        how many categories the caller cares about.
+        """
+        llm_events: list[AgentEvent] = []
+        tool_events: list[AgentEvent] = []
+        decision_events: list[AgentEvent] = []
+        error_events: list[AgentEvent] = []
+        for evt in events:
+            et = evt.event_type
+            if et == "llm_call":
+                llm_events.append(evt)
+            elif et == "tool_call":
+                tool_events.append(evt)
+            elif et == "decision":
+                decision_events.append(evt)
+            elif et == "error":
+                error_events.append(evt)
+        return llm_events, tool_events, decision_events, error_events
+
+    @staticmethod
+    def _build_tool_summaries(
+        tool_events: list[AgentEvent],
+    ) -> dict[str, ToolSummary]:
+        """Aggregate per-tool call/failure/duration stats from tool events."""
+        tool_map: dict[str, ToolSummary] = {}
+        for e in tool_events:
+            tc = e.tool_call
+            if not tc:
+                continue
+            name = tc.tool_name
+            ts = tool_map.get(name)
+            if ts is None:
+                ts = ToolSummary(tool_name=name)
+                tool_map[name] = ts
+            ts.call_count += 1
+            if e.output_data and e.output_data.get("error"):
+                ts.failure_count += 1
+            else:
+                ts.success_count += 1
+            if tc.duration_ms:
+                ts.total_duration_ms += tc.duration_ms
+        for ts in tool_map.values():
+            if ts.call_count:
+                ts.avg_duration_ms = ts.total_duration_ms / ts.call_count
+        return tool_map
+
+    @staticmethod
+    def _aggregate_models(llm_events: list[AgentEvent]) -> dict[str, list[int]]:
+        """Aggregate (call_count, token_total) per model from LLM events.
+
+        Returns a dict ``model -> [calls, tokens]``.  Empty when no LLM
+        events carry a ``model`` value.
+        """
+        model_agg: dict[str, list[int]] = {}
+        for e in llm_events:
+            if not e.model:
+                continue
+            bucket = model_agg.get(e.model)
+            if bucket is None:
+                bucket = [0, 0]
+                model_agg[e.model] = bucket
+            bucket[0] += 1
+            bucket[1] += e.tokens_in + e.tokens_out
+        return model_agg
+
     def generate(self, session: Session, config: NarrativeConfig | None = None) -> Narrative:
         """Generate a narrative for the given session."""
         cfg = config or NarrativeConfig()
@@ -192,26 +266,12 @@ class NarrativeGenerator:
         if session.ended_at and session.started_at:
             duration_s = (session.ended_at - session.started_at).total_seconds()
         elif events:
-            first_ts = events[0].timestamp
-            last_ts = events[-1].timestamp
-            duration_s = (last_ts - first_ts).total_seconds()
+            duration_s = (events[-1].timestamp - events[0].timestamp).total_seconds()
 
-        # Classify events in a single pass instead of 4 separate
-        # list comprehensions (O(4·E) → O(E)).
-        llm_events: list[AgentEvent] = []
-        tool_events: list[AgentEvent] = []
-        decision_events: list[AgentEvent] = []
-        error_events: list[AgentEvent] = []
-        for _evt in events:
-            _et = _evt.event_type
-            if _et == "llm_call":
-                llm_events.append(_evt)
-            elif _et == "tool_call":
-                tool_events.append(_evt)
-            elif _et == "decision":
-                decision_events.append(_evt)
-            elif _et == "error":
-                error_events.append(_evt)
+        # Classify events and aggregate stats via dedicated helpers.
+        llm_events, tool_events, decision_events, error_events = (
+            self._classify_events(events)
+        )
 
         # Token totals
         total_in = sum(e.tokens_in for e in events)
@@ -221,29 +281,12 @@ class NarrativeGenerator:
         # Cost estimate
         cost = 0.0
         if cfg.include_costs:
-            cost = (total_in / 1000 * cfg.cost_per_1k_input) + (total_out / 1000 * cfg.cost_per_1k_output)
+            cost = (
+                (total_in / 1000 * cfg.cost_per_1k_input)
+                + (total_out / 1000 * cfg.cost_per_1k_output)
+            )
 
-        # Tool summaries
-        tool_map: dict[str, ToolSummary] = {}
-        for e in tool_events:
-            tc = e.tool_call
-            if not tc:
-                continue
-            name = tc.tool_name
-            if name not in tool_map:
-                tool_map[name] = ToolSummary(tool_name=name)
-            ts = tool_map[name]
-            ts.call_count += 1
-            has_error = e.output_data and e.output_data.get("error")
-            if has_error:
-                ts.failure_count += 1
-            else:
-                ts.success_count += 1
-            if tc.duration_ms:
-                ts.total_duration_ms += tc.duration_ms
-        for ts in tool_map.values():
-            if ts.call_count:
-                ts.avg_duration_ms = ts.total_duration_ms / ts.call_count
+        tool_map = self._build_tool_summaries(tool_events)
 
         # Build sections
         sections: list[NarrativeSection] = []
@@ -279,23 +322,14 @@ class NarrativeGenerator:
                 order=order,
             ))
 
-        # Models section — single-pass aggregation instead of
-        # O(models × llm_events) nested scan per model.
-        model_agg: dict[str, list[int]] = {}  # model -> [calls, tokens]
-        for e in llm_events:
-            if e.model:
-                bucket = model_agg.get(e.model)
-                if bucket is None:
-                    bucket = [0, 0]
-                    model_agg[e.model] = bucket
-                bucket[0] += 1
-                bucket[1] += e.tokens_in + e.tokens_out
+        # Models section
+        model_agg = self._aggregate_models(llm_events)
         if model_agg:
             order += 1
-            model_lines = []
-            for m in sorted(model_agg):
-                calls, m_tokens = model_agg[m]
-                model_lines.append(f"- **{m}**: {calls} calls, {m_tokens:,} tokens")
+            model_lines = [
+                f"- **{m}**: {model_agg[m][0]} calls, {model_agg[m][1]:,} tokens"
+                for m in sorted(model_agg)
+            ]
             sections.append(NarrativeSection(
                 title="Models Used",
                 content="\n".join(model_lines),
