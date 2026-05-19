@@ -742,59 +742,68 @@ class SessionCorrelator:
         import bisect
 
         propagations: List[ErrorPropagation] = []
-        # Collect error timestamps per session, pre-sorted
+        # Collect error timestamps per session, pre-sorted.  Only timestamps
+        # are needed downstream; the raw event objects are not used.
         error_timestamps: Dict[str, List[datetime]] = {}
-        error_events_raw: Dict[str, list] = {}
+        now = datetime.now(timezone.utc)
 
         for session in self._sessions:
             sid = getattr(session, "session_id", "")
-            errors = []
-            for e in getattr(session, "events", []):
-                if "error" in getattr(e, "event_type", "").lower():
-                    errors.append(e)
-            if errors:
-                error_events_raw[sid] = errors
-                timestamps = sorted(
-                    getattr(e, "timestamp", datetime.now(timezone.utc))
-                    for e in errors
-                )
+            timestamps = [
+                getattr(e, "timestamp", now)
+                for e in getattr(session, "events", [])
+                if "error" in getattr(e, "event_type", "").lower()
+            ]
+            if timestamps:
+                timestamps.sort()
                 error_timestamps[sid] = timestamps
 
         sids = list(error_timestamps.keys())
         window_ms = self.error_propagation_window_ms
         window_td = timedelta(milliseconds=window_ms)
 
-        for i in range(len(sids)):
-            for j in range(len(sids)):
-                if i == j:
-                    continue
-                src = sids[i]
+        # Iterate unordered pairs once and emit both directions per pair.
+        # The previous full N² loop called _shared_resources_between (set
+        # intersection + sort) twice for every pair; halving the iterations
+        # cuts that work in half and keeps the per-pair shared lookup local.
+        def _scan(
+            src: str,
+            tgt: str,
+            shared: List[str],
+            src_ts_list: List[datetime],
+            tgt_ts_list: List[datetime],
+        ) -> None:
+            for src_ts in src_ts_list:
+                # Binary search for target errors in (src_ts, src_ts + window]
+                lo = bisect.bisect_right(tgt_ts_list, src_ts)
+                hi = bisect.bisect_right(tgt_ts_list, src_ts + window_td)
+                for k in range(lo, hi):
+                    tgt_ts = tgt_ts_list[k]
+                    delay_ms = (tgt_ts - src_ts).total_seconds() * 1000
+                    confidence = max(0.1, 1.0 - (delay_ms / window_ms))
+                    propagations.append(ErrorPropagation(
+                        source_session=src,
+                        target_session=tgt,
+                        source_error_time=src_ts,
+                        target_error_time=tgt_ts,
+                        delay_ms=delay_ms,
+                        direction=PropagationDirection.FORWARD,
+                        shared_resources=shared,
+                        confidence=confidence,
+                    ))
+
+        n = len(sids)
+        for i in range(n):
+            src = sids[i]
+            src_ts_list = error_timestamps[src]
+            for j in range(i + 1, n):
                 tgt = sids[j]
                 shared = self._shared_resources_between(src, tgt)
                 if not shared:
                     continue
-
                 tgt_ts_list = error_timestamps[tgt]
-
-                for src_ts in error_timestamps[src]:
-                    # Binary search for target errors in (src_ts, src_ts + window]
-                    lo = bisect.bisect_right(tgt_ts_list, src_ts)
-                    hi = bisect.bisect_right(tgt_ts_list, src_ts + window_td)
-
-                    for k in range(lo, hi):
-                        tgt_ts = tgt_ts_list[k]
-                        delay_ms = (tgt_ts - src_ts).total_seconds() * 1000
-                        confidence = max(0.1, 1.0 - (delay_ms / window_ms))
-                        propagations.append(ErrorPropagation(
-                            source_session=src,
-                            target_session=tgt,
-                            source_error_time=src_ts,
-                            target_error_time=tgt_ts,
-                            delay_ms=delay_ms,
-                            direction=PropagationDirection.FORWARD,
-                            shared_resources=shared,
-                            confidence=confidence,
-                        ))
+                _scan(src, tgt, shared, src_ts_list, tgt_ts_list)
+                _scan(tgt, src, shared, tgt_ts_list, src_ts_list)
 
         # Deduplicate: keep highest confidence per session pair
         best: Dict[Tuple[str, str], ErrorPropagation] = {}
