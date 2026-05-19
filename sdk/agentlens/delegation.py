@@ -493,7 +493,7 @@ class DelegationAnalyzer:
             session_events[ev.session_id].append(ev)
 
         cascade_count = 0
-        for session_id, events in session_events.items():
+        for _session_id, events in session_events.items():
             failed = [e for e in events if not e.success]
             if len(failed) >= 2:
                 # Check if failures form a chain (parent's child failed, then parent fails)

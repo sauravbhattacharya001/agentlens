@@ -136,7 +136,6 @@ def cmd_profile(args: argparse.Namespace) -> None:
 
     # Pretty terminal output
     BOLD = "\033[1m" if sys.stdout.isatty() else ""
-    DIM = "\033[2m" if sys.stdout.isatty() else ""
     CYAN = "\033[36m" if sys.stdout.isatty() else ""
     GREEN = "\033[32m" if sys.stdout.isatty() else ""
     RED = "\033[31m" if sys.stdout.isatty() else ""

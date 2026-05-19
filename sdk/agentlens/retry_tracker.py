@@ -329,7 +329,6 @@ class RetryTracker:
                 child_of[ev.get("event_id", "")] = parent_id
 
         # Find chain roots (events that are retried but are not retries themselves)
-        all_children = set(child_of.keys())
         roots: set[str] = set()
         for eid in child_of.values():
             if eid not in child_of:

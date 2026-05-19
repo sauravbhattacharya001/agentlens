@@ -302,9 +302,7 @@ class MemoryLeakDetector:
 
         # Extract time series
         tokens_in_series = [e.tokens_in for e in events]
-        tokens_out_series = [e.tokens_out for e in events]
         cumulative_tokens = self._cumulative(tokens_in_series)
-        durations = [e.duration_ms or 0 for e in events]
 
         # Run all detectors
         signals: list[LeakSignal] = []
@@ -610,7 +608,6 @@ class MemoryLeakDetector:
 
         # Check if cumulative growth is super-linear (quadratic or exponential)
         n = len(cumulative)
-        indices = list(range(n))
 
         # Fit linear
         linear_slope, linear_r2 = self._linear_fit(cumulative)

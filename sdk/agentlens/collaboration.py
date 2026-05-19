@@ -959,7 +959,7 @@ class CollaborationAnalyzer:
         if decisions_by_topic:
             consensus_count = 0
             good_consensus = 0
-            for topic, decs in decisions_by_topic.items():
+            for _topic, decs in decisions_by_topic.items():
                 if len(decs) >= 2:
                     outcomes = [d[1] for d in decs]
                     if len(set(outcomes)) == 1:  # all agree

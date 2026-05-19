@@ -772,7 +772,6 @@ class HallucinationDetector:
                     if pat.search(content):
                         # Verify reference is grounded in prior context
                         all_context = " ".join(context_so_far).lower()
-                        content_lower = content.lower()
 
                         # Extract what's being referenced
                         match = pat.search(content)
@@ -828,13 +827,11 @@ class HallucinationDetector:
         signals: List[HallucinationSignal] = []
 
         specificity_scores: List[Tuple[int, float]] = []
-        last_input_idx = -1
 
         for i, ev in enumerate(events):
             ev_type = ev.get("type", "")
 
             if ev_type in ("user", "input", "tool_result", "system"):
-                last_input_idx = i
                 continue
 
             if ev_type in ("assistant", "response", "agent", "llm"):

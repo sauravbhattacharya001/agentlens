@@ -383,7 +383,6 @@ class CognitiveBiasDetector:
     def _detect_confirmation(self, events: List[Dict]) -> List[BiasSignal]:
         """Detect confirmation bias: seeking only confirming evidence."""
         signals: List[BiasSignal] = []
-        n = len(events)
 
         # Look for repeated similar tool calls that return similar results
         tool_calls = [(i, e) for i, e in enumerate(events)
@@ -447,7 +446,7 @@ class CognitiveBiasDetector:
 
         # For each decision after first window, check if it mirrors
         # the immediately preceding window more than earlier patterns
-        for d_idx, (event_idx, decision) in enumerate(decisions):
+        for _d_idx, (event_idx, decision) in enumerate(decisions):
             if event_idx < ws:
                 continue
 
@@ -484,7 +483,6 @@ class CognitiveBiasDetector:
     def _detect_sunk_cost(self, events: List[Dict]) -> List[BiasSignal]:
         """Detect sunk cost bias: persisting with failing strategies."""
         signals: List[BiasSignal] = []
-        n = len(events)
 
         # Look for retry chains on same tool after failures
         tool_attempts: Dict[str, List[Tuple[int, bool]]] = defaultdict(list)
@@ -501,7 +499,7 @@ class CognitiveBiasDetector:
             # Find consecutive failure chains
             consecutive_failures = 0
             chain_start = -1
-            for idx, (event_idx, success) in enumerate(attempts):
+            for _idx, (event_idx, success) in enumerate(attempts):
                 if not success:
                     if consecutive_failures == 0:
                         chain_start = event_idx
@@ -538,7 +536,6 @@ class CognitiveBiasDetector:
     def _detect_availability(self, events: List[Dict]) -> List[BiasSignal]:
         """Detect availability bias: favoring recently-used tools."""
         signals: List[BiasSignal] = []
-        n = len(events)
 
         tool_calls = [(i, e.get("metadata", {}).get("tool_name", ""))
                       for i, e in enumerate(events)
@@ -555,7 +552,7 @@ class CognitiveBiasDetector:
         # Sliding window: for each tool call, check if it was the most recently used
         consecutive_same = 0
         prev_tool = ""
-        for idx, (event_idx, tool_name) in enumerate(tool_calls):
+        for _idx, (event_idx, tool_name) in enumerate(tool_calls):
             if tool_name == prev_tool:
                 consecutive_same += 1
             else:

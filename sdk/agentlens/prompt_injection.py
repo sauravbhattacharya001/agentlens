@@ -222,7 +222,7 @@ class PromptInjectionReport:
             lines.append("-" * 60)
             lines.append("  CATEGORY BREAKDOWN")
             lines.append("-" * 60)
-            for name, prof in sorted(active.items(), key=lambda x: -x[1].signal_count):
+            for _name, prof in sorted(active.items(), key=lambda x: -x[1].signal_count):
                 esc = " ⬆ ESCALATING" if prof.escalating else ""
                 lines.append(f"  {prof.category.label}")
                 lines.append(f"    Signals: {prof.signal_count}  |  "
@@ -359,7 +359,6 @@ def _extract_text_fields(event: Dict[str, Any]) -> List[Tuple[str, str]]:
     """Extract all text content from an event, returning (field_name, text) pairs."""
     fields: List[Tuple[str, str]] = []
     meta = event.get("metadata", {}) or {}
-    etype = event.get("type", "")
 
     # User input content
     content = meta.get("content", "")

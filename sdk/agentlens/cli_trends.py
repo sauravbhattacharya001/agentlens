@@ -215,7 +215,7 @@ def cmd_trends(args: argparse.Namespace) -> None:
 
         if top_movers:
             print(f"   {BOLD}Top Movers (by cost change):{RESET}")
-            for name, c, p, pct in top_movers:
+            for name, c, p, _pct in top_movers:
                 change = _color_change(c, p, invert=False)
                 print(f"     {name:<20} ${c:.4f}{change}")
             print()

@@ -44,7 +44,6 @@ def _parse_ts(ts: str | None) -> float | None:
 def _build_bars(events: list[dict]) -> list[dict]:
     """Convert events into gantt bars with start/end/label/type."""
     bars: list[dict] = []
-    pending: dict[str, dict] = {}  # keyed by event id or span_id
 
     for ev in events:
         etype = ev.get("type", "unknown")
@@ -52,7 +51,6 @@ def _build_bars(events: list[dict]) -> list[dict]:
         if ts is None:
             continue
         duration_ms = ev.get("duration_ms") or ev.get("latency_ms")
-        span_id = ev.get("span_id") or ev.get("id") or id(ev)
 
         if duration_ms is not None:
             bars.append({
@@ -146,7 +144,7 @@ def _render_html(bars: list[dict], session_id: str) -> str:
     span = t_max - t_min if t_max > t_min else 1.0
 
     rows_html = []
-    for i, b in enumerate(bars):
+    for _i, b in enumerate(bars):
         left_pct = (b["start"] - t_min) / span * 100
         width_pct = max(0.5, (b["end"] - b["start"]) / span * 100)
         color = _color_for(b["type"])

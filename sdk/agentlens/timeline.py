@@ -91,7 +91,7 @@ class TimelineRenderer:
                 break
 
         if base is None:
-            for i, e in enumerate(self.events):
+            for _i, e in enumerate(self.events):
                 e["_offset_ms"] = 0.0
             return
 

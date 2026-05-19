@@ -541,7 +541,7 @@ class TraceCompletionAdvisor:
 
         # Compute longest *pending* op: time from oldest outstanding tool
         # call start until now, in ms.
-        for tcid, ev in outstanding.items():
+        for _tcid, ev in outstanding.items():
             start = _coerce_dt(ev.get("timestamp")) if ev else now
             pending_ms = max(0.0, (now - start).total_seconds() * 1000.0)
             if pending_ms > longest_open_op_ms:

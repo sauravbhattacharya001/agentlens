@@ -732,7 +732,7 @@ class RewardHackingDetector:
 
         # Track tool call names for cross-referencing
         tool_calls_made: set = set()
-        for i, event in enumerate(events):
+        for _i, event in enumerate(events):
             if event.get("type") == "tool_call":
                 name = event.get("tool_name", "") or ""
                 tool_calls_made.add(name.lower())

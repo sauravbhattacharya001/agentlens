@@ -503,10 +503,6 @@ class ModelMigrationAdvisor:
         if not from_model or not to_model:
             raise ValueError("from_model and to_model must be non-empty")
 
-        relevant = [
-            e for e in events
-            if e.model == from_model and getattr(e, "event_type", None) != "error"
-        ]
         # We still want to count errors when computing a site's error_rate,
         # so collect those separately keyed off the same site signature.
         all_for_model = [e for e in events if e.model == from_model]

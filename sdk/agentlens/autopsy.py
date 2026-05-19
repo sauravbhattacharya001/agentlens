@@ -752,7 +752,6 @@ class SessionAutopsy:
         engines.append("tool_analysis")
 
         tfr = metrics.get("tool_failure_rate", 0.0)
-        tcr = metrics.get("tool_call_rate", 0.0)
 
         if tfr > self.config.tool_failure_concern:
             evidence.append(Evidence(

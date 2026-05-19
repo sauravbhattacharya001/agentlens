@@ -203,7 +203,6 @@ def render_scatter(
     x_left = _format_axis_value(x_min)
     x_mid = _format_axis_value((x_min + x_max) / 2)
     x_right = _format_axis_value(x_max)
-    x_axis_line = f"{'':>{y_label_pad}}  {x_left}"
     mid_pos = width // 2 - len(x_mid) // 2
     right_pos = width - len(x_right)
     x_positions = list(f"{'':>{y_label_pad}}  " + " " * width)

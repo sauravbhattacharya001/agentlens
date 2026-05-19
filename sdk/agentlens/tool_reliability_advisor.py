@@ -766,14 +766,8 @@ class ToolReliabilityAdvisor:
         circuit_tools = sorted(
             s.tool_name for s in snapshots if s.verdict == ToolVerdict.CIRCUIT_BREAK
         )
-        degraded_tools = sorted(
-            s.tool_name for s in snapshots if s.verdict == ToolVerdict.DEGRADED
-        )
         flaky_tools = sorted(
             s.tool_name for s in snapshots if s.verdict == ToolVerdict.FLAKY
-        )
-        watch_tools = sorted(
-            s.tool_name for s in snapshots if s.verdict == ToolVerdict.WATCH
         )
         deprecate_tools = sorted(
             s.tool_name
@@ -952,7 +946,6 @@ class ToolReliabilityAdvisor:
             if has_high:
                 p2_count = sum(1 for a in actions if a.priority == ActionPriority.P2)
                 trimmed: list[ToolReliabilityPlaybookAction] = []
-                p2_kept = 0
                 for a in actions:
                     if a.priority == ActionPriority.P3:
                         continue

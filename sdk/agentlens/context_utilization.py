@@ -289,7 +289,7 @@ class ContextUtilizationReport:
                 InsightSeverity.WARNING: "🟡",
                 InsightSeverity.INFO: "ℹ️",
             }
-            for i, ins in enumerate(self.insights[:10], 1):
+            for _i, ins in enumerate(self.insights[:10], 1):
                 icon = sev_icon.get(ins.severity, "•")
                 lines.append(
                     "║"

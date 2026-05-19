@@ -611,7 +611,7 @@ class ToolUsageProfiler:
         co_occur: Counter[tuple[str, str]] = Counter()
         sequential: Counter[tuple[str, str]] = Counter()
 
-        for sid, events in session_events.items():
+        for _sid, events in session_events.items():
             tools_in_session = set(e.tool_name for e in events)
             # Co-occurrence: all pairs present in same session
             tool_list = sorted(tools_in_session)
@@ -709,7 +709,7 @@ class ToolUsageProfiler:
                 for ev in self._events:
                     if ev.tool_name == tp.tool_name and ev.retry_of:
                         agent_retries[ev.agent_id] += 1
-                for agent_id, count in agent_retries.items():
+                for agent_id, _count in agent_retries.items():
                     patterns.append(AntiPattern(
                         pattern_type=AntiPatternType.RETRY_STORM,
                         agent_id=agent_id,

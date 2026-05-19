@@ -518,7 +518,7 @@ class NarrativeGenerator:
 
     def _build_timeline(self, events: list[AgentEvent], style: NarrativeStyle) -> list[str]:
         lines: list[str] = []
-        for i, e in enumerate(events):
+        for _i, e in enumerate(events):
             ts = e.timestamp.strftime("%H:%M:%S")
             if e.event_type == "llm_call":
                 model_info = f" ({e.model})" if e.model else ""
