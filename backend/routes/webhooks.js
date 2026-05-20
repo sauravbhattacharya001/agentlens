@@ -7,7 +7,7 @@ const { promisify } = require("util");
 const rateLimit = require("express-rate-limit");
 const router = express.Router();
 const { getDb } = require("../db");
-const { validateWebhookUrl } = require("../lib/validation");
+const { validateWebhookUrl, safeJsonParse } = require("../lib/validation");
 const { parseLimit, wrapRoute } = require("../lib/request-helpers");
 
 // ── Stricter rate limit for outbound webhook requests ───────────────
@@ -95,7 +95,7 @@ function formatWebhookResponse(w) {
   return {
     ...w,
     enabled: !!w.enabled,
-    rule_ids: w.rule_ids ? JSON.parse(w.rule_ids) : null,
+    rule_ids: w.rule_ids ? safeJsonParse(w.rule_ids, null) : null,
     secret: w.secret ? "••••••" : null,
   };
 }
@@ -378,7 +378,7 @@ async function fireWebhooks(alertData) {
   for (const wh of webhooks) {
     // Check if webhook is scoped to specific rules
     if (wh.rule_ids) {
-      const ruleIds = JSON.parse(wh.rule_ids);
+      const ruleIds = safeJsonParse(wh.rule_ids, null);
       if (Array.isArray(ruleIds) && ruleIds.length > 0 && !ruleIds.includes(alertData.rule_id)) {
         continue; // Skip — this webhook doesn't watch this rule
       }

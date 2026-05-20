@@ -1,6 +1,6 @@
 const express = require("express");
-const { isValidSessionId } = require("../lib/validation");
-const { wrapRoute } = require("../lib/request-helpers");
+const { isValidSessionId, safeJsonParse } = require("../lib/validation");
+const { wrapRoute, parseLimit } = require("../lib/request-helpers");
 const { createLazyStatements } = require("../lib/lazy-statements");
 
 const router = express.Router();
@@ -34,18 +34,16 @@ const ERROR_TYPES = new Set([
   "error", "tool_error", "agent_error", "timeout", "rate_limit",
 ]);
 
+// Use the shared `safeJsonParse` helper so malformed rows degrade to
+// `null` instead of throwing, and so we stop maintaining three nearly
+// identical try/catch blocks per JSON column.
 function parseEvent(row) {
-  const event = { ...row };
-  if (typeof event.input_data === "string") {
-    try { event.input_data = JSON.parse(event.input_data); } catch { event.input_data = null; }
-  }
-  if (typeof event.output_data === "string") {
-    try { event.output_data = JSON.parse(event.output_data); } catch { event.output_data = null; }
-  }
-  if (typeof event.tool_call === "string") {
-    try { event.tool_call = JSON.parse(event.tool_call); } catch { event.tool_call = null; }
-  }
-  return event;
+  return {
+    ...row,
+    input_data: safeJsonParse(row.input_data, null),
+    output_data: safeJsonParse(row.output_data, null),
+    tool_call: safeJsonParse(row.tool_call, null),
+  };
 }
 
 // Severity thresholds are fixed to prevent manipulation via query parameters.
@@ -285,8 +283,8 @@ router.post(
 router.get(
   "/candidates",
   wrapRoute("list postmortem candidates", async (req, res) => {
-    const minErrors = Math.max(1, Math.min(100, parseInt(req.query.min_errors) || 2));
-    const limit = Math.min(parseInt(req.query.limit) || 20, 100);
+    const minErrors = parseLimit(req.query.min_errors, 2, 100, 1);
+    const limit = parseLimit(req.query.limit, 20, 100, 1);
     const stmts = getStatements();
     const rows = stmts.recentErrorSessions.all(minErrors, limit);
     res.json({
