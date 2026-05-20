@@ -1,1 +1,0 @@
-let db = null; module.exports = { getDb() { return db; }, _setDb(d) { db = d; } };

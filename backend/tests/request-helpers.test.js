@@ -123,6 +123,22 @@ describe("requireSessionId", () => {
     const res = await request(app).get("/id<script>");
     expect(res.status).toBe(400);
   });
+
+  test("also accepts a `:sessionId` route param (regression for #189)", async () => {
+    // Some routes (e.g. /pricing/costs/:sessionId) name the param
+    // `sessionId` instead of `id`. The middleware should validate both.
+    const app = express();
+    app.get("/costs/:sessionId", requireSessionId, (req, res) => {
+      res.json({ ok: true, id: req.params.sessionId });
+    });
+
+    const good = await request(app).get("/costs/session-abc");
+    expect(good.status).toBe(200);
+    expect(good.body.id).toBe("session-abc");
+
+    const bad = await request(app).get("/costs/%00%01%02");
+    expect(bad.status).toBe(400);
+  });
 });
 
 // ── wrapRoute ───────────────────────────────────────────────────────
