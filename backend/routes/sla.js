@@ -1,7 +1,16 @@
 const express = require("express");
 const { getDb } = require("../db");
-const { sanitizeString } = require("../lib/validation");
+const { sanitizeString, safeJsonParse } = require("../lib/validation");
 const { parsePagination, wrapRoute } = require("../lib/request-helpers");
+
+// Parse a JSON column that should be an array; fall back to [] on null/
+// malformed input. Defends against routes 500-ing when a single corrupt
+// snapshot row (e.g. truncated write, manual DB edit) makes JSON.parse
+// throw or return a non-array whose .length is undefined.
+function parseJsonArray(raw) {
+  const parsed = safeJsonParse(raw, []);
+  return Array.isArray(parsed) ? parsed : [];
+}
 
 const router = express.Router();
 
@@ -310,8 +319,8 @@ router.get("/history", wrapRoute("list SLA history", (req, res) => {
   res.json({
     snapshots: rows.map(r => ({
       ...r,
-      metrics: JSON.parse(r.metrics),
-      violations: JSON.parse(r.violations),
+      metrics: safeJsonParse(r.metrics, {}),
+      violations: parseJsonArray(r.violations),
     })),
     total,
     limit,
@@ -339,7 +348,7 @@ router.get("/summary", wrapRoute("SLA summary", (req, res) => {
       target_count: targetCount,
       latest_check: latest ? {
         compliance_pct: latest.compliance_pct,
-        violation_count: JSON.parse(latest.violations).length,
+        violation_count: parseJsonArray(latest.violations).length,
         checked_at: latest.created_at,
         window_start: latest.window_start,
         window_end: latest.window_end,
