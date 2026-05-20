@@ -35,9 +35,16 @@ def _status_icon(status: str) -> str:
     return {"ok": "✅", "warning": "⚠️", "exceeded": "🚨"}.get(status, "❓")
 
 
-def cmd_budget(args: argparse.Namespace) -> None:
-    """Dispatch budget subcommands."""
-    client = get_client_only(args)
+def cmd_budget(args: argparse.Namespace, client: httpx.Client | None = None) -> None:
+    """Dispatch budget subcommands.
+
+    ``client`` is optional: in production it is built from ``args`` via
+    :func:`get_client_only`, but tests can inject a stub/mock client to avoid
+    real network calls. This keeps :func:`cmd_budget` directly testable without
+    monkey-patching the constructor.
+    """
+    if client is None:
+        client = get_client_only(args)
     sub = getattr(args, "budget_action", None)
     if sub == "list":
         _budget_list(args, client)
