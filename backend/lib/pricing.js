@@ -50,15 +50,41 @@ const DEFAULT_PRICING = {
  */
 var _pricingCache = null;
 var _pricingCacheExpiry = 0;
+var _pricingCacheDb = null;
+var _pricingCacheSig = null;
 var PRICING_CACHE_TTL_MS = 60000; // 60 seconds
+
+// Cheap signature of model_pricing table contents — used to invalidate
+// the cache when rows change without an explicit invalidatePricingCache()
+// call (e.g. external writers, tests). One indexed-scan over a tiny
+// operator-managed table; negligible compared to the work the cache saves.
+function _pricingSignature(db) {
+  try {
+    const row = db
+      .prepare(
+        "SELECT COUNT(*) AS n, COALESCE(MAX(updated_at), '') AS m FROM model_pricing"
+      )
+      .get();
+    return row.n + "|" + row.m;
+  } catch (_e) {
+    // Table may not exist yet on a brand-new DB; treat as empty.
+    return "0|";
+  }
+}
 
 function loadPricingMap() {
   var now = Date.now();
-  if (_pricingCache && now < _pricingCacheExpiry) {
+  const db = getDb();
+  const sig = _pricingSignature(db);
+  if (
+    _pricingCache &&
+    _pricingCacheDb === db &&
+    _pricingCacheSig === sig &&
+    now < _pricingCacheExpiry
+  ) {
     return _pricingCache;
   }
 
-  const db = getDb();
   const rows = db.prepare("SELECT * FROM model_pricing ORDER BY model ASC").all();
 
   const map = Object.create(null);
@@ -79,6 +105,8 @@ function loadPricingMap() {
 
   _pricingCache = map;
   _pricingCacheExpiry = now + PRICING_CACHE_TTL_MS;
+  _pricingCacheDb = db;
+  _pricingCacheSig = sig;
   // Clear findPricing lookup cache when pricing map is rebuilt
   _findPricingCache = Object.create(null);
 
@@ -93,6 +121,8 @@ function loadPricingMap() {
 function invalidatePricingCache() {
   _pricingCache = null;
   _pricingCacheExpiry = 0;
+  _pricingCacheDb = null;
+  _pricingCacheSig = null;
   _findPricingCache = Object.create(null);
 }
 

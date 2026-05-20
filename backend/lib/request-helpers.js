@@ -65,7 +65,11 @@ function parsePagination(query, opts) {
  *   router.get("/:id", requireSessionId, (req, res) => { ... });
  */
 function requireSessionId(req, res, next) {
-  if (!isValidSessionId(req.params.id)) {
+  // Routes use either `:id` or `:sessionId` for session IDs (the codebase
+  // is not fully consistent). Check both rather than failing on routes
+  // that named the param `sessionId`.
+  const id = req.params.id || req.params.sessionId;
+  if (!isValidSessionId(id)) {
     return res.status(400).json({ error: "Invalid session ID format" });
   }
   next();

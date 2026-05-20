@@ -10,6 +10,7 @@ const express = require("express");
 const { getDb } = require("../db");
 const { isValidSessionId, safeJsonParse: _sharedSafeJsonParse } = require("../lib/validation");
 const { wrapRoute } = require("../lib/request-helpers");
+const { createLazyStatements } = require("../lib/lazy-statements");
 
 const router = express.Router();
 
@@ -234,23 +235,14 @@ function replaySummaryFromRawEvents(events, session, options = {}) {
 // Lazily initialized once, reused across all requests to avoid
 // re-compiling SQL on every call (consistent with sessions.js,
 // analytics.js, and other route modules).
-let _replayStmts = null;
-
-function getReplayStatements() {
-  if (_replayStmts) return _replayStmts;
-  const db = getDb();
-
-  _replayStmts = {
-    getSession: db.prepare("SELECT * FROM sessions WHERE session_id = ?"),
-    getSessionId: db.prepare("SELECT session_id FROM sessions WHERE session_id = ?"),
-    eventsCapped: db.prepare("SELECT * FROM events WHERE session_id = ? ORDER BY timestamp ASC LIMIT ?"),
-    countEvents: db.prepare("SELECT COUNT(*) AS total FROM events WHERE session_id = ?"),
-    eventsPaged: db.prepare("SELECT * FROM events WHERE session_id = ? ORDER BY timestamp ASC LIMIT ? OFFSET ?"),
-    firstEventTs: db.prepare("SELECT timestamp FROM events WHERE session_id = ? ORDER BY timestamp ASC LIMIT 1"),
-  };
-
-  return _replayStmts;
-}
+const getReplayStatements = createLazyStatements((db) => ({
+  getSession: db.prepare("SELECT * FROM sessions WHERE session_id = ?"),
+  getSessionId: db.prepare("SELECT session_id FROM sessions WHERE session_id = ?"),
+  eventsCapped: db.prepare("SELECT * FROM events WHERE session_id = ? ORDER BY timestamp ASC LIMIT ?"),
+  countEvents: db.prepare("SELECT COUNT(*) AS total FROM events WHERE session_id = ?"),
+  eventsPaged: db.prepare("SELECT * FROM events WHERE session_id = ? ORDER BY timestamp ASC LIMIT ? OFFSET ?"),
+  firstEventTs: db.prepare("SELECT timestamp FROM events WHERE session_id = ? ORDER BY timestamp ASC LIMIT 1"),
+}));
 
 // Shared session ID validation middleware for all replay routes
 function validateSessionIdParam(req, res, next) {

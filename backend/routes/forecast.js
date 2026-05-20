@@ -26,7 +26,7 @@ const getForecastStatements = createLazyStatements((db) => {
   const baseWhere = "e.timestamp >= datetime('now', '-' || ? || ' days')";
   const groupOrder = " GROUP BY DATE(e.timestamp), e.model ORDER BY date ASC";
 
-  // Separate session count queries without model grouping — the main
+  // Separate session count queries without model grouping - the main
   // dailyAgg query groups by (date, model), so COUNT(DISTINCT session_id)
   // per model group doesn't reflect the true daily session count when
   // sessions use multiple models (taking max across groups undercounts).
@@ -36,7 +36,7 @@ const getForecastStatements = createLazyStatements((db) => {
     JOIN sessions s ON e.session_id = s.session_id`;
   const sessionCountGroup = " GROUP BY DATE(e.timestamp)";
 
-  _forecastStmts = {
+  return {
     dailyAgg: {
       none:  db.prepare(`${baseSelect} WHERE ${baseWhere}${groupOrder}`),
       agent: db.prepare(`${baseSelect} WHERE ${baseWhere} AND s.agent_name = ?${groupOrder}`),
@@ -101,7 +101,7 @@ function fetchDailyAggregates(db, days, agent, model, pricingMap) {
   // Fetch accurate per-day session counts from a separate query that
   // counts DISTINCT session_id without model grouping.  The main query
   // groups by (date, model), so per-group session counts don't reflect
-  // sessions that span multiple models — taking max undercounted, and
+  // sessions that span multiple models - taking max undercounted, and
   // summing overcounted.  This dedicated query is the only correct way.
   const sessionStmt = stmts.dailySessionCount[variant];
   const sessionRows = sessionStmt.all(...params);
@@ -141,9 +141,9 @@ function fetchDailyAggregates(db, days, agent, model, pricingMap) {
  * Simple OLS linear regression: y = slope * x + intercept.
  * x-values are 0, 1, 2, ...
  *
- * Single-pass implementation: computes slope, intercept, and R² in one
+ * Single-pass implementation: computes slope, intercept, and R2 in one
  * loop over the data (previously required 2-3 separate passes).
- * For x = 0..n-1, xMean = (n-1)/2 and Σ(x-xMean)² = n(n²-1)/12,
+ * For x = 0..n-1, xMean = (n-1)/2 and Σ(x-xMean)2 = n(n2-1)/12,
  * both computed analytically to avoid a pass over x values.
  *
  * @param {number[]} values - y-values
@@ -155,7 +155,7 @@ function linearRegression(values) {
   if (n === 1) return { slope: 0, intercept: values[0], r2: 1 };
 
   const xMean = (n - 1) / 2;
-  // Σ(x - xMean)² for x = 0..n-1 has a closed-form: n(n²-1)/12
+  // Σ(x - xMean)2 for x = 0..n-1 has a closed-form: n(n2-1)/12
   const den = n * (n * n - 1) / 12;
   if (den === 0) return { slope: 0, intercept: values[0], r2: 0 };
 
@@ -171,7 +171,7 @@ function linearRegression(values) {
   const slope = crossSum / den;
   const intercept = yMean - slope * xMean;
 
-  // R² in one more pass (combined with ssTot)
+  // R2 in one more pass (combined with ssTot)
   let ssTot = 0, ssRes = 0;
   for (let i = 0; i < n; i++) {
     const dy = values[i] - yMean;
@@ -185,7 +185,7 @@ function linearRegression(values) {
 }
 
 /**
- * Exponential moving average — weights recent values more heavily.
+ * Exponential moving average - weights recent values more heavily.
  * @param {number[]} values
  * @param {number} alpha - smoothing factor (0-1), higher = more recent
  * @returns {number}
@@ -322,7 +322,7 @@ router.get("/", wrapRoute("forecast usage", (req, res) => {
   const numTokenValues = tokenValues.map(Number);
   const numSessionValues = sessionValues.map(Number);
 
-  // Pre-compute regressions when needed — hoisted so trend detection
+  // Pre-compute regressions when needed - hoisted so trend detection
   // below can reuse them without a redundant linearRegression() call.
   // Previously these were const-declared inside the if-block, causing
   // a ReferenceError when accessed outside that scope for trend detection.
@@ -406,7 +406,7 @@ router.get("/", wrapRoute("forecast usage", (req, res) => {
     }
   }
 
-  // Trend detection — reuse pre-computed regression results when
+  // Trend detection - reuse pre-computed regression results when
   // available (linear method) to avoid redundant linearRegression() calls
   const costTrend = method === "linear"
     ? detectTrend(costValues, costReg)
@@ -485,7 +485,7 @@ router.get("/budget", wrapRoute("forecast budget check", (req, res) => {
   if (dailyData.length === 0) {
     return res.json({
       severity: "unknown",
-      message: "No historical data — cannot assess budget",
+      message: "No historical data - cannot assess budget",
       budget,
       projected: 0,
     });

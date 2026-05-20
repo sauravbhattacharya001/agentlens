@@ -271,13 +271,9 @@ function cacheMiddleware(cache, options) {
     // poisoning when multiple API keys have different access levels.
     // Use a SHA-256 hash of the full key (not a prefix slice) so that
     // keys sharing the same prefix never collide in the cache.
+    // Anonymous (no API key) requests share a single cache slot per URL.
     var apiKey = req.headers && req.headers["x-api-key"];
-    var keySuffix;
-    if (apiKey) {
-      keySuffix = "|k:" + apiKeyHashPrefix(apiKey);
-    } else {
-      keySuffix = "|anon";
-    }
+    var keySuffix = apiKey ? "|k:" + apiKeyHashPrefix(apiKey) : "";
     var key = (req.originalUrl || req.url) + keySuffix;
     var cached = cache.get(key);
 

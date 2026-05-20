@@ -8,13 +8,19 @@ const express = require("express");
 const router = express.Router();
 const { getDb } = require("../db");
 const { wrapRoute } = require("../lib/request-helpers");
+const { createLazyStatements } = require("../lib/lazy-statements");
 
 // ── Schema initialisation ───────────────────────────────────────────
 
-let _retentionTableReady = false;
+let _retentionTableReadyDb = null;
 function ensureRetentionTable() {
-  if (_retentionTableReady) return;
   const db = getDb();
+  if (_retentionTableReadyDb === db) {
+    const row = db
+      .prepare("SELECT name FROM sqlite_master WHERE type='table' AND name='retention_config'")
+      .get();
+    if (row) return;
+  }
   db.exec(`
     CREATE TABLE IF NOT EXISTS retention_config (
       key TEXT PRIMARY KEY,
@@ -22,7 +28,7 @@ function ensureRetentionTable() {
       updated_at TEXT NOT NULL DEFAULT (datetime('now'))
     );
   `);
-  _retentionTableReady = true;
+  _retentionTableReadyDb = db;
 }
 
 // ── Default config ──────────────────────────────────────────────────
@@ -36,44 +42,43 @@ const DEFAULT_CONFIG = {
 
 // ── Helpers ─────────────────────────────────────────────────────────
 
-let _retentionStmts = null;
+let _retentionStmtsInner = createLazyStatements((db) => ({
+  getConfig: db.prepare("SELECT key, value FROM retention_config"),
+  upsertConfig: db.prepare(`
+    INSERT INTO retention_config (key, value, updated_at)
+    VALUES (?, ?, datetime('now'))
+    ON CONFLICT(key) DO UPDATE SET value = excluded.value, updated_at = excluded.updated_at
+  `),
+  sessionCount: db.prepare("SELECT COUNT(*) AS count FROM sessions"),
+  eventCount: db.prepare("SELECT COUNT(*) AS count FROM events"),
+  oldestSession: db.prepare("SELECT MIN(started_at) AS oldest FROM sessions"),
+  newestSession: db.prepare("SELECT MAX(started_at) AS newest FROM sessions"),
+  sessionsOlderThan: db.prepare(`
+    SELECT session_id FROM sessions
+    WHERE started_at < ? ORDER BY started_at ASC
+  `),
+  eventCountBySession: db.prepare(
+    "SELECT COUNT(*) AS count FROM events WHERE session_id = ?"
+  ),
+  deleteEvents: db.prepare("DELETE FROM events WHERE session_id = ?"),
+  deleteSession: db.prepare("DELETE FROM sessions WHERE session_id = ?"),
+  deleteTags: db.prepare("DELETE FROM session_tags WHERE session_id = ?"),
+  ageDistribution: db.prepare(`
+    SELECT
+      SUM(CASE WHEN julianday('now') - julianday(started_at) <= 1 THEN 1 ELSE 0 END) AS last_24h,
+      SUM(CASE WHEN julianday('now') - julianday(started_at) > 1 AND julianday('now') - julianday(started_at) <= 7 THEN 1 ELSE 0 END) AS last_7d,
+      SUM(CASE WHEN julianday('now') - julianday(started_at) > 7 AND julianday('now') - julianday(started_at) <= 30 THEN 1 ELSE 0 END) AS last_30d,
+      SUM(CASE WHEN julianday('now') - julianday(started_at) > 30 AND julianday('now') - julianday(started_at) <= 90 THEN 1 ELSE 0 END) AS last_90d,
+      SUM(CASE WHEN julianday('now') - julianday(started_at) > 90 THEN 1 ELSE 0 END) AS older
+    FROM sessions
+  `),
+}));
 
 function getRetentionStatements() {
-  if (_retentionStmts) return _retentionStmts;
+  // Ensure schema exists (re-check when DB swaps in tests) before
+  // returning the cached prepared statements.
   ensureRetentionTable();
-  const db = getDb();
-  _retentionStmts = {
-    getConfig: db.prepare("SELECT key, value FROM retention_config"),
-    upsertConfig: db.prepare(`
-      INSERT INTO retention_config (key, value, updated_at)
-      VALUES (?, ?, datetime('now'))
-      ON CONFLICT(key) DO UPDATE SET value = excluded.value, updated_at = excluded.updated_at
-    `),
-    sessionCount: db.prepare("SELECT COUNT(*) AS count FROM sessions"),
-    eventCount: db.prepare("SELECT COUNT(*) AS count FROM events"),
-    oldestSession: db.prepare("SELECT MIN(started_at) AS oldest FROM sessions"),
-    newestSession: db.prepare("SELECT MAX(started_at) AS newest FROM sessions"),
-    sessionsOlderThan: db.prepare(`
-      SELECT session_id FROM sessions
-      WHERE started_at < ? ORDER BY started_at ASC
-    `),
-    eventCountBySession: db.prepare(
-      "SELECT COUNT(*) AS count FROM events WHERE session_id = ?"
-    ),
-    deleteEvents: db.prepare("DELETE FROM events WHERE session_id = ?"),
-    deleteSession: db.prepare("DELETE FROM sessions WHERE session_id = ?"),
-    deleteTags: db.prepare("DELETE FROM session_tags WHERE session_id = ?"),
-    ageDistribution: db.prepare(`
-      SELECT
-        SUM(CASE WHEN julianday('now') - julianday(started_at) <= 1 THEN 1 ELSE 0 END) AS last_24h,
-        SUM(CASE WHEN julianday('now') - julianday(started_at) > 1 AND julianday('now') - julianday(started_at) <= 7 THEN 1 ELSE 0 END) AS last_7d,
-        SUM(CASE WHEN julianday('now') - julianday(started_at) > 7 AND julianday('now') - julianday(started_at) <= 30 THEN 1 ELSE 0 END) AS last_30d,
-        SUM(CASE WHEN julianday('now') - julianday(started_at) > 30 AND julianday('now') - julianday(started_at) <= 90 THEN 1 ELSE 0 END) AS last_90d,
-        SUM(CASE WHEN julianday('now') - julianday(started_at) > 90 THEN 1 ELSE 0 END) AS older
-      FROM sessions
-    `),
-  };
-  return _retentionStmts;
+  return _retentionStmtsInner();
 }
 
 function getConfig() {

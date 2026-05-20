@@ -24,16 +24,30 @@
  *   const stmts = getStatements();
  *   const rows = stmts.listAll.all();
  *
+ * The cache is keyed by the *identity* of the underlying database handle.
+ * In production the handle is a long-lived singleton, so this behaves like
+ * a plain `if (cached) return cached`. In tests, however, suites routinely
+ * recreate the in-memory SQLite DB between tests (e.g. via `jest.resetModules()`
+ * + `process.env.DB_PATH = ...`). When that happens the previously cached
+ * prepared statements point at a closed/wrong database and surface as
+ * `SQLITE_ERROR`, `Cannot read properties of undefined`, or a torn-down-Jest
+ * `require()` failure (see issue #189). Re-checking the DB identity on every
+ * call is one extra `===` per request — negligible — and makes the cache
+ * self-invalidating without exposing a test-only reset hook.
+ *
  * @param {(db: import("better-sqlite3").Database) => Object} factory
  *   Receives the database instance and returns an object of prepared statements.
  * @returns {() => Object} A getter that lazily initializes and caches the statements.
  */
 function createLazyStatements(factory) {
   let cached = null;
+  let cachedDb = null;
   return function getStatements() {
-    if (cached) return cached;
     const { getDb } = require("../db");
-    cached = factory(getDb());
+    const db = getDb();
+    if (cached && cachedDb === db) return cached;
+    cached = factory(db);
+    cachedDb = db;
     return cached;
   };
 }

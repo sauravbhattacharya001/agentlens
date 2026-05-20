@@ -13,30 +13,24 @@ const express = require("express");
 const { getDb } = require("../db");
 const { wrapRoute } = require("../lib/request-helpers");
 const { loadPricingMap, computeCost } = require("../lib/pricing");
+const { createLazyStatements } = require("../lib/lazy-statements");
 
 const router = express.Router();
 
-let _budgetStmts = null;
-
-function getBudgetStatements() {
-  if (_budgetStmts) return _budgetStmts;
-  const db = getDb();
-  _budgetStmts = {
-    getAll: db.prepare("SELECT * FROM cost_budgets ORDER BY scope, period"),
-    getByScope: db.prepare("SELECT * FROM cost_budgets WHERE scope = ?"),
-    upsert: db.prepare(`
-      INSERT INTO cost_budgets (scope, period, limit_usd, warn_pct, created_at, updated_at)
-      VALUES (?, ?, ?, ?, ?, ?)
-      ON CONFLICT(scope, period) DO UPDATE SET
-        limit_usd = excluded.limit_usd,
-        warn_pct = excluded.warn_pct,
-        updated_at = excluded.updated_at
-    `),
-    deleteOne: db.prepare("DELETE FROM cost_budgets WHERE scope = ? AND period = ?"),
-    deleteByScope: db.prepare("DELETE FROM cost_budgets WHERE scope = ?"),
-  };
-  return _budgetStmts;
-}
+const getBudgetStatements = createLazyStatements((db) => ({
+  getAll: db.prepare("SELECT * FROM cost_budgets ORDER BY scope, period"),
+  getByScope: db.prepare("SELECT * FROM cost_budgets WHERE scope = ?"),
+  upsert: db.prepare(`
+    INSERT INTO cost_budgets (scope, period, limit_usd, warn_pct, created_at, updated_at)
+    VALUES (?, ?, ?, ?, ?, ?)
+    ON CONFLICT(scope, period) DO UPDATE SET
+      limit_usd = excluded.limit_usd,
+      warn_pct = excluded.warn_pct,
+      updated_at = excluded.updated_at
+  `),
+  deleteOne: db.prepare("DELETE FROM cost_budgets WHERE scope = ? AND period = ?"),
+  deleteByScope: db.prepare("DELETE FROM cost_budgets WHERE scope = ?"),
+}));
 
 function getPeriodRange(period) {
   const now = new Date();

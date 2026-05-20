@@ -7,7 +7,9 @@
     "start": "node server.js",
     "seed": "node seed.js",
     "dev": "node server.js",
-    "test": "jest --verbose",
+    "test": "jest --verbose && npm run test:node",
+    "test:jest": "jest --verbose",
+    "test:node": "node --test tests/collaboration.test.js tests/diff.test.js tests/tempo.test.js",
     "test:coverage": "jest --coverage --verbose",
     "prepublishOnly": "npm test"
   },
@@ -57,6 +59,14 @@
   },
   "jest": {
     "testEnvironment": "node",
+    "globalSetup": "<rootDir>/tests/jest.globalSetup.js",
+    "setupFiles": ["<rootDir>/tests/jest.setup.js"],
+    "testPathIgnorePatterns": [
+      "/node_modules/",
+      "/tests/collaboration\\.test\\.js$",
+      "/tests/diff\\.test\\.js$",
+      "/tests/tempo\\.test\\.js$"
+    ],
     "collectCoverageFrom": [
       "server.js",
       "db.js",

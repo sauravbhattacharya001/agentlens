@@ -6,6 +6,7 @@ const router = express.Router();
 const { getDb } = require("../db");
 const { fireWebhooks } = require("./webhooks");
 const { wrapRoute, parseLimit } = require("../lib/request-helpers");
+const { createLazyStatements } = require("../lib/lazy-statements");
 
 // ── Path parameter validation ───────────────────────────────────────
 // IDs are generated via `Date.now().toString(36)-<12 hex chars>`, so
@@ -25,10 +26,19 @@ function validateIdParam(paramName) {
 
 // ── Schema initialisation ───────────────────────────────────────────
 
-let _alertsTableReady = false;
+let _alertsTableReadyDb = null;
 function ensureAlertsTable() {
-  if (_alertsTableReady) return;
   const db = getDb();
+  // Always run CREATE TABLE IF NOT EXISTS — it is idempotent and cheap,
+  // and lets tests recover after dropping tables between cases. We only
+  // skip the work when the DB handle has already been initialised AND
+  // the canonical table is present.
+  if (_alertsTableReadyDb === db) {
+    const row = db
+      .prepare("SELECT name FROM sqlite_master WHERE type='table' AND name='alert_rules'")
+      .get();
+    if (row) return;
+  }
   db.exec(`
     CREATE TABLE IF NOT EXISTS alert_rules (
       rule_id TEXT PRIMARY KEY,
@@ -59,7 +69,7 @@ function ensureAlertsTable() {
     CREATE INDEX IF NOT EXISTS idx_alert_events_triggered ON alert_events(triggered_at);
     CREATE INDEX IF NOT EXISTS idx_alert_events_ack ON alert_events(acknowledged);
   `);
-  _alertsTableReady = true;
+  _alertsTableReadyDb = db;
 }
 
 // ── Cached prepared statements for evaluate endpoint ────────────────
@@ -67,25 +77,18 @@ function ensureAlertsTable() {
 // per-rule loop for cooldown checks and alert inserts — recompiling
 // the same SQL on every rule × every evaluation.  Caching them here
 // ensures they are compiled once per DB lifetime.
-let _evalStmts = null;
-
-function getEvaluateStatements() {
-  if (_evalStmts) return _evalStmts;
-  const db = getDb();
-  _evalStmts = {
-    enabledRules: db.prepare("SELECT * FROM alert_rules WHERE enabled = 1"),
-    recentAlert: db.prepare(
-      `SELECT alert_id FROM alert_events
-       WHERE rule_id = ? AND triggered_at >= ?
-       ORDER BY triggered_at DESC LIMIT 1`
-    ),
-    insertAlert: db.prepare(
-      `INSERT INTO alert_events (alert_id, rule_id, triggered_at, metric_value, details)
-       VALUES (?, ?, ?, ?, ?)`
-    ),
-  };
-  return _evalStmts;
-}
+const getEvaluateStatements = createLazyStatements((db) => ({
+  enabledRules: db.prepare("SELECT * FROM alert_rules WHERE enabled = 1"),
+  recentAlert: db.prepare(
+    `SELECT alert_id FROM alert_events
+     WHERE rule_id = ? AND triggered_at >= ?
+     ORDER BY triggered_at DESC LIMIT 1`
+  ),
+  insertAlert: db.prepare(
+    `INSERT INTO alert_events (alert_id, rule_id, triggered_at, metric_value, details)
+     VALUES (?, ?, ?, ?, ?)`
+  ),
+}));
 
 // Valid metrics users can alert on
 const VALID_METRICS = [
