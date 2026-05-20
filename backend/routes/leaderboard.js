@@ -1,6 +1,6 @@
 const express = require("express");
 const { getDb } = require("../db");
-const { wrapRoute, parseDays, daysAgoCutoff } = require("../lib/request-helpers");
+const { wrapRoute, parseDays, daysAgoCutoff, parseLimit } = require("../lib/request-helpers");
 const { createCache, cacheMiddleware } = require("../lib/response-cache");
 const { createLazyStatements } = require("../lib/lazy-statements");
 
@@ -103,7 +103,9 @@ router.get("/", leaderboardCacheMw, wrapRoute("build agent leaderboard", (req, r
   }
 
   const days = parseDays(req.query.days);
-  const limit = Math.min(Math.max(1, parseInt(req.query.limit) || 20), 100);
+  // limit: default 20, capped at 100 (aggregation query gets pricier per row)
+  const limit = parseLimit(req.query.limit, 20, 100, 1);
+  // min_sessions filter: at least 1, no need to cap
   const minSessions = Math.max(1, parseInt(req.query.min_sessions) || 2);
   const cutoff = daysAgoCutoff(days);
 
