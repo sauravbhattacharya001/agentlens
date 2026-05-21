@@ -126,18 +126,27 @@ class TestTrackerSpan:
 
     def test_span_id_attached_to_tracked_events(self):
         tracker = _make_tracker()
+        tracker.transport.send_event = MagicMock()
         tracker.start_session("agent")
 
         with tracker.span("work") as s:
             tracker.track(event_type="llm_call")
 
-        # Find the llm_call event sent to transport
+        # Single-element track() events go through transport.send_event()
+        # (the batched path send_events() is only used for span_start /
+        # span_end internally).  Inspect both call paths so this test stays
+        # honest if the optimisation in tracker.track is ever reverted.
+        candidates: list[dict] = []
+        for call in tracker.transport.send_event.call_args_list:
+            candidates.append(call[0][0])
         for call in tracker.transport.send_events.call_args_list:
-            events = call[0][0]
-            for ev in events:
-                if ev.get("event_type") == "llm_call":
-                    assert ev.get("span_id") == s.span_id
-                    return
+            for ev in call[0][0]:
+                candidates.append(ev)
+
+        for ev in candidates:
+            if ev.get("event_type") == "llm_call":
+                assert ev.get("span_id") == s.span_id
+                return
 
         pytest.fail("llm_call event not found in transport calls")
 

@@ -245,7 +245,10 @@ class TestSendBatchHTTPRequest:
             t._running = False
 
     def test_non_200_status_is_failure(self):
-        for status in [201, 400, 401, 403, 404, 429, 500, 502, 503]:
+        # 2xx (including 201) are intentionally treated as success by
+        # _send_batch (`200 <= status_code < 300`).  Only non-2xx
+        # responses count as a failure for retry / backoff purposes.
+        for status in [400, 401, 403, 404, 429, 500, 502, 503]:
             t = Transport(endpoint="http://test:3000", max_retries=3)
             try:
                 mock_resp = MagicMock()

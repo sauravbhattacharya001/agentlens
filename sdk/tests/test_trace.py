@@ -102,7 +102,7 @@ class TestTraceCommand:
         """Trace should print a waterfall for each event."""
         args = self._make_args()
 
-        with patch("agentlens.cli._get_client") as mock_gc:
+        with patch("agentlens.cli_trace.get_client") as mock_gc:
             client = MagicMock()
             mock_gc.return_value = (client, "http://localhost:3000")
 
@@ -130,7 +130,7 @@ class TestTraceCommand:
         """--json flag should output structured JSON."""
         args = self._make_args(json_output=True)
 
-        with patch("agentlens.cli._get_client") as mock_gc:
+        with patch("agentlens.cli_trace.get_client") as mock_gc:
             client = MagicMock()
             mock_gc.return_value = (client, "http://localhost:3000")
 
@@ -156,7 +156,7 @@ class TestTraceCommand:
         """--type filter should only show matching events."""
         args = self._make_args(type_filter="tool_call")
 
-        with patch("agentlens.cli._get_client") as mock_gc:
+        with patch("agentlens.cli_trace.get_client") as mock_gc:
             client = MagicMock()
             mock_gc.return_value = (client, "http://localhost:3000")
 
@@ -182,7 +182,7 @@ class TestTraceCommand:
         """--min-ms should only show slow events."""
         args = self._make_args(min_ms=1000)
 
-        with patch("agentlens.cli._get_client") as mock_gc:
+        with patch("agentlens.cli_trace.get_client") as mock_gc:
             client = MagicMock()
             mock_gc.return_value = (client, "http://localhost:3000")
 
@@ -208,7 +208,7 @@ class TestTraceCommand:
         """Errors should be visible in the trace with error count."""
         args = self._make_args()
 
-        with patch("agentlens.cli._get_client") as mock_gc:
+        with patch("agentlens.cli_trace.get_client") as mock_gc:
             client = MagicMock()
             mock_gc.return_value = (client, "http://localhost:3000")
 
@@ -232,7 +232,7 @@ class TestTraceCommand:
         """No events should print a message."""
         args = self._make_args()
 
-        with patch("agentlens.cli._get_client") as mock_gc:
+        with patch("agentlens.cli_trace.get_client") as mock_gc:
             client = MagicMock()
             mock_gc.return_value = (client, "http://localhost:3000")
 
