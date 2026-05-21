@@ -148,10 +148,20 @@ class HeatmapBuilder:
         if not event.model:
             return 0.0
         model = event.model.lower()
-        for prefix, (cin, cout) in self.cost_rates.items():
-            if prefix in model:
-                return (event.tokens_in * cin + event.tokens_out * cout) / 1000
-        return 0.0
+        # Match longest prefix first so e.g. "gpt-4o" doesn't get billed at
+        # the more expensive "gpt-4" rate (cost-attribution bug: gpt-4o was
+        # being charged 3x its actual rate because "gpt-4" precedes "gpt-4o"
+        # in DEFAULT_COSTS dict-insertion order).
+        best: tuple[float, float] | None = None
+        best_len = -1
+        for prefix, rates in self.cost_rates.items():
+            if prefix in model and len(prefix) > best_len:
+                best = rates
+                best_len = len(prefix)
+        if best is None:
+            return 0.0
+        cin, cout = best
+        return (event.tokens_in * cin + event.tokens_out * cout) / 1000
 
     def add_event(self, event: AgentEvent) -> None:
         """Add a single event to the heatmap."""
