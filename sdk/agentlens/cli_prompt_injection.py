@@ -9,7 +9,7 @@ from typing import Any
 
 import httpx
 
-from agentlens.cli_common import get_client
+from agentlens.cli_common import get_client_only
 from agentlens.prompt_injection import PromptInjectionDetector
 
 
@@ -32,7 +32,7 @@ def register_prompt_injection_parser(subparsers: Any) -> None:
 
 def cmd_prompt_injection(args: argparse.Namespace) -> None:
     """Execute prompt injection analysis."""
-    client = get_client(args)
+    client = get_client_only(args)
 
     # Fetch session
     try:

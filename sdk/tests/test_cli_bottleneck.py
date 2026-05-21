@@ -108,7 +108,7 @@ def _stub_client(sessions, events_by_session):
     return client
 
 
-@patch("agentlens.cli_bottleneck.get_client")
+@patch("agentlens.cli_bottleneck.get_client_only")
 def test_cmd_bottleneck_table_output_groups_by_agent(mock_get_client, capsys):
     sessions = [{"id": "s1"}, {"id": "s2"}]
     events = {
@@ -135,7 +135,7 @@ def test_cmd_bottleneck_table_output_groups_by_agent(mock_get_client, capsys):
     assert "33.3%" in out or "33.3" in out
 
 
-@patch("agentlens.cli_bottleneck.get_client")
+@patch("agentlens.cli_bottleneck.get_client_only")
 def test_cmd_bottleneck_json_format_emits_valid_json(mock_get_client, capsys):
     sessions = [{"id": "s1"}]
     events = {"s1": [
@@ -158,7 +158,7 @@ def test_cmd_bottleneck_json_format_emits_valid_json(mock_get_client, capsys):
     assert beta["events"] == 1
 
 
-@patch("agentlens.cli_bottleneck.get_client")
+@patch("agentlens.cli_bottleneck.get_client_only")
 def test_cmd_bottleneck_group_by_model_uses_meta_fallback(mock_get_client, capsys):
     sessions = [{"id": "s1"}]
     events = {"s1": [
@@ -177,7 +177,7 @@ def test_cmd_bottleneck_group_by_model_uses_meta_fallback(mock_get_client, capsy
     assert keys == {"gpt-4", "claude", "unknown"}
 
 
-@patch("agentlens.cli_bottleneck.get_client")
+@patch("agentlens.cli_bottleneck.get_client_only")
 def test_cmd_bottleneck_metric_cost_ranks_by_dollars(mock_get_client, capsys):
     sessions = [{"id": "s1"}]
     events = {"s1": [
@@ -193,7 +193,7 @@ def test_cmd_bottleneck_metric_cost_ranks_by_dollars(mock_get_client, capsys):
     assert payload[0]["pct_contribution"] > 99.0
 
 
-@patch("agentlens.cli_bottleneck.get_client")
+@patch("agentlens.cli_bottleneck.get_client_only")
 def test_cmd_bottleneck_metric_errors_counts_error_field_and_level(mock_get_client, capsys):
     sessions = [{"id": "s1"}]
     events = {"s1": [
@@ -211,7 +211,7 @@ def test_cmd_bottleneck_metric_errors_counts_error_field_and_level(mock_get_clie
     assert a["pct_contribution"] == 100.0
 
 
-@patch("agentlens.cli_bottleneck.get_client")
+@patch("agentlens.cli_bottleneck.get_client_only")
 def test_cmd_bottleneck_min_sessions_filter(mock_get_client, capsys):
     sessions = [{"id": "s1"}, {"id": "s2"}]
     events = {
@@ -227,7 +227,7 @@ def test_cmd_bottleneck_min_sessions_filter(mock_get_client, capsys):
     assert keys == {"alpha"}
 
 
-@patch("agentlens.cli_bottleneck.get_client")
+@patch("agentlens.cli_bottleneck.get_client_only")
 def test_cmd_bottleneck_handles_envelope_response_shape(mock_get_client, capsys):
     """Backend may return {"sessions": [...]} or {"events": [...]} envelopes."""
     client = MagicMock()
@@ -252,7 +252,7 @@ def test_cmd_bottleneck_handles_envelope_response_shape(mock_get_client, capsys)
     assert payload[0]["events"] == 1
 
 
-@patch("agentlens.cli_bottleneck.get_client")
+@patch("agentlens.cli_bottleneck.get_client_only")
 def test_cmd_bottleneck_no_data_exits_zero(mock_get_client, capsys):
     """Empty bucket after filter is a normal/no-op exit, not an error."""
     sessions = [{"id": "s1"}]
@@ -265,7 +265,7 @@ def test_cmd_bottleneck_no_data_exits_zero(mock_get_client, capsys):
     assert "No bottleneck data" in capsys.readouterr().err
 
 
-@patch("agentlens.cli_bottleneck.get_client")
+@patch("agentlens.cli_bottleneck.get_client_only")
 def test_cmd_bottleneck_sessions_http_error_exits_one(mock_get_client, capsys):
     import httpx
 
@@ -279,7 +279,7 @@ def test_cmd_bottleneck_sessions_http_error_exits_one(mock_get_client, capsys):
     assert "Error fetching sessions" in capsys.readouterr().err
 
 
-@patch("agentlens.cli_bottleneck.get_client")
+@patch("agentlens.cli_bottleneck.get_client_only")
 def test_cmd_bottleneck_event_fetch_error_skipped_silently(mock_get_client, capsys):
     """Per-session event fetch failures must not abort the whole run."""
     import httpx
@@ -306,7 +306,7 @@ def test_cmd_bottleneck_event_fetch_error_skipped_silently(mock_get_client, caps
     assert payload[0]["key"] == "alpha"
 
 
-@patch("agentlens.cli_bottleneck.get_client")
+@patch("agentlens.cli_bottleneck.get_client_only")
 def test_cmd_bottleneck_writes_to_output_file(mock_get_client, tmp_path, capsys):
     sessions = [{"id": "s1"}]
     events = {"s1": [{"agent": "alpha", "duration_ms": 10}]}
@@ -322,7 +322,7 @@ def test_cmd_bottleneck_writes_to_output_file(mock_get_client, tmp_path, capsys)
     assert str(out_file) in capsys.readouterr().out
 
 
-@patch("agentlens.cli_bottleneck.get_client")
+@patch("agentlens.cli_bottleneck.get_client_only")
 def test_cmd_bottleneck_respects_limit(mock_get_client, capsys):
     sessions = [{"id": "s1"}]
     events = {"s1": [
@@ -336,3 +336,4 @@ def test_cmd_bottleneck_respects_limit(mock_get_client, capsys):
     # Largest two latencies are a4 (50ms) and a3 (40ms).
     assert payload[0]["key"] == "a4"
     assert payload[1]["key"] == "a3"
+

@@ -9,7 +9,7 @@ from typing import Any
 
 import httpx
 
-from agentlens.cli_common import get_client
+from agentlens.cli_common import get_client_only
 from agentlens.cognitive_bias import CognitiveBiasDetector
 
 
@@ -31,7 +31,7 @@ def register_cognitive_bias_parser(subparsers: Any) -> None:
 
 def cmd_cognitive_bias(args: argparse.Namespace) -> None:
     """Execute cognitive bias analysis."""
-    client = get_client(args)
+    client = get_client_only(args)
 
     # Fetch session
     try:

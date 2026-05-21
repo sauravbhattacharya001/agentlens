@@ -9,7 +9,7 @@ from typing import Any
 
 import httpx
 
-from agentlens.cli_common import get_client
+from agentlens.cli_common import get_client_only
 from agentlens.context_utilization import ContextUtilizationAnalyzer
 
 
@@ -31,7 +31,7 @@ def register_context_utilization_parser(subparsers: Any) -> None:
 
 def cmd_context_utilization(args: argparse.Namespace) -> None:
     """Execute context utilization analysis."""
-    client = get_client(args)
+    client = get_client_only(args)
 
     # Fetch session
     try:

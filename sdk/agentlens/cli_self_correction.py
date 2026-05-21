@@ -9,7 +9,7 @@ from typing import Any
 
 import httpx
 
-from agentlens.cli_common import get_client
+from agentlens.cli_common import get_client_only
 from agentlens.self_correction import SelfCorrectionTracker
 
 
@@ -31,7 +31,7 @@ def register_self_correction_parser(subparsers: Any) -> None:
 
 def cmd_self_correction(args: argparse.Namespace) -> None:
     """Execute self-correction analysis."""
-    client = get_client(args)
+    client = get_client_only(args)
 
     # Fetch session
     try:

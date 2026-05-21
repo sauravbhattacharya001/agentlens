@@ -20,7 +20,7 @@ from typing import Any
 
 import httpx
 
-from agentlens.cli_common import get_client, percentile as _percentile, bar_chart as _bar
+from agentlens.cli_common import get_client_only, percentile as _percentile, bar_chart as _bar
 
 
 def _severity(pct: float) -> str:
@@ -34,7 +34,7 @@ def _severity(pct: float) -> str:
 
 
 def cmd_bottleneck(args: argparse.Namespace) -> None:
-    client = get_client(args)
+    client = get_client_only(args)
     group_by: str = getattr(args, "by", "agent") or "agent"
     metric: str = getattr(args, "metric", "latency") or "latency"
     limit: int = getattr(args, "limit", 10) or 10
