@@ -38,7 +38,6 @@ from __future__ import annotations
 import copy
 import hashlib
 import json
-import math
 import re
 from collections import Counter, defaultdict
 from dataclasses import dataclass, field
@@ -625,7 +624,7 @@ class CacheabilityAdvisor:
     def to_markdown(self, report: CacheabilityReport) -> str:
         p = report.portfolio
         lines: list[str] = []
-        lines.append(f"## Summary")
+        lines.append("## Summary")
         lines.append("")
         lines.append("| Metric | Value |")
         lines.append("| --- | --- |")

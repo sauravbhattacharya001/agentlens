@@ -27,7 +27,6 @@ from __future__ import annotations
 
 import copy
 import json
-import math
 from collections import Counter, defaultdict
 from dataclasses import dataclass, field
 from datetime import datetime, timedelta, timezone
@@ -35,7 +34,6 @@ from enum import Enum
 from typing import Any, Callable, Iterable, Mapping, Optional, Sequence
 
 from agentlens.budget import estimate_cost as _estimate_cost
-from agentlens.budget import get_pricing as _get_pricing
 
 
 # --------------------------------------------------------------------------- #

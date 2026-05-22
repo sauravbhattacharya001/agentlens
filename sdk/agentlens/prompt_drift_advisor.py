@@ -23,14 +23,13 @@ from __future__ import annotations
 
 import copy
 import json
-import math
 import re
 import statistics
 from collections import Counter, defaultdict
-from dataclasses import dataclass, field
+from dataclasses import dataclass
 from datetime import datetime, timezone
 from enum import Enum
-from typing import Any, Callable, Iterable, Mapping, Optional, Sequence, Tuple
+from typing import Any, Callable, Iterable, Optional, Tuple
 
 
 # --------------------------------------------------------------------------- #
@@ -263,7 +262,7 @@ class PromptDriftReport:
 
     def to_markdown(self) -> str:
         p = self.portfolio
-        lines = [f"# Prompt Drift Report", "", f"_{p.headline}_", ""]
+        lines = ["# Prompt Drift Report", "", f"_{p.headline}_", ""]
         lines.append("## Summary")
         lines.append("")
         lines.append("| metric | value |")

@@ -15,7 +15,6 @@ from typing import Any
 import httpx
 
 from agentlens._utils import format_duration  # noqa: F401 — re-exported
-from agentlens._utils import linear_regression  # noqa: F401 — re-exported
 from agentlens._utils import percentile as _raw_percentile
 
 __all__ = [
