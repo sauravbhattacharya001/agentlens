@@ -17,7 +17,6 @@ import sys
 from datetime import datetime
 from typing import List
 
-from agentlens.cli_common import add_common_args
 from agentlens.failure_forecast import (
     FailureForecaster,
     ForecastReport,
@@ -34,7 +33,8 @@ def register(subparsers: argparse._SubParsersAction) -> None:  # type: ignore[ty
         help="Predict upcoming session failures from leading indicators",
         description="Analyzes session health metrics to forecast failures before they happen.",
     )
-    add_common_args(parser)
+    parser.add_argument("--endpoint", help="Backend URL")
+    parser.add_argument("--api-key", help="API key")
 
     sub = parser.add_subparsers(dest="ff_action")
 
