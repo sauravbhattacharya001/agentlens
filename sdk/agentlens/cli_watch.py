@@ -16,6 +16,7 @@ import argparse
 import sys
 import time
 from collections import deque
+from dataclasses import dataclass
 from datetime import datetime, timezone
 from typing import Any
 
@@ -28,6 +29,23 @@ from agentlens.cli_common import sparkline as _sparkline  # re-export for backwa
 # that referenced it directly. The actual rendering now lives in
 # ``agentlens.cli_common.sparkline`` so we have a single source of truth.
 _SPARK_CHARS = "▁▂▃▄▅▆▇█"
+
+
+@dataclass(frozen=True)
+class WatchOptions:
+    """Bundle of dashboard rendering preferences.
+
+    Pulled out of ``_render_dashboard`` so callers (and tests) don't have to
+    juggle nine positional arguments and so adding a new toggle doesn't
+    cascade through every call site.
+    """
+
+    interval: int = 5
+    show_spark: bool = True
+    compact: bool = False
+    alert_threshold: float | None = None
+    agent_filter: str | None = None
+    metric_filter: str | None = None
 
 
 def _format_cost(cost: float) -> str:
@@ -113,14 +131,16 @@ def _render_dashboard(
     snapshot: dict[str, Any],
     history: deque[dict[str, Any]],
     tick: int,
-    interval: int,
-    show_spark: bool,
-    compact: bool,
-    alert_threshold: float | None,
-    agent_filter: str | None,
-    metric_filter: str | None,
+    options: WatchOptions,
 ) -> str:
     """Render the live dashboard as a string."""
+    interval = options.interval
+    show_spark = options.show_spark
+    compact = options.compact
+    alert_threshold = options.alert_threshold
+    agent_filter = options.agent_filter
+    metric_filter = options.metric_filter
+
     lines: list[str] = []
     now = datetime.now(timezone.utc).strftime("%H:%M:%S UTC")
     elapsed = tick * interval
@@ -212,17 +232,19 @@ def _render_dashboard(
 def cmd_watch(args: argparse.Namespace) -> None:
     """Run the live watch dashboard."""
     client = _get_client(args)
-    interval = getattr(args, "interval", 5)
-    metric = getattr(args, "metric", None)
-    agent = getattr(args, "agent", None)
-    alert_threshold = getattr(args, "alert_threshold", None)
-    compact = getattr(args, "compact", False)
-    show_spark = not getattr(args, "no_spark", False)
+    options = WatchOptions(
+        interval=getattr(args, "interval", 5),
+        show_spark=not getattr(args, "no_spark", False),
+        compact=getattr(args, "compact", False),
+        alert_threshold=getattr(args, "alert_threshold", None),
+        agent_filter=getattr(args, "agent", None),
+        metric_filter=getattr(args, "metric", None),
+    )
     duration = getattr(args, "duration", None)
 
     history: deque[dict[str, Any]] = deque(maxlen=60)  # Keep last 60 readings
     tick = 0
-    max_ticks = (duration * 60 // interval) if duration else None
+    max_ticks = (duration * 60 // options.interval) if duration else None
 
     print("🔭 Starting AgentLens watch... (Ctrl+C to stop)")
 
@@ -232,10 +254,7 @@ def cmd_watch(args: argparse.Namespace) -> None:
             history.append(snapshot)
 
             _clear_screen()
-            dashboard = _render_dashboard(
-                snapshot, history, tick, interval,
-                show_spark, compact, alert_threshold, agent, metric,
-            )
+            dashboard = _render_dashboard(snapshot, history, tick, options)
             print(dashboard)
 
             tick += 1
@@ -243,9 +262,9 @@ def cmd_watch(args: argparse.Namespace) -> None:
                 print(f"\n⏱ Duration limit reached ({duration} minutes). Stopping.")
                 break
 
-            time.sleep(interval)
+            time.sleep(options.interval)
     except KeyboardInterrupt:
-        print(f"\n\n👋 Watch stopped after {tick} refreshes ({tick * interval}s)")
+        print(f"\n\n👋 Watch stopped after {tick} refreshes ({tick * options.interval}s)")
         if history:
             first, last = history[0], history[-1]
             cost_delta = last["total_cost"] - first["total_cost"]
