@@ -31,6 +31,7 @@ Pure Python, stdlib only (math, statistics, dataclasses, enum, json, collections
 
 from __future__ import annotations
 
+import heapq
 import json
 import re
 import statistics
@@ -284,7 +285,7 @@ class HallucinationReport:
             lines.append("-" * 60)
             lines.append("  SIGNAL TIMELINE (top 10)")
             lines.append("-" * 60)
-            top = sorted(self.signal_timeline, key=lambda x: -x.confidence)[:10]
+            top = heapq.nlargest(10, self.signal_timeline, key=lambda x: x.confidence)
             for s in top:
                 lines.append(
                     f"  [{s.type.value}] event {s.event_index} "

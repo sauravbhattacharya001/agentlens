@@ -33,6 +33,7 @@ Pure Python, stdlib only (math, statistics, dataclasses, enum, collections).
 
 from __future__ import annotations
 
+import heapq
 import statistics
 from collections import Counter, defaultdict
 from dataclasses import dataclass, field
@@ -262,7 +263,7 @@ class DelegationReport:
         # Delegation graph
         if self.delegation_graph:
             lines.append("── Delegation Graph ──────────────────────────────────────")
-            for edge in sorted(self.delegation_graph, key=lambda e: e.count, reverse=True)[:10]:
+            for edge in heapq.nlargest(10, self.delegation_graph, key=lambda e: e.count):
                 sr = f"{edge.success_rate * 100:.0f}%"
                 lines.append(f"  {edge.parent} → {edge.child}  [{edge.count}x, {sr} success, {edge.avg_latency_ms:.0f}ms avg]")
             lines.append("")
@@ -270,7 +271,7 @@ class DelegationReport:
         # Agent profiles
         if self.agent_profiles:
             lines.append("── Agent Profiles ────────────────────────────────────────")
-            for p in sorted(self.agent_profiles, key=lambda x: x.delegations_sent, reverse=True)[:8]:
+            for p in heapq.nlargest(8, self.agent_profiles, key=lambda x: x.delegations_sent):
                 lines.append(f"  {p.agent_id}: sent={p.delegations_sent} recv={p.delegations_received} "
                              f"ratio={p.delegation_ratio:.0%} fan-out={p.fan_out} fan-in={p.fan_in}")
             lines.append("")

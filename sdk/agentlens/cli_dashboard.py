@@ -6,6 +6,7 @@ Extracted from cli.py to keep the main CLI dispatcher lean.
 from __future__ import annotations
 
 import argparse
+import heapq
 import json
 from typing import Any
 
@@ -123,7 +124,7 @@ def _render_html(sessions: list[dict], summary: dict[str, Any], endpoint: str) -
     status_labels = json.dumps(list(status_counts.keys()))
     status_data = json.dumps(list(status_counts.values()))
 
-    top_by_cost = sorted(rows, key=lambda r: r["cost"], reverse=True)[:10]
+    top_by_cost = heapq.nlargest(10, rows, key=lambda r: r["cost"])
     top_labels = json.dumps([r["id"][:12] for r in top_by_cost])
     top_data = json.dumps([round(r["cost"], 4) for r in top_by_cost])
 

@@ -31,6 +31,7 @@ Pure Python, stdlib only (math, statistics, dataclasses, enum).
 
 from __future__ import annotations
 
+import heapq
 import json
 import math
 import statistics
@@ -183,7 +184,7 @@ class MemoryLeakReport:
 
         if self.accumulation_profiles:
             lines.append("  ┌─── Accumulation by Event Type ────────────────────────┐")
-            for prof in sorted(self.accumulation_profiles, key=lambda p: p.total_contribution, reverse=True)[:5]:
+            for prof in heapq.nlargest(5, self.accumulation_profiles, key=lambda p: p.total_contribution):
                 lines.append(f"  │ {prof.event_type:20s} {prof.total_contribution:>8,} tokens ({prof.count} events, ~{prof.avg_contribution:.0f}/ea)")
             lines.append("  └─────────────────────────────────────────────────────────┘")
             lines.append("")

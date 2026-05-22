@@ -31,6 +31,7 @@ Usage (API)::
 
 from __future__ import annotations
 
+import heapq
 import json
 from dataclasses import dataclass, field
 from datetime import datetime
@@ -386,7 +387,9 @@ class Flamegraph:
             by_type[n.event_type] = by_type.get(n.event_type, 0) + n.duration_ms
             total_tokens += n.tokens_in + n.tokens_out
 
-        slowest = sorted(all_nodes, key=lambda n: n.duration_ms, reverse=True)[:5]
+        # heapq.nlargest is O(n log k); on flamegraphs with thousands of
+        # nodes that's a notable win over the previous O(n log n) full sort.
+        slowest = heapq.nlargest(5, all_nodes, key=lambda n: n.duration_ms)
         return {
             "total_ms": round(self._total_ms, 2),
             "node_count": len(all_nodes),

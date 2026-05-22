@@ -13,6 +13,7 @@ Usage:
 from __future__ import annotations
 
 import argparse
+import heapq
 import sys
 import time
 from collections import deque
@@ -199,7 +200,7 @@ def _render_dashboard(
                 lines.append("╠══════════════════════════════════════════════════════════╣")
                 lines.append("║  Agent              Sessions   Cost       Errors        ║")
                 lines.append("║  ─────────────────── ────────── ────────── ──────        ║")
-                for agent_name, stats in sorted(filtered, key=lambda x: x[1]["cost"], reverse=True)[:10]:
+                for agent_name, stats in heapq.nlargest(10, filtered, key=lambda x: x[1]["cost"]):
                     name = agent_name[:19].ljust(19)
                     s = str(stats["sessions"]).ljust(10)
                     c = _format_cost(stats["cost"]).ljust(10)
@@ -212,7 +213,7 @@ def _render_dashboard(
             lines.append("╠══════════════════════════════════════════════════════════╣")
             lines.append("║  Model                         Cost       Tokens        ║")
             lines.append("║  ────────────────────────────── ────────── ──────        ║")
-            for model_name, stats in sorted(models.items(), key=lambda x: x[1]["cost"], reverse=True)[:5]:
+            for model_name, stats in heapq.nlargest(5, models.items(), key=lambda x: x[1]["cost"]):
                 name = model_name[:30].ljust(30)
                 c = _format_cost(stats["cost"]).ljust(10)
                 t = str(stats["tokens"]).ljust(6)
