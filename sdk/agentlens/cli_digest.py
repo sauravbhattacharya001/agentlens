@@ -13,6 +13,7 @@ Output formats: text (terminal), markdown, html, json
 from __future__ import annotations
 
 import argparse
+import heapq
 import json
 import os
 import sys
@@ -103,7 +104,7 @@ def _model_breakdown(sessions: list[dict]) -> dict[str, int]:
 def _top_sessions(sessions: list[dict], n: int = 5) -> list[dict]:
     def cost(s: dict) -> float:
         return float(s.get("cost", 0) or s.get("total_cost", 0) or 0)
-    return sorted(sessions, key=cost, reverse=True)[:n]
+    return heapq.nlargest(n, sessions, key=cost)
 
 
 def _build_digest(args: argparse.Namespace) -> dict[str, Any]:

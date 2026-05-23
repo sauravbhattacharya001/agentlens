@@ -11,6 +11,7 @@ latency percentiles, model mix, and tool usage patterns.
 from __future__ import annotations
 
 import argparse
+import heapq
 import sys
 from collections import defaultdict
 from datetime import datetime, timedelta, timezone
@@ -127,7 +128,7 @@ def cmd_profile(args: argparse.Namespace) -> None:
         "latency_p95_ms": round(_percentile(durations, 95), 1) if durations else None,
         "latency_p99_ms": round(_percentile(durations, 99), 1) if durations else None,
         "models": {m: {"calls": model_usage[m], "tokens": model_tokens[m]} for m in sorted(model_usage, key=lambda k: model_usage[k], reverse=True)},
-        "tools": {t: tool_usage[t] for t in sorted(tool_usage, key=lambda k: tool_usage[k], reverse=True)[:15]},
+        "tools": {t: tool_usage[t] for t in heapq.nlargest(15, tool_usage, key=lambda k: tool_usage[k])},
     }
 
     if output_json:

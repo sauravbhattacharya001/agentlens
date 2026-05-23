@@ -7,6 +7,7 @@ analytics commands that share the report-generation / stats-analysis theme.
 from __future__ import annotations
 
 import argparse
+import heapq
 import json
 from typing import Any
 
@@ -106,7 +107,7 @@ def cmd_report(args: argparse.Namespace) -> None:
     error_rate = (total_errors / total_events * 100) if total_events > 0 else 0
 
     # Sort agents by sessions desc
-    top_agents = sorted(agent_counts.items(), key=lambda x: x[1]["sessions"], reverse=True)[:10]
+    top_agents = heapq.nlargest(10, agent_counts.items(), key=lambda x: x[1]["sessions"])
 
     # Build report
     report: dict[str, Any] = {

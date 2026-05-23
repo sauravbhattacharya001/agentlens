@@ -34,6 +34,7 @@ from __future__ import annotations
 from dataclasses import dataclass, field
 from datetime import datetime
 from enum import Enum
+import heapq
 from typing import Any
 
 from agentlens.models import AgentEvent
@@ -280,7 +281,7 @@ class ComplexityAnalyzer:
                                     recommended_tier=tier, reasoning=self._explain(level, factors))
 
     def _explain(self, level: ComplexityLevel, factors: dict[str, float]) -> str:
-        drivers = [k for k, v in sorted(factors.items(), key=lambda x: x[1], reverse=True)[:2] if v > 0.2]
+        drivers = [k for k, v in heapq.nlargest(2, factors.items(), key=lambda x: x[1]) if v > 0.2]
         if not drivers:
             return f"{level.value} complexity — minimal resource needs"
         return f"{level.value} complexity driven by {' and '.join(d.replace('_', ' ') for d in drivers)}"

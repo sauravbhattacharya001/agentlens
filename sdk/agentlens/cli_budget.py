@@ -10,6 +10,7 @@ Subcommands:
 from __future__ import annotations
 
 import argparse
+import heapq
 import json
 import sys
 
@@ -106,7 +107,7 @@ def _budget_list(args: argparse.Namespace, client: httpx.Client) -> None:
             # Model breakdown
             breakdown = b.get("model_breakdown", {})
             if breakdown:
-                top_models = sorted(breakdown.items(), key=lambda x: x[1].get("cost", 0), reverse=True)[:3]
+                top_models = heapq.nlargest(3, breakdown.items(), key=lambda x: x[1].get("cost", 0))
                 parts = []
                 for model, info in top_models:
                     cost = info.get("cost", 0)
