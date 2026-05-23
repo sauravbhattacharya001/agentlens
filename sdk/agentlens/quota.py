@@ -55,6 +55,12 @@ from agentlens._utils import new_id as _new_id
 
 
 class QuotaScope(Enum):
+    """Scope at which a quota policy is enforced.
+
+    Determines what the ``entity_id`` on a :class:`QuotaPolicy` refers to:
+    a single agent, a model name, a team, or the whole organization.
+    """
+
     AGENT = "agent"
     MODEL = "model"
     TEAM = "team"
@@ -62,6 +68,14 @@ class QuotaScope(Enum):
 
 
 class QuotaWindow(Enum):
+    """Time window used to aggregate usage when evaluating a quota.
+
+    Fixed windows (``HOURLY``/``DAILY``/``WEEKLY``/``MONTHLY``) align to
+    calendar boundaries (top of the hour, midnight, Monday, first of the
+    month).  Rolling windows (``ROLLING_*``) are anchored to *now* and
+    slide continuously.
+    """
+
     HOURLY = "hourly"
     DAILY = "daily"
     WEEKLY = "weekly"
@@ -83,6 +97,13 @@ WINDOW_DURATIONS: dict[str, timedelta] = {
 
 
 class QuotaAction(Enum):
+    """Action taken when a quota is exceeded.
+
+    ``WARN`` allows the call but emits a warning, ``THROTTLE`` allows it
+    while marking the check as throttled (callers may slow the agent
+    down), and ``DENY`` rejects the call outright.
+    """
+
     WARN = "warn"
     THROTTLE = "throttle"
     DENY = "deny"
@@ -90,6 +111,13 @@ class QuotaAction(Enum):
 
 @dataclass
 class UsageRecord:
+    """A single recorded usage event (tokens + cost) for an entity.
+
+    Created internally by :meth:`QuotaManager.record_usage` and stored on
+    both the global record list and per-entity / per-pool indexes so
+    window aggregations stay O(log n) per lookup.
+    """
+
     record_id: str = field(default_factory=_new_id)
     timestamp: datetime = field(default_factory=lambda: datetime.now(timezone.utc))
     entity_id: str = ""
@@ -101,6 +129,15 @@ class UsageRecord:
 
 @dataclass
 class QuotaPolicy:
+    """Declarative quota for a single entity (agent / model / team / org).
+
+    A policy bundles together the limits (``max_tokens``, ``max_cost_usd``,
+    ``max_requests``), the :class:`QuotaWindow` they apply to, a
+    ``burst_multiplier`` allowance, a ``warn_at`` threshold, and the
+    :class:`QuotaAction` to take on breach.  Stored on
+    :class:`QuotaManager` and looked up by ``entity_id``.
+    """
+
     quota_id: str = field(default_factory=_new_id)
     entity_id: str = ""
     scope: QuotaScope = QuotaScope.AGENT
@@ -118,6 +155,14 @@ class QuotaPolicy:
 
 @dataclass
 class QuotaCheck:
+    """Result of a quota evaluation for one call.
+
+    Carries the allow/deny decision, a human-readable ``reason``, current
+    utilisation ratios, remaining headroom on each axis, and flags for
+    burst-mode or shared-pool borrowing.  Returned by
+    :meth:`QuotaManager.record_usage` and :meth:`QuotaManager.check_usage`.
+    """
+
     allowed: bool = True
     reason: str = ""
     utilization_tokens: float = 0.0
@@ -133,6 +178,14 @@ class QuotaCheck:
 
 @dataclass
 class QuotaReport:
+    """Snapshot report for one entity's quota in the current window.
+
+    Aggregates tokens / cost / requests used vs. configured limits, the
+    resulting status (``ok`` / ``warning`` / ``exceeded`` / ``disabled``),
+    burst usage, and the top-N models and sessions contributing to the
+    spend.  Returned by :meth:`QuotaManager.report`.
+    """
+
     entity_id: str = ""
     scope: str = ""
     window: str = ""
@@ -155,6 +208,12 @@ class QuotaReport:
     top_sessions: list[dict[str, Any]] = field(default_factory=list)
 
     def render(self) -> str:
+        """Render a human-readable, terminal-friendly report.
+
+        Returns a multi-line string with utilisation bars for each
+        configured limit, burst/warning indicators, and the top models
+        list (suitable for printing in CLI output).
+        """
         lines = [
             f"═══ Quota Report: {self.entity_id} ({self.scope}) ═══",
             f"Window: {self.window}  |  Status: {self.status.upper()}",
@@ -187,6 +246,14 @@ class QuotaReport:
 
 @dataclass
 class SharedPool:
+    """A pool of borrowable tokens shared between multiple entities.
+
+    When a member entity exceeds its individual :class:`QuotaPolicy`,
+    :meth:`QuotaManager.record_usage` may transparently borrow from the
+    pool (up to ``pool_tokens`` per ``window``) instead of denying the
+    call outright.  Useful for absorbing transient bursts across a team.
+    """
+
     pool_id: str = field(default_factory=_new_id)
     name: str = ""
     members: list[str] = field(default_factory=list)
@@ -199,6 +266,13 @@ class SharedPool:
 
 @dataclass
 class FleetReport:
+    """Aggregate view of every quota-managed entity in the fleet.
+
+    Combines per-entity :class:`QuotaReport` summaries with shared-pool
+    utilisation so operators can spot fleet-wide pressure at a glance.
+    Returned by :meth:`QuotaManager.fleet_report`.
+    """
+
     total_entities: int = 0
     total_tokens: int = 0
     total_cost: float = 0.0
@@ -211,6 +285,11 @@ class FleetReport:
     generated_at: datetime = field(default_factory=lambda: datetime.now(timezone.utc))
 
     def render(self) -> str:
+        """Render the fleet report as a human-readable terminal string.
+
+        Sorts entities by token utilisation (highest first) so noisy
+        neighbours and exceeded quotas surface at the top.
+        """
         lines = [
             "╔══════════════════════════════════════════╗",
             "║        Fleet Quota Report                ║",
@@ -232,6 +311,11 @@ class FleetReport:
 
 
 def _bar(ratio: float, width: int = 20) -> str:
+    """Render a unicode progress bar for *ratio* (0.0..1.0+).
+
+    Values above ``1.0`` clamp to a fully-filled bar.  Used by the report
+    renderers above for terminal-friendly utilisation indicators.
+    """
     filled = int(min(ratio, 1.0) * width)
     return "█" * filled + "░" * (width - filled)
 
@@ -240,6 +324,13 @@ class QuotaManager:
     """Manages usage quotas across agents, models, and teams."""
 
     def __init__(self, *, now_fn=None):
+        """Build an empty quota manager.
+
+        Args:
+            now_fn: Optional callable returning the current timezone-aware
+                ``datetime``.  Defaults to ``datetime.now(timezone.utc)``;
+                tests inject a deterministic clock here.
+        """
         self._policies: dict[str, QuotaPolicy] = {}
         self._records: list[UsageRecord] = []
         # Per-entity index for O(entity_records) lookups instead of
@@ -261,6 +352,14 @@ class QuotaManager:
                      burst_multiplier: float = 1.0, warn_at: float = 0.8,
                      action_on_exceed: str = "deny", metadata: Optional[dict] = None,
                      **kwargs) -> QuotaPolicy:
+        """Register a new :class:`QuotaPolicy` for *entity_id*.
+
+        Any combination of ``max_tokens`` / ``max_cost_usd`` /
+        ``max_requests`` may be set; ``None`` means no limit on that axis.
+        Overwrites any existing policy with the same ``entity_id``.
+        Extra ``**kwargs`` are ignored so callers can forward dicts from
+        :meth:`import_state` without filtering.
+        """
         policy = QuotaPolicy(
             entity_id=entity_id, scope=QuotaScope(scope),
             max_tokens=max_tokens, max_cost_usd=max_cost_usd,
@@ -273,9 +372,17 @@ class QuotaManager:
         return policy
 
     def get_quota(self, entity_id: str) -> Optional[QuotaPolicy]:
+        """Return the :class:`QuotaPolicy` for *entity_id*, or ``None``."""
         return self._policies.get(entity_id)
 
     def update_quota(self, entity_id: str, **kwargs) -> QuotaPolicy:
+        """Patch fields on an existing policy in place.
+
+        Pass any subset of policy fields as keyword arguments; string
+        values for ``scope`` / ``window`` / ``action_on_exceed`` are
+        coerced to the matching enum.  Raises :class:`KeyError` when no
+        policy exists for *entity_id*.
+        """
         policy = self._policies.get(entity_id)
         if not policy:
             raise KeyError(f"No quota for '{entity_id}'")
@@ -288,9 +395,11 @@ class QuotaManager:
         return policy
 
     def delete_quota(self, entity_id: str) -> bool:
+        """Remove the policy for *entity_id*.  Returns ``True`` if removed."""
         return self._policies.pop(entity_id, None) is not None
 
     def list_quotas(self, *, scope: Optional[str] = None) -> list[QuotaPolicy]:
+        """Return all registered policies, optionally filtered by *scope*."""
         policies = list(self._policies.values())
         if scope:
             s = QuotaScope(scope)
@@ -298,34 +407,46 @@ class QuotaManager:
         return policies
 
     def disable_quota(self, entity_id: str) -> None:
+        """Mark *entity_id*'s policy as disabled (no enforcement, usage still tracked)."""
         if entity_id in self._policies:
             self._policies[entity_id].enabled = False
 
     def enable_quota(self, entity_id: str) -> None:
+        """Re-enable a previously disabled policy for *entity_id*."""
         if entity_id in self._policies:
             self._policies[entity_id].enabled = True
 
     def create_pool(self, name: str, *, members: list[str], pool_tokens: int = 0,
                     pool_cost_usd: float = 0.0, window: str = "daily") -> SharedPool:
+        """Create a :class:`SharedPool` of borrowable tokens.
+
+        ``members`` is the list of ``entity_id`` values eligible to draw
+        from this pool when their individual quota is exhausted.
+        Overwrites any pool with the same ``name``.
+        """
         pool = SharedPool(name=name, members=list(members), pool_tokens=pool_tokens,
                           pool_cost_usd=pool_cost_usd, window=QuotaWindow(window))
         self._pools[name] = pool
         return pool
 
     def get_pool(self, name: str) -> Optional[SharedPool]:
+        """Return the shared pool named *name*, or ``None`` if absent."""
         return self._pools.get(name)
 
     def add_pool_member(self, pool_name: str, entity_id: str) -> None:
+        """Add *entity_id* to the pool's member list (no-op if already a member)."""
         pool = self._pools.get(pool_name)
         if pool and entity_id not in pool.members:
             pool.members.append(entity_id)
 
     def remove_pool_member(self, pool_name: str, entity_id: str) -> None:
+        """Remove *entity_id* from the pool's member list (no-op if absent)."""
         pool = self._pools.get(pool_name)
         if pool and entity_id in pool.members:
             pool.members.remove(entity_id)
 
     def delete_pool(self, name: str) -> bool:
+        """Delete the pool named *name* (and its usage history).  Returns ``True`` if removed."""
         self._pool_usage.pop(name, None)
         return self._pools.pop(name, None) is not None
 
@@ -368,6 +489,14 @@ class QuotaManager:
 
     def record_usage(self, entity_id: str, *, tokens: int = 0, cost_usd: float = 0.0,
                      model: str = "", session_id: str = "") -> QuotaCheck:
+        """Record a usage event for *entity_id* and evaluate quota state.
+
+        Always appends the usage to history (even when no policy exists
+        or the policy is disabled).  Returns a :class:`QuotaCheck`
+        describing whether the call should be allowed, current
+        utilisation on each axis, any warnings, and whether the entity
+        is in burst mode or borrowed from a shared pool.
+        """
         now = self._now_fn()
         record = UsageRecord(timestamp=now, entity_id=entity_id, tokens=tokens,
                              cost_usd=cost_usd, model=model, session_id=session_id)
@@ -486,9 +615,21 @@ class QuotaManager:
         return check
 
     def on_check(self, callback) -> None:
+        """Register a callback invoked as ``callback(entity_id, QuotaCheck)``
+        after every :meth:`record_usage`.
+
+        Useful for emitting metrics, audit logs, or wiring up alerting.
+        """
         self._callbacks.append(callback)
 
     def report(self, entity_id: str) -> QuotaReport:
+        """Build a :class:`QuotaReport` for *entity_id* in its current window.
+
+        Returns a sentinel report with ``status='no_quota'`` when no
+        policy exists.  Otherwise aggregates window usage, computes
+        utilisation / status, and includes the top contributing models
+        and sessions.
+        """
         policy = self._policies.get(entity_id)
         now = self._now_fn()
         if not policy:
@@ -557,6 +698,11 @@ class QuotaManager:
         )
 
     def fleet_report(self) -> FleetReport:
+        """Build a :class:`FleetReport` covering every registered policy.
+
+        Aggregates per-entity reports plus shared-pool utilisation in
+        the current window.  O(n) in the number of policies + pools.
+        """
         reports = [self.report(eid) for eid in self._policies]
         now = self._now_fn()
         pool_reports = []
@@ -580,6 +726,11 @@ class QuotaManager:
         )
 
     def reset_usage(self, entity_id: str) -> int:
+        """Drop all stored usage for *entity_id*; returns the count removed.
+
+        Leaves the policy itself intact — only the historical records
+        and the per-entity indexes are wiped.
+        """
         removed = self._entity_records.pop(entity_id, [])
         self._entity_timestamps.pop(entity_id, None)
         count = len(removed)
@@ -590,6 +741,12 @@ class QuotaManager:
         return count
 
     def export_state(self) -> dict[str, Any]:
+        """Serialise quotas and pools to a plain-dict snapshot.
+
+        Records are *not* exported — only the configuration.  The
+        ``records_count`` field is included for diagnostics.  Pair with
+        :meth:`import_state` to rehydrate a fresh manager.
+        """
         return {
             "quotas": {
                 eid: {"scope": p.scope.value, "max_tokens": p.max_tokens,
@@ -608,12 +765,23 @@ class QuotaManager:
         }
 
     def import_state(self, state: dict[str, Any]) -> None:
+        """Rehydrate quotas and pools from an :meth:`export_state` dict.
+
+        Existing policies / pools with the same key are overwritten.
+        Historical usage records are not restored.
+        """
         for eid, cfg in state.get("quotas", {}).items():
             self.create_quota(eid, **cfg)
         for name, pcfg in state.get("pools", {}).items():
             self.create_pool(name, **pcfg)
 
     def _window_bounds(self, window: QuotaWindow, now: datetime) -> tuple[datetime, datetime]:
+        """Return the ``(start, end)`` bounds of *window* at instant *now*.
+
+        Fixed windows snap to the start of the hour/day/week/month and
+        extend one window-duration forward.  Rolling windows return
+        ``(now - duration, now)``.
+        """
         if window in (QuotaWindow.ROLLING_1H, QuotaWindow.ROLLING_24H, QuotaWindow.ROLLING_7D):
             duration = WINDOW_DURATIONS[window.value]
             return (now - duration, now)
@@ -652,6 +820,13 @@ class QuotaManager:
         return total
 
     def _try_pool_borrow(self, entity_id: str, tokens: int, now: datetime) -> int:
+        """Attempt to borrow *tokens* from any enabled shared pool that
+        lists *entity_id* as a member.
+
+        Returns the number of tokens actually borrowed (0 if no pool has
+        the headroom).  On success the borrow is recorded against the
+        pool so subsequent calls in the same window see reduced capacity.
+        """
         for pool in self._pools.values():
             if not pool.enabled or entity_id not in pool.members:
                 continue

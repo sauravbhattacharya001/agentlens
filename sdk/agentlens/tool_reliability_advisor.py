@@ -29,6 +29,8 @@ from datetime import datetime, timedelta, timezone
 from enum import Enum
 from typing import Any, Callable, Iterable, Optional
 
+from agentlens._utils import percentile as _percentile_impl
+
 
 # --------------------------------------------------------------------------- #
 # Enums
@@ -362,17 +364,24 @@ def _parse_ts(value: Any) -> Optional[datetime]:
 
 
 def _percentile(values: list[float], pct: float) -> float:
+    """Linear-interpolation percentile via the shared ``_utils.percentile``.
+
+    Thin compatibility wrapper around :func:`agentlens._utils.percentile`
+    so this module keeps its historical ``(unsorted_values, pct)`` calling
+    convention while delegating the actual interpolation to the SDK-wide
+    helper.  Eliminates the per-module copy of the percentile formula that
+    used to drift across advisors.
+
+    Args:
+        values: Unsorted numeric samples.
+        pct: Percentile to compute, expressed on the 0..100 scale.
+
+    Returns:
+        The interpolated percentile as a ``float`` (``0.0`` for empty input).
+    """
     if not values:
         return 0.0
-    if len(values) == 1:
-        return float(values[0])
-    s = sorted(values)
-    k = (len(s) - 1) * (pct / 100.0)
-    f = int(k)
-    c = min(f + 1, len(s) - 1)
-    if f == c:
-        return float(s[f])
-    return float(s[f] + (s[c] - s[f]) * (k - f))
+    return float(_percentile_impl(sorted(values), pct))
 
 
 # --------------------------------------------------------------------------- #
