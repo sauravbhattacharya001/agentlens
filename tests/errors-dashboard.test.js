@@ -7,6 +7,7 @@
 
 const fs = require("fs");
 const path = require("path");
+const { describe, test, expect } = require("./_jest-compat");
 
 const html = fs.readFileSync(
   path.join(__dirname, "..", "dashboard", "errors.html"),
