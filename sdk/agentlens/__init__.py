@@ -109,6 +109,16 @@ from agentlens.eval_regression_advisor import (
     ActionPriority as EvalRegressionPriority,
     RiskAppetite as EvalRegressionRiskAppetite,
 )
+from agentlens.advisor_orchestrator import (
+    AdvisorOrchestrator,
+    OrchestratorReport,
+    AdvisorResult as OrchestratorAdvisorResult,
+    CrossCorrelation,
+    OrchestratorPlaybookAction,
+    OrchestratorGrade,
+    OrchestratorRiskAppetite,
+    CorrelationType,
+)
 from agentlens.data_leak_advisor import (
     DataLeakAdvisor,
     DataLeakReport,
