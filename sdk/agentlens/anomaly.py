@@ -276,6 +276,10 @@ class AnomalyDetector:
         self._samples: dict[str, list[float]] = {}  # metric_name -> list of values
         self._baseline_cache: dict[str, MetricBaseline] = {}
         self._sample_lengths: dict[str, int] = {}  # track lengths for cache invalidation
+        # Welford online stats: (count, mean, M2) per metric for O(1) baseline
+        self._welford: dict[str, tuple[int, float, float]] = {}
+        # Track min/max per metric incrementally
+        self._extremes: dict[str, tuple[float, float]] = {}  # (min, max)
 
     @property
     def sample_count(self) -> int:
@@ -301,12 +305,28 @@ class AnomalyDetector:
             metrics: dict mapping metric names to float values.
                      Unknown metrics are accepted (extensible).
 
-        Invalidates cached baselines for any metric that receives new data.
+        Updates Welford running statistics incrementally (O(1) per metric)
+        and invalidates cached baselines for any metric that receives new data.
         """
         for name, value in metrics.items():
             if not isinstance(value, (int, float)):
                 continue
-            self._samples.setdefault(name, []).append(float(value))
+            fval = float(value)
+            self._samples.setdefault(name, []).append(fval)
+            # Update Welford online statistics — O(1) per sample
+            if name in self._welford:
+                count, mean, m2 = self._welford[name]
+                count += 1
+                delta = fval - mean
+                mean += delta / count
+                delta2 = fval - mean
+                m2 += delta * delta2
+                self._welford[name] = (count, mean, m2)
+                mn, mx = self._extremes[name]
+                self._extremes[name] = (min(mn, fval), max(mx, fval))
+            else:
+                self._welford[name] = (1, fval, 0.0)
+                self._extremes[name] = (fval, fval)
             # Invalidate cache for this metric (length changed)
             self._baseline_cache.pop(name, None)
 
@@ -322,18 +342,34 @@ class AnomalyDetector:
     def get_baseline(self, metric_name: str) -> MetricBaseline | None:
         """Get the statistical baseline for a specific metric.
 
-        Uses a cache keyed by metric name, invalidated when new samples are
-        added via ``add_sample``. This avoids recomputing mean/std_dev on
-        every call — significant when analyzing many sessions against the
-        same baseline.
+        Uses Welford's online algorithm for O(1) baseline retrieval.
+        The running mean and variance are updated incrementally in
+        ``add_sample``, so this method never needs to iterate over all
+        historical samples — a significant win when the sample count is
+        large (thousands of sessions).
         """
-        values = self._samples.get(metric_name)
-        if not values or len(values) < self.config.min_samples:
+        welford = self._welford.get(metric_name)
+        if welford is None:
+            return None
+        count, mean, m2 = welford
+        if count < self.config.min_samples:
             return None
         cached = self._baseline_cache.get(metric_name)
-        if cached is not None:
+        if cached is not None and cached.sample_count == count:
             return cached
-        baseline = self._compute_baseline(metric_name, values)
+        # Compute baseline from Welford state — O(1)
+        # Use Bessel's correction (n-1) for sample variance
+        variance = m2 / (count - 1) if count > 1 else 0.0
+        std_dev = math.sqrt(variance)
+        mn, mx = self._extremes[metric_name]
+        baseline = MetricBaseline(
+            name=metric_name,
+            mean=mean,
+            std_dev=std_dev,
+            min_val=mn,
+            max_val=mx,
+            sample_count=count,
+        )
         self._baseline_cache[metric_name] = baseline
         return baseline
 
@@ -440,6 +476,8 @@ class AnomalyDetector:
         """Clear all baseline data."""
         self._samples.clear()
         self._baseline_cache.clear()
+        self._welford.clear()
+        self._extremes.clear()
 
     @staticmethod
     def extract_metrics(session) -> dict[str, float]:
