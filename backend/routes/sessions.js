@@ -6,6 +6,7 @@ const { computeSessionMetrics, computeDeltas } = require("../lib/session-metrics
 const { getTagStatements } = require("../lib/tag-statements");
 const { parsePagination, requireSessionId, wrapRoute } = require("../lib/request-helpers");
 const { toExportEvent, eventToCsvRow, buildJsonExport, ndjsonSessionLine, CSV_HEADERS } = require("../lib/csv-export");
+const { buildPdfExport } = require("../lib/pdf-export");
 const { createLazyStatements } = require("../lib/lazy-statements");
 const { createStatementCache } = require("../lib/statement-cache");
 
@@ -380,8 +381,8 @@ router.get("/:id/export", requireSessionId, wrapRoute("export session", (req, re
   const { id } = req.params;
   const format = (req.query.format || "json").toLowerCase();
 
-  if (format !== "json" && format !== "csv" && format !== "ndjson") {
-    return res.status(400).json({ error: "Invalid format. Use 'json', 'csv', or 'ndjson'." });
+  if (format !== "json" && format !== "csv" && format !== "ndjson" && format !== "pdf") {
+    return res.status(400).json({ error: "Invalid format. Use 'json', 'csv', 'ndjson', or 'pdf'." });
   }
 
   const session = fetchSessionOrFail(id, res);
@@ -426,9 +427,18 @@ router.get("/:id/export", requireSessionId, wrapRoute("export session", (req, re
     return res.end();
   }
 
-  // JSON format needs all events in memory for transformation
+  // JSON and PDF formats need all events in memory for transformation
   const events = stmts.eventsBySession.all(id);
   const parsedEvents = events.map(e => toExportEvent(e, parseEventRow));
+
+  if (format === "pdf") {
+    const pdfBuffer = buildPdfExport(session, parsedEvents);
+    const filename = `agentlens-${sanitizeFilename(session.agent_name)}-${id.slice(0, 8)}.pdf`;
+    res.setHeader("Content-Disposition", `attachment; filename="${filename}"`);
+    res.setHeader("Content-Type", "application/pdf");
+    res.setHeader("Content-Length", pdfBuffer.length);
+    return res.end(pdfBuffer);
+  }
 
   if (format === "json") {
     const exportData = buildJsonExport(session, parsedEvents);
