@@ -117,6 +117,7 @@ from agentlens.cli_tool_usage import register_tool_usage_parser  # tool usage pr
 from agentlens.cli_hallucination import register_hallucination_parser  # hallucination detection
 from agentlens.cli_reward_hacking import register_reward_hacking_parser  # reward hacking detection
 from agentlens.cli_delegation import register_delegation_parser  # delegation analysis
+from agentlens.cli_drift import register_drift_parser  # behavioral drift detection
 
 
 def _print_table(rows: list[dict], columns: list[str], *, max_width: int = 40) -> None:
@@ -954,6 +955,9 @@ def main() -> None:
 
     # -- delegation --
     register_delegation_parser(sub)
+
+    # -- drift --
+    register_drift_parser(sub)
 
     # -- forecast --
     p = sub.add_parser("forecast", help="Predict future costs/usage from historical trends")
