@@ -146,6 +146,20 @@ from agentlens.tool_reliability_advisor import (
     ActionPriority as ToolReliabilityPriority,
     RiskAppetite as ToolReliabilityRiskAppetite,
 )
+from agentlens.tool_dependency_advisor import (
+    ToolDependencyAdvisor,
+    DependencyReport,
+    ToolNode as DependencyToolNode,
+    DependencyEdge,
+    CycleInfo,
+    ChainInfo,
+    DependencyVerdict,
+    DependencyIssueCode,
+    DependencyGrade,
+    PlaybookAction as DependencyPlaybookAction,
+    ActionPriority as DependencyPriority,
+    RiskAppetite as DependencyRiskAppetite,
+)
 from agentlens.evaluation import ResponseEvaluator, EvaluatorConfig, QualityReport, QualityTrend, QualityGrade, DimensionScore
 from agentlens.postmortem import PostmortemGenerator, PostmortemConfig, PostmortemReport, Severity as PostmortemSeverity, RootCause, ImpactAssessment, Remediation, RemediationCategory, LessonLearned, TimelineEntry, IncidentPhase
 from agentlens.rate_limiter import RateLimiter, RateLimit, RateLimitAction, RateLimitPolicy, CheckResult, RateLimitReport, WindowStats, openai_tier1_policy, anthropic_tier1_policy, conservative_policy
