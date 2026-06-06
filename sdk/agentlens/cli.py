@@ -118,6 +118,7 @@ from agentlens.cli_hallucination import register_hallucination_parser  # halluci
 from agentlens.cli_reward_hacking import register_reward_hacking_parser  # reward hacking detection
 from agentlens.cli_delegation import register_delegation_parser  # delegation analysis
 from agentlens.cli_drift import register_drift_parser  # behavioral drift detection
+from agentlens.cli_tool_reliability import cmd_tool_reliability, register as register_tool_reliability_parser  # tool reliability scorecard
 
 
 def _print_table(rows: list[dict], columns: list[str], *, max_width: int = 40) -> None:
@@ -959,6 +960,9 @@ def main() -> None:
     # -- drift --
     register_drift_parser(sub)
 
+    # -- tool-reliability --
+    register_tool_reliability_parser(sub)
+
     # -- forecast --
     p = sub.add_parser("forecast", help="Predict future costs/usage from historical trends")
     p.add_argument("--days", type=int, default=7, help="Number of days to forecast (default: 7)")
@@ -1028,6 +1032,7 @@ def main() -> None:
         "bottleneck": cmd_bottleneck,
         "triage": cmd_triage,
         "autopsy": cmd_autopsy,
+        "tool-reliability": cmd_tool_reliability,
     }
     commands[args.command](args)
 
