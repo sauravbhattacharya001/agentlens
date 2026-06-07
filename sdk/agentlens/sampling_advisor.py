@@ -56,6 +56,21 @@ from datetime import datetime, timezone
 from typing import Any
 from collections.abc import Iterable, Sequence
 
+from agentlens._utils import parse_iso_or_epoch as _parse_ts_raw, percentile as _percentile_impl
+
+
+def _to_dt(value: Any) -> datetime | None:
+    """Parse a timestamp value into a timezone-aware datetime.
+
+    Delegates to :func:`agentlens._utils.parse_iso_or_epoch` but ensures
+    naive ``datetime`` objects are stamped UTC to match this module's
+    historical contract.
+    """
+    dt = _parse_ts_raw(value)
+    if dt is not None and dt.tzinfo is None:
+        return dt.replace(tzinfo=timezone.utc)
+    return dt
+
 
 # ---------------------------------------------------------------------------
 # Data classes
@@ -196,34 +211,16 @@ def _get(obj: Any, name: str, default: Any = None) -> Any:
 
 
 def _percentile(values: Sequence[float], pct: float) -> float:
+    """Compute a percentile of unsorted values (fractional 0..1 scale).
+
+    Thin wrapper around :func:`agentlens._utils.percentile` that preserves
+    the 0..1 calling convention used by this module while delegating the
+    actual interpolation to the SDK-wide helper.
+    """
     if not values:
         return 0.0
-    if len(values) == 1:
-        return float(values[0])
-    s = sorted(values)
-    k = (len(s) - 1) * pct
-    f = math.floor(k)
-    c = math.ceil(k)
-    if f == c:
-        return float(s[int(k)])
-    return float(s[f] + (s[c] - s[f]) * (k - f))
+    return float(_percentile_impl(sorted(values), pct * 100.0))
 
-
-def _to_dt(value: Any) -> datetime | None:
-    if value is None:
-        return None
-    if isinstance(value, datetime):
-        return value if value.tzinfo else value.replace(tzinfo=timezone.utc)
-    if isinstance(value, (int, float)):
-        return datetime.fromtimestamp(float(value), tz=timezone.utc)
-    if isinstance(value, str):
-        try:
-            v = value.replace("Z", "+00:00")
-            dt = datetime.fromisoformat(v)
-            return dt if dt.tzinfo else dt.replace(tzinfo=timezone.utc)
-        except ValueError:
-            return None
-    return None
 
 
 # ---------------------------------------------------------------------------

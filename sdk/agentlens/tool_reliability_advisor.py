@@ -29,7 +29,20 @@ from datetime import datetime, timedelta, timezone
 from enum import Enum
 from typing import Any, Callable, Iterable, Optional
 
-from agentlens._utils import percentile as _percentile_impl
+from agentlens._utils import percentile as _percentile_impl, parse_iso_or_epoch as _parse_ts_raw
+
+
+def _parse_ts(value: Any) -> Optional[datetime]:
+    """Parse a timestamp value into a timezone-aware datetime.
+
+    Delegates to :func:`agentlens._utils.parse_iso_or_epoch` but ensures
+    naive ``datetime`` objects are stamped UTC to match this module's
+    historical contract.
+    """
+    dt = _parse_ts_raw(value)
+    if dt is not None and dt.tzinfo is None:
+        return dt.replace(tzinfo=timezone.utc)
+    return dt
 
 
 # --------------------------------------------------------------------------- #
@@ -345,22 +358,6 @@ def _coerce_event(ev: Any) -> dict[str, Any]:
             out[attr] = getattr(ev, attr)
     return out
 
-
-def _parse_ts(value: Any) -> Optional[datetime]:
-    if value is None:
-        return None
-    if isinstance(value, datetime):
-        return value if value.tzinfo else value.replace(tzinfo=timezone.utc)
-    if isinstance(value, (int, float)):
-        return datetime.fromtimestamp(value, tz=timezone.utc)
-    if isinstance(value, str):
-        try:
-            v = value.replace("Z", "+00:00")
-            d = datetime.fromisoformat(v)
-            return d if d.tzinfo else d.replace(tzinfo=timezone.utc)
-        except Exception:
-            return None
-    return None
 
 
 def _percentile(values: list[float], pct: float) -> float:

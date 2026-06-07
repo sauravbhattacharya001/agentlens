@@ -53,6 +53,7 @@ from datetime import datetime, timezone
 from enum import Enum
 from typing import Any, Callable, Iterable, Mapping, Optional, Sequence
 
+from agentlens._utils import percentile as _percentile_impl
 from agentlens.budget import get_pricing as _get_pricing
 
 
@@ -332,15 +333,18 @@ def _ev_ts(ev: Mapping[str, Any]) -> Optional[datetime]:
 
 
 def _percentile(sorted_values: Sequence[float], pct: float) -> Optional[float]:
+    """Compute a percentile of pre-sorted values (fractional 0..1 scale).
+
+    Thin wrapper around :func:`agentlens._utils.percentile` that preserves
+    the 0..1 calling convention used by this module while delegating the
+    actual interpolation to the SDK-wide helper.
+
+    Returns ``None`` for empty input to maintain backward compatibility
+    with callers that check for ``None``.
+    """
     if not sorted_values:
         return None
-    if len(sorted_values) == 1:
-        return float(sorted_values[0])
-    k = (len(sorted_values) - 1) * pct
-    lo = int(k)
-    hi = min(lo + 1, len(sorted_values) - 1)
-    frac = k - lo
-    return float(sorted_values[lo] + (sorted_values[hi] - sorted_values[lo]) * frac)
+    return float(_percentile_impl(sorted_values, pct * 100.0))
 
 
 def _cost_per_call(model: str, tokens_in: float, tokens_out: float) -> float:
