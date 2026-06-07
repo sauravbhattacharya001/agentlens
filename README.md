@@ -711,6 +711,10 @@ cd sdk && pytest
 
 ## 🚦 Direction
 
+**Research-time safety ≠ Production-time safety.**
+
+AI safety research (interpretability, RLHF, Constitutional AI) happens during model development. But once a model ships and agents run autonomously in CI pipelines, code reviews, and customer workflows — who's watching? The research team hands off a safe model. AgentLens ensures it *stays* safe at runtime — continuous behavioral observability for agents in production.
+
 AgentLens currently captures what agents *do* — tool calls, decisions, costs, timelines. The next frontier is capturing what agents *should have done differently*.
 
 Research like Anthropic's [circuit tracing](https://transformer-circuits.pub/2025/attribution-graphs/biology.html) shows that failure modes (hallucination, drift, confabulation) have structural signatures inside models. While we can't access model internals at runtime, we *can* detect the **output-level fingerprints** of those same failure circuits:
