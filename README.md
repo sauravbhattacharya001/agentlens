@@ -709,6 +709,21 @@ cd sdk && pip install -e ".[dev]"
 cd sdk && pytest
 ```
 
+## 🚦 Direction
+
+AgentLens currently captures what agents *do* — tool calls, decisions, costs, timelines. The next frontier is capturing what agents *should have done differently*.
+
+Research like Anthropic's [circuit tracing](https://transformer-circuits.pub/2025/attribution-graphs/biology.html) shows that failure modes (hallucination, drift, confabulation) have structural signatures inside models. While we can't access model internals at runtime, we *can* detect the **output-level fingerprints** of those same failure circuits:
+
+- **Confidence without grounding** — agent makes factual claims with no hedging, but the claims have no basis in the provided context
+- **Attribution gaps** — output references things that don't exist in the input, indicating confabulation circuits fired
+- **Reasoning trace inconsistency** — stated chain-of-thought doesn't logically lead to the conclusion
+- **Behavioral drift from baseline** — agent's decision patterns shift over time without task changes
+
+AgentLens is moving toward **observability as detection infrastructure** — not just "what happened" but "does what happened look like a known failure mode?" The goal: every traced session automatically flags output-level symptoms of the internal pathologies that interpretability research has identified.
+
+This positions AgentLens as the **externally-observable detection layer** — the badge reader the agent can't rewrite. The evidence lives outside the agent's control surface, making it unforgeable.
+
 ## 📄 License
 
 MIT — see [LICENSE](LICENSE) for details.
