@@ -1,5 +1,7 @@
 """Tests for the RetryTracker module."""
 
+from __future__ import annotations
+
 import pytest
 from agentlens.retry_tracker import (
     RetryChain,

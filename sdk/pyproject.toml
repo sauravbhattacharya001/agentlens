@@ -4,7 +4,7 @@ build-backend = "setuptools.build_meta"
 
 [project]
 name = "agentlens"
-version = "1.64.0"
+version = "1.65.0"
 description = "Observability and Explainability for AI Agents"
 readme = "README.md"
 license = {text = "MIT"}
@@ -37,6 +37,10 @@ classifiers = [
 dependencies = [
     "pydantic>=2.13.4",
     "httpx>=0.28.1",
+    # Pydantic evaluates PEP 604 (``X | None``) / PEP 585 (``dict[...]``) annotations
+    # at model-build time. On Python < 3.10 those operators are not supported at
+    # runtime, so Pydantic needs this backport to resolve the model field types.
+    "eval_type_backport>=0.2.0; python_version < '3.10'",
 ]
 
 [project.urls]

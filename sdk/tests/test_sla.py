@@ -1,5 +1,7 @@
 """Tests for the SLA Monitor module."""
 
+from __future__ import annotations
+
 import math
 import pytest
 from agentlens.sla import (

@@ -1,5 +1,10 @@
 """AgentLens — Observability and Explainability for AI Agents."""
 
+# PEP 563: defer annotation evaluation so module-level annotations using PEP 604
+# union syntax (e.g. ``AgentTracker | None``) do not crash at import time on
+# Python 3.9, where ``type | None`` raises ``TypeError`` at runtime.
+from __future__ import annotations
+
 from agentlens.models import AgentEvent, ToolCall, DecisionTrace, Session
 from agentlens.tracker import AgentTracker
 from agentlens.decorators import track_agent, track_tool_call
@@ -201,7 +206,7 @@ from agentlens.model_migration_advisor import (
     PlaybookAction as MigrationPlaybookAction,
 )
 
-__version__ = "1.64.0"
+__version__ = "1.65.0"
 __all__ = [
     "init",
     "start_session",

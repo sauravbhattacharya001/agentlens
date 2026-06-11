@@ -1,4 +1,6 @@
-"""Tests for agentlens.drift — behavioral drift detection."""
+"""Tests for agentlens.drift - behavioral drift detection."""
+
+from __future__ import annotations
 
 import json
 import math

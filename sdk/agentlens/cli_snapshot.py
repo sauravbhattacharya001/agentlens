@@ -31,7 +31,7 @@ def _safe_get(client: httpx.Client, path: str, params: dict | None = None) -> An
 
 def _capture_snapshot(client: httpx.Client, limit: int, label: str | None) -> dict:
     """Capture system state: sessions summary, costs, alerts, health."""
-    now = datetime.datetime.now(datetime.UTC).isoformat() + "Z"
+    now = datetime.datetime.now(datetime.timezone.utc).isoformat() + "Z"
 
     # Sessions summary
     sessions_raw = _safe_get(client, "/sessions", {"limit": limit}) or []
@@ -233,7 +233,7 @@ def cmd_snapshot(args: argparse.Namespace) -> None:
 
     # Always save to default location if no explicit output
     if not output:
-        ts = datetime.datetime.now(datetime.UTC).strftime("%Y%m%d-%H%M%S")
+        ts = datetime.datetime.now(datetime.timezone.utc).strftime("%Y%m%d-%H%M%S")
         default_dir = os.path.expanduser("~/.agentlens/snapshots")
         os.makedirs(default_dir, exist_ok=True)
         default_path = os.path.join(default_dir, f"snapshot-{ts}.json")

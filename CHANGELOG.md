@@ -7,18 +7,51 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
 
 ## [Unreleased]
 
+## [1.65.0] - 2026-06-11
+
+### Added
+
+- **AdvisorOrchestrator** — unified fleet-health scorecard that runs the agentic advisor suite and rolls the individual verdicts up into a single health view.
+- **CostAttributionAdvisor** — per-tag spend attribution with a chargeback playbook for splitting agent cost across teams/features.
+- **DataLeakAdvisor** — PII/secret leak detection over event traces (the 13th agentic advisor sibling).
+- **EvalRegressionAdvisor** — baseline-vs-current evaluation regression detector.
+- **PromptDriftAdvisor** — agentic baseline-vs-current prompt drift detector.
+- **CacheabilityAdvisor** — prompt-cache opportunity analysis.
+- **ToolDependencyAdvisor** — agentic tool-coupling analysis surfacing implicit dependencies between tools.
+- **ToolReliabilityAdvisor** — per-tool reliability/health auditor with a verdict ladder and remediation playbook.
+- **`drift` CLI command** — behavioral drift detection for agent sessions from the terminal.
+- **`tool-reliability` CLI command** — terminal scorecard for per-tool health.
+- **PDF export** for session reports (new output format in the exporter).
+
 ### Changed
 
 - **Sparkline rendering centralized.** `cli_trends`, `cli_watch` and `stamina` each shipped their own copy-pasted `_sparkline` helper with the same glyph table (`▁▂▃▄▅▆▇█`) and the same algorithm. All three now re-export `agentlens.cli_common.sparkline` so there is a single source of truth — behaviour is byte-for-byte identical (one glyph per input value) and no call sites needed changes.
+- **Duplicated `_percentile` / `_parse_ts` helpers consolidated** across the advisor modules.
+- **`narrative.generate()`** split from a 147-line function into focused helpers.
 
 ### Fixed
 
+- **PyPI publishing unblocked (Python 3.9 compatibility).** Releases from v1.x onward never reached PyPI because the publish workflow's Python 3.9 test job crashed at import time — leaving the public package stranded at an early `0.1.x`. Three 3.9-incompatible patterns were the cause and are now fixed:
+  - `agentlens/__init__.py` evaluated a module-level `AgentTracker | None` annotation at import time (PEP 604 `|` on a class is a runtime `TypeError` before Python 3.10); it now uses `from __future__ import annotations`.
+  - Pydantic models in `agentlens/models.py` use PEP 604 / PEP 585 field annotations that Pydantic resolves at model-build time; `eval_type_backport` is now declared as a dependency for `python_version < "3.10"` so those annotations resolve on 3.9.
+  - `cli_snapshot.py` used `datetime.UTC` (added in Python 3.11); it now uses `datetime.timezone.utc` to match the rest of the codebase.
+  Five test modules that used PEP 604 syntax in module-level helper signatures (`test_drift`, `test_flamegraph`, `test_retry_tracker`, `test_session_diff`, `test_sla`) also gained `from __future__ import annotations`. The full SDK suite (3820 tests) now passes on Python 3.9, 3.11 and 3.12.
 - **`cli_common.sparkline(width=...)` is no longer silently ignored.** The `width` parameter existed in the signature but did nothing; supplying it now down-samples the series into at most `width` buckets. Default behaviour (no `width` argument) is unchanged.
+- **`cli_failure_forecast`** was broken on import (missing `add_common_args`).
+- **Five CLI subcommands** crashed at startup because `get_client` returns a tuple.
+- **`heatmap`** cost rate for `gpt-4o` corrected via longest-prefix match.
+
+### Performance
+
+- **`anomaly`** baseline computation now uses the Welford online algorithm (O(1) per update).
+- **`heapq.nlargest`** replaces `sorted(..., reverse=True)[:k]` across 7 hot paths.
+- **`correlation.trace_error_propagation`** halves the number of session-pair iterations.
 
 ### Testing
 
 - **`agentlens._metrics`** — new `tests/test_metrics.py` (18 cases) covering the single-pass session-event scan used by both anomaly and drift detection: empty/None sessions, latency p95 at small and large N, `None` token fields, error-substring matching, tool detection via both the `tool_call` attribute and event-type substring, and the tool-failure rate's div-by-zero guard.
 - **`agentlens.cli_common`** — new `tests/test_cli_common.py` (26 cases) covering env-var/flag resolution for `get_client`, JSON pretty-printing, dict-vs-list session payloads from `fetch_sessions`, `percentile` interpolation, `(xs, ys)` ordering of `linear_regression`, `sparkline` constant-input and down-sampling, and `bar_chart` zero-max / overflow clamping.
+- Extensive new advisor/CLI coverage (AdvisorOrchestrator, ToolReliabilityAdvisor, `cli_alert`, `cli_correlate`, `cli_funnel`, `cli_heatmap`, `cli_diff`, `cli_baseline`, and others).
 
 ## [1.64.0] - 2026-05-18
 
