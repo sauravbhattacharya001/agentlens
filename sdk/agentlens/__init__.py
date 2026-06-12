@@ -205,7 +205,7 @@ from agentlens.model_migration_advisor import (
     SitePlan,
     PlaybookAction as MigrationPlaybookAction,
 )
-from agentlens.transcript import TranscriptExporter, export_transcript as _render_transcript, TRANSCRIPT_CONTRACT_VERSION
+from agentlens.transcript import TranscriptExporter, export_transcript as _render_transcript, export_run_metadata as _extract_run_metadata, TRANSCRIPT_CONTRACT_VERSION
 
 __version__ = "1.65.0"
 __all__ = [
@@ -216,6 +216,7 @@ __all__ = [
     "explain",
     "export_session",
     "export_transcript",
+    "export_run_metadata",
     "TranscriptExporter",
     "TRANSCRIPT_CONTRACT_VERSION",
     "compare_sessions",
@@ -676,6 +677,28 @@ def export_transcript(
         # Fetch the full session (incl. events) from the backend.
         session = export_session(session_id=session_id, format="json")
     return _render_transcript(session, timezone_label=timezone_label)
+
+
+def export_run_metadata(session=None, *, session_id: str | None = None) -> dict:
+    """Extract agent-eval ``RunMetadata`` (ground truth) from a session.
+
+    Pairs with :func:`export_transcript`: the transcript is the agent's claim,
+    this is the recorded status + wall-clock that agent-eval's ``verification``
+    check grades the claim against. Together they make the AgentLens ->
+    agent-eval path self-verifying.
+
+    Args:
+        session: An AgentLens :class:`~agentlens.models.Session` or a
+            session-shaped dict. If omitted, fetched from the backend.
+        session_id: Session to fetch when ``session`` is not provided. Defaults
+            to the current session.
+
+    Returns:
+        A dict shaped like agent-eval's ``RunMetadata``.
+    """
+    if session is None:
+        session = export_session(session_id=session_id, format="json")
+    return _extract_run_metadata(session)
 
 
 def compare_sessions(session_a: str, session_b: str) -> dict:

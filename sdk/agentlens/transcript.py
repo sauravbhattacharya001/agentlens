@@ -46,6 +46,18 @@ _STATUS_TO_OUTCOME: dict[str, str] = {
     # "active" / anything unfinished -> IN-PROGRESS (handled explicitly below)
 }
 
+# Map an AgentLens session status to an agent-eval RunMetadata.exitStatus.
+# This is the GROUND-TRUTH status the verification check grades the transcript
+# against - distinct from the self-reported `## Outcome`.
+_STATUS_TO_EXIT_STATUS: dict[str, str] = {
+    "completed": "ok",
+    "error": "error",
+    "failed": "error",
+    "timeout": "timeout",
+    "killed": "killed",
+    "active": "running",
+}
+
 _MAX_VALUE_LEN = 200
 
 
@@ -259,6 +271,52 @@ class TranscriptExporter:
         ]
         return "\n".join(parts)
 
+    def to_run_metadata(self, session: Session | dict[str, Any]) -> dict[str, Any]:
+        """Extract agent-eval ``RunMetadata`` from the session's trusted fields.
+
+        This is the GROUND-TRUTH side-channel for agent-eval's ``verification``
+        check. Where the exported transcript carries the agent's self-report,
+        this carries what AgentLens actually recorded: the session status
+        (mapped to ``exitStatus``) and the wall-clock start/end/duration. The
+        verification check cross-checks one against the other.
+
+        Returns a plain dict shaped like agent-eval's ``RunMetadata``
+        (``exitStatus``, ``startedAt``, ``endedAt``, ``durationMs``), suitable
+        for JSON serialization. Keys with no data are omitted.
+        """
+        if isinstance(session, Session):
+            sess_dict = session.to_api_dict()
+        else:
+            sess_dict = dict(session)
+
+        meta: dict[str, Any] = {}
+
+        status = (sess_dict.get("status") or "").lower()
+        if status in _STATUS_TO_EXIT_STATUS:
+            meta["exitStatus"] = _STATUS_TO_EXIT_STATUS[status]
+
+        started = sess_dict.get("started_at")
+        ended = sess_dict.get("ended_at")
+        if started:
+            meta["startedAt"] = started if isinstance(started, str) else _parse_iso(started)
+            if isinstance(meta["startedAt"], datetime):
+                meta["startedAt"] = meta["startedAt"].isoformat()
+        if ended:
+            meta["endedAt"] = ended if isinstance(ended, str) else _parse_iso(ended)
+            if isinstance(meta["endedAt"], datetime):
+                meta["endedAt"] = meta["endedAt"].isoformat()
+
+        # Prefer an explicit duration_ms; otherwise derive from start/end.
+        dur = sess_dict.get("duration_ms")
+        start_dt = _parse_iso(started)
+        end_dt = _parse_iso(ended)
+        if dur is not None:
+            meta["durationMs"] = float(dur)
+        elif start_dt is not None and end_dt is not None:
+            meta["durationMs"] = max(0.0, (end_dt - start_dt).total_seconds() * 1000.0)
+
+        return meta
+
 
 def _parse_iso(value: Any) -> datetime | None:
     if isinstance(value, datetime):
@@ -292,3 +350,22 @@ def export_transcript(
         A markdown string conforming to the agent-eval transcript contract.
     """
     return TranscriptExporter(timezone_label=timezone_label).render(session)
+
+
+def export_run_metadata(session: Session | dict[str, Any]) -> dict[str, Any]:
+    """Extract agent-eval ``RunMetadata`` from an AgentLens session.
+
+    Pairs with :func:`export_transcript`: the transcript is the agent's
+    *claim*, this metadata is the *ground truth* (recorded status + wall-clock)
+    that agent-eval's ``verification`` check grades the claim against. Together
+    they make the AgentLens -> agent-eval path self-verifying.
+
+    Args:
+        session: An AgentLens :class:`~agentlens.models.Session`, or a
+            session-shaped dict (e.g. the output of ``export_session``).
+
+    Returns:
+        A dict shaped like agent-eval's ``RunMetadata`` (``exitStatus``,
+        ``startedAt``, ``endedAt``, ``durationMs``); keys with no data omitted.
+    """
+    return TranscriptExporter().to_run_metadata(session)

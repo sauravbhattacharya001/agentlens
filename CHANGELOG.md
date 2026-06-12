@@ -21,6 +21,17 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
   - Accepts a `Session` object or a backend session dict (e.g. `export_session`).
   - Output validates with `agent-eval validate` (verified end-to-end).
   - 17 new SDK tests.
+- **Run metadata export (self-verifying loop)** - `agentlens.export_run_metadata()`
+  and `TranscriptExporter.to_run_metadata()` extract agent-eval `RunMetadata`
+  (ground truth) from a session: `exitStatus` mapped from the recorded session
+  status (`completed`->ok, `error`->error, `active`->running), plus
+  `startedAt`/`endedAt`/`durationMs` from the recorded wall-clock.
+  - Pairs with `export_transcript`: the transcript is the agent's *claim*, this
+    is the *truth* agent-eval's `verification` check grades it against - so the
+    AgentLens -> agent-eval path is self-verifying.
+  - Verified end-to-end: an optimistic transcript claiming `pass` over a session
+    recorded as `error` is caught by the verification check using this metadata.
+  - 9 new SDK tests.
 
 ## [1.65.0] - 2026-06-11
 

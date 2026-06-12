@@ -16,6 +16,7 @@ from agentlens.models import AgentEvent, Session, ToolCall, DecisionTrace
 from agentlens.transcript import (
     TranscriptExporter,
     export_transcript,
+    export_run_metadata,
     TRANSCRIPT_CONTRACT_VERSION,
 )
 
@@ -237,3 +238,70 @@ def test_contract_version_constant():
 def test_exporter_class_matches_module_function():
     session = _make_session()
     assert TranscriptExporter().render(session) == export_transcript(session)
+
+
+# ---------------------------------------------------------------------------
+# Run metadata (ground-truth side-channel for agent-eval verification)
+# ---------------------------------------------------------------------------
+
+@pytest.mark.parametrize(
+    "status,expected",
+    [
+        ("completed", "ok"),
+        ("error", "error"),
+        ("failed", "error"),
+        ("active", "running"),
+    ],
+)
+def test_run_metadata_maps_status_to_exit_status(status, expected):
+    meta = export_run_metadata(_make_session(status=status))
+    assert meta["exitStatus"] == expected
+
+
+def test_run_metadata_includes_timing():
+    meta = export_run_metadata(_make_session())
+    assert "startedAt" in meta and isinstance(meta["startedAt"], str)
+    assert "endedAt" in meta and isinstance(meta["endedAt"], str)
+    # 14-minute run -> 840000 ms
+    assert meta["durationMs"] == pytest.approx(14 * 60_000)
+
+
+def test_run_metadata_omits_end_for_active_session():
+    session = _make_session(status="active")
+    session.ended_at = None
+    meta = export_run_metadata(session)
+    assert meta["exitStatus"] == "running"
+    assert "endedAt" not in meta
+
+
+def test_run_metadata_accepts_session_dict():
+    session_dict = {
+        "agent_name": "gardener",
+        "started_at": BASE.isoformat(),
+        "ended_at": (BASE + timedelta(minutes=5)).isoformat(),
+        "status": "completed",
+        "events": [],
+    }
+    meta = export_run_metadata(session_dict)
+    assert meta["exitStatus"] == "ok"
+    assert meta["durationMs"] == pytest.approx(5 * 60_000)
+
+
+def test_run_metadata_is_json_serializable():
+    import json
+
+    meta = export_run_metadata(_make_session())
+    # Must round-trip cleanly so it can be handed to agent-eval.
+    assert json.loads(json.dumps(meta)) == meta
+
+
+def test_transcript_claim_and_metadata_truth_can_diverge():
+    """The whole point: a session can have a self-reported outcome that differs
+    from the ground-truth status. The transcript carries the claim; the
+    metadata carries the truth the verification check will catch."""
+    # An errored session: transcript Outcome -> fail, metadata exitStatus -> error.
+    session = _make_session(status="error")
+    md = export_transcript(session)
+    meta = export_run_metadata(session)
+    assert _section(md, "## Outcome").split()[0] == "fail"
+    assert meta["exitStatus"] == "error"
