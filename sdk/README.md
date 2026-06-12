@@ -96,6 +96,53 @@ data = agentlens.export_session(session_id="abc123", format="json")
 
 The JSON export includes the session metadata, all events, and a summary with total tokens, models used, event types, and total duration.
 
+## Transcript Export
+
+Render a tracked session as a Markdown **transcript** that conforms to the
+[`transcript-contract@v1`](../../eval-monitor/agent-eval/CONTRACT.md) format used by
+[agent-eval](../../eval-monitor/agent-eval). Unlike a free-form summary, every
+section is backed by recorded evidence (tool calls, timeline, token usage), so
+the transcript reflects what the agent *did*, not what it *says* it did:
+
+```python
+md = agentlens.export_transcript()              # current session
+md = agentlens.export_transcript(session_id="abc123")
+
+with open("transcripts/builder/2026-06-11-1000.md", "w", encoding="utf-8") as f:
+    f.write(md)
+```
+
+The output validates with `agent-eval validate` and includes the standard
+sections (`## Task`, `## Actions Taken`, `## Key Outputs`, `## Outcome`,
+`## Duration`). The `## Outcome` token is derived from the session status
+(`completed` -> `pass`, `error`/`failed` -> `fail`, unfinished -> `IN-PROGRESS`).
+
+### Ground-truth run metadata (self-verifying)
+
+`export_transcript` carries the agent's *self-reported* claim. Its companion,
+`export_run_metadata`, extracts the **ground truth** that agent-eval's
+`verification` check grades that claim against - the recorded status and
+wall-clock, independent of anything the agent reported:
+
+```python
+meta = agentlens.export_run_metadata()          # current session
+# -> {"exitStatus": "error", "startedAt": "...", "endedAt": "...", "durationMs": 5520000.0}
+```
+
+Emit both together and hand them to agent-eval, and the pipeline becomes
+self-verifying: a transcript that claims `pass` for a session AgentLens
+recorded as `error` is caught automatically (along with any duration the agent
+fabricated). `RunMetadata` fields map from the session as follows:
+
+| `RunMetadata` field | Source |
+| --- | --- |
+| `exitStatus` | session status (`completed`->`ok`, `error`/`failed`->`error`, `timeout`->`timeout`, `killed`->`killed`, `active`->`running`) |
+| `startedAt` / `endedAt` | recorded wall-clock (ISO-8601) |
+| `durationMs` | recorded `duration_ms`, or derived from start/end |
+
+The result is a plain JSON-serializable dict (empty keys omitted), ready to
+pass to agent-eval's `scoreTranscript(transcript, { runMetadata })`.
+
 ## Session Comparison
 
 Compare two sessions side-by-side to evaluate prompt changes, model swaps, or configuration tweaks:
@@ -161,6 +208,17 @@ Get a Markdown-formatted explanation of the agent's behavior in the current or s
 ### `agentlens.export_session(session_id=None, format="json")`
 
 Export session data. Returns a dict (JSON) or string (CSV).
+
+### `agentlens.export_transcript(session_id=None, timezone_label="PT")`
+
+Render a session as a `transcript-contract@v1` Markdown string. Accepts the
+current session, a `session_id`, a `Session` object, or a backend session dict.
+
+### `agentlens.export_run_metadata(session_id=None)`
+
+Extract agent-eval `RunMetadata` (ground truth: `exitStatus`, `startedAt`,
+`endedAt`, `durationMs`) from a session. Companion to `export_transcript` for
+self-verifying evaluation. Returns a JSON-serializable dict.
 
 ### `agentlens.compare_sessions(session_a, session_b)`
 
