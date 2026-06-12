@@ -205,6 +205,7 @@ from agentlens.model_migration_advisor import (
     SitePlan,
     PlaybookAction as MigrationPlaybookAction,
 )
+from agentlens.transcript import TranscriptExporter, export_transcript as _render_transcript, TRANSCRIPT_CONTRACT_VERSION
 
 __version__ = "1.65.0"
 __all__ = [
@@ -214,6 +215,9 @@ __all__ = [
     "track",
     "explain",
     "export_session",
+    "export_transcript",
+    "TranscriptExporter",
+    "TRANSCRIPT_CONTRACT_VERSION",
     "compare_sessions",
     "get_costs",
     "get_pricing",
@@ -642,6 +646,36 @@ def export_session(session_id: str | None = None, format: str = "json"):
         and summary statistics.
     """
     return _get_tracker("export_session").export_session(session_id=session_id, format=format)
+
+
+def export_transcript(
+    session=None,
+    *,
+    session_id: str | None = None,
+    timezone_label: str = "UTC",
+) -> str:
+    """Render an AgentLens session as a contract-compliant transcript for agent-eval.
+
+    The output conforms to ``transcript-contract@v1`` and is *evidence-backed*:
+    every section is derived from captured trace data (real tool calls, timing,
+    recorded status), not the agent's self-report. Validate it with
+    ``agent-eval validate`` and score it with the agent-eval monitor.
+
+    Args:
+        session: An AgentLens :class:`~agentlens.models.Session` or a
+            session-shaped dict (with an ``events`` list). If omitted, the
+            session is fetched from the backend via ``export_session``.
+        session_id: Session to fetch when ``session`` is not provided. Defaults
+            to the current session.
+        timezone_label: Cosmetic timezone label for printed times (UTC clock).
+
+    Returns:
+        A markdown string conforming to the agent-eval transcript contract.
+    """
+    if session is None:
+        # Fetch the full session (incl. events) from the backend.
+        session = export_session(session_id=session_id, format="json")
+    return _render_transcript(session, timezone_label=timezone_label)
 
 
 def compare_sessions(session_a: str, session_b: str) -> dict:

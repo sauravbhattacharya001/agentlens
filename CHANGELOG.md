@@ -7,6 +7,21 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
 
 ## [Unreleased]
 
+### Added
+
+- **Transcript export (agent-eval bridge)** - Render an AgentLens session as a
+  contract-compliant transcript for [agent-eval](https://github.com/sauravbhattacharya001/agent-eval).
+  - `agentlens.export_transcript(session=..., session_id=..., timezone_label=...)`
+    and the `TranscriptExporter` class produce markdown conforming to
+    `transcript-contract@v1`.
+  - Every section is *evidence-backed* from captured trace data: `## Actions Taken`
+    from recorded tool calls, `## Outcome` from the trusted session status
+    (`completed`->pass, `error`->fail, `active`->IN-PROGRESS), `## Duration` from
+    the recorded start/end - not the agent's self-report.
+  - Accepts a `Session` object or a backend session dict (e.g. `export_session`).
+  - Output validates with `agent-eval validate` (verified end-to-end).
+  - 17 new SDK tests.
+
 ## [1.65.0] - 2026-06-11
 
 ### Added
