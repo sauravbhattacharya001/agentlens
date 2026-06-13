@@ -464,98 +464,62 @@ class AdvisorOrchestrator:
     def _run_trace_completion(self, events: Sequence[Any]) -> AdvisorResult:
         from agentlens.trace_completion_advisor import TraceCompletionAdvisor
 
-        adv = TraceCompletionAdvisor(risk_appetite=self._appetite.value, now_fn=self._now_fn)
-        report = adv.assess(events)
-        playbook = []
-        for a in getattr(report, "playbook", []):
-            playbook.append(_action_to_dict(a))
-        return AdvisorResult(
-            advisor_name="TraceCompletionAdvisor",
-            grade=getattr(report, "grade", getattr(report, "completion_grade", "?")).value
-            if hasattr(getattr(report, "grade", getattr(report, "completion_grade", None)), "value")
-            else str(getattr(report, "grade", "?")),
-            risk_score=getattr(report, "incompletion_score", getattr(report, "risk_score", 0)),
-            p0_count=sum(1 for a in playbook if a.get("priority") == "P0"),
-            p1_count=sum(1 for a in playbook if a.get("priority") == "P1"),
-            playbook_actions=playbook,
-            insights=[str(i) for i in getattr(report, "insights", [])],
+        adv = TraceCompletionAdvisor(
+            risk_appetite=self._appetite.value, now_fn=self._now_fn
         )
+        report = adv.analyze(events)
+        # ``incompletion_score`` is the advisor's native 0-100 risk signal.
+        risk = _coerce_risk(
+            getattr(report, "incompletion_score", None), report
+        )
+        return _result_from_report("TraceCompletionAdvisor", report, risk)
 
     def _run_loop_detector(self, events: Sequence[Any]) -> AdvisorResult:
         from agentlens.agent_loop_detector import AgentLoopDetector
 
         adv = AgentLoopDetector(risk_appetite=self._appetite.value, now_fn=self._now_fn)
-        report = adv.assess(events)
-        playbook = []
-        for a in getattr(report, "playbook", []):
-            playbook.append(_action_to_dict(a))
-        return AdvisorResult(
-            advisor_name="AgentLoopDetector",
-            grade=_extract_grade(report),
-            risk_score=getattr(report, "overall_risk", getattr(report, "risk_score", 0)),
-            p0_count=sum(1 for a in playbook if a.get("priority") == "P0"),
-            p1_count=sum(1 for a in playbook if a.get("priority") == "P1"),
-            playbook_actions=playbook,
-            insights=[str(i) for i in getattr(report, "insights", [])],
+        report = adv.analyze(events)
+        # The loop report exposes ``overall_loop_risk`` (0-100).
+        risk = _coerce_risk(
+            getattr(report, "overall_loop_risk", None), report
         )
+        return _result_from_report("AgentLoopDetector", report, risk)
 
     def _run_cost_attribution(self, events: Sequence[Any]) -> AdvisorResult:
         from agentlens.cost_attribution_advisor import CostAttributionAdvisor
 
-        adv = CostAttributionAdvisor(risk_appetite=self._appetite.value, now_fn=self._now_fn)
-        report = adv.assess(events)
-        playbook = []
-        for a in getattr(report, "playbook", []):
-            playbook.append(_action_to_dict(a))
-        portfolio = getattr(report, "portfolio", None)
-        risk = 0.0
-        if portfolio:
-            risk = getattr(portfolio, "risk_score", getattr(portfolio, "concentration_score", 0))
-        return AdvisorResult(
-            advisor_name="CostAttributionAdvisor",
-            grade=_extract_grade(report),
-            risk_score=risk,
-            p0_count=sum(1 for a in playbook if a.get("priority") == "P0"),
-            p1_count=sum(1 for a in playbook if a.get("priority") == "P1"),
-            playbook_actions=playbook,
-            insights=[str(i) for i in getattr(report, "insights", [])],
+        adv = CostAttributionAdvisor(
+            risk_appetite=self._appetite.value, now_fn=self._now_fn
         )
+        report = adv.analyze(events)
+        # Cost has no single 0-100 score; derive it from the spend grade so a
+        # top-heavy / overspending portfolio surfaces as elevated fleet risk.
+        risk = _coerce_risk(None, report)
+        return _result_from_report("CostAttributionAdvisor", report, risk)
 
     def _run_data_leak(self, events: Sequence[Any]) -> AdvisorResult:
         from agentlens.data_leak_advisor import DataLeakAdvisor
 
-        adv = DataLeakAdvisor(risk_appetite=self._appetite.value, now_fn=self._now_fn)
-        report = adv.assess(events)
-        playbook = []
-        for a in getattr(report, "playbook", []):
-            playbook.append(_action_to_dict(a))
-        return AdvisorResult(
-            advisor_name="DataLeakAdvisor",
-            grade=_extract_grade(report),
-            risk_score=getattr(report, "risk_score", getattr(report, "leak_score", 0)),
-            p0_count=sum(1 for a in playbook if a.get("priority") == "P0"),
-            p1_count=sum(1 for a in playbook if a.get("priority") == "P1"),
-            playbook_actions=playbook,
-            insights=[str(i) for i in getattr(report, "insights", [])],
-        )
+        # DataLeakAdvisor takes ``risk_appetite`` on analyze(), not __init__.
+        adv = DataLeakAdvisor(now_fn=self._now_fn)
+        report = adv.analyze(events, risk_appetite=self._appetite.value)
+        # Risk is grade-driven (portfolio_grade); a secret/PII leak grades low.
+        risk = _coerce_risk(None, report)
+        return _result_from_report("DataLeakAdvisor", report, risk)
 
     def _run_cacheability(self, events: Sequence[Any]) -> AdvisorResult:
         from agentlens.cacheability_advisor import CacheabilityAdvisor
 
-        adv = CacheabilityAdvisor(risk_appetite=self._appetite.value, now_fn=self._now_fn)
-        report = adv.assess(events)
-        playbook = []
-        for a in getattr(report, "playbook", []):
-            playbook.append(_action_to_dict(a))
-        return AdvisorResult(
-            advisor_name="CacheabilityAdvisor",
-            grade=_extract_grade(report),
-            risk_score=getattr(report, "risk_score", getattr(report, "savings_score", 0)),
-            p0_count=sum(1 for a in playbook if a.get("priority") == "P0"),
-            p1_count=sum(1 for a in playbook if a.get("priority") == "P1"),
-            playbook_actions=playbook,
-            insights=[str(i) for i in getattr(report, "insights", [])],
-        )
+        # CacheabilityAdvisor takes ``risk_appetite`` on analyze(), not __init__.
+        adv = CacheabilityAdvisor(now_fn=self._now_fn)
+        report = adv.analyze(events, risk_appetite=self._appetite.value)
+        # The cache "risk" is really an opportunity: the share of spend that is
+        # cacheable. A high savings share means high waste -> high risk.
+        portfolio = getattr(report, "portfolio", None)
+        savings_share = getattr(portfolio, "projected_savings_share", None)
+        explicit = savings_share * 100 if isinstance(savings_share, (int, float)) else None
+        risk = _coerce_risk(explicit, report)
+        return _result_from_report("CacheabilityAdvisor", report, risk)
 
 
 # ---------------------------------------------------------------------------
@@ -583,9 +547,75 @@ def _action_to_dict(action: Any) -> dict[str, Any]:
 
 
 def _extract_grade(report: Any) -> str:
-    """Extract grade string from a report object."""
-    for attr in ("grade", "portfolio_grade", "completion_grade", "leak_grade"):
-        val = getattr(report, attr, None)
-        if val is not None:
-            return val.value if hasattr(val, "value") else str(val)
+    """Extract grade string from a report object.
+
+    Looks first at the top-level report, then at ``report.portfolio`` since a
+    few advisors (cost/leak/cacheability) carry the grade on the portfolio
+    summary rather than the report itself.
+    """
+    grade_attrs = (
+        "grade",
+        "portfolio_grade",
+        "completion_grade",
+        "leak_grade",
+        "cost_grade",
+        "loop_grade",
+    )
+    for source in (report, getattr(report, "portfolio", None)):
+        if source is None:
+            continue
+        for attr in grade_attrs:
+            val = getattr(source, attr, None)
+            if val is not None:
+                return val.value if hasattr(val, "value") else str(val)
     return "?"
+
+
+# Map a letter grade to a representative 0-100 risk score. Used for advisors
+# (cost, data-leak) that grade their portfolio but do not publish a single
+# numeric risk value, so they still contribute meaningfully to the fleet score.
+_GRADE_TO_RISK = {
+    "A": 8.0,
+    "B": 25.0,
+    "C": 45.0,
+    "D": 65.0,
+    "F": 88.0,
+}
+
+
+def _grade_to_risk(grade: str) -> float:
+    """Translate a letter grade into a representative 0-100 risk score."""
+    return _GRADE_TO_RISK.get(str(grade).strip().upper(), 0.0)
+
+
+def _coerce_risk(explicit: Any, report: Any) -> float:
+    """Return a 0-100 risk score for an advisor report.
+
+    Prefers an *explicit* numeric signal supplied by the caller (the advisor's
+    native score). When that is missing or non-numeric, falls back to deriving
+    risk from the report's letter grade so the advisor still influences the
+    fleet score. The result is always clamped to ``[0, 100]``.
+    """
+    if isinstance(explicit, bool):
+        explicit = None  # guard against True/False being treated as 1/0
+    if isinstance(explicit, (int, float)):
+        return max(0.0, min(100.0, float(explicit)))
+    return _grade_to_risk(_extract_grade(report))
+
+
+def _result_from_report(name: str, report: Any, risk: float) -> AdvisorResult:
+    """Build an :class:`AdvisorResult` from a concrete advisor report.
+
+    Centralises the playbook/grade/insight extraction shared by every advisor
+    runner so the per-advisor methods only have to compute the risk score.
+    """
+    playbook = [_action_to_dict(a) for a in getattr(report, "playbook", [])]
+    return AdvisorResult(
+        advisor_name=name,
+        grade=_extract_grade(report),
+        risk_score=float(risk),
+        p0_count=sum(1 for a in playbook if a.get("priority") == "P0"),
+        p1_count=sum(1 for a in playbook if a.get("priority") == "P1"),
+        playbook_actions=playbook,
+        insights=[str(i) for i in getattr(report, "insights", [])],
+    )
