@@ -48,7 +48,7 @@ Homepage = "https://github.com/sauravbhattacharya001/agentlens"
 Documentation = "https://sauravbhattacharya001.github.io/agentlens/"
 Repository = "https://github.com/sauravbhattacharya001/agentlens"
 Issues = "https://github.com/sauravbhattacharya001/agentlens/issues"
-Changelog = "https://github.com/sauravbhattacharya001/agentlens/blob/main/CHANGELOG.md"
+Changelog = "https://github.com/sauravbhattacharya001/agentlens/blob/master/CHANGELOG.md"
 
 [project.optional-dependencies]
 dev = [
