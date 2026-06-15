@@ -68,6 +68,40 @@ jobs:
           # Add .nojekyll to skip Jekyll processing
           touch _site/.nojekyll
 
+      - name: Generate robots.txt and sitemap.xml
+        env:
+          SITE_URL: https://sauravbhattacharya001.github.io/agentlens
+        run: |
+          set -euo pipefail
+          # robots.txt: allow everything and point crawlers at the sitemap.
+          cat > _site/robots.txt << EOF
+          User-agent: *
+          Allow: /
+          Sitemap: ${SITE_URL}/sitemap.xml
+          EOF
+
+          # sitemap.xml: enumerate every published HTML page with its git
+          # last-commit date as <lastmod>. Generated here (not committed) so it
+          # stays in sync automatically as docs pages are added or removed.
+          LASTMOD=$(date -u +%Y-%m-%d)
+          {
+            echo '<?xml version="1.0" encoding="UTF-8"?>'
+            echo '<urlset xmlns="http://www.sitemaps.org/schemas/sitemap/0.9">'
+            # Sort for deterministic output; strip the _site/ prefix for the URL path.
+            find _site -type f -name '*.html' ! -name '404.html' | sort | while read -r f; do
+              path="${f#_site/}"
+              # Pretty URL: serve dir index pages as the directory itself.
+              case "$path" in
+                index.html)       loc="${SITE_URL}/" ;;
+                */index.html)     loc="${SITE_URL}/${path%index.html}" ;;
+                *)                loc="${SITE_URL}/${path}" ;;
+              esac
+              printf '  <url><loc>%s</loc><lastmod>%s</lastmod></url>\n' "$loc" "$LASTMOD"
+            done
+            echo '</urlset>'
+          } > _site/sitemap.xml
+          echo "Generated sitemap with $(grep -c '<url>' _site/sitemap.xml) URLs"
+
       - name: Setup Pages
         uses: actions/configure-pages@v6
 
