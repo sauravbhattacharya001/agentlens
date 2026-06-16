@@ -22,7 +22,7 @@ from agentlens._utils import format_duration as _format_duration_impl, parse_iso
 _ICONS: dict[str, str] = {
     "session_start": "▶",
     "session_end": "⏹",
-    "llm_call": "🤖",
+    "llm_call": "🧠",
     "tool_call": "🔧",
     "error": "❌",
     "decision": "💡",

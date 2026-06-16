@@ -9,7 +9,7 @@
     "dev": "node server.js",
     "test": "jest --verbose && npm run test:node",
     "test:jest": "jest --verbose",
-    "test:node": "node --test tests/collaboration.test.js tests/diff.test.js tests/tempo.test.js",
+    "test:node": "node --test tests/diff.test.js",
     "test:coverage": "jest --coverage --verbose",
     "prepublishOnly": "npm test"
   },

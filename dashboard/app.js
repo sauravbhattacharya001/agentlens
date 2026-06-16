@@ -232,7 +232,7 @@ function renderTimeline(events) {
       stats.push(`<span>⏱ ${event.duration_ms.toFixed(0)}ms</span>`);
     }
     if (event.model) {
-      stats.push(`<span>🤖 ${escHtml(event.model)}</span>`);
+      stats.push(`<span>🧠 ${escHtml(event.model)}</span>`);
     }
     if (stats.length > 0) {
       statsHtml = `<div class="event-stats">${stats.join("")}</div>`;
@@ -2168,7 +2168,7 @@ function renderFilteredTimeline(events, matchedIds, searchQuery) {
         stats.push(`<span>⏱ ${event.duration_ms.toFixed(0)}ms</span>`);
       }
       if (event.model) {
-        stats.push(`<span>🤖 ${escHtml(event.model)}</span>`);
+        stats.push(`<span>🧠 ${escHtml(event.model)}</span>`);
       }
       if (stats.length > 0) {
         statsHtml = `<div class="event-stats">${stats.join("")}</div>`;

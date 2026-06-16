@@ -343,7 +343,7 @@ class SessionExporter:
             f"<tr><td>{_escape(m)}</td><td>{c}</td></tr>" for m, c in sorted(models.items(), key=lambda x: -x[1])
         )
         return (
-            "<div class='section'><h2>🤖 Models</h2>"
+            "<div class='section'><h2>🧠 Models</h2>"
             f"<table><thead><tr><th>Model</th><th>Calls</th></tr></thead><tbody>{rows}</tbody></table></div>"
         )
 
