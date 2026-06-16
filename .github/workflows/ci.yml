@@ -10,7 +10,7 @@ permissions:
   contents: read
 
 jobs:
-  # ── Node.js Backend ────────────────────────────────────────────────
+  # â”€â”€ Node.js Backend â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€
   backend:
     name: Backend (Node.js ${{ matrix.node-version }})
     runs-on: ubuntu-latest
@@ -46,9 +46,9 @@ jobs:
           timeout 5 node server.js &
           sleep 2
           curl -sf http://localhost:3000/health | grep -q '"status":"ok"'
-          echo "✅ Server health check passed"
+          echo "âœ… Server health check passed"
 
-  # ── Python SDK ─────────────────────────────────────────────────────
+  # â”€â”€ Python SDK â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€
   sdk:
     name: SDK (Python ${{ matrix.python-version }})
     runs-on: ubuntu-latest
@@ -88,17 +88,17 @@ jobs:
           if [ -d "tests" ] || find . -name "test_*.py" -o -name "*_test.py" | grep -q .; then
             pytest -v --tb=short
           else
-            echo "⚠️ No tests found — verifying import works"
-            python -c "import agentlens; print(f'✅ agentlens {agentlens.__version__} imported successfully')"
+            echo "âš ï¸ No tests found â€” verifying import works"
+            python -c "import agentlens; print(f'âœ… agentlens {agentlens.__version__} imported successfully')"
           fi
 
       - name: Build package
         run: |
           pip install build
           python -m build
-          echo "✅ Package built successfully"
+          echo "âœ… Package built successfully"
 
-  # ── Dashboard Lint & Tests ──────────────────────────────────────────
+  # â”€â”€ Dashboard Lint & Tests â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€
   dashboard:
     name: Dashboard (lint + integration tests)
     runs-on: ubuntu-latest
@@ -117,7 +117,7 @@ jobs:
           npx --yes eslint@latest dashboard/app.js --no-eslintrc \
             --rule '{"no-undef": "off", "no-unused-vars": "warn"}' \
             --env browser || true
-          echo "✅ Dashboard lint complete"
+          echo "âœ… Dashboard lint complete"
 
       - name: Run dashboard integration tests
         run: |
@@ -127,9 +127,9 @@ jobs:
                      tests/scorecards-dashboard.test.js \
                      tests/sla-dashboard.test.js \
                      tests/waterfall.test.js
-          echo "✅ Dashboard integration tests passed"
+          echo "âœ… Dashboard integration tests passed"
 
-  # ── Root Integration Tests ─────────────────────────────────────────
+  # â”€â”€ Root Integration Tests â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€
   integration:
     name: Integration tests
     runs-on: ubuntu-latest
@@ -161,8 +161,6 @@ jobs:
         run: pip install -e ".[dev]"
         working-directory: sdk
 
-      - name: Run root Python tests
-        run: python -m pytest tests/test_cli_forecast.py -v --tb=short
+      - name: Run SDK tests
+        run: python -m pytest -q
         working-directory: sdk
-        env:
-          PYTHONPATH: ${{ github.workspace }}/sdk

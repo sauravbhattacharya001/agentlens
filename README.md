@@ -99,14 +99,6 @@ AgentLens runs entirely on your infrastructure — SQLite for storage, no cloud 
 | 🎯 **Command Center** | Unified activity feed aggregating alerts, anomalies, budget warnings, and health signals |
 | 📋 **SLA Compliance** | Track SLA targets with compliance rings, violation alerts, and history |
 | 🩺 **Auto-Triage** | Unified session diagnostics — runs health, anomaly, drift, error, and cost analysis in one call with prioritized findings |
-| 📐 **Capacity Planning** | Fleet capacity planning — workload projection, resource sizing, scaling recommendations, bottleneck detection |
-| 🛡️ **Session Guardrails** | Constraint validation — token budgets, duration limits, tool allowlists, model restrictions, custom predicates |
-| 💡 **Cost Optimizer** | Intelligent model selection — task complexity scoring, cheaper-model recommendations, 30-70% savings estimation |
-| 📉 **Drift Detection** | Detect behavioral drift from baselines — metric shift analysis with significance scoring |
-| 📝 **Prompt Tracking** | Track prompt versions, A/B test variants, and measure prompt performance across sessions |
-| 🔄 **Retry Tracking** | Monitor retry patterns, detect retry storms, backoff strategy analysis |
-| 🚦 **Rate Limiting** | Client-side rate limiting with token bucket, sliding window, and adaptive strategies |
-| 🎲 **Sampling** | Probabilistic event sampling — head-based, tail-based, and priority sampling strategies |
 | ⏪ **Session Replay** | Replay recorded sessions step-by-step with configurable speed and event filtering |
 
 ## 🏗️ Architecture
@@ -168,111 +160,7 @@ cd sdk
 pip install -e .
 ```
 
-### 4. Use the CLI
-
-After installing the SDK, you get the `agentlens` command:
-
-```bash
-# Check backend connectivity
-agentlens status
-
-# List recent sessions
-agentlens sessions --limit 10
-
-# View cost breakdown for a session
-agentlens costs <session_id>
-
-# Search events by type or model
-agentlens events --type llm_call --model gpt-4
-
-# Export a session to JSON or CSV
-agentlens export <session_id> --format csv -o report.csv
-
-# Health score for a session (A–F grading)
-agentlens health <session_id>
-
-# Compare two sessions side-by-side
-agentlens compare <session_a> <session_b>
-
-# View aggregate analytics
-agentlens analytics
-
-# List recent alerts
-agentlens alerts
-
-# Generate incident postmortem for a session
-agentlens postmortem <session_id>
-
-# List sessions eligible for postmortem analysis
-agentlens postmortem --candidates --min-errors 3
-
-# Live session leaderboard
-agentlens top
-
-# Live-follow session events
-agentlens tail <session_id>
-
-# Generate time-range summary report
-agentlens report --from 2024-01-01 --to 2024-01-31
-
-# Generate interactive HTML flamegraph for a session
-agentlens flamegraph <session_id> -o profile.html --open
-
-# Print flamegraph statistics without generating HTML
-agentlens flamegraph <session_id> --stats
-
-# Generate self-contained HTML dashboard with interactive charts
-agentlens dashboard --limit 200 -o dashboard.html --open
-
-# Evaluate sessions against SLA policies
-agentlens sla --policy production --limit 100
-
-# Custom SLA targets with verbose output
-agentlens sla --latency 2000 --error-rate 5 --token-budget 8000 --slo 95 --verbose
-
-# SLA compliance as JSON for CI/CD pipelines
-agentlens sla --policy production --json
-
-# Auto-triage a session — unified diagnostics with prioritized findings
-agentlens triage <session_id>
-agentlens triage <session_id> --severity high --json
-
-# Capacity planning — workload projection and resource sizing
-agentlens capacity --hours 72
-agentlens capacity --target-rpm 500 --target-latency 300
-
-# Cost optimization recommendations
-agentlens optimize <session_id>
-agentlens optimize <session_id> --budget 0.50
-
-# Replay a recorded session step-by-step
-agentlens replay <session_id> --speed 2x
-
-# Drift detection — compare current behavior to baselines
-agentlens baseline create <agent_name> --sessions 100
-agentlens baseline drift <agent_name> --window 24h
-```
-
-> 📖 **Full CLI reference:** See [docs/CLI.md](docs/CLI.md) for all 50+ commands with options and examples.
-
-Configure via environment variables:
-```bash
-export AGENTLENS_ENDPOINT=http://localhost:3000
-export AGENTLENS_API_KEY=your-key
-```
-
-Or pass `--endpoint` and `--api-key` flags to any command.
-
-> 🛡️ **Running behind a reverse proxy?** When you front the backend with nginx,
-> Traefik, Caddy, an ALB, Cloud Run, Fly.io, or any other reverse proxy, set
-> `AGENTLENS_TRUST_PROXY=1` on the backend (or the number of proxy hops).
-> Without it, `req.ip` resolves to the proxy's address and the per-IP rate
-> limiters collapse into a single global bucket — one noisy client can DoS
-> the whole deployment. Do **not** set it to `true` in production; that would
-> let any caller spoof `X-Forwarded-For`. See
-> [`backend/.env.example`](backend/.env.example) for accepted values.
-
-### 5. Instrument Your Agent
+### 4. Instrument Your Agent
 
 ```python
 import agentlens
@@ -501,24 +389,6 @@ alerts = tracker.evaluate_alerts()  # Check all rules against recent data
 alert_events = tracker.get_alert_events(limit=20)
 ```
 
-### Anomaly Detection
-
-```python
-from agentlens import AnomalyDetector, AnomalyDetectorConfig
-
-config = AnomalyDetectorConfig(
-    warning_threshold=2.0,   # 2σ = warning
-    critical_threshold=3.0,  # 3σ = critical
-)
-detector = AnomalyDetector(config)
-
-# Analyze a session for anomalies
-report = detector.analyze(session_events)
-print(f"Found {len(report.anomalies)} anomalies")
-for anomaly in report.anomalies:
-    print(f"  [{anomaly.severity.value}] {anomaly.kind.value}: {anomaly.description}")
-```
-
 ### Health Scoring
 
 ```python
@@ -550,76 +420,6 @@ print(preview["message"])
 # Actually purge
 result = tracker.purge()
 print(f"Purged {result['purged_sessions']} sessions")
-```
-
-### Auto-Triage
-
-```python
-# One-call unified diagnostics — health, anomalies, drift, errors, and cost analysis
-import httpx
-
-resp = httpx.get(f"{endpoint}/api/triage/{session_id}")
-report = resp.json()
-
-print(f"Overall: {report['grade']} ({report['score']}/100)")
-for finding in report['findings']:
-    print(f"  [{finding['severity']}] {finding['category']}: {finding['message']}")
-    for fix in finding.get('remediations', []):
-        print(f"    → {fix}")
-```
-
-### Capacity Planning
-
-```python
-from agentlens import CapacityPlanner, WorkloadSample
-from datetime import datetime, timedelta
-
-planner = CapacityPlanner()
-planner.add_sample(WorkloadSample(
-    timestamp=datetime.now() - timedelta(hours=2),
-    active_sessions=50, requests_per_minute=120,
-    avg_latency_ms=450, token_throughput=8000,
-    error_rate=0.02, cpu_utilization=0.65, memory_utilization=0.55
-))
-
-projection = planner.project_workload(horizon_hours=72)
-sizing = planner.size_resources(target_rpm=500, target_latency_ms=300)
-bottlenecks = planner.detect_bottlenecks()
-report = planner.report()
-```
-
-### Session Guardrails
-
-```python
-from agentlens.guardrails import Guardrails
-
-g = (Guardrails("production-budget")
-     .max_total_tokens(50_000)
-     .max_duration_seconds(300)
-     .require_tools(["search", "calculator"])
-     .block_tools(["shell_exec"])
-     .allow_models(["gpt-4", "gpt-4-turbo"])
-     .max_errors(2)
-     .add_predicate("no_pii", lambda events: not any("SSN" in str(e) for e in events)))
-
-result = g.validate(session_events)
-print(f"Pass: {result.passed}, Violations: {len(result.violations)}")
-for v in result.violations:
-    print(f"  {v.rule}: {v.message}")
-```
-
-### Cost Optimizer
-
-```python
-from agentlens.cost_optimizer import CostOptimizer
-
-optimizer = CostOptimizer()
-recs = optimizer.analyze(session_events)
-
-print(f"Current: ${recs['current_cost']:.4f} → Optimized: ${recs['optimized_cost']:.4f}")
-print(f"Potential savings: {recs['savings_percent']:.0f}%")
-for rec in recs['recommendations']:
-    print(f"  {rec['current_model']} → {rec['suggested_model']} ({rec['reason']})")
 ```
 
 ### Data Models
