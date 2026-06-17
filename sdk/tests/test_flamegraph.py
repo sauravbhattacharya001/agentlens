@@ -8,7 +8,7 @@ import tempfile
 import unittest
 from datetime import datetime, timedelta, timezone
 
-from agentlens.flamegraph import Flamegraph, flamegraph_html, _FGNode, _event_label, _parse_ts
+from agentlens.flamegraph import Flamegraph, flamegraph_html, _FGNode, _event_label, _parse_ts, _HTML_TEMPLATE
 from agentlens.models import AgentEvent, Session, ToolCall
 from agentlens.span import Span
 
@@ -311,6 +311,50 @@ class TestFlamegraphMultipleEvents(unittest.TestCase):
         html = fg.render_html()
         self.assertIn("web_search", html)
         self.assertIn("calculator", html)
+
+
+class TestFlamegraphTemplateSeam(unittest.TestCase):
+    """Pin the flamegraph_template.py seam.
+
+    The static HTML/CSS/JS asset lives in its own module so flamegraph.py stays
+    pure data-transformation logic.  These tests guard that boundary: the
+    template must remain importable from the sibling module, be re-exported by
+    flamegraph as the same object, keep the injection placeholder render_html
+    depends on, and carry no Python logic of its own.
+    """
+
+    def test_template_importable_from_sibling_module(self):
+        from agentlens.flamegraph_template import _HTML_TEMPLATE as tpl
+        self.assertIsInstance(tpl, str)
+        self.assertTrue(tpl.startswith("<!DOCTYPE html>"))
+
+    def test_flamegraph_reexports_same_template_object(self):
+        from agentlens import flamegraph_template
+        # flamegraph imports the template by name; it must be the same object,
+        # not a divergent copy.
+        self.assertIs(_HTML_TEMPLATE, flamegraph_template._HTML_TEMPLATE)
+
+    def test_template_keeps_data_injection_placeholder(self):
+        # render_html() substitutes this exact marker; losing it would silently
+        # produce an HTML page with no flamegraph data.
+        self.assertIn("/* __DATA__ */", _HTML_TEMPLATE)
+        events = [_make_event(duration_ms=100)]
+        html = Flamegraph(events).render_html()
+        self.assertNotIn("/* __DATA__ */", html)
+        self.assertIn("const DATA =", html)
+
+    def test_template_module_is_logic_free(self):
+        # The template module should hold only the string constant (+ a module
+        # docstring and __future__ import) - no functions or classes. This keeps
+        # the presentation asset and the Python logic from re-entangling.
+        from agentlens import flamegraph_template
+        public = [
+            name for name in vars(flamegraph_template)
+            if not name.startswith("__")
+            and getattr(getattr(flamegraph_template, name), "__module__", None)
+            == flamegraph_template.__name__
+        ]
+        self.assertEqual(public, [])
 
 
 if __name__ == "__main__":
