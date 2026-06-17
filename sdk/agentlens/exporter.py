@@ -33,11 +33,12 @@ from __future__ import annotations
 import csv
 import io
 import json
+import tempfile
 from datetime import datetime, timezone
+from pathlib import Path
 from typing import Any
 
-from pathlib import Path
-
+from agentlens._utils import format_duration as _duration_human
 from agentlens.models import Session, AgentEvent
 
 
@@ -54,7 +55,6 @@ def _validate_output_path(path: str) -> Path:
     """
     resolved = Path(path).resolve()
     cwd = Path.cwd().resolve()
-    import tempfile
     tmp = Path(tempfile.gettempdir()).resolve()
 
     if resolved == cwd or resolved == tmp:
@@ -78,9 +78,6 @@ def _validate_output_path(path: str) -> Path:
 def _iso(dt: datetime | None) -> str | None:
     """Convert datetime to ISO string or None."""
     return dt.isoformat() if dt else None
-
-
-from agentlens._utils import format_duration as _duration_human  # consolidated
 
 
 def _session_stats(session: Session) -> dict[str, Any]:
