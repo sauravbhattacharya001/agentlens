@@ -12,54 +12,16 @@ import os
 from datetime import datetime, timezone
 from typing import Any
 
-from agentlens._utils import format_duration as _format_duration_impl, parse_iso
-
-
-# ---------------------------------------------------------------------------
-# Icon / label helpers
-# ---------------------------------------------------------------------------
-
-_ICONS: dict[str, str] = {
-    "session_start": "▶",
-    "session_end": "⏹",
-    "llm_call": "🧠",
-    "tool_call": "🔧",
-    "error": "❌",
-    "decision": "💡",
-    "generic": "●",
-}
-
-_HTML_COLORS: dict[str, str] = {
-    "session_start": "#22c55e",
-    "session_end": "#6b7280",
-    "llm_call": "#3b82f6",
-    "tool_call": "#f59e0b",
-    "error": "#ef4444",
-    "decision": "#8b5cf6",
-    "generic": "#6b7280",
-}
-
-
-def _icon(event_type: str) -> str:
-    return _ICONS.get(event_type, _ICONS["generic"])
-
-
-def _format_duration(ms: float | None) -> str:
-    if ms is None:
-        return ""
-    return _format_duration_impl(ms)
-
-
-def _format_timestamp_offset(ms: float) -> str:
-    """Format millisecond offset as MM:SS.mmm."""
-    total_s = ms / 1000.0
-    minutes = int(total_s // 60)
-    seconds = total_s - minutes * 60
-    return f"{minutes:02d}:{seconds:06.3f}"
-
-
-def _event_start_ms(event: dict) -> float | None:
-    return event.get("_offset_ms")
+from agentlens._utils import parse_iso
+# Presentation vocabulary + formatting helpers live in timeline_format.py;
+# re-imported here so they resolve in the renderer body and the public import
+# paths (e.g. ``agentlens.timeline._format_duration``) stay unchanged.
+from agentlens.timeline_format import (
+    _HTML_COLORS,
+    _format_duration,
+    _format_timestamp_offset,
+    _icon,
+)
 
 
 # ---------------------------------------------------------------------------
