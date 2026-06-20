@@ -28,103 +28,37 @@ Contract section        AgentLens source (captured evidence)
 
 from __future__ import annotations
 
-import json
 from datetime import datetime
 from typing import Any
 
-from agentlens.models import AgentEvent, Session
+from agentlens.models import Session
 
-# The contract version this exporter targets. Keep in sync with agent-eval's
-# TRANSCRIPT_CONTRACT_V1.version.
-TRANSCRIPT_CONTRACT_VERSION = "transcript-contract@v1"
+# The value vocabulary (status maps, contract version) and the pure
+# formatting/normalization helpers live in transcript_format.py; re-imported
+# here so they resolve in the engine body and the public import paths (e.g.
+# ``agentlens.transcript._summarize``, ``agentlens.transcript.TRANSCRIPT_CONTRACT_VERSION``)
+# stay unchanged.
+from agentlens.transcript_format import (
+    TRANSCRIPT_CONTRACT_VERSION,
+    _STATUS_TO_EXIT_STATUS,
+    _STATUS_TO_OUTCOME,
+    _as_event_dict,
+    _fmt_duration,
+    _fmt_ts,
+    _get_tool,
+    _parse_iso,
+    _summarize,
+)
 
-# Map an AgentLens session status to a contract outcome token.
-_STATUS_TO_OUTCOME: dict[str, str] = {
-    "completed": "pass",
-    "error": "fail",
-    "failed": "fail",
-    # "active" / anything unfinished -> IN-PROGRESS (handled explicitly below)
-}
-
-# Map an AgentLens session status to an agent-eval RunMetadata.exitStatus.
-# This is the GROUND-TRUTH status the verification check grades the transcript
-# against - distinct from the self-reported `## Outcome`.
-_STATUS_TO_EXIT_STATUS: dict[str, str] = {
-    "completed": "ok",
-    "error": "error",
-    "failed": "error",
-    "timeout": "timeout",
-    "killed": "killed",
-    "active": "running",
-}
-
-_MAX_VALUE_LEN = 200
-
-
-def _fmt_ts(ts: datetime | str | None) -> str:
-    """Format a timestamp as a compact, human-readable UTC string."""
-    if ts is None:
-        return "unknown"
-    if isinstance(ts, str):
-        try:
-            ts = datetime.fromisoformat(ts)
-        except ValueError:
-            return ts
-    return ts.strftime("%Y-%m-%d %H:%M UTC")
-
-
-def _fmt_duration(start: datetime | None, end: datetime | None) -> str:
-    """Render 'start -> end (N minutes)' from two timestamps."""
-    if start is None:
-        return "unknown"
-    start_s = _fmt_ts(start)
-    if end is None:
-        return f"{start_s} -> (in progress)"
-    end_s = _fmt_ts(end)
-    secs = max(0.0, (end - start).total_seconds())
-    if secs < 90:
-        human = f"{secs:.0f} seconds"
-    else:
-        human = f"{secs / 60:.0f} minutes"
-    return f"{start_s} -> {end_s} ({human})"
-
-
-def _summarize(value: Any) -> str:
-    """Render an input/output value compactly for a list item."""
-    if value is None:
-        return ""
-    if isinstance(value, str):
-        text = value
-    else:
-        try:
-            text = json.dumps(value, ensure_ascii=False, separators=(", ", ": "))
-        except (TypeError, ValueError):
-            text = str(value)
-    text = " ".join(text.split())  # collapse whitespace/newlines
-    if len(text) > _MAX_VALUE_LEN:
-        text = text[: _MAX_VALUE_LEN - 1].rstrip() + "\u2026"
-    return text
-
-
-def _as_event_dict(event: AgentEvent | dict[str, Any]) -> dict[str, Any]:
-    """Normalize an event (model or backend dict) into a plain dict."""
-    if isinstance(event, AgentEvent):
-        return event.model_dump(mode="json", exclude_none=False)
-    return event
-
-
-def _get_tool(event: dict[str, Any]) -> dict[str, Any] | None:
-    tc = event.get("tool_call")
-    if isinstance(tc, dict):
-        return tc
-    # Some events carry tool fields inline.
-    if event.get("tool_name"):
-        return {
-            "tool_name": event.get("tool_name"),
-            "tool_input": event.get("tool_input"),
-            "tool_output": event.get("tool_output"),
-        }
-    return None
+# Public surface of this module (also the re-exported names above).  Declared
+# explicitly so the re-imported value-vocabulary constant is recognised as a
+# re-export and the ``agentlens.transcript`` API stays intentional.
+__all__ = [
+    "TRANSCRIPT_CONTRACT_VERSION",
+    "TranscriptExporter",
+    "export_run_metadata",
+    "export_transcript",
+]
 
 
 class TranscriptExporter:
@@ -316,17 +250,6 @@ class TranscriptExporter:
             meta["durationMs"] = max(0.0, (end_dt - start_dt).total_seconds() * 1000.0)
 
         return meta
-
-
-def _parse_iso(value: Any) -> datetime | None:
-    if isinstance(value, datetime):
-        return value
-    if isinstance(value, str):
-        try:
-            return datetime.fromisoformat(value)
-        except ValueError:
-            return None
-    return None
 
 
 def export_transcript(
