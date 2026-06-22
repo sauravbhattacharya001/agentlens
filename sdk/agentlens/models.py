@@ -39,22 +39,22 @@ class AgentEvent(BaseModel):
     session_id: str = ""
     event_type: str = "generic"  # llm_call, tool_call, decision, error, etc.
     timestamp: datetime = Field(default_factory=_utcnow)
-    
+
     # I/O
     input_data: dict[str, Any] | None = None
     output_data: dict[str, Any] | None = None
-    
+
     # LLM specifics
     model: str | None = None
     tokens_in: int = 0
     tokens_out: int = 0
-    
+
     # Tool call (optional)
     tool_call: ToolCall | None = None
-    
+
     # Decision trace (optional)
     decision_trace: DecisionTrace | None = None
-    
+
     # Timing
     duration_ms: float | None = None
 

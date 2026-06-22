@@ -85,16 +85,16 @@ def _get_tracker(operation: str = "this operation") -> AgentTracker:
 
 def init(api_key: str = "default", endpoint: str = "http://localhost:3000") -> AgentTracker:
     """Initialize the AgentLens SDK.
-    
+
     If the SDK was already initialized, the previous transport is closed
     (flushing any buffered events and stopping the background thread)
     before creating the new one.  This prevents resource leaks when
     ``init()`` is called multiple times (e.g. in tests or notebooks).
-    
+
     Args:
         api_key: Your AgentLens API key.
         endpoint: The AgentLens backend URL.
-    
+
     Returns:
         The global AgentTracker instance.
     """
@@ -113,11 +113,11 @@ def init(api_key: str = "default", endpoint: str = "http://localhost:3000") -> A
 
 def start_session(agent_name: str = "default-agent", metadata: dict | None = None) -> Session:
     """Start a new tracking session.
-    
+
     Args:
         agent_name: Name of the agent being tracked.
         metadata: Optional metadata dict.
-    
+
     Returns:
         A Session object.
     """
@@ -143,7 +143,7 @@ def track(
     duration_ms: float | None = None,
 ) -> AgentEvent:
     """Track an agent event manually.
-    
+
     Returns:
         The created AgentEvent.
     """
@@ -164,7 +164,7 @@ def track(
 
 def explain(session_id: str | None = None) -> str:
     """Get a human-readable explanation of the agent's behavior in the current/specified session.
-    
+
     Returns:
         A string explanation.
     """
