@@ -9,7 +9,6 @@ import os
 import tempfile
 from datetime import datetime, timezone, timedelta
 
-import pytest
 
 from agentlens.models import Session, AgentEvent, ToolCall, DecisionTrace
 from agentlens.exporter import SessionExporter, _session_stats, _duration_human, _escape

@@ -65,7 +65,7 @@ class TestAnnotate:
         }
         tracker.transport.post.return_value = mock_resp
 
-        result = tracker.annotate(
+        tracker.annotate(
             "Performance degraded",
             author="alice",
             annotation_type="warning",

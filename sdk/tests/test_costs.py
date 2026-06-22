@@ -1,7 +1,6 @@
 """Tests for cost estimation — tracker.get_costs/get_pricing/set_pricing."""
 
-from unittest.mock import MagicMock, patch
-import json
+from unittest.mock import MagicMock
 
 import pytest
 
@@ -74,7 +73,7 @@ class TestGetCosts:
             tracker.get_costs()
 
     def test_get_costs_includes_headers(self, tracker, mock_transport):
-        session = tracker.start_session()
+        tracker.start_session()
 
         mock_response = MagicMock()
         mock_response.json.return_value = {"total_cost": 0}

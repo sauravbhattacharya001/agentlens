@@ -667,7 +667,7 @@ class TestTrackerIntegration:
         from agentlens.tracker import AgentTracker
         transport = MagicMock()
         tracker = AgentTracker(transport=transport)
-        session = tracker.start_session(agent_name="test")
+        tracker.start_session(agent_name="test")
         tracker.track(event_type="llm_call", duration_ms=50.0, tokens_in=100, tokens_out=100)
         report = tracker.health_score()
         assert isinstance(report, HealthReport)
@@ -679,7 +679,7 @@ class TestTrackerIntegration:
         tracker = AgentTracker(transport=transport)
         s1 = tracker.start_session(agent_name="a1")
         tracker.track(event_type="llm_call", duration_ms=50.0, tokens_in=100, tokens_out=100)
-        s2 = tracker.start_session(agent_name="a2")
+        tracker.start_session(agent_name="a2")
         report = tracker.health_score(session_id=s1.session_id)
         assert report.session_id == s1.session_id
 

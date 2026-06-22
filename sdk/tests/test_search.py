@@ -83,7 +83,7 @@ class TestSearchEvents:
         )
         mock_transport.get.return_value = mock_response
 
-        result = tracker.search_events(session_id="explicit-session")
+        tracker.search_events(session_id="explicit-session")
 
         call_args = mock_transport.get.call_args
         assert "explicit-session" in call_args[0][0]
@@ -95,7 +95,7 @@ class TestSearchEvents:
 
     def test_search_with_query(self, tracker, mock_transport):
         """search_events passes q parameter."""
-        session = tracker.start_session(agent_name="test")
+        tracker.start_session(agent_name="test")
         mock_response = MagicMock()
         mock_response.json.return_value = make_search_response()
         mock_transport.get.return_value = mock_response
@@ -108,7 +108,7 @@ class TestSearchEvents:
 
     def test_search_with_event_type(self, tracker, mock_transport):
         """search_events passes type parameter."""
-        session = tracker.start_session(agent_name="test")
+        tracker.start_session(agent_name="test")
         mock_response = MagicMock()
         mock_response.json.return_value = make_search_response()
         mock_transport.get.return_value = mock_response
@@ -120,7 +120,7 @@ class TestSearchEvents:
 
     def test_search_with_model(self, tracker, mock_transport):
         """search_events passes model parameter."""
-        session = tracker.start_session(agent_name="test")
+        tracker.start_session(agent_name="test")
         mock_response = MagicMock()
         mock_response.json.return_value = make_search_response()
         mock_transport.get.return_value = mock_response
@@ -132,7 +132,7 @@ class TestSearchEvents:
 
     def test_search_with_min_tokens(self, tracker, mock_transport):
         """search_events passes min_tokens parameter."""
-        session = tracker.start_session(agent_name="test")
+        tracker.start_session(agent_name="test")
         mock_response = MagicMock()
         mock_response.json.return_value = make_search_response()
         mock_transport.get.return_value = mock_response
@@ -144,7 +144,7 @@ class TestSearchEvents:
 
     def test_search_with_max_tokens(self, tracker, mock_transport):
         """search_events passes max_tokens parameter."""
-        session = tracker.start_session(agent_name="test")
+        tracker.start_session(agent_name="test")
         mock_response = MagicMock()
         mock_response.json.return_value = make_search_response()
         mock_transport.get.return_value = mock_response
@@ -156,7 +156,7 @@ class TestSearchEvents:
 
     def test_search_with_min_duration(self, tracker, mock_transport):
         """search_events passes min_duration_ms parameter."""
-        session = tracker.start_session(agent_name="test")
+        tracker.start_session(agent_name="test")
         mock_response = MagicMock()
         mock_response.json.return_value = make_search_response()
         mock_transport.get.return_value = mock_response
@@ -168,7 +168,7 @@ class TestSearchEvents:
 
     def test_search_with_has_tools(self, tracker, mock_transport):
         """search_events passes has_tools boolean."""
-        session = tracker.start_session(agent_name="test")
+        tracker.start_session(agent_name="test")
         mock_response = MagicMock()
         mock_response.json.return_value = make_search_response()
         mock_transport.get.return_value = mock_response
@@ -180,7 +180,7 @@ class TestSearchEvents:
 
     def test_search_with_has_reasoning(self, tracker, mock_transport):
         """search_events passes has_reasoning boolean."""
-        session = tracker.start_session(agent_name="test")
+        tracker.start_session(agent_name="test")
         mock_response = MagicMock()
         mock_response.json.return_value = make_search_response()
         mock_transport.get.return_value = mock_response
@@ -192,7 +192,7 @@ class TestSearchEvents:
 
     def test_search_with_errors(self, tracker, mock_transport):
         """search_events passes errors boolean."""
-        session = tracker.start_session(agent_name="test")
+        tracker.start_session(agent_name="test")
         mock_response = MagicMock()
         mock_response.json.return_value = make_search_response()
         mock_transport.get.return_value = mock_response
@@ -204,7 +204,7 @@ class TestSearchEvents:
 
     def test_search_with_time_range(self, tracker, mock_transport):
         """search_events passes after/before parameters."""
-        session = tracker.start_session(agent_name="test")
+        tracker.start_session(agent_name="test")
         mock_response = MagicMock()
         mock_response.json.return_value = make_search_response()
         mock_transport.get.return_value = mock_response
@@ -220,7 +220,7 @@ class TestSearchEvents:
 
     def test_search_with_pagination(self, tracker, mock_transport):
         """search_events passes limit/offset parameters."""
-        session = tracker.start_session(agent_name="test")
+        tracker.start_session(agent_name="test")
         mock_response = MagicMock()
         mock_response.json.return_value = make_search_response()
         mock_transport.get.return_value = mock_response
@@ -233,7 +233,7 @@ class TestSearchEvents:
 
     def test_search_limit_clamped(self, tracker, mock_transport):
         """search_events clamps limit to 1-500 range."""
-        session = tracker.start_session(agent_name="test")
+        tracker.start_session(agent_name="test")
         mock_response = MagicMock()
         mock_response.json.return_value = make_search_response()
         mock_transport.get.return_value = mock_response
@@ -248,7 +248,7 @@ class TestSearchEvents:
 
     def test_search_offset_clamped(self, tracker, mock_transport):
         """search_events clamps negative offset to 0."""
-        session = tracker.start_session(agent_name="test")
+        tracker.start_session(agent_name="test")
         mock_response = MagicMock()
         mock_response.json.return_value = make_search_response()
         mock_transport.get.return_value = mock_response
@@ -259,7 +259,7 @@ class TestSearchEvents:
 
     def test_search_omits_unset_params(self, tracker, mock_transport):
         """search_events only sends params that are set."""
-        session = tracker.start_session(agent_name="test")
+        tracker.start_session(agent_name="test")
         mock_response = MagicMock()
         mock_response.json.return_value = make_search_response()
         mock_transport.get.return_value = mock_response
@@ -283,7 +283,7 @@ class TestSearchEvents:
 
     def test_search_zero_min_tokens_not_sent(self, tracker, mock_transport):
         """min_tokens=0 is not sent (treated as no filter)."""
-        session = tracker.start_session(agent_name="test")
+        tracker.start_session(agent_name="test")
         mock_response = MagicMock()
         mock_response.json.return_value = make_search_response()
         mock_transport.get.return_value = mock_response
@@ -295,7 +295,7 @@ class TestSearchEvents:
 
     def test_search_false_booleans_not_sent(self, tracker, mock_transport):
         """has_tools=False, etc. are not sent as params."""
-        session = tracker.start_session(agent_name="test")
+        tracker.start_session(agent_name="test")
         mock_response = MagicMock()
         mock_response.json.return_value = make_search_response()
         mock_transport.get.return_value = mock_response
@@ -309,7 +309,7 @@ class TestSearchEvents:
 
     def test_search_combined_filters(self, tracker, mock_transport):
         """search_events sends all filters when combined."""
-        session = tracker.start_session(agent_name="test")
+        tracker.start_session(agent_name="test")
         mock_response = MagicMock()
         mock_response.json.return_value = make_search_response()
         mock_transport.get.return_value = mock_response
@@ -337,7 +337,7 @@ class TestSearchEvents:
 
     def test_search_api_key_sent(self, tracker, mock_transport):
         """search_events sends API key in headers."""
-        session = tracker.start_session(agent_name="test")
+        tracker.start_session(agent_name="test")
         mock_response = MagicMock()
         mock_response.json.return_value = make_search_response()
         mock_transport.get.return_value = mock_response
@@ -349,7 +349,7 @@ class TestSearchEvents:
 
     def test_search_returns_full_response(self, tracker, mock_transport):
         """search_events returns the complete response structure."""
-        session = tracker.start_session(agent_name="test")
+        tracker.start_session(agent_name="test")
         expected = make_search_response(matched=3, total_events=10)
         mock_response = MagicMock()
         mock_response.json.return_value = expected

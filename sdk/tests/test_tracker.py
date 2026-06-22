@@ -1,10 +1,9 @@
 """Tests for agentlens.tracker — session management and event tracking."""
 
-from unittest.mock import MagicMock, patch
+from unittest.mock import MagicMock
 
 import pytest
 
-from agentlens.models import AgentEvent, Session
 from agentlens.tracker import AgentTracker
 from agentlens.transport import Transport
 
@@ -45,7 +44,7 @@ class TestStartSession:
         assert event["metadata"] == {"version": "1.0"}
 
     def test_multiple_sessions(self, tracker, mock_transport):
-        s1 = tracker.start_session(agent_name="agent-1")
+        tracker.start_session(agent_name="agent-1")
         s2 = tracker.start_session(agent_name="agent-2")
 
         assert len(tracker.sessions) == 2
@@ -123,7 +122,7 @@ class TestTrack:
         assert event.tool_call.duration_ms == 150.0
 
     def test_track_with_reasoning(self, tracker, mock_transport):
-        session = tracker.start_session()
+        tracker.start_session()
         event = tracker.track(
             event_type="agent_call",
             reasoning="Chose search because the question is factual",
@@ -277,7 +276,7 @@ class TestExportSession:
     def test_export_specific_session_id(self, tracker, mock_transport):
         mock_transport.get.return_value = _mock_response({"ok": True})
 
-        result = tracker.export_session(session_id="custom-sid")
+        tracker.export_session(session_id="custom-sid")
 
         call_args = mock_transport.get.call_args
         assert "custom-sid" in call_args[0][0]
@@ -546,7 +545,7 @@ class TestTags:
             {"session_id": session.session_id, "removed": 1, "tags": []}
         )
 
-        result = tracker.remove_tags(["old-tag"])
+        tracker.remove_tags(["old-tag"])
 
         call_args = mock_transport.delete.call_args
         assert f"/sessions/{session.session_id}/tags" in call_args[0][0]
@@ -558,13 +557,13 @@ class TestTags:
             {"session_id": session.session_id, "removed": 3, "tags": []}
         )
 
-        result = tracker.remove_tags()
+        tracker.remove_tags()
 
         call_args = mock_transport.delete.call_args
         assert call_args[1]["json"] == {}
 
     def test_get_tags_returns_list(self, tracker, mock_transport):
-        session = tracker.start_session()
+        tracker.start_session()
         mock_transport.get.return_value = _mock_response(
             {"tags": ["prod", "v2"]}
         )
@@ -606,7 +605,7 @@ class TestAnnotations:
         tracker.start_session()
         mock_transport.post.return_value = _mock_response({"annotation_id": "ann-1"})
 
-        result = tracker.annotate("Bug found", annotation_type="bug", author="tester")
+        tracker.annotate("Bug found", annotation_type="bug", author="tester")
 
         payload = mock_transport.post.call_args[1]["json"]
         assert payload["text"] == "Bug found"
@@ -849,7 +848,7 @@ class TestHeatmap:
         mock_transport.get.return_value = MagicMock(
             json=MagicMock(return_value={"matrix": [], "peak": None})
         )
-        result = tracker.heatmap()
+        tracker.heatmap()
         mock_transport.get.assert_called_with(
             "/analytics/heatmap",
             params={"metric": "events", "days": 30},

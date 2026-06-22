@@ -201,7 +201,7 @@ class TestListSessionsByTag:
         mock_resp.json.return_value = {"sessions": [], "total": 100, "limit": 10, "offset": 20}
         tracker.transport.get.return_value = mock_resp
 
-        result = tracker.list_sessions_by_tag("debug", limit=10, offset=20)
+        tracker.list_sessions_by_tag("debug", limit=10, offset=20)
         call_args = tracker.transport.get.call_args
         assert call_args[1]["params"]["limit"] == 10
         assert call_args[1]["params"]["offset"] == 20

@@ -3,7 +3,6 @@
 from __future__ import annotations
 
 import os
-import tempfile
 from datetime import datetime, timezone, timedelta
 
 import pytest
@@ -609,7 +608,7 @@ class TestTrackerIntegration:
         tracker = AgentTracker(transport=MagicMock())
         # Mock transport send_events
         tracker.transport.send_events = MagicMock()
-        session = tracker.start_session(agent_name="test-agent")
+        tracker.start_session(agent_name="test-agent")
         tracker.track(event_type="llm_call", model="gpt-4o", tokens_in=100, tokens_out=50, duration_ms=1000)
         renderer = tracker.timeline()
         assert isinstance(renderer, TimelineRenderer)

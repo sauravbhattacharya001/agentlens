@@ -4,7 +4,7 @@ import json
 import pytest
 from datetime import datetime, timedelta, timezone
 
-from agentlens.models import AgentEvent, Session, ToolCall, DecisionTrace
+from agentlens.models import AgentEvent, Session, ToolCall
 from agentlens.replayer import (
     SessionReplayer,
     ReplayFrame,

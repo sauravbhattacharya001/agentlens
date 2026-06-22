@@ -1,11 +1,8 @@
 """Tests for agentlens.transport — batched HTTP transport with retry logic."""
 
-import threading
-import time
 from unittest.mock import MagicMock, patch
 
 import httpx
-import pytest
 
 from agentlens.transport import Transport, _MAX_BUFFER_SIZE
 

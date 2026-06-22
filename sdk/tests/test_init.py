@@ -289,7 +289,7 @@ class TestExplain:
     def test_explain_with_session_id(self, initialized):
         s1 = agentlens.start_session(agent_name="first-agent")
         agentlens.track(event_type="llm_call")
-        s2 = agentlens.start_session(agent_name="second-agent")
+        agentlens.start_session(agent_name="second-agent")
         result = agentlens.explain(session_id=s1.session_id)
         assert "first-agent" in result
 

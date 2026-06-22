@@ -1,7 +1,7 @@
 """Tests for agentlens.decorators — @track_agent and @track_tool_call."""
 
 import asyncio
-from unittest.mock import MagicMock, patch
+from unittest.mock import patch
 
 import pytest
 
@@ -87,7 +87,7 @@ class TestTrackAgent:
         def safe_agent():
             return "works"
 
-        # When agentlens.track raises RuntimeError (not initialized), 
+        # When agentlens.track raises RuntimeError (not initialized),
         # the decorator should still return the result
         with patch("agentlens.track", side_effect=RuntimeError("not init")):
             result = safe_agent()

@@ -7,7 +7,6 @@ from datetime import datetime, timezone, timedelta
 from agentlens.models import AgentEvent, Session, ToolCall, DecisionTrace
 from agentlens.narrative import (
     NarrativeGenerator, NarrativeConfig, NarrativeStyle,
-    Narrative, NarrativeSection, ToolSummary,
 )
 
 

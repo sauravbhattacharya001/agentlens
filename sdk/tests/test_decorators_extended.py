@@ -1,7 +1,7 @@
 """Additional tests for agentlens.decorators — edge cases and deeper coverage."""
 
 import asyncio
-from unittest.mock import MagicMock, patch, call
+from unittest.mock import patch
 
 import pytest
 

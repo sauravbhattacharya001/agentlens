@@ -1,11 +1,8 @@
 """Additional tests for agentlens.transport — concurrency, retry logic, edge cases."""
 
-import threading
-import time
-from unittest.mock import MagicMock, patch, PropertyMock
+from unittest.mock import MagicMock, patch
 
 import httpx
-import pytest
 
 from agentlens.transport import Transport, _MAX_BUFFER_SIZE
 

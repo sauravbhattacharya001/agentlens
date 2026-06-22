@@ -1,6 +1,5 @@
 """Tests for the span context manager feature."""
 
-import time
 from unittest.mock import MagicMock
 
 import pytest
@@ -109,7 +108,7 @@ class TestTrackerSpan:
         tracker = _make_tracker()
         tracker.start_session("agent")
 
-        with tracker.span("test") as s:
+        with tracker.span("test"):
             pass
 
         calls = tracker.transport.send_events.call_args_list

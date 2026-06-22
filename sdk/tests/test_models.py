@@ -1,7 +1,6 @@
 """Tests for agentlens.models — Pydantic models and session logic."""
 
-import uuid
-from datetime import datetime, timezone
+from datetime import timezone
 
 from agentlens.models import (
     AgentEvent,
