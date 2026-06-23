@@ -3,25 +3,44 @@
 Transforms session event data into formatted timeline views (text, markdown,
 HTML) for debugging, reporting, and sharing.  Pure SDK-side utility — no
 backend changes needed.
+
+:class:`TimelineRenderer` owns the stateful concerns (offset computation,
+filtering, analysis, IO); the stateless multi-format rendering functions it
+delegates to live in ``agentlens.timeline_render`` and the per-event styling
+vocabulary lives in ``agentlens.timeline_format``.
 """
 
 from __future__ import annotations
 
-import html as _html
 import os
 from datetime import datetime, timezone
 from typing import Any
 
 from agentlens._utils import parse_iso
-# Presentation vocabulary + formatting helpers live in timeline_format.py;
-# re-imported here so they resolve in the renderer body and the public import
-# paths (e.g. ``agentlens.timeline._format_duration``) stay unchanged.
+# The duration / timestamp formatters live in timeline_format.py; they are
+# re-exported here (see ``__all__``) so the historical public import paths
+# ``agentlens.timeline._format_duration`` / ``_format_timestamp_offset`` keep
+# working for callers that imported them directly.
 from agentlens.timeline_format import (
-    _HTML_COLORS,
     _format_duration,
     _format_timestamp_offset,
-    _icon,
 )
+# Stateless multi-format render engine lives in timeline_render.py; each
+# render_* method below is a thin delegator over the already-computed events
+# and summary.
+from agentlens.timeline_render import (
+    _is_error_event,
+    render_html as _render_html,
+    render_markdown as _render_markdown,
+    render_text as _render_text,
+)
+
+__all__ = [
+    "TimelineRenderer",
+    # Re-exported for backwards-compatible ``agentlens.timeline.*`` access.
+    "_format_duration",
+    "_format_timestamp_offset",
+]
 
 
 # ---------------------------------------------------------------------------
@@ -94,123 +113,15 @@ class TimelineRenderer:
         Returns:
             Multi-line string with the formatted timeline.
         """
-        max_width = max(40, max_width)
-        lines: list[str] = []
-
-        # Header
-        sid = self.session.get("session_id", "unknown")
-        agent = self.session.get("agent_name", "")
-        summary = self.get_summary()
-        dur_str = _format_duration(summary["total_duration_ms"])
-
-        header_line = "═" * max_width
-        lines.append(header_line)
-        lines.append(f" Session Timeline: {sid}")
-        parts = []
-        if agent:
-            parts.append(f"Agent: {agent}")
-        if dur_str:
-            parts.append(f"Duration: {dur_str}")
-        parts.append(f"Events: {summary['total_events']}")
-        lines.append(" " + " | ".join(parts))
-        lines.append(header_line)
-        lines.append("")
-
-        # Events
-        for ev in self.events:
-            offset = ev.get("_offset_ms", 0.0)
-            ts_str = _format_timestamp_offset(offset)
-            etype = ev.get("event_type", "generic")
-            icon = _icon(etype)
-
-            label = etype.upper()
-            model = ev.get("model")
-            tool_name = None
-            tc = ev.get("tool_call")
-            if isinstance(tc, dict):
-                tool_name = tc.get("tool_name")
-
-            suffix = ""
-            if model:
-                label += f" [{model}]"
-            elif tool_name:
-                label += f" [{tool_name}]"
-
-            dur = ev.get("duration_ms")
-            if show_duration and dur is not None:
-                suffix = f" ──── {_format_duration(dur)}"
-
-            lines.append(f" {ts_str} ┃ {icon} {label}{suffix}")
-
-            # Metadata lines
-            meta_lines: list[str] = []
-            if show_metadata:
-                if etype == "session_start" and agent:
-                    meta_lines.append(f"agent: {agent}")
-                if etype == "error":
-                    err_msg = ev.get("output_data", {})
-                    if isinstance(err_msg, dict):
-                        err_msg = err_msg.get("error", err_msg.get("message", ""))
-                    if err_msg:
-                        meta_lines.append(str(err_msg))
-
-            if show_tokens:
-                tin = ev.get("tokens_in", 0) or 0
-                tout = ev.get("tokens_out", 0) or 0
-                if tin or tout:
-                    total = tin + tout
-                    meta_lines.append(f"tokens: {tin} → {tout} ({total} total)")
-
-            if show_metadata:
-                # Check for reasoning
-                dt = ev.get("decision_trace")
-                if isinstance(dt, dict) and dt.get("reasoning"):
-                    meta_lines.append("⚠ has_reasoning")
-
-                # Session end total tokens
-                if etype == "session_end":
-                    tt = summary["total_tokens"]
-                    if tt:
-                        meta_lines.append(f"total_tokens: {tt}")
-
-                # Tool status
-                if tool_name and etype == "tool_call":
-                    tc_dict = ev.get("tool_call", {})
-                    if isinstance(tc_dict, dict):
-                        out = tc_dict.get("tool_output")
-                        if isinstance(out, dict) and out.get("error"):
-                            meta_lines.append("status: error")
-                        else:
-                            meta_lines.append("status: success")
-
-            pad = " " * len(ts_str)
-            for ml in meta_lines:
-                lines.append(f" {pad} ┃   {ml}")
-
-        # Summary footer
-        lines.append("")
-        lines.append(f"─── Summary {'─' * (max_width - 14)}")
-        llm_events = [e for e in self.events if e.get("event_type") == "llm_call"]
-        tool_events = [e for e in self.events if e.get("event_type") == "tool_call"]
-        error_events = [e for e in self.events if e.get("event_type") == "error"]
-
-        line1_parts = [
-            f"Total: {summary['total_events']} events",
-        ]
-        if dur_str:
-            line1_parts.append(dur_str)
-        line1_parts.append(f"{summary['total_tokens']} tokens")
-        lines.append(f" {' | '.join(line1_parts)}")
-
-        line2_parts = []
-        if llm_events:
-            avg_dur = sum(e.get("duration_ms", 0) or 0 for e in llm_events) / len(llm_events)
-            line2_parts.append(f"LLM calls: {len(llm_events)} (avg {_format_duration(avg_dur)})")
-        line2_parts.append(f"Tools: {len(tool_events)}")
-        line2_parts.append(f"Errors: {len(error_events)}")
-        lines.append(f" {' | '.join(line2_parts)}")
-
-        return "\n".join(lines)
+        return _render_text(
+            self.events,
+            self.session,
+            self.get_summary(),
+            show_metadata=show_metadata,
+            show_tokens=show_tokens,
+            show_duration=show_duration,
+            max_width=max_width,
+        )
 
     def render_markdown(
         self,
@@ -235,83 +146,15 @@ class TimelineRenderer:
         Returns:
             Markdown-formatted string.
         """
-        summary = self.get_summary()
-        sid = self.session.get("session_id", "unknown")
-        agent = self.session.get("agent_name", "")
-        lines: list[str] = []
-
-        lines.append(f"# Session Timeline: {sid}")
-        lines.append("")
-        if show_metadata:
-            parts = []
-            if agent:
-                parts.append(f"**Agent:** {agent}")
-            parts.append(f"**Duration:** {_format_duration(summary['total_duration_ms'])}")
-            parts.append(f"**Events:** {summary['total_events']}")
-            parts.append(f"**Tokens:** {summary['total_tokens']}")
-            lines.append(" | ".join(parts))
-            lines.append("")
-
-        if include_toc:
-            lines.append("## Table of Contents")
-            lines.append("- [Events](#events)")
-            lines.append("- [Summary](#summary)")
-            lines.append("")
-
-        lines.append("## Events")
-        lines.append("")
-
-        # Table header
-        cols = ["Time", "Type", "Details"]
-        if show_duration:
-            cols.append("Duration")
-        if show_tokens:
-            cols.append("Tokens")
-        lines.append("| " + " | ".join(cols) + " |")
-        lines.append("| " + " | ".join(["---"] * len(cols)) + " |")
-
-        for ev in self.events:
-            offset = ev.get("_offset_ms", 0.0)
-            ts = _format_timestamp_offset(offset)
-            etype = ev.get("event_type", "generic")
-            icon = _icon(etype)
-            detail_parts: list[str] = []
-            model = ev.get("model")
-            tc = ev.get("tool_call")
-            tool_name = tc.get("tool_name") if isinstance(tc, dict) else None
-            if model:
-                detail_parts.append(f"model: {model}")
-            if tool_name:
-                detail_parts.append(f"tool: {tool_name}")
-            if etype == "error":
-                err = ev.get("output_data", {})
-                if isinstance(err, dict):
-                    err = err.get("error", err.get("message", ""))
-                if err:
-                    detail_parts.append(str(err))
-            detail = ", ".join(detail_parts) if detail_parts else "-"
-
-            row = [ts, f"{icon} {etype.upper()}", detail]
-            if show_duration:
-                dur = ev.get("duration_ms")
-                row.append(_format_duration(dur) if dur else "-")
-            if show_tokens:
-                tin = ev.get("tokens_in", 0) or 0
-                tout = ev.get("tokens_out", 0) or 0
-                row.append(f"{tin}→{tout}" if (tin or tout) else "-")
-            lines.append("| " + " | ".join(row) + " |")
-
-        lines.append("")
-        lines.append("## Summary")
-        lines.append("")
-        lines.append(f"- **Total events:** {summary['total_events']}")
-        lines.append(f"- **Total duration:** {_format_duration(summary['total_duration_ms'])}")
-        lines.append(f"- **Total tokens:** {summary['total_tokens']}")
-        lines.append(f"- **Errors:** {summary['error_count']}")
-        if summary["models_used"]:
-            lines.append(f"- **Models:** {', '.join(summary['models_used'])}")
-
-        return "\n".join(lines)
+        return _render_markdown(
+            self.events,
+            self.session,
+            self.get_summary(),
+            show_metadata=show_metadata,
+            show_tokens=show_tokens,
+            show_duration=show_duration,
+            include_toc=include_toc,
+        )
 
     def render_html(
         self,
@@ -339,106 +182,16 @@ class TimelineRenderer:
         Returns:
             Complete HTML document as a string.
         """
-        summary = self.get_summary()
-        sid = self.session.get("session_id", "unknown")
-        agent = self.session.get("agent_name", "")
-
-        bg = "#1a1a2e" if dark_mode else "#ffffff"
-        fg = "#e0e0e0" if dark_mode else "#333333"
-        card_bg = "#16213e" if dark_mode else "#f9fafb"
-        border = "#0f3460" if dark_mode else "#e5e7eb"
-
-        css = f"""
-        body {{ font-family: -apple-system, BlinkMacSystemFont, 'Segoe UI', sans-serif;
-               background: {bg}; color: {fg}; margin: 0; padding: 20px; }}
-        .header {{ text-align: center; margin-bottom: 24px; }}
-        .header h1 {{ margin: 0 0 8px 0; }}
-        .meta {{ color: #888; font-size: 14px; }}
-        .event-card {{ background: {card_bg}; border: 1px solid {border};
-                       border-radius: 8px; padding: 12px 16px; margin: 8px 0;
-                       border-left: 4px solid #6b7280; }}
-        .event-time {{ font-family: monospace; font-size: 12px; color: #888; }}
-        .event-type {{ font-weight: bold; margin-left: 8px; }}
-        .event-duration {{ font-size: 12px; color: #888; margin-left: 8px; }}
-        .token-badge {{ display: inline-block; background: #e0e7ff; color: #3730a3;
-                        border-radius: 4px; padding: 2px 6px; font-size: 11px; margin-left: 8px; }}
-        .error-details {{ color: #ef4444; margin-top: 4px; font-size: 13px; }}
-        .summary {{ background: {card_bg}; border: 1px solid {border};
-                    border-radius: 8px; padding: 16px; margin-top: 24px; }}
-        .duration-bar {{ display: inline-block; height: 6px; background: #3b82f6;
-                         border-radius: 3px; margin-left: 8px; vertical-align: middle; }}
-        """
-
-        h = _html.escape
-        parts: list[str] = []
-        parts.append("<!DOCTYPE html><html><head><meta charset='utf-8'>")
-        parts.append(f"<title>{h(title)}</title>")
-        parts.append(f"<style>{css}</style></head><body>")
-        parts.append(f"<div class='header'><h1>{h(title)}</h1>")
-        if show_metadata:
-            meta_parts = []
-            if agent:
-                meta_parts.append(f"Agent: {h(agent)}")
-            meta_parts.append(f"Session: {h(sid)}")
-            meta_parts.append(f"Duration: {_format_duration(summary['total_duration_ms'])}")
-            meta_parts.append(f"Events: {summary['total_events']}")
-            parts.append(f"<div class='meta'>{' | '.join(meta_parts)}</div>")
-        parts.append("</div>")
-
-        # Find max duration for bar scaling
-        max_dur = max((e.get("duration_ms") or 0 for e in self.events), default=1) or 1
-
-        for ev in self.events:
-            etype = ev.get("event_type", "generic")
-            color = _HTML_COLORS.get(etype, _HTML_COLORS["generic"])
-            offset = ev.get("_offset_ms", 0.0)
-            ts = _format_timestamp_offset(offset)
-            icon = _icon(etype)
-
-            parts.append(f"<div class='event-card' style='border-left-color:{color}'>")
-            parts.append(f"<span class='event-time'>{ts}</span>")
-            parts.append(f"<span class='event-type'>{icon} {h(etype.upper())}</span>")
-
-            model = ev.get("model")
-            tc = ev.get("tool_call")
-            tool_name = tc.get("tool_name") if isinstance(tc, dict) else None
-            if model:
-                parts.append(f"<span class='event-duration'>[{h(model)}]</span>")
-            if tool_name:
-                parts.append(f"<span class='event-duration'>[{h(tool_name)}]</span>")
-
-            dur = ev.get("duration_ms")
-            if show_duration and dur is not None:
-                bar_w = max(2, int(80 * dur / max_dur))
-                parts.append(f"<span class='event-duration'>{_format_duration(dur)}</span>")
-                parts.append(f"<span class='duration-bar' style='width:{bar_w}px'></span>")
-
-            if show_tokens:
-                tin = ev.get("tokens_in", 0) or 0
-                tout = ev.get("tokens_out", 0) or 0
-                if tin or tout:
-                    parts.append(f"<span class='token-badge'>{tin}→{tout}</span>")
-
-            if etype == "error":
-                err = ev.get("output_data", {})
-                if isinstance(err, dict):
-                    err = err.get("error", err.get("message", ""))
-                if err:
-                    parts.append(f"<div class='error-details'>{h(str(err))}</div>")
-
-            parts.append("</div>")
-
-        # Summary
-        parts.append("<div class='summary'><h3>Summary</h3>")
-        parts.append(f"<p>Total: {summary['total_events']} events | "
-                      f"{_format_duration(summary['total_duration_ms'])} | "
-                      f"{summary['total_tokens']} tokens | "
-                      f"{summary['error_count']} errors</p>")
-        if summary["models_used"]:
-            parts.append(f"<p>Models: {', '.join(h(m) for m in summary['models_used'])}</p>")
-        parts.append("</div></body></html>")
-
-        return "".join(parts)
+        return _render_html(
+            self.events,
+            self.session,
+            self.get_summary(),
+            show_metadata=show_metadata,
+            show_tokens=show_tokens,
+            show_duration=show_duration,
+            dark_mode=dark_mode,
+            title=title,
+        )
 
     # -- Filtering -----------------------------------------------------------
 
@@ -558,11 +311,4 @@ class TimelineRenderer:
 
     @staticmethod
     def _is_error(event: dict) -> bool:
-        if event.get("event_type") == "error":
-            return True
-        tc = event.get("tool_call")
-        if isinstance(tc, dict):
-            out = tc.get("tool_output")
-            if isinstance(out, dict) and out.get("error"):
-                return True
-        return False
+        return _is_error_event(event)
