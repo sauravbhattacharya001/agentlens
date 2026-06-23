@@ -1,21 +1,13 @@
 """Tests for ``agentlens._utils`` — the shared internal helpers.
 
-These helpers are touched by ~20+ modules across the SDK (every CLI,
-the analytics layer, the trackers).  Until now they had no dedicated
-test file — bugs here ripple everywhere, so they get the most coverage
-treatment.
+These helpers are imported by several core modules (``models``, ``span``,
+``timeline``, ``flamegraph``, ``exporter``).  Bugs here ripple widely, so
+they get thorough coverage.
 
 Covers:
     - new_id(): default length, custom length, uniqueness, character set
     - utcnow(): timezone-awareness, monotonic-ish ordering
     - parse_iso(): Z suffix, +offset, naive, empty/None, garbage, non-strings
-    - parse_iso_or_epoch(): seconds vs milliseconds heuristic, datetime
-      passthrough, invalid numerics
-    - safe_compile(): valid + invalid patterns
-    - safe_search(): match, no-match, ReDoS guard on Windows-style
-      truncation, accepts pre-compiled patterns
-    - linear_regression(): empty, single-point, perfect line, constant y,
-      explicit x's, ordering matches y = m*x + b
     - percentile(): empty, single value, exact ranks, interpolation,
       p=0 / p=100 endpoints
     - format_duration(): None, sub-second, seconds, minutes, hours,
@@ -23,7 +15,6 @@ Covers:
 """
 from __future__ import annotations
 
-import math
 import re
 from datetime import datetime, timezone
 
@@ -101,130 +92,6 @@ class TestParseIso:
     def test_unparseable_returns_none(self, value):
         # Pure-numeric input is not ISO; parse_iso should reject it.
         assert _utils.parse_iso(value) is None
-
-
-# ---------------------------------------------------------------------------
-# parse_iso_or_epoch
-# ---------------------------------------------------------------------------
-
-class TestParseIsoOrEpoch:
-    def test_iso_string(self):
-        dt = _utils.parse_iso_or_epoch("2025-06-15T12:34:56Z")
-        assert dt == datetime(2025, 6, 15, 12, 34, 56, tzinfo=timezone.utc)
-
-    def test_datetime_passthrough(self):
-        dt = datetime(2025, 6, 15, tzinfo=timezone.utc)
-        assert _utils.parse_iso_or_epoch(dt) is dt
-
-    def test_epoch_seconds(self):
-        # 1_700_000_000 = 2023-11-14 22:13:20 UTC
-        dt = _utils.parse_iso_or_epoch(1_700_000_000)
-        assert dt is not None
-        assert dt.year == 2023 and dt.month == 11
-
-    def test_epoch_milliseconds(self):
-        # > 1e12 → interpreted as ms
-        dt_ms = _utils.parse_iso_or_epoch(1_700_000_000_000)
-        dt_s = _utils.parse_iso_or_epoch(1_700_000_000)
-        assert dt_ms == dt_s
-
-    def test_float_epoch(self):
-        dt = _utils.parse_iso_or_epoch(1_700_000_000.5)
-        assert dt is not None
-        assert dt.microsecond == 500_000
-
-    @pytest.mark.parametrize("value", [None, "", "garbage"])
-    def test_invalid_returns_none(self, value):
-        assert _utils.parse_iso_or_epoch(value) is None
-
-    def test_overflow_epoch_returns_none(self):
-        # Way beyond datetime's range — should not raise.
-        assert _utils.parse_iso_or_epoch(1e30) is None
-
-
-# ---------------------------------------------------------------------------
-# safe_compile / safe_search
-# ---------------------------------------------------------------------------
-
-class TestSafeCompile:
-    def test_valid_pattern(self):
-        pat = _utils.safe_compile(r"\d+")
-        assert pat is not None and pat.search("abc123").group(0) == "123"
-
-    def test_invalid_pattern_returns_none(self):
-        assert _utils.safe_compile(r"(unclosed") is None
-
-    def test_flags_respected(self):
-        pat = _utils.safe_compile(r"hello", re.IGNORECASE)
-        assert pat is not None and pat.search("HELLO") is not None
-
-
-class TestSafeSearch:
-    def test_match(self):
-        m = _utils.safe_search(r"foo(\d+)", "foo42")
-        assert m is not None and m.group(1) == "42"
-
-    def test_no_match(self):
-        assert _utils.safe_search(r"foo", "bar") is None
-
-    def test_accepts_precompiled(self):
-        pat = re.compile(r"x+")
-        assert _utils.safe_search(pat, "xxx") is not None
-
-    def test_handles_very_long_input(self):
-        # On Windows the helper caps input at 100k chars but should still
-        # produce a sensible result for a benign pattern.
-        text = "a" * 200_000 + "needle"
-        # 'needle' lives past the 100k cap on Windows, so the match may be
-        # None; on POSIX it should match.  Either way: no exception, no hang.
-        result = _utils.safe_search(r"needle", text)
-        assert result is None or result.group(0) == "needle"
-
-
-# ---------------------------------------------------------------------------
-# linear_regression
-# ---------------------------------------------------------------------------
-
-class TestLinearRegression:
-    def test_empty(self):
-        slope, intercept = _utils.linear_regression([])
-        assert slope == 0.0 and intercept == 0.0
-
-    def test_single_point(self):
-        slope, intercept = _utils.linear_regression([7.0])
-        assert slope == 0.0 and intercept == 7.0
-
-    def test_perfect_line_default_x(self):
-        # y = 2x + 1 → at x=0..3 yields [1, 3, 5, 7]
-        slope, intercept = _utils.linear_regression([1.0, 3.0, 5.0, 7.0])
-        assert math.isclose(slope, 2.0)
-        assert math.isclose(intercept, 1.0)
-
-    def test_perfect_line_explicit_x(self):
-        slope, intercept = _utils.linear_regression(
-            ys=[10.0, 20.0, 30.0],
-            xs=[1.0, 2.0, 3.0],
-        )
-        assert math.isclose(slope, 10.0)
-        assert math.isclose(intercept, 0.0)
-
-    def test_constant_y(self):
-        slope, intercept = _utils.linear_regression([5.0, 5.0, 5.0, 5.0])
-        assert math.isclose(slope, 0.0, abs_tol=1e-9)
-        assert math.isclose(intercept, 5.0)
-
-    def test_zero_x_variance(self):
-        # All xs equal → denominator==0 branch
-        slope, intercept = _utils.linear_regression(
-            ys=[1.0, 2.0, 3.0],
-            xs=[5.0, 5.0, 5.0],
-        )
-        assert slope == 0.0
-        assert math.isclose(intercept, 2.0)  # y_mean
-
-    def test_negative_slope(self):
-        slope, _ = _utils.linear_regression([10.0, 8.0, 6.0, 4.0])
-        assert slope < 0
 
 
 # ---------------------------------------------------------------------------

@@ -1,27 +1,24 @@
 """Shared internal utilities for the AgentLens SDK.
 
-Small helpers that are used by multiple modules (e.g. ``exporter``,
-``cli_common``) live here to avoid copy-paste duplication.
+Small helpers used by multiple modules (e.g. ``models``, ``span``,
+``timeline``, ``flamegraph``, ``exporter``) live here to avoid copy-paste
+duplication.
 """
 
 from __future__ import annotations
 
-import re
-import signal
-import sys
 import uuid
 from datetime import datetime, timezone
 from typing import Any, Optional
-from re import Pattern
 
-__all__ = ["format_duration", "linear_regression", "new_id", "parse_iso", "parse_iso_or_epoch", "safe_compile", "safe_search", "percentile", "utcnow"]
+__all__ = ["format_duration", "new_id", "parse_iso", "percentile", "utcnow"]
 
 
 def new_id(length: int = 12) -> str:
     """Return a random hex identifier of the given *length*.
 
-    Consolidates the previously duplicated ``_new_id`` helpers from
-    ``budget``, ``cost_optimizer``, ``latency``, ``models``, and ``span``.
+    Single source for ID generation across the SDK so every module mints
+    identifiers the same way (used by ``models`` and ``span``).
     """
     return uuid.uuid4().hex[:length]
 
@@ -41,9 +38,9 @@ def parse_iso(value: str | Any) -> Optional[datetime]:
 
     Handles the common ``"Z"`` suffix (replacing it with ``"+00:00"``) and
     gracefully returns ``None`` for ``None``, empty strings, or unparseable
-    values.  Consolidates the duplicated ``datetime.fromisoformat(…
-    .replace("Z", "+00:00"))`` pattern previously copy-pasted across
-    nine CLI / analytics modules.
+    values.  Single home for the ``datetime.fromisoformat(...
+    .replace("Z", "+00:00"))`` pattern (used by ``timeline`` and
+    ``flamegraph``).
     """
     if not value:
         return None
@@ -51,140 +48,6 @@ def parse_iso(value: str | Any) -> Optional[datetime]:
         return datetime.fromisoformat(str(value).replace("Z", "+00:00"))
     except (ValueError, TypeError):
         return None
-
-def parse_iso_or_epoch(value: str | int | float | datetime | Any) -> Optional[datetime]:
-    """Parse an ISO-8601 string *or* numeric epoch timestamp into a datetime.
-
-    Handles:
-    - ISO-8601 strings (with or without ``Z`` suffix)
-    - ``datetime`` objects (returned as-is)
-    - Numeric timestamps: seconds since epoch (< 1e12) or
-      milliseconds since epoch (>= 1e12)
-
-    Returns ``None`` for ``None``, empty strings, or unparseable values.
-
-    This consolidates the duplicated ``_parse_ts`` helpers previously
-    copy-pasted across ``cli_digest``, ``cli_retention``, ``cli_replay``,
-    ``flamegraph``, and ``postmortem``.
-    """
-    if value is None:
-        return None
-    if isinstance(value, datetime):
-        return value
-    if isinstance(value, (int, float)):
-        try:
-            epoch = value / 1000 if value > 1e12 else value
-            return datetime.fromtimestamp(epoch, tz=timezone.utc)
-        except (ValueError, OSError, OverflowError):
-            return None
-    return parse_iso(value)
-
-
-# ---------------------------------------------------------------------------
-# ReDoS-safe regex helpers (CWE-1333)
-# ---------------------------------------------------------------------------
-
-_REGEX_TIMEOUT_S = 2  # max seconds for a single regex operation
-
-
-def safe_compile(pattern: str, flags: int = 0) -> Optional[Pattern[str]]:
-    """Compile a regex pattern, returning *None* on invalid syntax.
-
-    This is a thin wrapper around :func:`re.compile` that swallows
-    :class:`re.error` so callers don't need their own try/except.
-    """
-    try:
-        return re.compile(pattern, flags)
-    except re.error:
-        return None
-
-
-def safe_search(
-    pattern: Pattern[str] | str,
-    text: str,
-    flags: int = 0,
-    timeout: float = _REGEX_TIMEOUT_S,
-) -> Optional[re.Match[str]]:
-    """Run :func:`re.search` with a wall-clock timeout guard.
-
-    On POSIX systems (Linux / macOS) this uses ``SIGALRM`` to abort
-    catastrophic backtracking.  On Windows (no ``SIGALRM``), the
-    function still executes the search but caps *text* length to
-    100 000 characters as a heuristic safeguard — enough for any
-    reasonable input while preventing multi-second stalls on
-    pathological data.
-
-    Returns the match object or *None* (no match **or** timed out).
-    """
-    compiled = pattern if isinstance(pattern, re.Pattern) else re.compile(pattern, flags)
-
-    if sys.platform != "win32" and hasattr(signal, "SIGALRM"):
-        def _alarm_handler(signum: int, frame: Any) -> None:  # pragma: no cover
-            raise TimeoutError("regex search timed out")
-
-        old_handler = signal.signal(signal.SIGALRM, _alarm_handler)
-        signal.alarm(int(timeout) or 1)
-        try:
-            return compiled.search(text)
-        except TimeoutError:
-            return None
-        finally:
-            signal.alarm(0)
-            signal.signal(signal.SIGALRM, old_handler)
-    else:
-        # Windows fallback — cap input length to prevent worst-case backtracking.
-        truncated = text[:100_000]
-        try:
-            return compiled.search(truncated)
-        except (RecursionError, MemoryError):
-            return None
-
-
-def linear_regression(
-    ys: list[float],
-    xs: list[float] | None = None,
-) -> tuple[float, float]:
-    """Ordinary least-squares linear regression: y = slope * x + intercept.
-
-    When *xs* is ``None`` the x-values default to ``0, 1, 2, …``
-    (indexed regression — useful for time-series where each data point
-    is one period apart).
-
-    Returns ``(slope, intercept)``.  Falls back to ``(0.0, ys[0])``
-    when fewer than two data points.
-    """
-    n = len(ys)
-    if n == 0:
-        return 0.0, 0.0
-    if n == 1:
-        return 0.0, ys[0]
-
-    if xs is None:
-        # Fast path: x = 0..n-1 — closed-form means avoid sum()
-        x_mean = (n - 1) / 2.0
-        y_mean = sum(ys) / n
-        numerator = 0.0
-        denominator = 0.0
-        for i, y in enumerate(ys):
-            dx = i - x_mean
-            numerator += dx * (y - y_mean)
-            denominator += dx * dx
-    else:
-        x_mean = sum(xs) / n
-        y_mean = sum(ys) / n
-        numerator = 0.0
-        denominator = 0.0
-        for x, y in zip(xs, ys):
-            dx = x - x_mean
-            numerator += dx * (y - y_mean)
-            denominator += dx * dx
-
-    if denominator == 0:
-        return 0.0, y_mean
-
-    slope = numerator / denominator
-    intercept = y_mean - slope * x_mean
-    return slope, intercept
 
 
 def percentile(sorted_values: list[float], p: float) -> float:
