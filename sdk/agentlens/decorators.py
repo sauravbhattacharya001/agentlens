@@ -27,11 +27,6 @@ _SENSITIVE_KWARG_PATTERNS: frozenset[str] = frozenset({
 _REDACTED = "[REDACTED]"
 
 
-def _is_sensitive_key(key: str) -> bool:
-    """Check if a keyword argument name looks like it holds a secret."""
-    return key.lower().replace("-", "_") in _SENSITIVE_KWARG_PATTERNS
-
-
 def _safe_repr(value: Any, *, max_length: int = 200) -> str:
     """Convert a value to a bounded string representation.
 
@@ -45,24 +40,6 @@ def _safe_repr(value: Any, *, max_length: int = 200) -> str:
     if len(s) > max_length:
         s = s[:max_length] + f"...[truncated, {len(s)} chars]"
     return s
-
-
-def _build_input(args: tuple, kwargs: dict) -> dict:
-    """Serialize function arguments for tracking.
-
-    Redacts keyword arguments whose names match common secret/credential
-    patterns (api_key, password, token, etc.) to prevent sensitive data
-    from being captured in observability events (CWE-532).  Positional
-    arguments are included as-is since they lack semantic names, but are
-    truncated to a safe length.
-    """
-    return {
-        "args": [_safe_repr(a) for a in args],
-        "kwargs": {
-            k: _REDACTED if _is_sensitive_key(k) else _safe_repr(v)
-            for k, v in kwargs.items()
-        },
-    }
 
 
 def _make_tracker(

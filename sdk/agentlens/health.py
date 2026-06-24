@@ -427,27 +427,3 @@ class HealthScorer:
         if score >= 60:
             return HealthGrade.POOR
         return HealthGrade.CRITICAL
-
-    @staticmethod
-    def _count_errors(events: list[dict]) -> int:
-        count = 0
-        for e in events:
-            if e.get("event_type") == "error":
-                count += 1
-                continue
-            tc = e.get("tool_call")
-            if isinstance(tc, dict):
-                out = tc.get("tool_output")
-                if isinstance(out, dict) and out.get("error"):
-                    count += 1
-        return count
-
-    @staticmethod
-    def _is_tool_error(event: dict) -> bool:
-        tc = event.get("tool_call")
-        if not isinstance(tc, dict):
-            return False
-        out = tc.get("tool_output")
-        if isinstance(out, dict) and out.get("error"):
-            return True
-        return False
