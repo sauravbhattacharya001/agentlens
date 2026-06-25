@@ -146,20 +146,20 @@ router.get("/", wrapRoute("list sessions", (req, res) => {
  * GET /sessions/search — Search and filter sessions with multi-criteria matching.
  * Must be defined before /:id to avoid matching "search" as a session ID.
  *
- * @query {string} [q] - Free-text search across session_id, agent_name, and metadata.
- * @query {string} [status] - Filter by status.
- * @query {string} [agent] - Filter by agent name (exact match).
- * @query {string} [from] - Start date (ISO 8601) for date range filter.
- * @query {string} [to] - End date (ISO 8601) for date range filter.
- * @query {string} [sort] - Sort field (started_at, duration_ms, total_tokens, cost_usd).
+ * @query {string} [q] - Free-text search across agent_name and metadata (space-separated terms, up to 10, ANDed).
+ * @query {string} [agent] - Filter by agent name (substring match).
+ * @query {string} [status] - Filter by status (active, completed, error, timeout); invalid values are ignored.
+ * @query {string} [after] - Start date (ISO 8601); matches sessions with started_at >= this.
+ * @query {string} [before] - End date (ISO 8601); matches sessions with started_at <= this.
+ * @query {number} [min_tokens] - Minimum total tokens (tokens_in + tokens_out); applied when > 0.
+ * @query {number} [max_tokens] - Maximum total tokens (tokens_in + tokens_out); applied when > 0.
+ * @query {string} [tags] - Comma-separated tags (up to 20); sessions must have ALL listed tags.
+ * @query {string} [sort=started_at] - Sort field: started_at, total_tokens, agent_name, or status (others ignored).
  * @query {string} [order=desc] - Sort order (asc or desc).
- * @query {number} [minTokens] - Minimum total_tokens filter.
- * @query {number} [maxTokens] - Maximum total_tokens filter.
- * @query {number} [minCost] - Minimum cost_usd filter.
- * @query {number} [maxCost] - Maximum cost_usd filter.
  * @query {number} [limit=50] - Results per page (1-200).
  * @query {number} [offset=0] - Pagination offset.
- * @returns {{ sessions: Object[], total: number, filters: Object }} Filtered results with applied filter summary.
+ * @returns {{ sessions: Object[], total: number, limit: number, offset: number, sort: string, order: string, filters: Object }}
+ *   Filtered results (each session enriched with parsed metadata and its tags) plus the applied-filter summary.
  */
 router.get("/search", wrapRoute("search sessions", (req, res) => {
   const db = getDb();
@@ -575,23 +575,29 @@ router.post("/compare", wrapRoute("compare sessions", (req, res) => {
 // still runs in-process since it needs parsed JSON field access.
 /**
  * GET /sessions/:id/events/search — Search and filter events within a session.
- * Supports filtering by event type, time range, text search across input/output,
- * tool call filtering, and cost/token range filters.
+ * Supports filtering by event type, model, time range, full-text search across input/output,
+ * tool-call / reasoning presence, and token/duration range filters.
+ *
+ * Results are always ordered by timestamp ascending.
  *
  * @param {string} id - Session ID (path parameter).
- * @query {string} [q] - Free-text search across event input_data and output_data.
- * @query {string} [type] - Filter by event_type (e.g., "llm_call", "tool_use").
- * @query {string} [from] - Start timestamp (ISO 8601).
- * @query {string} [to] - End timestamp (ISO 8601).
- * @query {boolean} [hasToolCall] - Filter events that have/lack tool_call data.
- * @query {boolean} [hasDecisionTrace] - Filter events with/without decision traces.
- * @query {number} [minTokens] - Minimum token count filter.
- * @query {number} [maxTokens] - Maximum token count filter.
- * @query {string} [sort=timestamp] - Sort field (timestamp, duration_ms, tokens, cost_usd).
- * @query {string} [order=asc] - Sort order (asc or desc).
+ * @query {string} [q] - Free-text search (space-separated terms, up to 10) across input_data,
+ *   output_data, tool_call, event_type, model, and decision_trace.
+ * @query {string} [type] - Comma-separated event types (up to 20), matched case-insensitively.
+ * @query {string} [model] - Comma-separated model substrings (up to 20), matched case-insensitively.
+ * @query {string} [after] - Start timestamp (ISO 8601); matches events with timestamp >= this.
+ * @query {string} [before] - End timestamp (ISO 8601); matches events with timestamp <= this.
+ * @query {number} [min_tokens] - Minimum total tokens (tokens_in + tokens_out); applied when > 0.
+ * @query {number} [max_tokens] - Maximum total tokens (tokens_in + tokens_out); applied when > 0.
+ * @query {number} [min_duration_ms] - Minimum event duration in ms; applied when > 0.
+ * @query {boolean} [errors] - When "true", only error/agent_error/tool_error events.
+ * @query {boolean} [has_tools] - When "true", only events that carry tool_call data.
+ * @query {boolean} [has_reasoning] - When "true", only events whose decision_trace has reasoning.
  * @query {number} [limit=100] - Results per page (1-500).
  * @query {number} [offset=0] - Pagination offset.
- * @returns {{ events: Object[], total: number, filters: Object }}
+ * @returns {{ session_id: string, total_events: number, matched: number, returned: number,
+ *   offset: number, limit: number, summary: Object, events: Object[] }}
+ *   `matched` is the count after filters; `total_events` is the session's unfiltered event count.
  * @returns {404} If session not found.
  */
 router.get("/:id/events/search", requireSessionId, wrapRoute("search events", (req, res) => {
