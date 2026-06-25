@@ -153,13 +153,11 @@ function getMetricStatements() {
   if (_metricStmts) return _metricStmts;
   const db = getDb();
 
+  // Both session-only and event-joined metrics expose their session row
+  // as alias `s`, so the agent-name filter clause is identical for every
+  // metric — a single builder covers both query shapes. It compiles the
+  // unfiltered query plus an `s.agent_name = ?` variant for agent_filter.
   const build = (sql) => ({
-    all:   db.prepare(sql),
-    agent: db.prepare(sql + " AND s.agent_name = ?"),
-  });
-
-  // Event-joined queries use "e" + "s" aliases
-  const buildE = (sql) => ({
     all:   db.prepare(sql),
     agent: db.prepare(sql + " AND s.agent_name = ?"),
   });
@@ -173,7 +171,7 @@ function getMetricStatements() {
       `SELECT COALESCE(AVG(s.total_tokens_in + s.total_tokens_out), 0) AS val
        FROM sessions s WHERE s.started_at >= ?`
     ),
-    error_rate: buildE(
+    error_rate: build(
       `SELECT
          COUNT(*) AS total,
          SUM(CASE WHEN e.event_type IN ('error', 'agent_error', 'tool_error') THEN 1 ELSE 0 END) AS errors
@@ -181,13 +179,13 @@ function getMetricStatements() {
        JOIN sessions s ON e.session_id = s.session_id
        WHERE e.timestamp >= ?`
     ),
-    avg_duration_ms: buildE(
+    avg_duration_ms: build(
       `SELECT COALESCE(AVG(e.duration_ms), 0) AS val
        FROM events e
        JOIN sessions s ON e.session_id = s.session_id
        WHERE e.timestamp >= ? AND e.duration_ms IS NOT NULL`
     ),
-    max_duration_ms: buildE(
+    max_duration_ms: build(
       `SELECT COALESCE(MAX(e.duration_ms), 0) AS val
        FROM events e
        JOIN sessions s ON e.session_id = s.session_id
@@ -197,12 +195,12 @@ function getMetricStatements() {
       `SELECT COUNT(*) AS val FROM sessions s
        WHERE s.started_at >= ?`
     ),
-    event_count: buildE(
+    event_count: build(
       `SELECT COUNT(*) AS val FROM events e
        JOIN sessions s ON e.session_id = s.session_id
        WHERE e.timestamp >= ?`
     ),
-    token_rate: buildE(
+    token_rate: build(
       `SELECT COALESCE(SUM(e.tokens_in + e.tokens_out), 0) AS total
        FROM events e
        JOIN sessions s ON e.session_id = s.session_id
