@@ -17,7 +17,6 @@ jest.mock("../db", () => ({
 }));
 
 const retentionRouter = require("../routes/retention");
-const { _resetStmts } = require("../routes/retention");
 
 function createApp() {
   const app = express();
@@ -53,7 +52,6 @@ function daysAgo(days) {
 // ── Setup / Teardown ────────────────────────────────────────────────
 
 beforeEach(() => {
-  _resetStmts();
   mockDb = new Database(":memory:");
   mockDb.pragma("journal_mode = WAL");
   mockDb.pragma("foreign_keys = ON");

@@ -469,4 +469,3 @@ router.post("/purge", wrapRoute("purge retention data", (req, res) => {
 }));
 
 module.exports = router;
-module.exports._resetStmts = function () { _retentionStmts = null; };
