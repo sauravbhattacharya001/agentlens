@@ -7,7 +7,6 @@
  *   GET /replay/:sessionId/summary — replay stats & metadata
  */
 const express = require("express");
-const { getDb } = require("../db");
 const { isValidSessionId, safeJsonParse: _sharedSafeJsonParse } = require("../lib/validation");
 const { wrapRoute } = require("../lib/request-helpers");
 const { createLazyStatements } = require("../lib/lazy-statements");
