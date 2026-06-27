@@ -247,6 +247,15 @@ See [`docs/API.md`](docs/API.md) for the REST reference and
 
 Run the SDK tests with `cd sdk && pip install -e ".[dev]" && pytest`.
 
+### Fleet ingest + cost triage (working seam with agent-eval)
+
+Beyond the demo data, AgentLens ingests a real OpenClaw fleet via two read-only passes (only the AgentLens backend is written):
+
+- **Behavioral grading** — `agentlens-selfhost/ingest_all.py` reads raw worker-cron session logs, auto-creates the parent session, and links a per-worker grade from the companion [`agent-eval`](https://github.com/sauravbhattacharya001/agent-eval) snapshot.
+- **Cost triage of the failure long-tail** — `triage_export.mjs` runs agent-eval's tested [`triageSessions()`](https://github.com/sauravbhattacharya001/agent-eval#fleet-triage-rank-failed-runs-by-cost) over the *entire* sessions dir; `ingest_all.py --ingest-failures` then ingests the failures the cron-only pass never captured (the main/interactive abandons) under a `fleet-failures` agent, each annotated with its failure `kind` + projected `$`.
+
+That second pass closed a real blind spot: the most expensive runs (e.g. a **19.3M-token / ~$174 idle-timeout abandon**) are interactive, not cron, so none overlapped with the cron-worker sessions already ingested. Net effect on this fleet: backend **94 → 188 sessions**, with the entire **~$2,100** expensive-failure long-tail now visible, priced, and one click from its full replay.
+
 ## License
 
 MIT — see [LICENSE](LICENSE) for details.
