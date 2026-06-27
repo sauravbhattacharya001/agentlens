@@ -43,7 +43,7 @@ jest.mock("../db", () => ({
 const express = require("express");
 const request = require("supertest");
 const replayRouter = require("../routes/replay");
-const { buildFrames, replaySummary, msBetween, classifyEvent, safeJsonParse } =
+const { buildFrames, replaySummary, replaySummaryFromRawEvents, msBetween, classifyEvent, safeJsonParse } =
   require("../routes/replay")._internals;
 
 let app;
@@ -253,6 +253,103 @@ describe("replaySummary", () => {
       { event_type: "b", category: "b", model: null, tokens_in: 0, tokens_out: 0, delay_ms: 120000, elapsed_ms: 120000 },
     ];
     expect(replaySummary(long, null).speed_recommendation).toBe("5x");
+  });
+});
+
+// The /summary endpoint serves replaySummaryFromRawEvents() — a perf
+// optimisation that skips JSON-parsing 4 columns per event and computes
+// the summary straight from scalar columns.  Its documented contract is
+// that it returns the SAME aggregates as the full buildFrames() +
+// replaySummary() path.  These tests pin that equivalence so a future
+// tweak to either path (delay capping, token accrual, speed thresholds)
+// can't silently break the contract without a red test.
+describe("replaySummaryFromRawEvents (equivalence with replaySummary)", () => {
+  // Mixed sequence: every category, sparse models, token accrual, a
+  // sub-cap gap, an over-cap gap, and a tail gap that pushes duration
+  // across a speed-recommendation threshold.
+  const mixedEvents = [
+    { event_id: "e1", event_type: "llm_call", timestamp: "2026-01-01T00:00:00Z", model: "gpt-4", tokens_in: 100, tokens_out: 50 },
+    { event_id: "e2", event_type: "tool_use", timestamp: "2026-01-01T00:00:05Z", model: null, tokens_in: 0, tokens_out: 0 },
+    { event_id: "e3", event_type: "error", timestamp: "2026-01-01T00:01:30Z", model: "gpt-4", tokens_in: 20, tokens_out: 0 },
+    { event_id: "e4", event_type: "decision", timestamp: "2026-01-01T00:01:35Z", model: null, tokens_in: 0, tokens_out: 0 },
+    { event_id: "e5", event_type: "custom", timestamp: "2026-01-01T00:10:00Z", model: "claude-3-opus", tokens_in: 5, tokens_out: 200 },
+  ];
+  const session = { session_id: "s1", agent_name: "agent-a", status: "completed" };
+
+  // Fields both functions are contracted to agree on for a populated session.
+  const AGG_FIELDS = [
+    "total_frames", "total_duration_ms", "event_types", "categories",
+    "models_used", "total_tokens_in", "total_tokens_out", "avg_delay_ms",
+    "max_delay_ms", "speed_recommendation", "session_id", "agent_name",
+    "session_status",
+  ];
+
+  function viaFrames(events, sess, opts) {
+    return replaySummary(buildFrames(events, opts), sess);
+  }
+
+  test("matches the frames path on every aggregate (default options)", () => {
+    const fromFrames = viaFrames(mixedEvents, session);
+    const fromRaw = replaySummaryFromRawEvents(mixedEvents, session);
+    for (const f of AGG_FIELDS) {
+      expect(fromRaw[f]).toEqual(fromFrames[f]);
+    }
+  });
+
+  test("matches the frames path when speed + maxDelay are applied", () => {
+    // These are exactly the knobs the route forwards from the query string.
+    const opts = { speedMultiplier: 2, maxDelayMs: 5000 };
+    const fromFrames = viaFrames(mixedEvents, session, opts);
+    const fromRaw = replaySummaryFromRawEvents(mixedEvents, session, opts);
+    for (const f of AGG_FIELDS) {
+      expect(fromRaw[f]).toEqual(fromFrames[f]);
+    }
+    // Sanity: the cap actually engaged (the 8.5-min tail gap clamps to 5s).
+    expect(fromRaw.max_delay_ms).toBe(2500); // 5000ms cap / speed 2
+  });
+
+  test("matches the frames path for a single-event session", () => {
+    const fromFrames = viaFrames([mixedEvents[0]], session);
+    const fromRaw = replaySummaryFromRawEvents([mixedEvents[0]], session);
+    for (const f of AGG_FIELDS) {
+      expect(fromRaw[f]).toEqual(fromFrames[f]);
+    }
+    expect(fromRaw.avg_delay_ms).toBe(0);
+    expect(fromRaw.total_duration_ms).toBe(0);
+  });
+
+  test("accrues tokens and models identically with sparse/null fields", () => {
+    const fromRaw = replaySummaryFromRawEvents(mixedEvents, session);
+    expect(fromRaw.total_tokens_in).toBe(125);
+    expect(fromRaw.total_tokens_out).toBe(250);
+    expect(fromRaw.models_used).toEqual(["gpt-4", "claude-3-opus"]);
+  });
+
+  // The ONE deliberate divergence, now documented in the JSDoc: the raw
+  // path always carries the session identity keys (so /summary returns
+  // them even for an empty session), whereas replaySummary()'s empty
+  // branch omits them. Pin both sides so neither regresses by accident.
+  test("empty branch carries session identity keys (unlike replaySummary)", () => {
+    const sess = { session_id: "empty-s", agent_name: "agent-z", status: "active" };
+    const fromRaw = replaySummaryFromRawEvents([], sess);
+    expect(fromRaw.session_id).toBe("empty-s");
+    expect(fromRaw.agent_name).toBe("agent-z");
+    expect(fromRaw.session_status).toBe("active");
+    expect(fromRaw.total_frames).toBe(0);
+    expect(fromRaw.total_duration_ms).toBe(0);
+    expect(fromRaw.speed_recommendation).toBe("1x");
+
+    // replaySummary()'s empty branch deliberately does NOT include them.
+    const fromFrames = replaySummary([], sess);
+    expect("session_id" in fromFrames).toBe(false);
+    expect("agent_name" in fromFrames).toBe(false);
+  });
+
+  test("empty branch with null session yields null identity values", () => {
+    const fromRaw = replaySummaryFromRawEvents([], null);
+    expect(fromRaw.session_id).toBeNull();
+    expect(fromRaw.agent_name).toBeNull();
+    expect(fromRaw.session_status).toBeNull();
   });
 });
 

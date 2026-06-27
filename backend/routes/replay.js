@@ -154,6 +154,13 @@ function replaySummary(frames, session) {
  * columns (event_type, model, tokens_in, tokens_out, timestamp,
  * duration_ms), reducing CPU and GC pressure by ~60-80% on the
  * /summary endpoint.
+ *
+ * Equivalence to replaySummary(buildFrames(events)) is exact for the
+ * populated case (every aggregate field matches).  The ONE deliberate
+ * difference is the empty-events branch: this path always carries the
+ * session identity keys (session_id / agent_name / session_status),
+ * whereas replaySummary()'s empty branch omits them — the /summary
+ * endpoint wants those keys present even for a zero-event session.
  */
 function replaySummaryFromRawEvents(events, session, options = {}) {
   const { speedMultiplier = 1, maxDelayMs = 30000 } = options;
