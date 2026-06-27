@@ -87,14 +87,17 @@ function eventKey(e) {
 /**
  * Align two event lists using LCS on event keys.
  *
- * Uses O(m) space instead of O(n*m) by keeping only two rows of the DP
- * table at a time. For the backtracking pass we store the LCS choice
- * direction in a compact bit-array (1 bit per cell: 0 = go down,
- * 1 = go right, diagonal is implicit when keys match).
+ * Uses O(m) space for the DP rows instead of O(n*m) by keeping only two
+ * rows of the score table at a time. For the backtracking pass we store the
+ * LCS choice direction in a bit-packed Uint8Array — 2 bits per cell
+ * (0b00 = diagonal/match, 0b01 = down, 0b10 = right), 4 cells per byte
+ * (see setDir/getDir below). The diagonal choice is stored explicitly, not
+ * inferred from the keys, so backtracking never re-compares keys.
  *
  * Previously allocated a full (n+1)×(m+1) array of numbers — for the
  * MAX_DIFF_EVENTS cap of 2500, that's 6.25M entries (~50 MB). The new
- * approach uses ~2×2501 numbers (~40 KB) + ~780 KB direction bits.
+ * approach uses two Uint16 rows (~10 KB) plus ~1.5 MB of direction bits
+ * (6.25M cells × 2 bits), still an order of magnitude below the old table.
  */
 function alignEvents(baseline, candidate) {
   const n = baseline.length;
