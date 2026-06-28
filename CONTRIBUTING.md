@@ -42,15 +42,15 @@ AgentLens is a **multi-component observability platform** for AI agents:
 ```
 agentlens/
 ├── backend/              # Node.js (Express) API server
-│   ├── routes/           # 28 API route modules
+│   ├── routes/           # 14 API route modules
 │   ├── lib/              # Core services (pricing, stats, caching, etc.)
-│   ├── tests/            # 41 Jest test suites
+│   ├── tests/            # 29 Jest suites (+ 1 Node suite via test:node)
 │   ├── db.js             # SQLite database layer
 │   ├── middleware.js     # Express middleware (auth, rate limiting)
 │   ├── migrations.js     # Schema migration runner
 │   └── server.js         # Application entry point
 ├── sdk/                  # Python SDK (PyPI package)
-│   ├── agentlens/        # 86 modules — core library
+│   ├── agentlens/        # 28 modules — core library
 │   ├── tests/            # pytest test suites
 │   └── pyproject.toml    # Package metadata & dependencies
 ├── dashboard/            # Web dashboard (frontend)
@@ -63,23 +63,22 @@ agentlens/
 
 ## Module Catalog
 
-### Backend Routes (28 modules)
+### Backend Routes (14 modules)
+
+Each row maps to a file in `backend/routes/` mounted in `server.js`.
 
 | Domain | Routes |
 |--------|--------|
 | **Core** | `sessions`, `events`, `errors`, `tags` |
-| **Analytics** | `analytics`, `correlations`, `correlation-scheduler`, `forecast`, `stats` |
-| **Observability** | `anomalies`, `baselines`, `profiler`, `diff`, `dependencies` |
-| **Cost & Budget** | `budgets`, `pricing` |
-| **Alerting** | `alerts`, `sla`, `triage` |
-| **Collaboration** | `collaboration`, `annotations`, `bookmarks`, `leaderboard` |
-| **Operations** | `replay`, `retention`, `scorecards`, `command-center`, `postmortem` |
-| **Integration** | `webhooks` |
-| **Skills** | `competency` |
+| **Analytics** | `analytics`, `leaderboard` |
+| **Cost** | `pricing` |
+| **Alerting** | `alerts`, `webhooks` |
+| **Collaboration** | `annotations`, `bookmarks` |
+| **Operations** | `replay`, `diff`, `retention` |
 
-### Backend Libraries (11 modules)
+### Backend Libraries (12 modules)
 
-`csv-export` · `dependency-map` · `explain` · `lazy-statements` · `pricing` · `request-helpers` · `response-cache` · `session-metrics` · `statement-cache` · `stats` · `tag-statements` · `validation`
+`csv-export` · `explain` · `lazy-statements` · `pdf-export` · `pricing` · `request-helpers` · `response-cache` · `session-metrics` · `statement-cache` · `stats` · `tag-statements` · `validation`
 
 ### SDK Modules (28 modules)
 
@@ -137,7 +136,7 @@ See `dashboard/` for frontend setup instructions.
 
 ```bash
 cd backend
-npm test                    # all 41 test suites
+npm test                    # 29 Jest suites + 1 Node suite (via test:node)
 npm test -- --verbose       # with details
 npm run test:coverage       # with coverage report
 ```
