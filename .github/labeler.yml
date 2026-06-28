@@ -58,7 +58,6 @@ observability:
       - 'sdk/agentlens/transport.py'
       - 'sdk/agentlens/decorators.py'
       - 'sdk/agentlens/span.py'
-      - 'sdk/agentlens/_metrics.py'
       - 'sdk/agentlens/sampling.py'
       - 'sdk/agentlens/exporter.py'
 

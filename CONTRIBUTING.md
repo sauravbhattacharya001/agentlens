@@ -81,21 +81,19 @@ agentlens/
 
 `csv-export` · `dependency-map` · `explain` · `lazy-statements` · `pricing` · `request-helpers` · `response-cache` · `session-metrics` · `statement-cache` · `stats` · `tag-statements` · `validation`
 
-### SDK Modules (86 modules)
+### SDK Modules (28 modules)
+
+The SDK mirrors the three product pillars: **Capture** (tracking), **Transport**
+(shipping events to the collector), and **Inspect** (timeline, narrative, replay,
+flamegraph, transcript/cost export, health). Render-only seams live in sibling
+`*_render` / `*_format` / `*_types` modules next to the feature they back.
 
 | Category | Modules |
 |----------|---------|
-| **Core** | `tracker`, `transport`, `models`, `span`, `decorators`, `exporter` |
-| **Metrics** | `_metrics`, `_utils`, `timeline`, `latency`, `heatmap`, `flamegraph` |
-| **Analysis** | `anomaly`, `correlation`, `drift`, `evaluation`, `group_analyzer`, `narrative` |
-| **Cost** | `budget`, `cost_optimizer`, `quota`, `rate_limiter`, `sampling` |
-| **Reliability** | `health`, `stamina`, `guardrails`, `retry_tracker`, `self_correction`, `error_fingerprint` |
-| **Forecasting** | `forecast`, `failure_forecast`, `memory_leak`, `capacity` |
-| **Alerting** | `alerts`, `alert_rules`, `tracker_alerts`, `sla` |
-| **Sessions** | `session_diff`, `replayer`, `autopsy`, `collaboration` |
-| **Tracking** | `tracker_annotations`, `tracker_retention`, `tracker_tags`, `prompt_tracker` |
-| **Testing** | `ab_test`, `compliance` |
-| **CLI** | 30 CLI modules (`cli_*.py`) — one per feature |
+| **Capture** | `tracker`, `tracker_alerts`, `tracker_annotations`, `tracker_queries`, `tracker_retention`, `tracker_tags`, `decorators`, `span`, `models` |
+| **Transport** | `transport` |
+| **Inspect** | `timeline` (+ `timeline_render`, `timeline_format`), `narrative` (+ `narrative_render`, `narrative_types`), `replayer` (+ `replayer_types`), `flamegraph` (+ `flamegraph_template`), `exporter` (+ `exporter_format`), `transcript` (+ `transcript_format`), `health` (+ `health_types`) |
+| **Internal** | `_utils` |
 
 ## Development Setup
 
