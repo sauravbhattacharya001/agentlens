@@ -52,7 +52,7 @@ Changelog = "https://github.com/sauravbhattacharya001/agentlens/blob/master/CHAN
 
 [project.optional-dependencies]
 dev = [
-    "pytest>=8.4.2",
+    "pytest>=9.1.1",
     "pytest-cov",
 ]
 
