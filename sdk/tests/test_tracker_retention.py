@@ -151,3 +151,42 @@ class TestPurge:
         assert kwargs["params"] == {"dry_run": "true"}
         assert kwargs["json"] == {}
         assert result["would_purge_sessions"] == 7
+
+    def test_real_purge_surfaces_batch_cap_fields(self, tracker):
+        """When more sessions are eligible than the server's 500-session
+        cap, the response carries ``total_eligible`` and ``remaining`` so
+        the caller knows to purge again. The SDK must pass these through
+        unchanged (documented in ``purge`` Returns)."""
+        _set_json(
+            tracker.transport.post,
+            {
+                "dry_run": False,
+                "purged_sessions": 500,
+                "purged_events": 12_345,
+                "total_eligible": 720,
+                "remaining": 220,
+            },
+        )
+        result = tracker.purge()
+        assert result["purged_sessions"] == 500
+        assert result["total_eligible"] == 720
+        # remaining > 0 is the documented signal to call purge() again
+        assert result["remaining"] == 220
+
+    def test_dry_run_surfaces_capped_flag(self, tracker):
+        """A dry run over a backlog larger than the cap reports
+        ``capped: true`` alongside ``total_eligible`` (documented in
+        ``purge`` Returns)."""
+        _set_json(
+            tracker.transport.post,
+            {
+                "dry_run": True,
+                "would_purge_sessions": 500,
+                "would_purge_events": 9_000,
+                "total_eligible": 640,
+                "capped": True,
+            },
+        )
+        result = tracker.purge(dry_run=True)
+        assert result["capped"] is True
+        assert result["total_eligible"] == 640

@@ -110,6 +110,12 @@ class RetentionMixin:
         eligible under the current retention configuration. Sessions
         with exempt tags are always preserved.
 
+        A single call purges at most 500 sessions, so the server never
+        wipes the whole database in one request. When more than 500
+        sessions are eligible the response reports the overflow and you
+        should call ``purge()`` again to drain the rest (see ``remaining``
+        / ``capped`` below).
+
         Args:
             dry_run: If True, returns what *would* be purged without
                 actually deleting anything. Useful for previewing the
@@ -118,8 +124,19 @@ class RetentionMixin:
         Returns:
             A dict containing:
             - ``dry_run``: Whether this was a dry run.
-            - ``purged_sessions`` / ``would_purge_sessions``: Count.
-            - ``purged_events`` / ``would_purge_events``: Count.
+            - ``purged_sessions`` / ``would_purge_sessions``: Number of
+              sessions purged (or that would be) in this call, capped at
+              500.
+            - ``purged_events`` / ``would_purge_events``: Matching event
+              count for those sessions.
+            - ``total_eligible``: Total sessions matching the policy,
+              including any beyond this call's 500-session cap. Omitted
+              when nothing is eligible.
+            - ``remaining`` (real purge only): Eligible sessions left
+              after this call (``total_eligible - purged_sessions``);
+              ``> 0`` means call ``purge()`` again to continue.
+            - ``capped`` (dry run only): True when ``total_eligible``
+              exceeded the 500-session cap.
             - ``details``: Per-session breakdown with session ID, reason,
               and event count.
             - ``message``: Human-readable summary.
@@ -130,9 +147,11 @@ class RetentionMixin:
             preview = tracker.purge(dry_run=True)
             print(preview["message"])
 
-            # Then actually purge
+            # Then actually purge, draining the backlog if it was capped
             result = tracker.purge()
             print(f"Purged {result['purged_sessions']} sessions")
+            while result.get("remaining", 0) > 0:
+                result = tracker.purge()
         """
         params = {}
         if dry_run:
