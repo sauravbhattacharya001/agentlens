@@ -34,7 +34,7 @@ AgentLens is a **multi-component observability platform** for AI agents:
 
 - **SDK** — lightweight Python library (PyPI: `agentlens`) that instruments agent code, tracks sessions/spans/events, and ships telemetry to the backend.
 - **Backend** — Node.js/Express REST API with SQLite persistence via `better-sqlite3` prepared statements. Handles analytics, alerting, forecasting, cost estimation, and more.
-- **Dashboard** — Web frontend for visualizing agent sessions, costs, anomalies, and performance.
+- **Dashboard** — Web frontend for visualizing agent sessions, costs, errors, and performance.
 - **Docs** — GitHub Pages site generated from `docs/`.
 
 ## Project Structure
@@ -209,7 +209,6 @@ Scope with the component: `backend`, `sdk`, `dashboard`, `docs`, `ci`.
 2. Export public API in `__init__.py` if user-facing
 3. Add type hints on all public functions
 4. Write tests in `sdk/tests/test_your_module.py`
-5. If it has a CLI, add `cli_your_module.py` and register the subcommand in `cli.py`
 
 ## Submitting a Pull Request
 
