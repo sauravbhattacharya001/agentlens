@@ -22,6 +22,8 @@ from datetime import datetime, timezone
 from enum import Enum
 from typing import Any
 
+from agentlens._utils import format_duration_seconds as _fmt_seconds
+
 
 class NarrativeStyle(Enum):
     """Tone and detail level for generated narratives."""
@@ -150,12 +152,10 @@ class Narrative:
         }
 
     def _fmt_duration(self) -> str:
-        s = int(self.duration_seconds)
-        if s < 60:
-            return f"{s}s"
-        elif s < 3600:
-            return f"{s // 60}m {s % 60}s"
-        else:
-            h = s // 3600
-            m = (s % 3600) // 60
-            return f"{h}h {m}m"
+        """Render :attr:`duration_seconds` as ``Ns`` / ``Nm Ns`` / ``Nh Nm``.
+
+        Uses the shared :func:`agentlens._utils.format_duration_seconds`
+        helper; a zero duration renders as ``"0s"`` (durations are always
+        non-negative here, so no empty-string guard is applied).
+        """
+        return _fmt_seconds(self.duration_seconds)

@@ -12,6 +12,8 @@ Covers:
       p=0 / p=100 endpoints
     - format_duration(): None, sub-second, seconds, minutes, hours,
       negative-ish edge values, string-coercible numerics
+    - format_duration_seconds(): zero, sub-minute, minute+seconds, hour+minutes,
+      negative clamp, boundary values, truncation of fractional seconds
 """
 from __future__ import annotations
 
@@ -153,3 +155,35 @@ class TestFormatDuration:
     def test_string_numeric(self):
         # The helper coerces with float(), so numeric strings work.
         assert _utils.format_duration("250") == "250ms"
+
+
+# ---------------------------------------------------------------------------
+# format_duration_seconds (coarse Ns / Nm Ns / Nh Nm vocabulary)
+# ---------------------------------------------------------------------------
+
+class TestFormatDurationSeconds:
+    def test_zero(self):
+        # Unlike the empty-string guard in narrative_render.fmt_dur, the bare
+        # helper renders zero as "0s"; callers add their own guard if needed.
+        assert _utils.format_duration_seconds(0) == "0s"
+
+    def test_sub_minute(self):
+        assert _utils.format_duration_seconds(45) == "45s"
+        assert _utils.format_duration_seconds(59) == "59s"
+
+    def test_minute_boundary(self):
+        assert _utils.format_duration_seconds(60) == "1m 0s"
+        assert _utils.format_duration_seconds(125) == "2m 5s"
+
+    def test_hour_boundary(self):
+        assert _utils.format_duration_seconds(3600) == "1h 0m"
+        assert _utils.format_duration_seconds(3725) == "1h 2m"
+
+    def test_negative_clamps_to_zero(self):
+        # Negative input is clamped rather than producing a "-1s" string.
+        assert _utils.format_duration_seconds(-5) == "0s"
+
+    def test_truncates_fractional_seconds(self):
+        # Whole-second granularity: fractional input is truncated, not rounded.
+        assert _utils.format_duration_seconds(45.9) == "45s"
+        assert _utils.format_duration_seconds(125.4) == "2m 5s"

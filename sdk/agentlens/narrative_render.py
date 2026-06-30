@@ -18,6 +18,7 @@ There is no session-traversal orchestration here (that stays on
 from __future__ import annotations
 
 from agentlens.models import AgentEvent, Session
+from agentlens._utils import format_duration_seconds as _fmt_seconds
 from agentlens.narrative_types import (
     NarrativeStyle,
     ToolSummary,
@@ -304,13 +305,13 @@ def build_errors(events: list[AgentEvent], style: NarrativeStyle) -> list[str]:
 
 
 def fmt_dur(seconds: float) -> str:
+    """Format a duration in seconds, returning ``""`` for non-positive input.
+
+    Delegates the ``Ns`` / ``Nm Ns`` / ``Nh Nm`` formatting to the shared
+    :func:`agentlens._utils.format_duration_seconds` helper; the only extra
+    behaviour here is suppressing zero/negative durations to an empty string
+    so summaries omit the duration clause entirely.
+    """
     if seconds <= 0:
         return ""
-    s = int(seconds)
-    if s < 60:
-        return f"{s}s"
-    elif s < 3600:
-        return f"{s // 60}m {s % 60}s"
-    h = s // 3600
-    m = (s % 3600) // 60
-    return f"{h}h {m}m"
+    return _fmt_seconds(seconds)
