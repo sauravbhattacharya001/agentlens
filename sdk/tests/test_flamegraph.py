@@ -275,6 +275,48 @@ class TestFlamegraphOutput(unittest.TestCase):
         self.assertEqual(len(stats["slowest_events"]), 2)
 
 
+class TestFlamegraphFlatCache(unittest.TestCase):
+    """Pin the lazy _flat_cache behaviour.
+
+    The flattened node list is cached on first to_data()/get_stats() access so
+    repeated reads don't re-traverse the tree. These tests guard that the cache
+    starts empty, is populated on first use, is genuinely reused on later calls
+    (not recomputed), and that the two consumers agree on the node count.
+    """
+
+    def test_cache_starts_unpopulated(self):
+        events = [_make_event(duration_ms=100)]
+        fg = Flamegraph(events)
+        # Nothing has read the flat list yet, so the cache is still empty.
+        self.assertIsNone(fg._flat_cache)
+
+    def test_cache_populated_on_first_read(self):
+        events = [_make_event(duration_ms=100), _make_event(offset_ms=100, duration_ms=50)]
+        fg = Flamegraph(events)
+        fg.to_data()
+        self.assertIsNotNone(fg._flat_cache)
+        self.assertEqual(len(fg._flat_cache), 2)
+
+    def test_cache_is_reused_not_recomputed(self):
+        # Poison the cache after it is built; a second read must return the
+        # poisoned value, proving the flat list is cached rather than rebuilt.
+        events = [_make_event(duration_ms=100)]
+        fg = Flamegraph(events)
+        first = fg.to_data()
+        self.assertEqual(first["nodeCount"], 1)
+        fg._flat_cache = []  # poison
+        self.assertEqual(fg.to_data()["nodeCount"], 0)
+
+    def test_consumers_agree_on_node_count(self):
+        events = [
+            _make_event(event_type="llm_call", duration_ms=200),
+            _make_event(event_type="tool_call", offset_ms=200, duration_ms=50),
+            _make_event(event_type="decision", offset_ms=300, duration_ms=10),
+        ]
+        fg = Flamegraph(events)
+        self.assertEqual(fg.to_data()["nodeCount"], fg.get_stats()["node_count"])
+
+
 class TestFlamegraphHtmlConvenience(unittest.TestCase):
     def test_flamegraph_html_function(self):
         events = [_make_event(duration_ms=100)]

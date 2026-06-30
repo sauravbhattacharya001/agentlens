@@ -135,6 +135,8 @@ class Flamegraph:
         self.session_name = session_name
         self._nodes: list[_FGNode] = []
         self._total_ms: float = 0
+        # Lazily populated by _get_flat_nodes() on first to_data()/get_stats()
+        # call so repeated reads don't re-flatten the node tree.
         self._flat_cache: list[_FGNode] | None = None
         self._build()
 
@@ -318,9 +320,6 @@ class Flamegraph:
                 enode.depth = depth
                 active.append((enode.start_ms + enode.duration_ms, depth))
             self._nodes = event_nodes
-
-        # Cache the flat node list so to_data/get_stats don't re-traverse
-        self._flat_cache: list[_FGNode] | None = None
 
     @staticmethod
     def _all_nodes(nodes: list[_FGNode]) -> list[_FGNode]:
