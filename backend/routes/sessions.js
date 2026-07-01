@@ -7,6 +7,7 @@ const { getTagStatements } = require("../lib/tag-statements");
 const { parsePagination, requireSessionId, wrapRoute } = require("../lib/request-helpers");
 const { toExportEvent, eventToCsvRow, buildJsonExport, ndjsonSessionLine, CSV_HEADERS } = require("../lib/csv-export");
 const { buildPdfExport } = require("../lib/pdf-export");
+const { buildEventSearchFilter, summarizeEvents } = require("../lib/event-filter");
 const { createLazyStatements } = require("../lib/lazy-statements");
 const { createStatementCache } = require("../lib/statement-cache");
 
@@ -607,104 +608,8 @@ router.get("/:id/events/search", requireSessionId, wrapRoute("search events", (r
   const session = fetchSessionOrFail(id, res);
   if (!session) return;
 
-    // ── Build dynamic SQL WHERE clause ──────────────────────────────
-    const conditions = ["session_id = ?"];
-    const params = [id];
-
-    // Filter by event type (comma-separated, pushed to SQL via IN)
-    // Cap at 20 values to prevent SQLite parameter overflow from
-    // unbounded user input (SQLite limit is ~999 variables per query).
-    const typeFilter = req.query.type;
-    if (typeFilter) {
-      const types = typeFilter.split(",").map((t) => t.trim()).filter(Boolean).slice(0, 20);
-      if (types.length > 0) {
-        conditions.push(`LOWER(event_type) IN (${types.map(() => "LOWER(?)").join(",")})`);
-        params.push(...types);
-      }
-    }
-
-    // Filter by model (comma-separated, substring match via LIKE)
-    // Cap at 20 values to prevent SQLite parameter overflow.
-    const modelFilter = req.query.model;
-    if (modelFilter) {
-      const models = modelFilter.split(",").map((m) => m.trim()).filter(Boolean).slice(0, 20);
-      if (models.length > 0) {
-        const modelClauses = models.map(() => "LOWER(model) LIKE ? ESCAPE '\\'");
-        conditions.push(`model IS NOT NULL AND (${modelClauses.join(" OR ")})`);
-        params.push(...models.map((m) => `%${escapeLikeWildcards(m).toLowerCase()}%`));
-      }
-    }
-
-    // Filter by minimum total tokens
-    const minTokens = parseInt(req.query.min_tokens);
-    if (Number.isFinite(minTokens) && minTokens > 0) {
-      conditions.push("(COALESCE(tokens_in, 0) + COALESCE(tokens_out, 0)) >= ?");
-      params.push(minTokens);
-    }
-
-    // Filter by maximum total tokens
-    const maxTokens = parseInt(req.query.max_tokens);
-    if (Number.isFinite(maxTokens) && maxTokens > 0) {
-      conditions.push("(COALESCE(tokens_in, 0) + COALESCE(tokens_out, 0)) <= ?");
-      params.push(maxTokens);
-    }
-
-    // Filter by time range (ISO timestamps)
-    const after = req.query.after;
-    if (after) {
-      const afterDate = new Date(after);
-      if (!isNaN(afterDate.getTime())) {
-        conditions.push("timestamp >= ?");
-        params.push(after);
-      }
-    }
-
-    const before = req.query.before;
-    if (before) {
-      const beforeDate = new Date(before);
-      if (!isNaN(beforeDate.getTime())) {
-        conditions.push("timestamp <= ?");
-        params.push(before);
-      }
-    }
-
-    // Filter by minimum duration
-    const minDuration = parseFloat(req.query.min_duration_ms);
-    if (Number.isFinite(minDuration) && minDuration > 0) {
-      conditions.push("COALESCE(duration_ms, 0) >= ?");
-      params.push(minDuration);
-    }
-
-    // Filter for error events only
-    if (req.query.errors === "true") {
-      conditions.push("event_type IN ('error', 'agent_error', 'tool_error')");
-    }
-
-    // Filter for events with tool calls only
-    if (req.query.has_tools === "true") {
-      conditions.push("tool_call IS NOT NULL AND tool_call != 'null'");
-    }
-
-    // Filter for events with reasoning only
-    if (req.query.has_reasoning === "true") {
-      conditions.push("decision_trace IS NOT NULL AND decision_trace != 'null' AND decision_trace LIKE '%\"reasoning\"%'");
-    }
-
-    // ── Full-text search — push to SQL via LIKE when possible ─────
-    const q = req.query.q;
-    if (q) {
-      // Cap at 10 search terms — each term adds 6 LIKE clauses with
-      // bound parameters.  Unbounded input could exceed SQLite's ~999
-      // variable limit or cause excessive query complexity.
-      const searchTerms = q.split(/\s+/).filter(Boolean).slice(0, 10);
-      for (const term of searchTerms) {
-        const likeTerm = `%${escapeLikeWildcards(term)}%`;
-        conditions.push(
-          `(LOWER(COALESCE(input_data,'')) LIKE LOWER(?) ESCAPE '\\' OR LOWER(COALESCE(output_data,'')) LIKE LOWER(?) ESCAPE '\\' OR LOWER(COALESCE(tool_call,'')) LIKE LOWER(?) ESCAPE '\\' OR LOWER(COALESCE(event_type,'')) LIKE LOWER(?) ESCAPE '\\' OR LOWER(COALESCE(model,'')) LIKE LOWER(?) ESCAPE '\\' OR LOWER(COALESCE(decision_trace,'')) LIKE LOWER(?) ESCAPE '\\')`
-        );
-        params.push(likeTerm, likeTerm, likeTerm, likeTerm, likeTerm, likeTerm);
-      }
-    }
+    // -- Build dynamic SQL WHERE clause (pure; see lib/event-filter) --
+    const { conditions, params } = buildEventSearchFilter(id, req.query);
 
     // ── Pagination — always apply LIMIT/OFFSET in SQL ───────────────
     const { limit, offset } = parsePagination(req.query, { defaultLimit: 100, maxLimit: 500 });
@@ -727,22 +632,8 @@ router.get("/:id/events/search", requireSessionId, wrapRoute("search events", (r
     // Parse JSON columns
     const parsed = dbResults.map(parseEventRow);
 
-    // ── Compute summary stats in a single pass (avoids 4 iterations) ──
-    let totalTokensIn = 0;
-    let totalTokensOut = 0;
-    let totalDuration = 0;
-    const eventTypes = {};
-    const models = {};
-    for (let i = 0; i < parsed.length; i++) {
-      const e = parsed[i];
-      totalTokensIn += e.tokens_in || 0;
-      totalTokensOut += e.tokens_out || 0;
-      totalDuration += e.duration_ms || 0;
-      eventTypes[e.event_type] = (eventTypes[e.event_type] || 0) + 1;
-      if (e.model) {
-        models[e.model] = (models[e.model] || 0) + 1;
-      }
-    }
+    // -- Summarize matched events in a single pass (pure; see lib/event-filter) --
+    const summary = summarizeEvents(parsed);
 
     res.json({
       session_id: id,
@@ -751,14 +642,7 @@ router.get("/:id/events/search", requireSessionId, wrapRoute("search events", (r
       returned: parsed.length,
       offset,
       limit,
-      summary: {
-        tokens_in: totalTokensIn,
-        tokens_out: totalTokensOut,
-        total_tokens: totalTokensIn + totalTokensOut,
-        total_duration_ms: Math.round(totalDuration * 100) / 100,
-        event_types: eventTypes,
-        models,
-      },
+      summary,
       events: parsed,
     });
 }));
