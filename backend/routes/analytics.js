@@ -5,6 +5,7 @@ const { wrapRoute, parseDays, daysAgoCutoff } = require("../lib/request-helpers"
 const { createCache, cacheMiddleware } = require("../lib/response-cache");
 const { loadPricingMap, computeCost } = require("../lib/pricing");
 const { createLazyStatements } = require("../lib/lazy-statements");
+const { buildHeatmap } = require("../lib/heatmap");
 
 const router = express.Router();
 
@@ -433,72 +434,7 @@ router.get("/heatmap", isTest ? analyticsCacheMw : cacheMiddleware(analyticsCach
 
     const rows = getHeatmapStatements()[metric].all(cutoff);
 
-    // Build 7×24 matrix (Sun=0 .. Sat=6, hours 0-23)
-    const matrix = Array.from({ length: 7 }, () => Array(24).fill(0));
-    let maxValue = 0;
-
-    for (const row of rows) {
-      matrix[row.dow][row.hour] = row.value;
-      if (row.value > maxValue) maxValue = row.value;
-    }
-
-    const dayNames = ["Sunday", "Monday", "Tuesday", "Wednesday", "Thursday", "Friday", "Saturday"];
-
-    // Flatten for easy consumption
-    const cells = [];
-    for (let d = 0; d < 7; d++) {
-      for (let h = 0; h < 24; h++) {
-        if (matrix[d][h] > 0) {
-          cells.push({
-            day: d,
-            day_name: dayNames[d],
-            hour: h,
-            value: matrix[d][h],
-            intensity: maxValue > 0 ? Math.round((matrix[d][h] / maxValue) * 100) / 100 : 0,
-          });
-        }
-      }
-    }
-
-    // Day and hour totals
-    const dayTotals = dayNames.map((name, i) => ({
-      day: i,
-      day_name: name,
-      total: matrix[i].reduce((a, b) => a + b, 0),
-    }));
-
-    const hourTotals = Array.from({ length: 24 }, (_, h) => ({
-      hour: h,
-      total: matrix.reduce((sum, row) => sum + row[h], 0),
-    }));
-
-    // Peak detection
-    let peakDay = 0, peakHour = 0, peakValue = 0;
-    for (let d = 0; d < 7; d++) {
-      for (let h = 0; h < 24; h++) {
-        if (matrix[d][h] > peakValue) {
-          peakValue = matrix[d][h];
-          peakDay = d;
-          peakHour = h;
-        }
-      }
-    }
-
-    res.json({
-      period_days: days,
-      metric,
-      max_value: maxValue,
-      peak: {
-        day: peakDay,
-        day_name: dayNames[peakDay],
-        hour: peakHour,
-        value: peakValue,
-      },
-      matrix,
-      cells,
-      day_totals: dayTotals,
-      hour_totals: hourTotals,
-    });
+    res.json(buildHeatmap(rows, { days, metric }));
 }));
 
 // GET /analytics/costs — Aggregate cost breakdown by model and over time
