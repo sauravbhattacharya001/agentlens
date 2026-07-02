@@ -3,9 +3,10 @@ const { getDb } = require("../db");
 const { latencyStats, round2 } = require("../lib/stats");
 const { wrapRoute, parseDays, daysAgoCutoff } = require("../lib/request-helpers");
 const { createCache, cacheMiddleware } = require("../lib/response-cache");
-const { loadPricingMap, computeCost } = require("../lib/pricing");
+const { loadPricingMap } = require("../lib/pricing");
 const { createLazyStatements } = require("../lib/lazy-statements");
 const { buildHeatmap } = require("../lib/heatmap");
+const { rollUpCosts } = require("../lib/cost-rollup");
 
 const router = express.Router();
 
@@ -477,85 +478,13 @@ router.get("/costs", analyticsCacheMw, wrapRoute("fetch cost analytics", (req, r
 
   const stmts = getCostStatements();
 
-  // Aggregate by model
+  // Fetch grouped per-model and per-(day, model) token aggregates, then shape
+  // them into the cost report.  All cost math (pricing match, rounding,
+  // percent share, daily bucketing, projection) lives in lib/cost-rollup.
   const modelRows = stmts.modelAgg.all(cutoff);
-
-  let totalCost = 0;
-  let totalInputCost = 0;
-  let totalOutputCost = 0;
-  const modelCosts = [];
-  const unmatchedModels = [];
-
-  for (const row of modelRows) {
-    const cost = computeCost(row.model, row.total_tokens_in, row.total_tokens_out, pricingMap);
-    if (cost) {
-      totalCost += cost.totalCost;
-      totalInputCost += cost.inputCost;
-      totalOutputCost += cost.outputCost;
-      modelCosts.push({
-        model: row.model,
-        call_count: row.call_count,
-        tokens_in: row.total_tokens_in,
-        tokens_out: row.total_tokens_out,
-        input_cost: Math.round(cost.inputCost * 10000) / 10000,
-        output_cost: Math.round(cost.outputCost * 10000) / 10000,
-        total_cost: Math.round(cost.totalCost * 10000) / 10000,
-        percent: 0,  // filled below
-      });
-    } else {
-      unmatchedModels.push(row.model);
-    }
-  }
-
-  // Fill percent
-  for (const mc of modelCosts) {
-    mc.percent = totalCost > 0
-      ? Math.round((mc.total_cost / totalCost) * 10000) / 100
-      : 0;
-  }
-
-  // Daily cost trend
   const dailyRows = stmts.dailyAgg.all(cutoff);
 
-  const dailyCosts = {};
-  for (const row of dailyRows) {
-    const cost = computeCost(row.model, row.tokens_in, row.tokens_out, pricingMap);
-    if (!cost) continue;
-    if (!dailyCosts[row.day]) {
-      dailyCosts[row.day] = { day: row.day, cost: 0, input_cost: 0, output_cost: 0 };
-    }
-    dailyCosts[row.day].cost += cost.totalCost;
-    dailyCosts[row.day].input_cost += cost.inputCost;
-    dailyCosts[row.day].output_cost += cost.outputCost;
-  }
-
-  const dailyTrend = Object.values(dailyCosts).map(d => ({
-    day: d.day,
-    cost: Math.round(d.cost * 10000) / 10000,
-    input_cost: Math.round(d.input_cost * 10000) / 10000,
-    output_cost: Math.round(d.output_cost * 10000) / 10000,
-  }));
-
-  // Average daily cost
-  const avgDailyCost = dailyTrend.length > 0
-    ? totalCost / dailyTrend.length
-    : 0;
-
-  // Projected monthly cost (30-day extrapolation)
-  const projectedMonthlyCost = avgDailyCost * 30;
-
-  res.json({
-    period_days: days,
-    total_cost: Math.round(totalCost * 10000) / 10000,
-    total_input_cost: Math.round(totalInputCost * 10000) / 10000,
-    total_output_cost: Math.round(totalOutputCost * 10000) / 10000,
-    avg_daily_cost: Math.round(avgDailyCost * 10000) / 10000,
-    projected_monthly_cost: Math.round(projectedMonthlyCost * 100) / 100,
-    currency: "USD",
-    by_model: modelCosts,
-    daily_trend: dailyTrend,
-    unmatched_models: unmatchedModels,
-  });
+  res.json(rollUpCosts(modelRows, dailyRows, pricingMap, { days }));
 }));
 
 // GET /analytics/cache — Cache statistics (for monitoring)
