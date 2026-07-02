@@ -9,6 +9,7 @@ const router = express.Router();
 const { getDb } = require("../db");
 const { validateWebhookUrl, safeJsonParse } = require("../lib/validation");
 const { parseLimit, wrapRoute } = require("../lib/request-helpers");
+const { formatPayload } = require("../lib/webhook-payload");
 
 // ── Stricter rate limit for outbound webhook requests ───────────────
 // The /test and fire endpoints trigger outbound HTTP requests to
@@ -114,70 +115,9 @@ router.use((req, res, next) => {
   next();
 });
 
-// ── Format payload for different services ───────────────────────────
-
-function formatPayload(format, alertData) {
-  const { rule_name, metric, operator, threshold, current_value, window_minutes, agent_filter, alert_id, rule_id } = alertData;
-  const summary = `🚨 Alert "${rule_name}": ${metric} ${operator} ${threshold} (current: ${current_value}) over ${window_minutes}m window`;
-
-  switch (format) {
-    case "slack":
-      return {
-        text: summary,
-        blocks: [
-          {
-            type: "header",
-            text: { type: "plain_text", text: `🚨 AgentLens Alert: ${rule_name}` },
-          },
-          {
-            type: "section",
-            fields: [
-              { type: "mrkdwn", text: `*Metric:*\n${metric}` },
-              { type: "mrkdwn", text: `*Condition:*\n${operator} ${threshold}` },
-              { type: "mrkdwn", text: `*Current Value:*\n${current_value}` },
-              { type: "mrkdwn", text: `*Window:*\n${window_minutes} minutes` },
-              ...(agent_filter ? [{ type: "mrkdwn", text: `*Agent:*\n${agent_filter}` }] : []),
-            ],
-          },
-        ],
-      };
-
-    case "discord":
-      return {
-        content: summary,
-        embeds: [
-          {
-            title: `🚨 AgentLens Alert: ${rule_name}`,
-            color: 0xff4444,
-            fields: [
-              { name: "Metric", value: metric, inline: true },
-              { name: "Condition", value: `${operator} ${threshold}`, inline: true },
-              { name: "Current Value", value: `${current_value}`, inline: true },
-              { name: "Window", value: `${window_minutes} minutes`, inline: true },
-              ...(agent_filter ? [{ name: "Agent", value: agent_filter, inline: true }] : []),
-            ],
-            timestamp: new Date().toISOString(),
-          },
-        ],
-      };
-
-    case "json":
-    default:
-      return {
-        event: "alert.fired",
-        alert_id,
-        rule_id,
-        rule_name,
-        metric,
-        operator,
-        threshold,
-        current_value,
-        window_minutes,
-        agent_filter,
-        fired_at: new Date().toISOString(),
-      };
-  }
-}
+// Per-format alert payload shaping (Slack / Discord / JSON) lives in
+// lib/webhook-payload.js so the three payload shapes are unit-testable
+// without the DNS/HMAC/fetch/DB delivery path; formatPayload is imported above.
 
 // ── Helper: sign payload with HMAC-SHA256 ───────────────────────────
 
