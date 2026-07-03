@@ -2,14 +2,13 @@
 
 const express = require("express");
 const crypto = require("crypto");
-const dns = require("dns");
-const { promisify } = require("util");
 const rateLimit = require("express-rate-limit");
 const router = express.Router();
 const { getDb } = require("../db");
 const { validateWebhookUrl, safeJsonParse } = require("../lib/validation");
 const { parseLimit, wrapRoute } = require("../lib/request-helpers");
 const { formatPayload } = require("../lib/webhook-payload");
+const { validateResolvedIps } = require("../lib/ssrf-guard");
 
 // ── Stricter rate limit for outbound webhook requests ───────────────
 // The /test and fire endpoints trigger outbound HTTP requests to
@@ -22,9 +21,6 @@ const webhookOutboundLimiter = rateLimit({
   legacyHeaders: false,
   message: { error: "Too many webhook test requests, please try again later" },
 });
-
-const dnsResolve4 = promisify(dns.resolve4);
-const dnsResolve6 = promisify(dns.resolve6);
 
 // ── Security limits ─────────────────────────────────────────────────
 // Prevent resource exhaustion via unbounded user-controlled values.
@@ -131,68 +127,6 @@ function signPayload(rawBody, timestamp, secret) {
   const signingString = `${timestamp}.${rawBody}`;
   const v1 = crypto.createHmac("sha256", secret).update(signingString).digest("hex");
   return `t=${timestamp},v1=${v1}`;
-}
-
-// ── Helper: validate resolved IPs against SSRF blocklist ────────────
-// Prevents DNS rebinding attacks where a domain resolves to a public IP
-// during URL validation but to an internal/metadata IP at fetch time.
-
-function isBlockedIp(ip) {
-  // IPv4 checks
-  const v4 = ip.match(/^(\d{1,3})\.(\d{1,3})\.(\d{1,3})\.(\d{1,3})$/);
-  if (v4) {
-    const [, a, b] = v4.map(Number);
-    if (a === 127) return true;                                // loopback
-    if (a === 0) return true;                                  // 0.0.0.0/8
-    if (a === 10) return true;                                 // 10.0.0.0/8
-    if (a === 172 && b >= 16 && b <= 31) return true;          // 172.16.0.0/12
-    if (a === 192 && b === 168) return true;                   // 192.168.0.0/16
-    if (a === 169 && b === 254) return true;                   // link-local / cloud metadata
-    if (a === 100 && b >= 64 && b <= 127) return true;         // CGN 100.64.0.0/10
-    if (a >= 224) return true;                                 // multicast + reserved
-  }
-
-  // IPv6 checks
-  const lower = ip.toLowerCase();
-  if (lower === "::1") return true;                            // loopback
-  if (lower === "::") return true;                             // unspecified
-  if (lower.startsWith("fe80:")) return true;                  // link-local
-  if (lower.startsWith("fc") || lower.startsWith("fd")) return true;  // unique local
-  if (lower.startsWith("::ffff:")) return true;                // IPv4-mapped
-
-  return false;
-}
-
-async function validateResolvedIps(hostname) {
-  // If hostname is already an IP, check it directly
-  if (/^(\d{1,3}\.){3}\d{1,3}$/.test(hostname) || hostname.includes(":")) {
-    if (isBlockedIp(hostname)) {
-      return { safe: false, error: "Resolved IP is a blocked address" };
-    }
-    return { safe: true };
-  }
-
-  // Resolve DNS and check all returned IPs
-  const ips = [];
-  try {
-    const v4 = await dnsResolve4(hostname);
-    ips.push(...v4);
-  } catch { /* no A records */ }
-  try {
-    const v6 = await dnsResolve6(hostname);
-    ips.push(...v6);
-  } catch { /* no AAAA records */ }
-
-  if (ips.length === 0) {
-    return { safe: false, error: "DNS resolution failed — no records found" };
-  }
-
-  for (const ip of ips) {
-    if (isBlockedIp(ip)) {
-      return { safe: false, error: `DNS resolved to blocked IP: ${ip}` };
-    }
-  }
-  return { safe: true };
 }
 
 // ── Helper: deliver webhook (with retries) ──────────────────────────
