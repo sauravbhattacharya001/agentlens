@@ -9,6 +9,7 @@ const { validateWebhookUrl, safeJsonParse } = require("../lib/validation");
 const { parseLimit, wrapRoute } = require("../lib/request-helpers");
 const { formatPayload } = require("../lib/webhook-payload");
 const { validateResolvedIps } = require("../lib/ssrf-guard");
+const { signPayload } = require("../lib/webhook-signature");
 
 // ── Stricter rate limit for outbound webhook requests ───────────────
 // The /test and fire endpoints trigger outbound HTTP requests to
@@ -116,18 +117,11 @@ router.use((req, res, next) => {
 // without the DNS/HMAC/fetch/DB delivery path; formatPayload is imported above.
 
 // ── Helper: sign payload with HMAC-SHA256 ───────────────────────────
-
-function signPayload(rawBody, timestamp, secret) {
-  // Stripe / Standard-Webhooks-style canonical signing string:
-  //   `${timestamp}.${rawBody}`
-  // Binding the timestamp into the MAC lets receivers reject replays of
-  // captured deliveries (see issue #185). `rawBody` MUST be the exact
-  // bytes shipped over the wire — do not re-stringify the payload after
-  // signing, or verification on the receiver will fail.
-  const signingString = `${timestamp}.${rawBody}`;
-  const v1 = crypto.createHmac("sha256", secret).update(signingString).digest("hex");
-  return `t=${timestamp},v1=${v1}`;
-}
+// The replay-resistant HMAC signing (canonical `${timestamp}.${rawBody}`
+// string → `t=<ts>,v1=<hex>` header, issue #185) lives in
+// lib/webhook-signature.js so the exact wire contract receivers must
+// reproduce is unit-testable without the DNS/fetch/DB delivery path;
+// signPayload is imported above.
 
 // ── Helper: deliver webhook (with retries) ──────────────────────────
 
