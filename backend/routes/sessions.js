@@ -1,6 +1,6 @@
 const express = require("express");
 const { getDb } = require("../db");
-const { isValidSessionId, isValidStatus, safeJsonParse, validateTag, escapeLikeWildcards } = require("../lib/validation");
+const { isValidSessionId, isValidStatus, safeJsonParse, validateTag } = require("../lib/validation");
 const { generateExplanation } = require("../lib/explain");
 const { computeSessionMetrics, computeDeltas } = require("../lib/session-metrics");
 const { getTagStatements } = require("../lib/tag-statements");
@@ -8,6 +8,7 @@ const { parsePagination, requireSessionId, wrapRoute } = require("../lib/request
 const { toExportEvent, eventToCsvRow, buildJsonExport, ndjsonSessionLine, CSV_HEADERS } = require("../lib/csv-export");
 const { buildPdfExport } = require("../lib/pdf-export");
 const { buildEventSearchFilter, summarizeEvents } = require("../lib/event-filter");
+const { buildSessionSearchFilter, buildSessionFilterSummary } = require("../lib/session-filter");
 const { createLazyStatements } = require("../lib/lazy-statements");
 const { createStatementCache } = require("../lib/statement-cache");
 
@@ -166,92 +167,10 @@ router.get("/search", wrapRoute("search sessions", (req, res) => {
   const db = getDb();
 
   const { limit, offset } = parsePagination(req.query);
-    const sortBy = ["started_at", "total_tokens", "agent_name", "status"].includes(req.query.sort)
-      ? req.query.sort
-      : "started_at";
-    const sortOrder = req.query.order === "asc" ? "ASC" : "DESC";
 
-    // Build dynamic WHERE clauses
-    const conditions = [];
-    const params = [];
-
-    // Full-text search across agent_name and metadata
-    const q = req.query.q;
-    if (q) {
-      // Cap at 10 terms to prevent parameter overflow and excessive
-      // query complexity (each term adds 2 LIKE parameters).
-      const terms = q.trim().split(/\s+/).filter(Boolean).slice(0, 10);
-      for (const term of terms) {
-        const escaped = escapeLikeWildcards(term);
-        conditions.push("(s.agent_name LIKE ? ESCAPE '\\' OR s.metadata LIKE ? ESCAPE '\\')");
-        params.push(`%${escaped}%`, `%${escaped}%`);
-      }
-    }
-
-    // Agent name filter (exact or substring)
-    const agent = req.query.agent;
-    if (agent) {
-      conditions.push("s.agent_name LIKE ? ESCAPE '\\'");
-      params.push(`%${escapeLikeWildcards(agent)}%`);
-    }
-
-    // Status filter
-    const status = req.query.status;
-    if (status && isValidStatus(status)) {
-      conditions.push("s.status = ?");
-      params.push(status);
-    }
-
-    // Date range filters
-    const after = req.query.after;
-    if (after) {
-      conditions.push("s.started_at >= ?");
-      params.push(after);
-    }
-    const before = req.query.before;
-    if (before) {
-      conditions.push("s.started_at <= ?");
-      params.push(before);
-    }
-
-    // Token thresholds
-    const minTokens = parseInt(req.query.min_tokens);
-    if (Number.isFinite(minTokens) && minTokens > 0) {
-      conditions.push("(s.total_tokens_in + s.total_tokens_out) >= ?");
-      params.push(minTokens);
-    }
-    const maxTokens = parseInt(req.query.max_tokens);
-    if (Number.isFinite(maxTokens) && maxTokens > 0) {
-      conditions.push("(s.total_tokens_in + s.total_tokens_out) <= ?");
-      params.push(maxTokens);
-    }
-
-    // Tag filter (comma-separated, sessions must have ALL specified tags)
-    // Cap at 20 tags to prevent SQLite variable-count overflow (limit ~999)
-    // and excessive query complexity from unbounded user input.
-    const tagFilter = req.query.tags;
-    let tagJoin = "";
-    if (tagFilter) {
-      const tags = tagFilter.split(",").map(t => t.trim()).filter(Boolean).slice(0, 20);
-      if (tags.length > 0) {
-        tagJoin = `INNER JOIN (
-          SELECT session_id FROM session_tags
-          WHERE tag IN (${tags.map(() => "?").join(",")})
-          GROUP BY session_id
-          HAVING COUNT(DISTINCT tag) = ?
-        ) tf ON s.session_id = tf.session_id`;
-        params.unshift(...tags, tags.length);
-      }
-    }
-
-    // Sort column mapping
-    const sortColumn = sortBy === "total_tokens"
-      ? "(s.total_tokens_in + s.total_tokens_out)"
-      : `s.${sortBy}`;
-
-    const whereClause = conditions.length > 0
-      ? "WHERE " + conditions.join(" AND ")
-      : "";
+    // -- Build dynamic SQL pieces (pure; see lib/session-filter) --
+    const { params, tagJoin, whereClause, sortBy, sortOrder, sortColumn } =
+      buildSessionSearchFilter(req.query);
 
     // Count query
     const countSql = `SELECT COUNT(*) as count FROM sessions s ${tagJoin} ${whereClause}`;
@@ -306,16 +225,7 @@ router.get("/search", wrapRoute("search sessions", (req, res) => {
       offset,
       sort: sortBy,
       order: sortOrder.toLowerCase(),
-      filters: {
-        q: q || null,
-        agent: agent || null,
-        status: status || null,
-        after: after || null,
-        before: before || null,
-        min_tokens: Number.isFinite(minTokens) ? minTokens : null,
-        max_tokens: Number.isFinite(maxTokens) ? maxTokens : null,
-        tags: tagFilter ? tagFilter.split(",").map(t => t.trim()).filter(Boolean) : null,
-      },
+      filters: buildSessionFilterSummary(req.query),
     });
 }));
 
