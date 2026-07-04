@@ -7,6 +7,19 @@ const { getDb } = require("../db");
 const { fireWebhooks } = require("./webhooks");
 const { wrapRoute, parseLimit } = require("../lib/request-helpers");
 const { createLazyStatements } = require("../lib/lazy-statements");
+const {
+  METRIC_DESCRIPTIONS,
+  VALID_METRICS,
+  VALID_OPERATORS,
+  MAX_WINDOW_MINUTES,
+  MAX_COOLDOWN_MINUTES,
+  MAX_NAME_LENGTH,
+  MAX_AGENT_FILTER_LENGTH,
+  MAX_ALERT_RULES,
+  compareValue,
+  clampWindowMinutes,
+  clampCooldownMinutes,
+} = require("../lib/alert-rules");
 
 // ── Path parameter validation ───────────────────────────────────────
 // IDs are generated via `Date.now().toString(36)-<12 hex chars>`, so
@@ -90,26 +103,9 @@ const getEvaluateStatements = createLazyStatements((db) => ({
   ),
 }));
 
-// Valid metrics users can alert on
-const VALID_METRICS = [
-  "total_tokens",         // total tokens (in+out) across sessions in window
-  "avg_tokens_per_session", // average tokens per session in window
-  "error_rate",           // % of events with errors in window
-  "avg_duration_ms",      // average event duration in window
-  "max_duration_ms",      // max event duration in window
-  "session_count",        // number of new sessions in window
-  "event_count",          // number of events in window
-  "token_rate",           // tokens per minute in window
-];
-
-const VALID_OPERATORS = ["<", ">", "<=", ">=", "==", "!="];
-
-// ── Security limits ─────────────────────────────────────────────────
-const MAX_WINDOW_MINUTES = 10080;   // 7 days max — prevents expensive full-table scans
-const MAX_COOLDOWN_MINUTES = 10080; // 7 days max
-const MAX_NAME_LENGTH = 128;
-const MAX_AGENT_FILTER_LENGTH = 256;
-const MAX_ALERT_RULES = 100;        // cap total rules to prevent DoS via evaluate endpoint
+// The metric catalog, operator set, security limits, threshold comparator,
+// and window/cooldown clamps live in lib/alert-rules (pure + unit-tested);
+// they are imported at the top of this module.
 
 // Validate ruleId / alertId: alphanumeric + hyphens, max 64 chars.
 // Matches the pattern used by generateId() and prevents log injection
@@ -235,19 +231,8 @@ function evaluateMetric(metric, windowMinutes, agentFilter) {
   return row.val;
 }
 
-// ── Helper: compare value against threshold ─────────────────────────
-
-function compareValue(value, operator, threshold) {
-  switch (operator) {
-    case "<":  return value < threshold;
-    case ">":  return value > threshold;
-    case "<=": return value <= threshold;
-    case ">=": return value >= threshold;
-    case "==": return value === threshold;
-    case "!=": return value !== threshold;
-    default:   return false;
-  }
-}
+// ── Helper: compare value against threshold ─────────────────────
+// compareValue lives in lib/alert-rules (pure comparator); imported above.
 
 // ── GET /alerts/rules — list all alert rules ────────────────────────
 
@@ -302,8 +287,8 @@ router.post("/rules", wrapRoute("create alert rule", (req, res) => {
 
     const ruleId = generateId();
     const now = new Date().toISOString();
-    const windowMin = Math.min(Math.max(1, Number(window_minutes) || 60), MAX_WINDOW_MINUTES);
-    const cooldownMin = Math.min(Math.max(0, Number(cooldown_minutes) || 15), MAX_COOLDOWN_MINUTES);
+    const windowMin = clampWindowMinutes(Number(window_minutes) || 60);
+    const cooldownMin = clampCooldownMinutes(Number(cooldown_minutes) || 15);
 
     db.prepare(`
       INSERT INTO alert_rules (rule_id, name, metric, operator, threshold, window_minutes, agent_filter, cooldown_minutes, created_at, updated_at)
@@ -353,7 +338,7 @@ router.put("/rules/:ruleId", validateIdParam("ruleId"), wrapRoute("update alert 
       }
       updates.threshold = threshold;
     }
-    if (window_minutes !== undefined) updates.window_minutes = Math.min(Math.max(1, Number(window_minutes)), MAX_WINDOW_MINUTES);
+    if (window_minutes !== undefined) updates.window_minutes = clampWindowMinutes(Number(window_minutes));
     if (agent_filter !== undefined) {
       if (agent_filter && (typeof agent_filter !== "string" || agent_filter.length > MAX_AGENT_FILTER_LENGTH)) {
         return res.status(400).json({ error: `agent_filter cannot exceed ${MAX_AGENT_FILTER_LENGTH} characters` });
@@ -361,7 +346,7 @@ router.put("/rules/:ruleId", validateIdParam("ruleId"), wrapRoute("update alert 
       updates.agent_filter = agent_filter || null;
     }
     if (enabled !== undefined) updates.enabled = enabled ? 1 : 0;
-    if (cooldown_minutes !== undefined) updates.cooldown_minutes = Math.min(Math.max(0, Number(cooldown_minutes)), MAX_COOLDOWN_MINUTES);
+    if (cooldown_minutes !== undefined) updates.cooldown_minutes = clampCooldownMinutes(Number(cooldown_minutes));
 
     const setClauses = Object.keys(updates).map(k => `${k} = ?`);
     setClauses.push("updated_at = ?");
@@ -512,16 +497,7 @@ router.get("/metrics", wrapRoute("list alert metrics", (req, res) => {
   res.json({
     metrics: VALID_METRICS.map(m => ({
       name: m,
-      description: {
-        total_tokens: "Total tokens (in+out) across sessions in the time window",
-        avg_tokens_per_session: "Average tokens per session in the time window",
-        error_rate: "Percentage of error events in the time window (0-100)",
-        avg_duration_ms: "Average event duration in milliseconds",
-        max_duration_ms: "Maximum event duration in milliseconds",
-        session_count: "Number of new sessions in the time window",
-        event_count: "Number of events in the time window",
-        token_rate: "Tokens per minute in the time window",
-      }[m],
+      description: METRIC_DESCRIPTIONS[m],
     })),
     operators: VALID_OPERATORS,
   });
