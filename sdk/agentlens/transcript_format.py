@@ -21,6 +21,7 @@ import json
 from datetime import datetime
 from typing import Any
 
+from agentlens._utils import parse_iso as _parse_iso_util
 from agentlens.models import AgentEvent
 
 
@@ -52,14 +53,20 @@ _MAX_VALUE_LEN = 200
 
 
 def _fmt_ts(ts: datetime | str | None) -> str:
-    """Format a timestamp as a compact, human-readable UTC string."""
+    """Format a timestamp as a compact, human-readable UTC string.
+
+    A string is parsed via the shared :func:`agentlens._utils.parse_iso`
+    (which tolerates a trailing ``Z`` on Python 3.9/3.10, unlike bare
+    ``datetime.fromisoformat``); if it is unparseable the original string is
+    returned unchanged.
+    """
     if ts is None:
         return "unknown"
     if isinstance(ts, str):
-        try:
-            ts = datetime.fromisoformat(ts)
-        except ValueError:
+        parsed = _parse_iso_util(ts)
+        if parsed is None:
             return ts
+        ts = parsed
     return ts.strftime("%Y-%m-%d %H:%M UTC")
 
 
@@ -118,11 +125,17 @@ def _get_tool(event: dict[str, Any]) -> dict[str, Any] | None:
 
 
 def _parse_iso(value: Any) -> datetime | None:
+    """Parse a timestamp into a datetime, passing existing datetimes through.
+
+    Delegates string parsing to the shared :func:`agentlens._utils.parse_iso`
+    helper (the single home for the ``fromisoformat`` pattern, also used by
+    ``timeline`` and ``flamegraph``).  That helper normalises a trailing ``Z``
+    suffix to ``+00:00`` before parsing, so common UTC timestamps like
+    ``"2025-01-01T00:00:00Z"`` parse correctly on Python 3.9/3.10 too (where
+    bare ``datetime.fromisoformat`` rejects ``Z``); the previous local copy
+    silently dropped those to ``None``.  An existing ``datetime`` is returned
+    unchanged to preserve object identity for the callers that pass one.
+    """
     if isinstance(value, datetime):
         return value
-    if isinstance(value, str):
-        try:
-            return datetime.fromisoformat(value)
-        except ValueError:
-            return None
-    return None
+    return _parse_iso_util(value)
