@@ -12,7 +12,6 @@ paths (``agentlens.health`` and ``agentlens``) are unchanged.
 
 from __future__ import annotations
 
-import math
 from typing import Any
 
 from agentlens.health_types import (
@@ -22,6 +21,7 @@ from agentlens.health_types import (
     HealthThresholds,
     MetricScore,
 )
+from agentlens._utils import percentile
 
 __all__ = [
     "HealthScorer",
@@ -245,13 +245,9 @@ class HealthScorer:
                 detail="No duration data available",
             )
 
-        # Percentile using linear interpolation (consistent with the
-        # backend's analytics.js).
-        idx = 0.95 * (len(durations) - 1)
-        lo = int(math.floor(idx))
-        hi = min(lo + 1, len(durations) - 1)
-        frac = idx - lo
-        p95 = durations[lo] + (durations[hi] - durations[lo]) * frac
+        # P95 via the shared percentile helper (linear interpolation
+        # between the two nearest ranks; single home in _utils).
+        p95 = percentile(durations, 95)
 
         if p95 <= 100.0:
             score = 100.0

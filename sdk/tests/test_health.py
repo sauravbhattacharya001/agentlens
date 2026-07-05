@@ -13,6 +13,7 @@ from agentlens.health import (
     HealthThresholds,
     MetricScore,
 )
+from agentlens import _utils
 from agentlens.models import AgentEvent, Session, ToolCall
 
 
@@ -298,6 +299,17 @@ class TestP95LatencyScorer:
         events = [{"event_type": "llm_call", "duration_ms": float(i * 100), "tokens_in": 0, "tokens_out": 0, "tool_call": None} for i in range(20)]
         ms = HealthScorer()._score_p95_latency(events)
         assert ms.value == 1805.0
+
+    def test_p95_matches_shared_percentile(self):
+        # The scorer must derive P95 from the shared _utils.percentile helper
+        # (single home for linear interpolation) — not a divergent inline copy.
+        durations = [17.0, 4.0, 991.0, 250.0, 33.0, 700.0, 12.0, 480.0, 61.0, 88.0, 3.0, 1200.0, 45.0]
+        events = [
+            {"event_type": "llm_call", "duration_ms": d, "tokens_in": 0, "tokens_out": 0, "tool_call": None}
+            for d in durations
+        ]
+        ms = HealthScorer()._score_p95_latency(events)
+        assert ms.value == _utils.percentile(sorted(durations), 95)
 
     def test_no_durations(self):
         events = [{"event_type": "llm_call", "tokens_in": 0, "tokens_out": 0, "tool_call": None}]
