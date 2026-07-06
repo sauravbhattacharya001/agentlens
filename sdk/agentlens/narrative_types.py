@@ -18,11 +18,12 @@ unchanged.
 from __future__ import annotations
 
 from dataclasses import dataclass, field
-from datetime import datetime, timezone
+from datetime import datetime
 from enum import Enum
 from typing import Any
 
 from agentlens._utils import format_duration_seconds as _fmt_seconds
+from agentlens._utils import utcnow as _utcnow
 
 
 class NarrativeStyle(Enum):
@@ -85,7 +86,7 @@ class Narrative:
     error_count: int = 0
     decision_count: int = 0
     style: NarrativeStyle = NarrativeStyle.TECHNICAL
-    generated_at: datetime = field(default_factory=lambda: datetime.now(timezone.utc))
+    generated_at: datetime = field(default_factory=_utcnow)
 
     def to_markdown(self) -> str:
         """Export narrative as markdown."""

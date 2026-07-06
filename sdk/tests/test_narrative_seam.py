@@ -138,6 +138,36 @@ class TestNarrativeTypesSeam(unittest.TestCase):
         cfg = NarrativeConfig(style="executive")
         self.assertIs(cfg.style, NarrativeStyle.EXECUTIVE)
 
+    def test_generated_at_uses_shared_utcnow_clock(self):
+        # generated_at defaults through the shared _utils.utcnow clock (like every
+        # other timestamp in the SDK) rather than a local
+        # ``datetime.now(timezone.utc)`` copy. Guard both halves of that contract:
+        #   1) the field's default_factory IS the shared helper object (the same
+        #      symbol models/span defer to), and
+        #   2) the default it mints is timezone-aware UTC.
+        from agentlens import _utils, narrative_types
+
+        self.assertIs(
+            narrative_types.Narrative.__dataclass_fields__["generated_at"].default_factory,
+            _utils.utcnow,
+            "generated_at should default via the shared _utils.utcnow helper",
+        )
+
+        n = Narrative(session_id="s", agent_name="a", summary="", body="")
+        self.assertEqual(n.generated_at.tzinfo, timezone.utc)
+
+    def test_types_module_carries_no_local_clock_import(self):
+        # The fold onto the shared clock also drops the now-unused ``timezone``
+        # import from the data-model module; a stray one would signal a local
+        # datetime.now(timezone.utc) copy creeping back in.
+        from agentlens import narrative_types
+
+        self.assertFalse(
+            hasattr(narrative_types, "timezone"),
+            "narrative_types should not import timezone once it defers to "
+            "_utils.utcnow for the generated_at default",
+        )
+
 
 if __name__ == "__main__":
     unittest.main()
