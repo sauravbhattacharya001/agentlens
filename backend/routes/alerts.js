@@ -1,10 +1,10 @@
 /* ── Alert Rules — threshold-based alerting for agent observability ──── */
 
 const express = require("express");
-const crypto = require("crypto");
 const router = express.Router();
 const { getDb } = require("../db");
 const { fireWebhooks } = require("./webhooks");
+const { makeId } = require("../lib/id-generator");
 const { wrapRoute, parseLimit } = require("../lib/request-helpers");
 const { createLazyStatements } = require("../lib/lazy-statements");
 const {
@@ -134,7 +134,7 @@ router.param("alertId", (req, res, next, val) => {
 // ── Helper: generate unique ID ──────────────────────────────────────
 
 function generateId() {
-  return `${Date.now().toString(36)}-${crypto.randomBytes(6).toString('hex')}`;
+  return makeId();
 }
 
 // ── Helper: evaluate metric value for a time window ─────────────────

@@ -1,11 +1,11 @@
 /* ── Session Annotations — notes and comments on sessions ──────────── */
 
 const express = require("express");
-const crypto = require("crypto");
 const router = express.Router();
 const { getDb } = require("../db");
 const { isValidSessionId } = require("../lib/validation");
 const { parsePagination, wrapRoute } = require("../lib/request-helpers");
+const { makeId } = require("../lib/id-generator");
 
 // Shared session ID validation for annotation routes.
 // Unlike sessions.js (which uses requireSessionId middleware),
@@ -56,7 +56,7 @@ const MAX_AUTHOR_LENGTH = 100;
 // ── Helper: generate unique ID ──────────────────────────────────────
 
 function generateId() {
-  return `ann-${Date.now().toString(36)}-${crypto.randomBytes(6).toString('hex')}`;
+  return makeId("ann");
 }
 
 // ── Helper: validate annotation input ───────────────────────────────

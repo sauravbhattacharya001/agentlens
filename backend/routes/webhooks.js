@@ -1,7 +1,6 @@
 /* ── Webhooks — notify external services when alerts fire ────────── */
 
 const express = require("express");
-const crypto = require("crypto");
 const rateLimit = require("express-rate-limit");
 const router = express.Router();
 const { getDb } = require("../db");
@@ -10,6 +9,7 @@ const { parseLimit, wrapRoute } = require("../lib/request-helpers");
 const { formatPayload } = require("../lib/webhook-payload");
 const { validateResolvedIps } = require("../lib/ssrf-guard");
 const { signPayload } = require("../lib/webhook-signature");
+const { makeId } = require("../lib/id-generator");
 
 // ── Stricter rate limit for outbound webhook requests ───────────────
 // The /test and fire endpoints trigger outbound HTTP requests to
@@ -75,7 +75,7 @@ function ensureWebhooksTable() {
 }
 
 function generateId() {
-  return `${Date.now().toString(36)}-${crypto.randomBytes(6).toString("hex")}`;
+  return makeId();
 }
 
 // Validate webhookId: alphanumeric + hyphens, max 64 chars
