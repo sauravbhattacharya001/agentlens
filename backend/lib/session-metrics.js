@@ -7,6 +7,7 @@
  */
 
 const { safeJsonParse } = require("./validation");
+const { round2 } = require("./stats");
 
 /**
  * Compute aggregate metrics for a session and its events.
@@ -86,8 +87,8 @@ function computeSessionMetrics(session, events) {
     total_tokens: totalTokens,
     event_count: eventCount,
     error_count: errorCount,
-    total_processing_ms: Math.round(totalDuration * 100) / 100,
-    avg_event_duration_ms: Math.round(avgDuration * 100) / 100,
+    total_processing_ms: round2(totalDuration),
+    avg_event_duration_ms: round2(avgDuration),
     models,
     event_types: eventTypes,
     tools,
@@ -133,7 +134,7 @@ function computeDeltas(metricsA, metricsB) {
     const b = metricsB[field] || 0;
     const raw = b - a;
     // Round ms fields to 2 decimal places
-    const absolute = field.endsWith("_ms") ? Math.round(raw * 100) / 100 : raw;
+    const absolute = field.endsWith("_ms") ? round2(raw) : raw;
     deltas[field] = { absolute, percent: pctDelta(a, b) };
   }
   return deltas;

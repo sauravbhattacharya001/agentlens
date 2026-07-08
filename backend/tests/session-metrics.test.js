@@ -2,7 +2,8 @@
  * Tests for lib/session-metrics.js — extracted session metric computation.
  */
 
-const { computeSessionMetrics, pctDelta } = require("../lib/session-metrics");
+const { computeSessionMetrics, pctDelta, computeDeltas } = require("../lib/session-metrics");
+const { round2 } = require("../lib/stats");
 
 // ── pctDelta ──────────────────────────────────────────────────────────
 
@@ -173,5 +174,47 @@ describe("computeSessionMetrics", () => {
     expect(m.session_id).toBe("sess-001");
     expect(m.agent_name).toBe("test-agent");
     expect(m.status).toBe("completed");
+  });
+});
+
+// ── computeDeltas ──────────────────────────────────────────
+
+describe("computeDeltas", () => {
+  test("reports absolute and percent change for every tracked field", () => {
+    const a = {
+      total_tokens: 100, tokens_in: 60, tokens_out: 40,
+      event_count: 10, error_count: 1,
+      total_processing_ms: 200, avg_event_duration_ms: 20,
+    };
+    const b = {
+      total_tokens: 150, tokens_in: 90, tokens_out: 60,
+      event_count: 12, error_count: 2,
+      total_processing_ms: 300, avg_event_duration_ms: 25,
+    };
+    const d = computeDeltas(a, b);
+    expect(Object.keys(d).sort()).toEqual([
+      "avg_event_duration_ms", "error_count", "event_count",
+      "tokens_in", "tokens_out", "total_processing_ms", "total_tokens",
+    ]);
+    expect(d.total_tokens).toEqual({ absolute: 50, percent: 50 });
+    expect(d.event_count).toEqual({ absolute: 2, percent: 20 });
+  });
+
+  test("rounds *_ms absolute deltas to two decimals but leaves counts exact", () => {
+    const a = { total_processing_ms: 0, event_count: 0 };
+    const b = { total_processing_ms: 1.005, event_count: 3 };
+    const d = computeDeltas(a, b);
+    // _ms field goes through round2 (1.005 * 100 rounds to 101 -> 1.01... but
+    // float repr of 1.005*100 is 100.49999, so round2 yields 1) - assert the
+    // exact round2 result so the fold onto stats.round2 stays pinned.
+    expect(d.total_processing_ms.absolute).toBe(round2(1.005));
+    // non-_ms field is passed through unrounded (integer diff stays exact)
+    expect(d.event_count.absolute).toBe(3);
+  });
+
+  test("treats missing fields as 0 on both sides", () => {
+    const d = computeDeltas({}, {});
+    expect(d.total_tokens).toEqual({ absolute: 0, percent: 0 });
+    expect(d.avg_event_duration_ms).toEqual({ absolute: 0, percent: 0 });
   });
 });

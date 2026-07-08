@@ -17,6 +17,7 @@
  */
 
 const { escapeLikeWildcards } = require("./validation");
+const { round2 } = require("./stats");
 
 // Cap dynamic user input pushed into SQL to keep well under SQLite's ~999
 // bound-variable limit and to bound query complexity from unbounded input.
@@ -172,7 +173,7 @@ function summarizeEvents(events) {
     tokens_in: totalTokensIn,
     tokens_out: totalTokensOut,
     total_tokens: totalTokensIn + totalTokensOut,
-    total_duration_ms: Math.round(totalDuration * 100) / 100,
+    total_duration_ms: round2(totalDuration),
     event_types: eventTypes,
     models,
   };

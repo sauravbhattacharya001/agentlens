@@ -7,6 +7,7 @@ const { fireWebhooks } = require("./webhooks");
 const { makeId } = require("../lib/id-generator");
 const { wrapRoute, parseLimit } = require("../lib/request-helpers");
 const { createLazyStatements } = require("../lib/lazy-statements");
+const { round2 } = require("../lib/stats");
 const {
   METRIC_DESCRIPTIONS,
   VALID_METRICS,
@@ -391,7 +392,7 @@ router.post("/evaluate", wrapRoute("evaluate alerts", async (req, res) => {
         metric: rule.metric,
         operator: rule.operator,
         threshold: rule.threshold,
-        current_value: Math.round(value * 100) / 100,
+        current_value: round2(value),
         triggered,
         window_minutes: rule.window_minutes,
         agent_filter: rule.agent_filter,
