@@ -8,6 +8,7 @@ const { makeId } = require("../lib/id-generator");
 const { wrapRoute, parseLimit } = require("../lib/request-helpers");
 const { createLazyStatements } = require("../lib/lazy-statements");
 const { round2 } = require("../lib/stats");
+const { isValidResourceId } = require("../lib/validation");
 const {
   METRIC_DESCRIPTIONS,
   VALID_METRICS,
@@ -26,12 +27,12 @@ const {
 // IDs are generated via `Date.now().toString(36)-<12 hex chars>`, so
 // they only contain alphanumeric characters and hyphens.  Reject
 // anything else early to prevent SQL injection or parameter confusion.
-const SAFE_ID_RE = /^[a-zA-Z0-9][a-zA-Z0-9-]{0,63}$/;
+// The structural check lives in lib/validation (isValidResourceId).
 
 function validateIdParam(paramName) {
   return (req, res, next) => {
     const val = req.params[paramName];
-    if (!val || !SAFE_ID_RE.test(val)) {
+    if (!isValidResourceId(val)) {
       return res.status(400).json({ error: `Invalid ${paramName} format` });
     }
     next();
@@ -108,16 +109,9 @@ const getEvaluateStatements = createLazyStatements((db) => ({
 // and window/cooldown clamps live in lib/alert-rules (pure + unit-tested);
 // they are imported at the top of this module.
 
-// Validate ruleId / alertId: alphanumeric + hyphens, max 64 chars.
-// Matches the pattern used by generateId() and prevents log injection
-// or cache pollution from arbitrary-length / special-char params.
-const RESOURCE_ID_RE = /^[a-zA-Z0-9][a-zA-Z0-9-]{0,63}$/;
-
-function isValidResourceId(id) {
-  return typeof id === "string" && RESOURCE_ID_RE.test(id);
-}
-
-// Middleware: reject invalid ruleId early (mirrors webhooks.js pattern)
+// Middleware: reject invalid ruleId early (mirrors webhooks.js pattern).
+// isValidResourceId is imported from lib/validation (single home for the
+// server-generated-ID format check).
 router.param("ruleId", (req, res, next, val) => {
   if (!isValidResourceId(val)) {
     return res.status(400).json({ error: "Invalid rule ID format" });

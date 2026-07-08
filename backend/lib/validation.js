@@ -15,6 +15,14 @@ const MAX_TAGS_PER_SESSION = 20;
 const TAG_RE = /^[a-zA-Z0-9_\-.:/ ]+$/;
 const SESSION_ID_RE = /^[a-zA-Z0-9_\-.:]+$/;
 
+// Resource / entity IDs (alert rule IDs, alert event IDs, webhook IDs,
+// webhook delivery IDs) are minted by lib/id-generator's makeId() as
+// `${base36-millis}-${12 hex chars}`, so they only ever contain
+// alphanumeric characters and hyphens, start with an alphanumeric, and are
+// well under 64 chars.  This is deliberately STRICTER than SESSION_ID_RE
+// (no `_ . :`), because these IDs are server-generated, never user-authored.
+const RESOURCE_ID_RE = /^[a-zA-Z0-9][a-zA-Z0-9-]{0,63}$/;
+
 const VALID_EVENT_TYPES = new Set([
   "session_start",
   "session_end",
@@ -69,6 +77,32 @@ function validateSessionId(id) {
  */
 function isValidSessionId(id) {
   return typeof id === "string" && id.length <= 128 && SESSION_ID_RE.test(id);
+}
+
+/**
+ * Check whether a server-generated resource/entity ID is structurally valid.
+ *
+ * Applies to alert rule IDs, alert event IDs, webhook IDs, and webhook
+ * delivery IDs - every key minted by lib/id-generator's makeId().  The shape
+ * is alphanumeric-leading, alphanumeric-plus-hyphen thereafter, max 64 chars
+ * (see RESOURCE_ID_RE).  Rejecting anything else at the route boundary (via
+ * `router.param(...)` / a param-guard middleware) prevents SQL injection,
+ * log injection, and cache pollution from arbitrary-length or special-char
+ * path params before the value ever reaches the database.
+ *
+ * This is the single home for that predicate: routes/alerts.js and
+ * routes/webhooks.js each previously carried a byte-identical private copy
+ * of both the regex and this one-line check (alerts.js carried it twice, as
+ * `SAFE_ID_RE` and `RESOURCE_ID_RE`), so the format contract had no direct
+ * unit coverage and could silently drift between copies.  It is intentionally
+ * stricter than isValidSessionId (no `_ . :`) because these IDs are
+ * server-minted, not user-supplied.
+ *
+ * @param {*} id
+ * @returns {boolean}
+ */
+function isValidResourceId(id) {
+  return typeof id === "string" && RESOURCE_ID_RE.test(id);
 }
 
 /**
@@ -334,10 +368,12 @@ module.exports = {
   MAX_TAGS_PER_SESSION,
   VALID_EVENT_TYPES,
   VALID_SESSION_STATUSES,
+  RESOURCE_ID_RE,
   // Helpers
   sanitizeString,
   validateSessionId,
   isValidSessionId,
+  isValidResourceId,
   safeJsonStringify,
   safeJsonParse,
   clampNonNegInt,

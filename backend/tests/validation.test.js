@@ -15,6 +15,7 @@ const {
   sanitizeString,
   validateSessionId,
   isValidSessionId,
+  isValidResourceId,
   safeJsonStringify,
   safeJsonParse,
   clampNonNegInt,
@@ -189,6 +190,72 @@ describe("isValidSessionId", () => {
   test("returns false for invalid characters", () => {
     expect(isValidSessionId("space here")).toBe(false);
     expect(isValidSessionId("excl!")).toBe(false);
+  });
+});
+
+/* ================================================================
+ * isValidResourceId
+ *
+ * Guards server-generated resource/entity IDs (alert rule/event IDs,
+ * webhook IDs, webhook delivery IDs) at the route boundary.  Its shape is
+ * deliberately STRICTER than isValidSessionId: only the exact form that
+ * lib/id-generator's makeId() can mint - alphanumeric-leading,
+ * alphanumeric-plus-hyphen thereafter, max 64 chars, and NONE of the
+ * `_ . :` that session IDs permit.
+ * ================================================================ */
+describe("isValidResourceId", () => {
+  test("accepts the exact shape makeId() produces (base36-millis + hex)", () => {
+    expect(isValidResourceId("lqf3k2p9-a1b2c3d4e5f6")).toBe(true);
+    // prefixed form used for annotation IDs (makeId("ann"))
+    expect(isValidResourceId("ann-lqf3k2p9-a1b2c3d4e5f6")).toBe(true);
+  });
+
+  test("accepts plain alphanumerics and internal hyphens", () => {
+    expect(isValidResourceId("abc")).toBe(true);
+    expect(isValidResourceId("A1")).toBe(true);
+    expect(isValidResourceId("9")).toBe(true);
+    expect(isValidResourceId("a-b-c")).toBe(true);
+  });
+
+  test("returns false for non-string input", () => {
+    expect(isValidResourceId(123)).toBe(false);
+    expect(isValidResourceId(null)).toBe(false);
+    expect(isValidResourceId(undefined)).toBe(false);
+    expect(isValidResourceId({})).toBe(false);
+  });
+
+  test("returns false for the empty string", () => {
+    expect(isValidResourceId("")).toBe(false);
+  });
+
+  test("requires an alphanumeric leading character (no leading hyphen)", () => {
+    expect(isValidResourceId("-abc")).toBe(false);
+    expect(isValidResourceId("-")).toBe(false);
+  });
+
+  test("rejects the `_ . :` characters that session IDs allow", () => {
+    // These are all VALID for isValidSessionId but must be REJECTED here.
+    expect(isValidResourceId("a_b")).toBe(false);
+    expect(isValidResourceId("a.b")).toBe(false);
+    expect(isValidResourceId("a:b")).toBe(false);
+    // sanity: the same values are accepted by the looser session-ID check
+    expect(isValidSessionId("a_b")).toBe(true);
+    expect(isValidSessionId("a.b")).toBe(true);
+    expect(isValidSessionId("a:b")).toBe(true);
+  });
+
+  test("rejects other special characters and whitespace", () => {
+    expect(isValidResourceId("space here")).toBe(false);
+    expect(isValidResourceId("excl!")).toBe(false);
+    expect(isValidResourceId("a/b")).toBe(false);
+    expect(isValidResourceId("a%20b")).toBe(false);
+  });
+
+  test("enforces the 64-character maximum (1 leading + 63 trailing)", () => {
+    expect(isValidResourceId("a".repeat(64))).toBe(true);
+    expect(isValidResourceId("a".repeat(65))).toBe(false);
+    // a full-length real-shaped ID stays under the cap
+    expect(isValidResourceId(`a${"-b".repeat(31)}`)).toBe(true); // 1 + 62 = 63 chars
   });
 });
 

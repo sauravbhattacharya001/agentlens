@@ -4,7 +4,7 @@ const express = require("express");
 const rateLimit = require("express-rate-limit");
 const router = express.Router();
 const { getDb } = require("../db");
-const { validateWebhookUrl, safeJsonParse } = require("../lib/validation");
+const { validateWebhookUrl, safeJsonParse, isValidResourceId } = require("../lib/validation");
 const { parseLimit, wrapRoute } = require("../lib/request-helpers");
 const { formatPayload } = require("../lib/webhook-payload");
 const { validateResolvedIps } = require("../lib/ssrf-guard");
@@ -78,11 +78,10 @@ function generateId() {
   return makeId();
 }
 
-// Validate webhookId: alphanumeric + hyphens, max 64 chars
-const WEBHOOK_ID_RE = /^[a-zA-Z0-9][a-zA-Z0-9-]{0,63}$/;
-
+// Validate webhookId: alphanumeric + hyphens, max 64 chars.
+// isValidResourceId is the shared home for this check (lib/validation).
 function validateWebhookId(id) {
-  return typeof id === "string" && WEBHOOK_ID_RE.test(id);
+  return isValidResourceId(id);
 }
 
 // ── Shared response formatter ───────────────────────────────────────
