@@ -354,7 +354,28 @@ class AgentTracker(
         )
 
     def explain(self, session_id: str | None = None) -> str:
-        """Generate a human-readable explanation of the agent's behavior."""
+        """Generate a human-readable explanation of the agent's behavior.
+
+        Renders a Markdown report for a locally-tracked session: a header
+        (agent name, session ID, start time, status, total token counts)
+        followed by a numbered event timeline.  Each event line shows its
+        type and, when present, the model, the invoked tool, the decision
+        reasoning, and the per-event token counts.
+
+        Unlike the other query methods, this never raises for a missing
+        session - it returns a friendly placeholder string instead, so it is
+        safe to call opportunistically (e.g. for logging).  If *session_id*
+        is given but not tracked locally, the result is
+        ``"Session <id> not found."``; with no session at all it is
+        ``"No active session."``.
+
+        Args:
+            session_id: Session to explain, or None for the current session.
+
+        Returns:
+            A Markdown explanation, or a placeholder string if the session
+            is not tracked locally.
+        """
         try:
             sid = self._resolve_session(session_id, require_local=True)
         except RuntimeError:

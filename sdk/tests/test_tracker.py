@@ -195,6 +195,38 @@ class TestExplain:
         assert "llm_call" in explanation
         assert "tool_call" in explanation
         assert "search" in explanation
+        # Header block: agent name, status, and rolled-up token totals.
+        assert "## Session Explanation: explainer" in explanation
+        assert "**Status:** active" in explanation
+        assert "**Total tokens:** 10 in / 5 out" in explanation
+        # Per-event annotations: the model tag and per-event token line only
+        # render for the events that carry them (the llm_call here).
+        assert "(model: gpt-4)" in explanation
+        assert "Tokens: 10 in / 5 out" in explanation
+
+    def test_explain_renders_reasoning(self, tracker, mock_transport):
+        # The decision_trace reasoning branch is only reached when an event
+        # was tracked with reasoning=..., so assert it renders verbatim.
+        tracker.start_session(agent_name="thinker")
+        tracker.track(
+            event_type="decision",
+            reasoning="chose search because the query was ambiguous",
+        )
+
+        explanation = tracker.explain()
+        assert "Reasoning: chose search because the query was ambiguous" in explanation
+
+    def test_explain_omits_absent_annotations(self, tracker, mock_transport):
+        # An event with no model / tool / reasoning / tokens must NOT emit any
+        # of those optional annotation lines - only the numbered event header.
+        tracker.start_session(agent_name="minimal")
+        tracker.track(event_type="generic")
+
+        explanation = tracker.explain()
+        assert "**generic**" in explanation
+        assert "model:" not in explanation
+        assert "Reasoning:" not in explanation
+        assert "Tokens:" not in explanation
 
 
 # ── Helper to set up mock HTTP responses ─────────────────────────
