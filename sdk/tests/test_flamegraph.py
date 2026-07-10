@@ -399,5 +399,89 @@ class TestFlamegraphTemplateSeam(unittest.TestCase):
         self.assertEqual(public, [])
 
 
+class TestFlamegraphHtmlEscaping(unittest.TestCase):
+    """Pin the render_html() XSS-escaping seam (CWE-79).
+
+    render_html() embeds the flamegraph data as a JSON literal inside a
+    <script> block. json.dumps escapes quotes/backslashes but NOT the
+    HTML-significant sequences ``</`` and ``<!--``, which would otherwise let
+    crafted event/tool/model strings break out of the script context. These
+    tests guard that documented escaping so a refactor can't silently drop it.
+    """
+
+    def _script_payload(self, html: str) -> str:
+        # Isolate the injected `const DATA = {...};` literal.
+        marker = "const DATA = "
+        start = html.index(marker) + len(marker)
+        end = html.index(";", start)
+        return html[start:end]
+
+    def test_closing_script_tag_is_escaped(self):
+        tc = ToolCall(tool_name="</script><script>alert(1)//")
+        events = [_make_event(event_type="tool_call", tool_call=tc, duration_ms=50)]
+        html = Flamegraph(events).render_html()
+        payload = self._script_payload(html)
+        # The raw closing tag must NOT survive inside the script literal...
+        self.assertNotIn("</script>", payload)
+        # ...it must appear only in the neutralised form.
+        self.assertIn(r"<\/script>", html)
+
+    def test_html_comment_open_is_escaped(self):
+        events = [_make_event(event_type="llm_call", model="<!--comment-->", duration_ms=50)]
+        html = Flamegraph(events).render_html()
+        payload = self._script_payload(html)
+        self.assertNotIn("<!--", payload)
+        self.assertIn(r"<\!--", html)
+
+    def test_escaped_payload_still_parses_as_json_after_unescaping(self):
+        # The escaping is reversible in-browser (\/ -> / , \! -> !); the literal
+        # embedded here must still be valid JSON once those two are undone.
+        tc = ToolCall(tool_name="</x>")
+        events = [_make_event(event_type="tool_call", tool_call=tc, duration_ms=50)]
+        html = Flamegraph(events).render_html()
+        payload = self._script_payload(html).replace(r"<\/", "</").replace(r"<\!--", "<!--")
+        data = json.loads(payload)
+        self.assertEqual(data["nodes"][0]["tool"], "</x>")
+
+
+class TestFlamegraphBuildBranches(unittest.TestCase):
+    """Pin under-asserted branches of Flamegraph._build().
+
+    Covers the fallback paths that the happy-path tests don't exercise:
+    unparseable timestamps, spans whose parent_id dangles, events that fall
+    outside every span, and span attribute passthrough.
+    """
+
+    def test_unparseable_timestamp_returns_none(self):
+        self.assertIsNone(_parse_ts("not-a-real-timestamp"))
+
+    def test_orphan_parent_span_is_treated_as_root(self):
+        # A span whose parent_id matches no known span must still render, at
+        # depth 0, rather than vanishing.
+        orphan = _make_span("orphan", duration_ms=200, parent_id="missing-parent")
+        fg = Flamegraph(events=[], spans=[orphan])
+        data = fg.to_data()
+        self.assertEqual(data["nodeCount"], 1)
+        self.assertEqual(data["nodes"][0]["depth"], 0)
+        self.assertEqual(data["nodes"][0]["name"], "span: orphan")
+
+    def test_event_outside_all_spans_stays_top_level(self):
+        # Span covers 0-100ms; the event starts at 500ms, contained by nothing,
+        # so it must fall through to a top-level node at depth 0.
+        span = _make_span("planning", offset_ms=0, duration_ms=100)
+        outside = _make_event(offset_ms=500, duration_ms=10)
+        fg = Flamegraph(events=[outside], spans=[span])
+        data = fg.to_data()
+        event_node = [n for n in data["nodes"] if n["type"] == "llm_call"][0]
+        self.assertEqual(event_node["depth"], 0)
+
+    def test_span_attributes_pass_through_to_node(self):
+        span = _make_span("annotated", duration_ms=50)
+        span.attributes = {"region": "us-east", "retries": 2}
+        fg = Flamegraph(events=[], spans=[span])
+        node = fg.to_data()["nodes"][0]
+        self.assertEqual(node["attrs"], {"region": "us-east", "retries": 2})
+
+
 if __name__ == "__main__":
     unittest.main()
