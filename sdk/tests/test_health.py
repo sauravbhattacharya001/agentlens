@@ -777,3 +777,170 @@ class TestTotals:
         ]
         report = HealthScorer().score(events)
         assert report.total_duration_ms == 100.0
+
+
+# ---------------------------------------------------------------------------
+# Aggregation & object-model branches (previously exercised only indirectly)
+# ---------------------------------------------------------------------------
+
+class TestAggregateEdgeCases:
+    """Direct coverage for _aggregate's error/tool classification branches."""
+
+    def test_error_event_with_failing_tool_counted_once(self):
+        # An event_type=="error" that ALSO carries a failing tool_call must
+        # count as a single error (the tool_output check lives in the else
+        # branch and is skipped), while tool_failures still increments in the
+        # separate tool block.
+        events = [{
+            "event_type": "error",
+            "duration_ms": 10.0,
+            "tool_call": {"tool_name": "x", "tool_output": {"error": "e"}},
+        }]
+        agg = HealthScorer._aggregate(events)
+        assert agg["error_count"] == 1
+        assert agg["tool_count"] == 1
+        assert agg["tool_failures"] == 1
+
+    def test_non_dict_tool_output_is_not_an_error(self):
+        # A tool_output that is not a dict (e.g. a plain string) must not be
+        # treated as a failure, but the call is still counted.
+        events = [{
+            "event_type": "tool",
+            "tool_call": {"tool_name": "y", "tool_output": "plain string"},
+        }]
+        agg = HealthScorer._aggregate(events)
+        assert agg["error_count"] == 0
+        assert agg["tool_count"] == 1
+        assert agg["tool_failures"] == 0
+
+    def test_non_dict_tool_call_is_ignored(self):
+        # A tool_call that is not a dict must not be counted as a tool call.
+        events = [{"event_type": "llm_call", "tool_call": "notadict"}]
+        agg = HealthScorer._aggregate(events)
+        assert agg["error_count"] == 0
+        assert agg["tool_count"] == 0
+        assert agg["tool_failures"] == 0
+
+    def test_tool_output_error_on_non_error_event_counts(self):
+        # The else branch: a non-"error" event whose tool_output.error is set
+        # increments the error count.
+        events = [{
+            "event_type": "tool",
+            "tool_call": {"tool_name": "z", "tool_output": {"error": "boom"}},
+        }]
+        agg = HealthScorer._aggregate(events)
+        assert agg["error_count"] == 1
+        assert agg["tool_failures"] == 1
+
+
+class TestEnsureAggListPath:
+    """Scorer methods accept a raw event list directly (backward-compatible)."""
+
+    def test_score_error_rate_accepts_raw_list(self):
+        raw = [{"event_type": "error"}, {"event_type": "llm_call", "duration_ms": 10.0}]
+        m = HealthScorer()._score_error_rate(raw)
+        assert m.value == pytest.approx(0.5)
+        assert "1/2" in m.detail
+
+    def test_score_tool_success_accepts_raw_list(self):
+        raw = [{"event_type": "tool", "tool_call": {"tool_name": "t", "tool_output": {"error": "x"}}}]
+        m = HealthScorer()._score_tool_success(raw)
+        assert m.value == pytest.approx(0.0)
+        assert "1 calls" in m.detail
+
+    def test_pre_aggregated_dict_passes_through(self):
+        # A dict is treated as already-aggregated and used as-is.
+        agg = {"total": 4, "error_count": 1, "total_tokens": 0, "total_duration": 0.0,
+               "durations": [], "tool_count": 0, "tool_failures": 0}
+        m = HealthScorer()._score_error_rate(agg)
+        assert m.value == pytest.approx(0.25)
+
+
+class TestScoreSessionToolCallBranches:
+    """score_session must normalise the three tool_call shapes correctly."""
+
+    class _PlainTC:
+        tool_name = "shell"
+        tool_output = {"error": "boom"}
+
+    class _EventPlainTC:
+        event_type = "tool"
+        duration_ms = 20.0
+        tokens_in = 5
+        tokens_out = 5
+        tool_call = None  # set per-instance below
+
+    def _make_session(self, events, sid="sess"):
+        class _S:
+            session_id = sid
+        s = _S()
+        s.events = events
+        return s
+
+    def test_plain_object_tool_call_fallback(self):
+        # tool_call is neither a dict nor a model_dump()-capable object: the
+        # fallback pulls tool_name/tool_output off the attributes.
+        class _Ev:
+            event_type = "tool"
+            duration_ms = 20.0
+            tokens_in = 5
+            tokens_out = 5
+            tool_call = TestScoreSessionToolCallBranches._PlainTC()
+        report = HealthScorer().score_session(self._make_session([_Ev()], "sess-xyz"))
+        assert report.session_id == "sess-xyz"
+        assert report.error_count == 1
+        ts = next(m for m in report.metrics if m.name == "tool_success")
+        assert ts.value == pytest.approx(0.0)
+        assert "1 calls" in ts.detail
+
+    def test_dict_tool_call_branch(self):
+        class _Ev:
+            event_type = "tool"
+            duration_ms = 15.0
+            tokens_in = 2
+            tokens_out = 2
+            tool_call = {"tool_name": "http", "tool_output": {"error": None}}
+        report = HealthScorer().score_session(self._make_session([_Ev()], "sess-dict"))
+        assert report.error_count == 0
+        ts = next(m for m in report.metrics if m.name == "tool_success")
+        assert ts.value == pytest.approx(1.0)
+
+    def test_model_dump_tool_call_branch(self):
+        # An object exposing model_dump() (pydantic-style) is dumped to a dict.
+        class _TC:
+            def model_dump(self):
+                return {"tool_name": "db", "tool_output": {"error": "fail"}}
+        class _Ev:
+            event_type = "tool"
+            duration_ms = 5.0
+            tokens_in = 1
+            tokens_out = 1
+            tool_call = _TC()
+        report = HealthScorer().score_session(self._make_session([_Ev()]))
+        assert report.error_count == 1
+        ts = next(m for m in report.metrics if m.name == "tool_success")
+        assert ts.value == pytest.approx(0.0)
+
+    def test_none_tool_call_branch(self):
+        class _Ev:
+            event_type = "llm_call"
+            duration_ms = 30.0
+            tokens_in = 1
+            tokens_out = 1
+            tool_call = None
+        report = HealthScorer().score_session(self._make_session([_Ev()]))
+        assert report.error_count == 0
+        ts = next(m for m in report.metrics if m.name == "tool_success")
+        # No tool calls to evaluate -> perfect + explanatory detail.
+        assert ts.score == pytest.approx(100.0)
+        assert "No tool calls" in ts.detail
+
+    def test_missing_attributes_use_getattr_defaults(self):
+        # An event object missing the optional attributes falls back to the
+        # getattr defaults (generic type, no duration, zero tokens).
+        class _Ev:
+            pass
+        report = HealthScorer().score_session(self._make_session([_Ev()], "sparse"))
+        assert report.session_id == "sparse"
+        assert report.event_count == 1
+        assert report.total_tokens == 0
