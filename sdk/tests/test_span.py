@@ -46,6 +46,42 @@ class TestSpanModel:
         assert d["session_id"] == "s1"
         assert "parent_id" not in d  # None is excluded
 
+    def test_set_status_without_error_leaves_error_none(self):
+        # set_status with no error message must NOT overwrite .error
+        s = Span(name="x")
+        s.set_status("completed")
+        assert s.status == "completed"
+        assert s.error is None
+
+    def test_set_status_empty_error_is_falsy(self):
+        # an empty-string error is falsy -> error stays None
+        s = Span(name="x")
+        s.set_status("error", "")
+        assert s.status == "error"
+        assert s.error is None
+
+    def test_to_dict_omits_all_optional_fields_when_unset(self):
+        s = Span(name="bare", session_id="s1")
+        d = s.to_dict()
+        for key in ("parent_id", "ended_at", "duration_ms", "attributes", "error"):
+            assert key not in d
+
+    def test_to_dict_includes_all_optional_fields_when_set(self):
+        from datetime import datetime, timezone
+
+        s = Span(name="full", session_id="s1", parent_id="parent-1")
+        s.ended_at = datetime(2026, 1, 1, tzinfo=timezone.utc)
+        s.duration_ms = 12.345
+        s.set_attribute("k", "v")
+        s.set_status("error", "boom")
+        d = s.to_dict()
+        assert d["parent_id"] == "parent-1"
+        assert d["ended_at"] == "2026-01-01T00:00:00+00:00"
+        assert d["duration_ms"] == 12.35  # rounded to 2 dp
+        assert d["attributes"] == {"k": "v"}
+        assert d["error"] == "boom"
+        assert d["status"] == "error"
+
 
 class TestTrackerSpan:
     def test_basic_span(self):
