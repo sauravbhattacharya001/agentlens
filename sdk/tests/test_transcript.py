@@ -295,6 +295,149 @@ def test_run_metadata_is_json_serializable():
     assert json.loads(json.dumps(meta)) == meta
 
 
+# ---------------------------------------------------------------------------
+# Fallback / edge paths (fill uncovered branches)
+# ---------------------------------------------------------------------------
+
+def test_task_falls_back_to_first_event_input_when_no_metadata_task():
+    """With no task/prompt/goal/description in metadata, the Task section is
+    derived from the first event that carries an input_data summary."""
+    session = Session(agent_name="builder", started_at=BASE, metadata={})
+    # First event has no input_data (skipped), second supplies it.
+    session.add_event(AgentEvent(event_type="llm_call"))
+    session.add_event(
+        AgentEvent(event_type="llm_call", input_data={"prompt": "summarize the diff"})
+    )
+    session.ended_at = BASE + timedelta(minutes=1)
+    session.status = "completed"
+    task = _section(export_transcript(session), "## Task")
+    assert "summarize the diff" in task
+
+
+def test_task_placeholder_when_nothing_recorded():
+    """No metadata task and no event input -> explicit placeholder."""
+    session = Session(agent_name="builder", started_at=BASE, metadata={})
+    session.add_event(AgentEvent(event_type="llm_call"))
+    session.ended_at = BASE + timedelta(minutes=1)
+    session.status = "completed"
+    assert _section(export_transcript(session), "## Task") == "(no task recorded)"
+
+
+def test_actions_placeholder_when_no_actions():
+    session = Session(agent_name="idle", started_at=BASE, metadata={"task": "nap"})
+    session.add_event(AgentEvent(event_type="llm_call"))
+    session.ended_at = BASE + timedelta(minutes=1)
+    session.status = "completed"
+    assert _section(export_transcript(session), "## Actions Taken") == "(no actions recorded)"
+
+
+def test_decision_reasoning_from_top_level_field():
+    """A decision event whose reasoning lives at the top level (no
+    decision_trace) still becomes an action via the ev.get('reasoning')
+    fallback."""
+    session_dict = {
+        "agent_name": "thinker",
+        "started_at": BASE.isoformat(),
+        "ended_at": (BASE + timedelta(minutes=1)).isoformat(),
+        "status": "completed",
+        "metadata": {"task": "decide"},
+        "events": [
+            {"event_type": "decision", "reasoning": "picked path A after weighing cost"},
+        ],
+    }
+    actions = _section(export_transcript(session_dict), "## Actions Taken")
+    assert "picked path A" in actions
+
+
+def test_outputs_skip_empty_summaries_and_use_later_final():
+    """Tool outputs / final outputs that summarize to empty are skipped, so the
+    exporter walks past them to the next candidate (covers the loop-continue
+    branches)."""
+    session_dict = {
+        "agent_name": "builder",
+        "started_at": BASE.isoformat(),
+        "ended_at": (BASE + timedelta(minutes=1)).isoformat(),
+        "status": "completed",
+        "metadata": {"task": "t"},
+        "events": [
+            # tool_call present but tool_output summarizes to empty (empty string).
+            {
+                "event_type": "tool_call",
+                "tool_call": {"tool_name": "noop", "tool_input": {}, "tool_output": ""},
+            },
+            # last event's output_data is empty -> skipped; walk to prior real output.
+            {"event_type": "llm_call", "output_data": {"result": "done"}},
+            {"event_type": "llm_call", "output_data": ""},
+        ],
+    }
+    outputs = _section(export_transcript(session_dict), "## Key Outputs")
+    # The empty tool output is not listed; the real final output is.
+    assert "noop" not in outputs
+    assert "done" in outputs
+
+
+def test_outputs_placeholder_when_nothing_recorded():
+    session = Session(agent_name="quiet", started_at=BASE, metadata={"task": "t"})
+    session.add_event(AgentEvent(event_type="llm_call"))
+    session.ended_at = BASE + timedelta(minutes=1)
+    session.status = "completed"
+    assert _section(export_transcript(session), "## Key Outputs") == "(no outputs recorded)"
+
+
+def test_duration_appends_timezone_label_when_not_utc():
+    md = TranscriptExporter(timezone_label="PT").render(_make_session())
+    duration = _section(md, "## Duration")
+    assert "[PT]" in duration
+
+
+def test_run_metadata_converts_datetime_timing_to_isoformat():
+    """When started_at/ended_at are datetime objects (not strings), the run
+    metadata serializes them to ISO strings."""
+    # Pass a session-shaped dict carrying raw datetime objects (not the
+    # already-stringified to_api_dict form), exercising the datetime->isoformat
+    # branch in to_run_metadata.
+    session_dict = {
+        "agent_name": "builder",
+        "started_at": BASE,
+        "ended_at": BASE + timedelta(minutes=3),
+        "status": "completed",
+        "events": [],
+    }
+    meta = export_run_metadata(session_dict)
+    assert isinstance(meta["startedAt"], str) and "2026-06-05" in meta["startedAt"]
+    assert isinstance(meta["endedAt"], str) and "2026-06-05" in meta["endedAt"]
+    assert meta["durationMs"] == pytest.approx(3 * 60_000)
+
+
+def test_run_metadata_prefers_explicit_duration_ms():
+    session_dict = {
+        "agent_name": "builder",
+        "started_at": BASE.isoformat(),
+        "ended_at": (BASE + timedelta(minutes=5)).isoformat(),
+        "status": "completed",
+        "duration_ms": 12345,
+        "events": [],
+    }
+    meta = export_run_metadata(session_dict)
+    # Explicit duration_ms wins over the start/end-derived value.
+    assert meta["durationMs"] == 12345.0
+
+
+def test_run_metadata_omits_timing_when_absent():
+    session_dict = {"agent_name": "x", "status": "completed", "events": []}
+    meta = export_run_metadata(session_dict)
+    assert "startedAt" not in meta and "endedAt" not in meta
+    assert "durationMs" not in meta
+
+
+def test_run_metadata_omits_exit_status_for_unknown_status():
+    """An unmapped session status yields no exitStatus key (verification then
+    has no ground-truth status to grade against)."""
+    session_dict = {"agent_name": "x", "status": "paused", "events": []}
+    meta = export_run_metadata(session_dict)
+    assert "exitStatus" not in meta
+
+
 def test_transcript_claim_and_metadata_truth_can_diverge():
     """The whole point: a session can have a self-reported outcome that differs
     from the ground-truth status. The transcript carries the claim; the
