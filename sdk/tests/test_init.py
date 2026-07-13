@@ -406,3 +406,64 @@ class TestModuleExports:
             "get_costs", "get_pricing", "set_pricing",
         }
         assert expected.issubset(set(agentlens.__all__))
+
+
+# ---------------------------------------------------------------------------
+# TestExportTranscriptFetchBranch
+# ---------------------------------------------------------------------------
+
+class TestExportTranscriptFetchBranch:
+    """When called with no ``session``, ``export_transcript`` /
+    ``export_run_metadata`` must fetch the session from the backend via
+    ``export_session`` and render/extract from that fetched payload.
+    Covers the ``session is None`` branch in ``agentlens/__init__.py``.
+    """
+
+    _BACKEND_SESSION = {
+        "agent_name": "gardener",
+        "started_at": "2026-06-05T10:00:00+00:00",
+        "ended_at": "2026-06-05T10:05:00+00:00",
+        "status": "completed",
+        "metadata": {"task": "prune stale branches"},
+        "events": [
+            {
+                "event_type": "tool_call",
+                "tool_call": {
+                    "tool_name": "git_branch_delete",
+                    "tool_input": {"branch": "old/feature"},
+                    "tool_output": {"deleted": True},
+                },
+            },
+        ],
+    }
+
+    def test_export_transcript_fetches_when_session_omitted(self):
+        """No ``session`` arg -> export_session(session_id, format='json') is
+        called and its payload is rendered into the transcript."""
+        with patch("agentlens.export_session", return_value=self._BACKEND_SESSION) as mock_export:
+            md = agentlens.export_transcript(session_id="sid-123")
+        mock_export.assert_called_once_with(session_id="sid-123", format="json")
+        assert md.lstrip().startswith("# gardener Run - ")
+        assert "git_branch_delete" in md
+
+    def test_export_transcript_passed_session_skips_fetch(self):
+        """An explicit ``session`` must NOT trigger a backend fetch."""
+        with patch("agentlens.export_session") as mock_export:
+            md = agentlens.export_transcript(session=self._BACKEND_SESSION)
+        mock_export.assert_not_called()
+        assert md.lstrip().startswith("# gardener Run - ")
+
+    def test_export_run_metadata_fetches_when_session_omitted(self):
+        """No ``session`` arg -> export_session is called and RunMetadata is
+        extracted from the fetched payload."""
+        with patch("agentlens.export_session", return_value=self._BACKEND_SESSION) as mock_export:
+            meta = agentlens.export_run_metadata(session_id="sid-123")
+        mock_export.assert_called_once_with(session_id="sid-123", format="json")
+        assert isinstance(meta, dict)
+
+    def test_export_run_metadata_passed_session_skips_fetch(self):
+        """An explicit ``session`` must NOT trigger a backend fetch."""
+        with patch("agentlens.export_session") as mock_export:
+            meta = agentlens.export_run_metadata(session=self._BACKEND_SESSION)
+        mock_export.assert_not_called()
+        assert isinstance(meta, dict)
