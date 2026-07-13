@@ -8,10 +8,19 @@ import json
 import os
 import tempfile
 from datetime import datetime, timezone, timedelta
+from pathlib import Path
+
+import pytest
 
 
 from agentlens.models import Session, AgentEvent, ToolCall, DecisionTrace
-from agentlens.exporter import SessionExporter, _session_stats, _duration_human, _escape
+from agentlens.exporter import (
+    SessionExporter,
+    _session_stats,
+    _duration_human,
+    _escape,
+    _validate_output_path,
+)
 
 
 # ── Fixtures ────────────────────────────────────────────────────────
@@ -107,6 +116,56 @@ class TestSessionStats:
         assert stats["event_count"] == 0
         assert stats["tool_calls"] == 0
         assert stats["session_duration_ms"] is None
+
+    def test_events_without_model_or_duration(self):
+        # Exercises the false side of `if ev.model` and `if ev.duration_ms`:
+        # a bare event contributes to the count but not to models_used or
+        # total_event_duration_ms.
+        s = Session(session_id="bare-001", agent_name="bare-agent")
+        s.add_event(AgentEvent(event_id="e0", event_type="llm_call"))
+        stats = _session_stats(s)
+        assert stats["event_count"] == 1
+        assert stats["models_used"] == {}
+        assert stats["total_event_duration_ms"] == 0.0
+        assert stats["error_count"] == 0
+
+    def test_error_event_is_counted(self):
+        # Exercises the `event_type == "error"` branch (error_count increment).
+        s = Session(session_id="err-001", agent_name="err-agent")
+        s.add_event(AgentEvent(event_id="e0", event_type="error"))
+        s.add_event(AgentEvent(event_id="e1", event_type="llm_call"))
+        stats = _session_stats(s)
+        assert stats["error_count"] == 1
+        assert stats["event_types"]["error"] == 1
+
+
+class TestValidateOutputPath:
+    def test_accepts_file_in_cwd(self):
+        resolved = _validate_output_path("report.json")
+        assert resolved == (Path.cwd() / "report.json").resolve()
+
+    def test_accepts_file_in_temp(self):
+        target = Path(tempfile.gettempdir()) / "al-export.json"
+        resolved = _validate_output_path(str(target))
+        assert resolved == target.resolve()
+
+    def test_rejects_bare_cwd_directory(self):
+        # Resolving to the cwd itself is a directory, not a file (line 58).
+        with pytest.raises(ValueError, match="not a directory"):
+            _validate_output_path(str(Path.cwd()))
+
+    def test_rejects_bare_temp_directory(self):
+        with pytest.raises(ValueError, match="not a directory"):
+            _validate_output_path(tempfile.gettempdir())
+
+    def test_rejects_path_outside_allowed_dirs(self):
+        # A traversal that escapes both cwd and temp is rejected (line 69).
+        escaped = Path.cwd().resolve()
+        while escaped.parent != escaped:
+            escaped = escaped.parent  # filesystem root
+        target = escaped / "agentlens-not-allowed-xyz.json"
+        with pytest.raises(ValueError, match="must be within"):
+            _validate_output_path(str(target))
 
 
 # ── JSON export ─────────────────────────────────────────────────────
