@@ -14,6 +14,7 @@ describe("tag-statements.js — prepared tag SQL statements", () => {
   let tmpDir;
   let db;
   let getTagStatements;
+  let batchGetTags;
 
   beforeAll(() => {
     tmpDir = fs.mkdtempSync(path.join(os.tmpdir(), "agentlens-tagtest-"));
@@ -35,8 +36,18 @@ describe("tag-statements.js — prepared tag SQL statements", () => {
     // Initialize DB with schema so tables exist
     const { getDb } = require("../db");
     db = getDb();
-    ({ getTagStatements } = require("../lib/tag-statements"));
+    ({ getTagStatements, batchGetTags } = require("../lib/tag-statements"));
   });
+
+  // Helper: create a session + attach the given tags.
+  function seedSession(sid, tags) {
+    const now = new Date().toISOString();
+    db.prepare(
+      "INSERT INTO sessions (session_id, agent_name, status, started_at) VALUES (?, ?, ?, ?)"
+    ).run(sid, "agent", "active", now);
+    const stmts = getTagStatements();
+    for (const t of tags) stmts.addTag.run(sid, t, now);
+  }
 
   // ── Singleton behavior ─────────────────────────────────
 
@@ -272,6 +283,65 @@ describe("tag-statements.js — prepared tag SQL statements", () => {
     const stmts = getTagStatements();
     const result = stmts.sessionsByTag.all("nonexistent-tag", 50, 0);
     assert.strictEqual(result.length, 0);
+  });
+
+  // ── batchGetTags ───────────────────────────────────────
+
+  it("batchGetTags returns {} for empty or nullish input", () => {
+    assert.deepStrictEqual(batchGetTags([]), {});
+    assert.deepStrictEqual(batchGetTags(null), {});
+    assert.deepStrictEqual(batchGetTags(undefined), {});
+  });
+
+  it("batchGetTags small-batch path (<=5) maps session_id -> tag array", () => {
+    seedSession("b1", ["x", "y"]);
+    seedSession("b2", ["z"]);
+    seedSession("b3", []); // no tags -> omitted from map
+
+    const map = batchGetTags(["b1", "b2", "b3"]);
+    assert.deepStrictEqual([...map.b1].sort(), ["x", "y"]);
+    assert.deepStrictEqual([...map.b2].sort(), ["z"]);
+    assert.ok(!("b3" in map), "sessions with no tags are omitted");
+  });
+
+  it("batchGetTags large-batch path (>5) exercises chunked queries and caches statements", () => {
+    // 63 sessions -> chunking splits into 50 + 10 + 1 + 1 + 1 (CHUNK_SIZES 50,10,1).
+    const ids = [];
+    for (let i = 0; i < 63; i++) {
+      const sid = `big-${i}`;
+      ids.push(sid);
+      seedSession(sid, [`tag-${i}`, "common"]);
+    }
+
+    const map = batchGetTags(ids);
+    assert.strictEqual(Object.keys(map).length, 63);
+    for (let i = 0; i < 63; i++) {
+      assert.deepStrictEqual(map[`big-${i}`].sort(), ["common", `tag-${i}`].sort());
+    }
+
+    // Cached chunk statements were created for sizes 50, 10 and 1.
+    const stmts = getTagStatements();
+    assert.ok(stmts._batchTags_50, "chunk-50 statement cached");
+    assert.ok(stmts._batchTags_10, "chunk-10 statement cached");
+    assert.ok(stmts._batchTags_1, "chunk-1 statement cached");
+
+    // A second large call reuses the cached statements (no throw, same result shape).
+    const again = batchGetTags(ids);
+    assert.strictEqual(Object.keys(again).length, 63);
+  });
+
+  it("batchGetTags large-batch path omits sessions that have no tags", () => {
+    const ids = [];
+    for (let i = 0; i < 12; i++) {
+      const sid = `sparse-${i}`;
+      ids.push(sid);
+      // Only even-indexed sessions get a tag.
+      seedSession(sid, i % 2 === 0 ? ["even"] : []);
+    }
+    const map = batchGetTags(ids);
+    assert.strictEqual(Object.keys(map).length, 6);
+    assert.deepStrictEqual(map["sparse-0"], ["even"]);
+    assert.ok(!("sparse-1" in map));
   });
 
   // ── getTagsForSession ordering ─────────────────────────
