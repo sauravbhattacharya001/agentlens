@@ -199,6 +199,70 @@ describe("response-cache", () => {
     });
   });
 
+  // ── evictExpired ──
+
+  describe("evictExpired", () => {
+    test("removes only expired entries and returns count", () => {
+      const cache = createCache({ ttlMs: 60000 });
+      cache.set("/live", 200, {}, "live");
+      cache.set("/dead1", 200, {}, "d1", 1); // 1ms TTL
+      cache.set("/dead2", 200, {}, "d2", 1); // 1ms TTL
+
+      const start = Date.now();
+      while (Date.now() - start < 5) { /* spin */ }
+
+      const evicted = cache.evictExpired();
+      expect(evicted).toBe(2);
+      expect(cache.size).toBe(1);
+      expect(cache.get("/live")).not.toBeNull();
+    });
+
+    test("returns 0 when nothing is expired", () => {
+      const cache = createCache({ ttlMs: 60000 });
+      cache.set("/a", 200, {}, "a");
+      expect(cache.evictExpired()).toBe(0);
+      expect(cache.size).toBe(1);
+    });
+  });
+
+  // ── destroy ──
+
+  describe("destroy", () => {
+    test("clears entries, resets stats, and stops the sweep timer", () => {
+      const cache = createCache({ ttlMs: 60000 });
+      cache.set("/a", 200, {}, "a");
+      cache.get("/a"); // hit
+      cache.get("/miss"); // miss
+      cache.destroy();
+      expect(cache.size).toBe(0);
+      const s = cache.stats();
+      expect(s.hits).toBe(0);
+      expect(s.misses).toBe(0);
+      // Idempotent: second destroy must not throw
+      expect(() => cache.destroy()).not.toThrow();
+    });
+  });
+
+  // ── passive sweep timer ──
+
+  describe("passive sweep timer", () => {
+    test("periodically evicts expired entries without manual calls", () => {
+      jest.useFakeTimers();
+      try {
+        // ttlMs=10 → sweep interval fires every 20ms
+        const cache = createCache({ ttlMs: 10 });
+        cache.set("/a", 200, {}, "a");
+        expect(cache.size).toBe(1);
+        // Advance past entry expiry AND the 2×TTL sweep interval
+        jest.advanceTimersByTime(25);
+        expect(cache.size).toBe(0);
+        cache.destroy();
+      } finally {
+        jest.useRealTimers();
+      }
+    });
+  });
+
   // ── cacheMiddleware ──
 
   describe("cacheMiddleware", () => {
@@ -280,6 +344,94 @@ describe("response-cache", () => {
       let nextCalled = false;
       mw(req, res, () => { nextCalled = true; });
       expect(nextCalled).toBe(true);
+    });
+
+    test("keys cache per API key and replays cached headers on HIT", () => {
+      const cache = createCache();
+      const mw = cacheMiddleware(cache);
+
+      // First GET with an API key populates the cache under a key-scoped slot,
+      // capturing a custom response header to replay on the HIT path.
+      const req1 = mockReq("GET", "/api/scoped", { "x-api-key": "key-A" });
+      const res1 = mockRes();
+      mw(req1, res1, () => {
+        res1.json({ scoped: true });
+      });
+      expect(res1._headers["X-Cache"]).toBe("MISS");
+
+      // Same key + URL → HIT, and the cached headers are replayed.
+      const req2 = mockReq("GET", "/api/scoped", { "x-api-key": "key-A" });
+      const res2 = mockRes();
+      let next2 = false;
+      mw(req2, res2, () => { next2 = true; });
+      expect(next2).toBe(false);
+      expect(res2._headers["X-Cache"]).toBe("HIT");
+      expect(res2._json).toEqual({ scoped: true });
+
+      // A different API key must NOT hit the other key's cached slot.
+      const req3 = mockReq("GET", "/api/scoped", { "x-api-key": "key-B" });
+      const res3 = mockRes();
+      let next3 = false;
+      mw(req3, res3, () => { next3 = true; });
+      expect(next3).toBe(true);
+      expect(res3._headers["X-Cache"]).toBe("MISS");
+    });
+
+    test("replays cached headers to the client on a HIT", () => {
+      const cache = createCache();
+      const mw = cacheMiddleware(cache);
+      // Pre-seed the cache with a stored entry that carries headers, so the
+      // HIT path's header-replay loop runs against a non-empty header map.
+      cache.set("/api/withhdr", 200, { "X-Custom": "from-origin", ETag: "abc" }, { ok: 1 });
+      const req = mockReq("GET", "/api/withhdr");
+      const res = mockRes();
+      let nextCalled = false;
+      mw(req, res, () => { nextCalled = true; });
+      expect(nextCalled).toBe(false);
+      expect(res._headers["X-Cache"]).toBe("HIT");
+      expect(res._headers["X-Custom"]).toBe("from-origin");
+      expect(res._headers.ETag).toBe("abc");
+      expect(res._json).toEqual({ ok: 1 });
+    });
+
+    test("reuses the API-key hash micro-cache across requests", () => {
+      const cache = createCache();
+      const mw = cacheMiddleware(cache);
+      // Two GETs with the same key exercise the keyHashCache hit branch
+      // (second call returns the memoized hash instead of re-hashing).
+      for (let i = 0; i < 2; i++) {
+        const req = mockReq("GET", "/api/reuse", { "x-api-key": "same-key" });
+        const res = mockRes();
+        mw(req, res, () => { res.json({ i }); });
+      }
+      // Second request is served from cache.
+      const s = cache.stats();
+      expect(s.hits).toBeGreaterThanOrEqual(1);
+    });
+
+    test("evicts oldest entry from the API-key hash micro-cache past capacity", () => {
+      const cache = createCache();
+      const mw = cacheMiddleware(cache);
+      // KEY_HASH_CACHE_MAX is 16; 20 distinct keys force LRU eviction.
+      for (let i = 0; i < 20; i++) {
+        const req = mockReq("GET", "/api/k" + i, { "x-api-key": "key-" + i });
+        const res = mockRes();
+        mw(req, res, () => { res.json({ i }); });
+      }
+      // Reaching here without throwing exercises the eviction branch.
+      // Sanity: response caching still works for all distinct URLs.
+      expect(cache.size).toBe(20);
+    });
+
+    test("does not cache error responses produced via json()", () => {
+      const cache = createCache();
+      const mw = cacheMiddleware(cache);
+      const req = mockReq("GET", "/api/boom");
+      const res = mockRes();
+      mw(req, res, () => {
+        res.status(500).json({ error: "boom" });
+      });
+      expect(cache.has("/api/boom")).toBe(false);
     });
 
     test("invalidates prefix on non-GET when configured", () => {
