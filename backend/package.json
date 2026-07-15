@@ -7,9 +7,8 @@
     "start": "node server.js",
     "seed": "node seed.js",
     "dev": "node server.js",
-    "test": "jest --verbose && npm run test:node",
+    "test": "jest --verbose",
     "test:jest": "jest --verbose",
-    "test:node": "node --test tests/diff.test.js",
     "test:coverage": "jest --coverage --verbose",
     "prepublishOnly": "npm test"
   },
@@ -64,7 +63,6 @@
     "testPathIgnorePatterns": [
       "/node_modules/",
       "/tests/collaboration\\.test\\.js$",
-      "/tests/diff\\.test\\.js$",
       "/tests/tempo\\.test\\.js$"
     ],
     "collectCoverageFrom": [

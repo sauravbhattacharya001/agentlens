@@ -1,238 +1,249 @@
-const { describe, it, beforeEach, afterEach } = require("node:test");
-const assert = require("node:assert/strict");
+const Database = require("better-sqlite3");
+
+// ── Shared in-memory DB, injected via the mocked `../db` module ──────
+let mockDb;
+jest.mock("../db", () => ({
+  getDb: () => mockDb,
+}));
+
 const express = require("express");
-const http = require("http");
-
-// Stub db module
-const dbRows = { sessions: {}, events: {} };
-const mockDb = {
-  prepare(sql) {
-    return {
-      get(id) {
-        return dbRows.sessions[id] || null;
-      },
-      all(id) {
-        return dbRows.events[id] || [];
-      },
-    };
-  },
-};
-
-// Monkey-patch db module before requiring router
-const path = require("path");
-const Module = require("module");
-const originalResolve = Module._resolveFilename;
-Module._resolveFilename = function (request, parent, ...rest) {
-  if (request === "../db") {
-    return require.resolve("./diff-db-stub");
-  }
-  return originalResolve.call(this, request, parent, ...rest);
-};
-
-// Create a stub file for the db
-const fs = require("fs");
-const stubPath = path.join(__dirname, "diff-db-stub.js");
-fs.writeFileSync(
-  stubPath,
-  `let db = null; module.exports = { getDb() { return db; }, _setDb(d) { db = d; } };`
-);
-
-const { _setDb } = require("./diff-db-stub");
+const request = require("supertest");
 const diffRouter = require("../routes/diff");
 
-// Restore module resolution
-Module._resolveFilename = originalResolve;
-
-function makeApp() {
-  const app = express();
-  app.use(express.json());
-  app.use("/diff", diffRouter);
-  return app;
+function createSchema(db) {
+  db.pragma("foreign_keys = ON");
+  db.exec(`
+    CREATE TABLE sessions (
+      session_id TEXT PRIMARY KEY,
+      agent_name TEXT NOT NULL DEFAULT 'default-agent',
+      started_at TEXT NOT NULL,
+      ended_at TEXT,
+      metadata TEXT DEFAULT '{}',
+      total_tokens_in INTEGER DEFAULT 0,
+      total_tokens_out INTEGER DEFAULT 0,
+      status TEXT DEFAULT 'active'
+    );
+    CREATE TABLE events (
+      event_id TEXT PRIMARY KEY,
+      session_id TEXT NOT NULL,
+      event_type TEXT NOT NULL DEFAULT 'generic',
+      timestamp TEXT NOT NULL,
+      input_data TEXT,
+      output_data TEXT,
+      model TEXT,
+      tokens_in INTEGER DEFAULT 0,
+      tokens_out INTEGER DEFAULT 0,
+      tool_call TEXT,
+      decision_trace TEXT,
+      duration_ms REAL,
+      FOREIGN KEY (session_id) REFERENCES sessions(session_id) ON DELETE CASCADE
+    );
+  `);
 }
 
-function fetch(app, url) {
-  return new Promise((resolve, reject) => {
-    const server = app.listen(0, () => {
-      const port = server.address().port;
-      http.get(`http://127.0.0.1:${port}${url}`, (res) => {
-        let body = "";
-        res.on("data", (c) => (body += c));
-        res.on("end", () => {
-          server.close();
-          try {
-            resolve({ status: res.statusCode, body: JSON.parse(body) });
-          } catch {
-            resolve({ status: res.statusCode, body });
-          }
-        });
-      }).on("error", (e) => { server.close(); reject(e); });
-    });
-  });
+function insertSession(db, id, agent, status = "completed") {
+  db.prepare(
+    "INSERT INTO sessions (session_id, agent_name, started_at, status) VALUES (?, ?, ?, ?)"
+  ).run(id, agent, "2025-01-01T00:00:00Z", status);
 }
 
-function makeSession(id, agent, events) {
-  return { session_id: id, agent_name: agent, status: "completed", metadata: "{}" };
+let eventSeq = 0;
+function insertEvent(db, sessionId, type, opts = {}) {
+  eventSeq += 1;
+  db.prepare(
+    `INSERT INTO events
+      (event_id, session_id, event_type, timestamp, model, tokens_in, tokens_out, tool_call, duration_ms)
+     VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?)`
+  ).run(
+    `evt-${eventSeq}`,
+    sessionId,
+    type,
+    opts.timestamp || `2025-01-01T00:00:${String(eventSeq).padStart(2, "0")}Z`,
+    opts.model || null,
+    opts.tokens_in ?? 0,
+    opts.tokens_out ?? 0,
+    opts.tool_call ? JSON.stringify(opts.tool_call) : null,
+    opts.duration_ms ?? null
+  );
 }
 
-function makeEvent(type, opts = {}) {
-  return {
-    id: Math.random(),
-    session_id: opts.session_id || "s1",
-    event_type: type,
-    timestamp: new Date().toISOString(),
-    duration_ms: opts.duration_ms || 100,
-    model: opts.model || "gpt-4",
-    tokens_in: opts.tokens_in || 50,
-    tokens_out: opts.tokens_out || 30,
-    tool_call: opts.tool_call ? JSON.stringify(opts.tool_call) : null,
-    input_data: null,
-    output_data: null,
-    decision_trace: null,
-  };
-}
-
+/*
+ * Route tests: mount the real `routes/diff.js` behind supertest with a real
+ * in-memory better-sqlite3 DB injected through the mocked `../db` module.
+ * This exercises the full HTTP surface — validation, 404s, token/tool/model
+ * deltas, LCS alignment, and truncation — and is measured by jest coverage
+ * (the previous node:test file was excluded from jest's coverage run).
+ */
 describe("GET /diff", () => {
   let app;
 
+  beforeAll(() => {
+    app = express();
+    app.use(express.json());
+    app.use("/diff", diffRouter);
+  });
+
   beforeEach(() => {
-    const sessions = {};
-    const events = {};
+    if (mockDb) mockDb.close();
+    mockDb = new Database(":memory:");
+    createSchema(mockDb);
 
-    const db = {
-      prepare(sql) {
-        return {
-          get(id) { return sessions[id] || null; },
-          all(id) { return events[id] || []; },
-        };
-      },
-    };
-    _setDb(db);
+    insertSession(mockDb, "sess-base", "agent-a");
+    insertEvent(mockDb, "sess-base", "llm_call", { tokens_in: 100, tokens_out: 50, model: "gpt-4", duration_ms: 200 });
+    insertEvent(mockDb, "sess-base", "tool_call", { tokens_in: 20, tokens_out: 10, tool_call: { tool_name: "search" }, duration_ms: 50 });
+    insertEvent(mockDb, "sess-base", "llm_call", { tokens_in: 80, tokens_out: 40, model: "gpt-4", duration_ms: 150 });
 
-    // Baseline session
-    sessions["sess-base"] = makeSession("sess-base", "agent-a");
-    events["sess-base"] = [
-      makeEvent("llm_call", { session_id: "sess-base", tokens_in: 100, tokens_out: 50, model: "gpt-4" }),
-      makeEvent("tool_call", { session_id: "sess-base", tokens_in: 20, tokens_out: 10, tool_call: { tool_name: "search" } }),
-      makeEvent("llm_call", { session_id: "sess-base", tokens_in: 80, tokens_out: 40, model: "gpt-4" }),
-    ];
-
-    // Candidate session
-    sessions["sess-cand"] = makeSession("sess-cand", "agent-b");
-    events["sess-cand"] = [
-      makeEvent("llm_call", { session_id: "sess-cand", tokens_in: 120, tokens_out: 60, model: "gpt-4o" }),
-      makeEvent("tool_call", { session_id: "sess-cand", tokens_in: 25, tokens_out: 15, tool_call: { tool_name: "search" } }),
-      makeEvent("tool_call", { session_id: "sess-cand", tokens_in: 30, tokens_out: 20, tool_call: { tool_name: "calculator" } }),
-      makeEvent("llm_call", { session_id: "sess-cand", tokens_in: 90, tokens_out: 45, model: "gpt-4o" }),
-    ];
-
-    app = makeApp();
+    insertSession(mockDb, "sess-cand", "agent-b");
+    insertEvent(mockDb, "sess-cand", "llm_call", { tokens_in: 120, tokens_out: 60, model: "gpt-4o", duration_ms: 300 });
+    insertEvent(mockDb, "sess-cand", "tool_call", { tokens_in: 25, tokens_out: 15, tool_call: { tool_name: "search" }, duration_ms: 50 });
+    insertEvent(mockDb, "sess-cand", "tool_call", { tokens_in: 30, tokens_out: 20, tool_call: { tool_name: "calculator" }, duration_ms: 60 });
+    insertEvent(mockDb, "sess-cand", "llm_call", { tokens_in: 90, tokens_out: 45, model: "gpt-4o", duration_ms: 150 });
   });
 
-  afterEach(() => {
-    _setDb(null);
+  afterAll(() => {
+    if (mockDb) {
+      mockDb.close();
+      mockDb = null;
+    }
   });
 
-  it("returns 400 when params missing", async () => {
-    const res = await fetch(app, "/diff");
-    assert.equal(res.status, 400);
+  test("returns 400 when params are missing", async () => {
+    const res = await request(app).get("/diff");
+    expect(res.status).toBe(400);
+    expect(res.body.error).toMatch(/required/);
   });
 
-  it("returns 400 when same session", async () => {
-    const res = await fetch(app, "/diff?baseline=sess-base&candidate=sess-base");
-    assert.equal(res.status, 400);
+  test("returns 400 when only baseline is given", async () => {
+    const res = await request(app).get("/diff?baseline=sess-base");
+    expect(res.status).toBe(400);
   });
 
-  it("returns 404 for missing baseline", async () => {
-    const res = await fetch(app, "/diff?baseline=nonexist&candidate=sess-cand");
-    assert.equal(res.status, 404);
+  test("returns 400 for a structurally invalid session ID", async () => {
+    const res = await request(app).get("/diff?baseline=bad%20id!&candidate=sess-cand");
+    expect(res.status).toBe(400);
+    expect(res.body.error).toBe("Invalid session ID format");
   });
 
-  it("returns 404 for missing candidate", async () => {
-    const res = await fetch(app, "/diff?baseline=sess-base&candidate=nonexist");
-    assert.equal(res.status, 404);
+  test("returns 400 when diffing a session with itself", async () => {
+    const res = await request(app).get("/diff?baseline=sess-base&candidate=sess-base");
+    expect(res.status).toBe(400);
+    expect(res.body.error).toMatch(/itself/);
   });
 
-  it("computes correct token deltas", async () => {
-    const res = await fetch(app, "/diff?baseline=sess-base&candidate=sess-cand");
-    assert.equal(res.status, 200);
+  test("returns 404 for a missing baseline session", async () => {
+    const res = await request(app).get("/diff?baseline=nonexist&candidate=sess-cand");
+    expect(res.status).toBe(404);
+    expect(res.body.error).toMatch(/Baseline/);
+  });
+
+  test("returns 404 for a missing candidate session", async () => {
+    const res = await request(app).get("/diff?baseline=sess-base&candidate=nonexist");
+    expect(res.status).toBe(404);
+    expect(res.body.error).toMatch(/Candidate/);
+  });
+
+  test("computes correct token deltas", async () => {
+    const res = await request(app).get("/diff?baseline=sess-base&candidate=sess-cand");
+    expect(res.status).toBe(200);
     const d = res.body.deltas;
     // Baseline: in=200, out=100. Candidate: in=265, out=140
-    assert.equal(d.tokens_in, 265 - 200);
-    assert.equal(d.tokens_out, 140 - 100);
-    assert.equal(d.tokens_total, (265 + 140) - (200 + 100));
+    expect(d.tokens_in).toBe(265 - 200);
+    expect(d.tokens_out).toBe(140 - 100);
+    expect(d.tokens_total).toBe((265 + 140) - (200 + 100));
   });
 
-  it("computes correct event count delta", async () => {
-    const res = await fetch(app, "/diff?baseline=sess-base&candidate=sess-cand");
-    assert.equal(res.body.deltas.event_count, 1); // 4 - 3
+  test("computes correct event count delta", async () => {
+    const res = await request(app).get("/diff?baseline=sess-base&candidate=sess-cand");
+    expect(res.body.deltas.event_count).toBe(1); // 4 - 3
   });
 
-  it("detects added tools", async () => {
-    const res = await fetch(app, "/diff?baseline=sess-base&candidate=sess-cand");
-    assert.ok(res.body.tools.added.includes("calculator"));
+  test("reports baseline and candidate session summaries", async () => {
+    const res = await request(app).get("/diff?baseline=sess-base&candidate=sess-cand");
+    expect(res.body.baseline.session_id).toBe("sess-base");
+    expect(res.body.candidate.session_id).toBe("sess-cand");
+    expect(res.body.baseline.agent_name).toBe("agent-a");
+    expect(res.body.candidate.agent_name).toBe("agent-b");
+    expect(res.body.baseline.event_count).toBe(3);
+    expect(res.body.candidate.event_count).toBe(4);
   });
 
-  it("detects common tools", async () => {
-    const res = await fetch(app, "/diff?baseline=sess-base&candidate=sess-cand");
-    assert.ok(res.body.tools.common.includes("search"));
+  test("detects added / common tools and counts", async () => {
+    const res = await request(app).get("/diff?baseline=sess-base&candidate=sess-cand");
+    expect(res.body.tools.added).toContain("calculator");
+    expect(res.body.tools.common).toContain("search");
+    expect(res.body.tools.removed).toEqual([]);
+    expect(res.body.tools.baseline_counts.search).toBe(1);
+    expect(res.body.tools.candidate_counts.calculator).toBe(1);
   });
 
-  it("has no removed tools in this case", async () => {
-    const res = await fetch(app, "/diff?baseline=sess-base&candidate=sess-cand");
-    assert.deepEqual(res.body.tools.removed, []);
+  test("detects removed tools when the candidate drops one", async () => {
+    // Add a baseline-only tool so the candidate is missing it.
+    insertEvent(mockDb, "sess-base", "tool_call", { tool_call: { tool_name: "grep" } });
+    const res = await request(app).get("/diff?baseline=sess-base&candidate=sess-cand");
+    expect(res.body.tools.removed).toContain("grep");
   });
 
-  it("detects model changes", async () => {
-    const res = await fetch(app, "/diff?baseline=sess-base&candidate=sess-cand");
-    assert.ok(res.body.models.baseline["gpt-4"] > 0);
-    assert.ok(res.body.models.candidate["gpt-4o"] > 0);
+  test("reports per-model usage for both sessions", async () => {
+    const res = await request(app).get("/diff?baseline=sess-base&candidate=sess-cand");
+    expect(res.body.models.baseline["gpt-4"]).toBeGreaterThan(0);
+    expect(res.body.models.candidate["gpt-4o"]).toBeGreaterThan(0);
   });
 
-  it("computes similarity between 0 and 1", async () => {
-    const res = await fetch(app, "/diff?baseline=sess-base&candidate=sess-cand");
-    assert.ok(res.body.similarity >= 0 && res.body.similarity <= 1);
+  test("computes a similarity ratio between 0 and 1", async () => {
+    const res = await request(app).get("/diff?baseline=sess-base&candidate=sess-cand");
+    expect(res.body.similarity).toBeGreaterThanOrEqual(0);
+    expect(res.body.similarity).toBeLessThanOrEqual(1);
   });
 
-  it("alignment includes all events", async () => {
-    const res = await fetch(app, "/diff?baseline=sess-base&candidate=sess-cand");
-    // Total alignment should cover all unique events
-    assert.ok(res.body.alignment.length >= 3); // at least baseline count
+  test("aligns events and flags modified + added statuses with change details", async () => {
+    const res = await request(app).get("/diff?baseline=sess-base&candidate=sess-cand");
+    const statuses = new Set(res.body.alignment.map((a) => a.status));
+    expect(statuses.has("added")).toBe(true);
+    expect(statuses.has("modified") || statuses.has("matched")).toBe(true);
+
+    const modified = res.body.alignment.filter((a) => a.status === "modified");
+    expect(modified.length).toBeGreaterThan(0);
+    // The two llm_calls changed model gpt-4 -> gpt-4o, so a model change is recorded.
+    expect(modified.some((m) => m.changes && m.changes.model)).toBe(true);
   });
 
-  it("alignment has correct statuses", async () => {
-    const res = await fetch(app, "/diff?baseline=sess-base&candidate=sess-cand");
-    const statuses = new Set(res.body.alignment.map(a => a.status));
-    // Should have modified (llm_calls changed tokens/model) and added (calculator)
-    assert.ok(statuses.has("modified") || statuses.has("matched"));
-    assert.ok(statuses.has("added"));
+  test("reports matched (unchanged) events when sessions are identical in shape", async () => {
+    insertSession(mockDb, "sess-x", "agent-x");
+    insertSession(mockDb, "sess-y", "agent-y");
+    insertEvent(mockDb, "sess-x", "llm_call", { tokens_in: 10, tokens_out: 5, model: "m", duration_ms: 100 });
+    insertEvent(mockDb, "sess-y", "llm_call", { tokens_in: 10, tokens_out: 5, model: "m", duration_ms: 100 });
+    const res = await request(app).get("/diff?baseline=sess-x&candidate=sess-y");
+    expect(res.body.similarity).toBe(1);
+    expect(res.body.alignment.every((a) => a.status === "matched")).toBe(true);
   });
 
-  it("returns baseline and candidate session info", async () => {
-    const res = await fetch(app, "/diff?baseline=sess-base&candidate=sess-cand");
-    assert.equal(res.body.baseline.session_id, "sess-base");
-    assert.equal(res.body.candidate.session_id, "sess-cand");
-    assert.equal(res.body.baseline.agent_name, "agent-a");
-    assert.equal(res.body.candidate.agent_name, "agent-b");
+  test("flags a duration change over the 10ms threshold as modified", async () => {
+    insertSession(mockDb, "sess-p", "agent-p");
+    insertSession(mockDb, "sess-q", "agent-q");
+    insertEvent(mockDb, "sess-p", "llm_call", { model: "m", duration_ms: 100 });
+    insertEvent(mockDb, "sess-q", "llm_call", { model: "m", duration_ms: 500 });
+    const res = await request(app).get("/diff?baseline=sess-p&candidate=sess-q");
+    const modified = res.body.alignment.filter((a) => a.status === "modified");
+    expect(modified.some((m) => m.changes && m.changes.duration_ms)).toBe(true);
   });
 
-  it("includes tool counts", async () => {
-    const res = await fetch(app, "/diff?baseline=sess-base&candidate=sess-cand");
-    assert.equal(res.body.tools.baseline_counts.search, 1);
-    assert.equal(res.body.tools.candidate_counts.search, 1);
-    assert.equal(res.body.tools.candidate_counts.calculator, 1);
+  test("reports added and removed event types", async () => {
+    insertSession(mockDb, "sess-t1", "agent-t");
+    insertSession(mockDb, "sess-t2", "agent-t");
+    insertEvent(mockDb, "sess-t1", "only_base", {});
+    insertEvent(mockDb, "sess-t2", "only_cand", {});
+    const res = await request(app).get("/diff?baseline=sess-t1&candidate=sess-t2");
+    expect(res.body.event_types.added).toContain("only_cand");
+    expect(res.body.event_types.removed).toContain("only_base");
   });
 
-  it("modified events have change details", async () => {
-    const res = await fetch(app, "/diff?baseline=sess-base&candidate=sess-cand");
-    const modified = res.body.alignment.filter(a => a.status === "modified");
-    assert.ok(modified.length > 0);
-    // At least one should have model change
-    const hasModelChange = modified.some(m => m.changes && m.changes.model);
-    assert.ok(hasModelChange);
+  test("handles empty sessions without error", async () => {
+    insertSession(mockDb, "sess-empty1", "agent-e");
+    insertSession(mockDb, "sess-empty2", "agent-e");
+    const res = await request(app).get("/diff?baseline=sess-empty1&candidate=sess-empty2");
+    expect(res.status).toBe(200);
+    expect(res.body.similarity).toBe(1); // no events -> defined as identical
+    expect(res.body.alignment).toEqual([]);
+    expect(res.body.truncated).toBe(false);
   });
-});
-
-// Cleanup stub
-process.on("exit", () => {
-  try { fs.unlinkSync(stubPath); } catch {}
 });
