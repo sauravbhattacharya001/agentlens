@@ -9,10 +9,19 @@ const {
   createApiKeyAuth,
 } = require("./middleware");
 
-const app = express();
 const PORT = process.env.PORT || 3000;
 
-// ── Reverse proxy trust ─────────────────────────────────────────────
+// ── Application factory ─────────────────────────────────────────────
+// Builds and returns a fully-wired Express app WITHOUT binding a port,
+// opening the database on startup, or registering process signal
+// handlers. Those are process-level side effects that belong to the
+// `node server.js` entry point (see the `require.main === module` block
+// at the bottom), not to the app graph — separating them lets the whole
+// middleware/route wiring be exercised in-process by tests via supertest.
+function createApp() {
+  const app = express();
+
+  // ── Reverse proxy trust ───────────────────────────────────────────
 // When AgentLens runs behind a reverse proxy (nginx, Traefik, Caddy, an
 // ALB / Cloud Run / Fly.io ingress, etc.) the rate limiters and req.ip
 // only see the proxy's address unless we explicitly trust X-Forwarded-For.
@@ -27,19 +36,19 @@ const PORT = process.env.PORT || 3000;
 //
 // See https://expressjs.com/en/guide/behind-proxies.html for the full
 // set of supported values.
-const trustProxyRaw = process.env.AGENTLENS_TRUST_PROXY;
-if (trustProxyRaw && trustProxyRaw.trim() !== "") {
-  const trimmed = trustProxyRaw.trim();
-  const asNum = Number(trimmed);
-  app.set(
-    "trust proxy",
-    Number.isFinite(asNum) && /^-?\d+$/.test(trimmed) ? asNum : trimmed,
-  );
-}
+  const trustProxyRaw = process.env.AGENTLENS_TRUST_PROXY;
+  if (trustProxyRaw && trustProxyRaw.trim() !== "") {
+    const trimmed = trustProxyRaw.trim();
+    const asNum = Number(trimmed);
+    app.set(
+      "trust proxy",
+      Number.isFinite(asNum) && /^-?\d+$/.test(trimmed) ? asNum : trimmed,
+    );
+  }
 
-// ── Security middleware ─────────────────────────────────────────────
-app.use(createHelmetMiddleware());
-app.use(createCorsMiddleware());
+  // ── Security middleware ───────────────────────────────────────────
+  app.use(createHelmetMiddleware());
+  app.use(createCorsMiddleware());
 
 // ── Static assets (served early, before auth/rate-limit/body-parsing) ──
 // Dashboard files are static HTML/CSS/JS — serving them before the API
@@ -47,126 +56,145 @@ app.use(createCorsMiddleware());
 // API key authentication, and no-cache headers on every asset request.
 // This reduces per-request overhead for dashboard users significantly
 // (skips ~5 middleware layers) and allows browsers to cache static assets.
-app.use(express.static(path.join(__dirname, "..", "dashboard"), {
-  maxAge: "1h",
-  etag: true,
-  lastModified: true,
-}));
+  app.use(express.static(path.join(__dirname, "..", "dashboard"), {
+    maxAge: "1h",
+    etag: true,
+    lastModified: true,
+  }));
 
-// ── Rate limiting & authentication ──────────────────────────────────
-const apiLimiter = createApiLimiter();
-const ingestLimiter = createIngestLimiter();
-const { authenticateApiKey, hasApiKey } = createApiKeyAuth();
+  // ── Rate limiting & authentication ────────────────────────────────
+  const apiLimiter = createApiLimiter();
+  const ingestLimiter = createIngestLimiter();
+  const { authenticateApiKey, hasApiKey } = createApiKeyAuth();
 
 // ── Route definitions ───────────────────────────────────────────────
 // Each entry: [mountPath, routerModule, options?]
 //   options.limiter  — override the default apiLimiter (e.g. ingestLimiter)
 //   options.noAuth   — skip API-key auth for this mount
 //   options.mount    — override the Express mount path (when different from URL prefix)
-const routeDefs = [
-  ["/events",       "./routes/events",                { limiter: ingestLimiter }],
+  const routeDefs = [
+    ["/events",       "./routes/events",                { limiter: ingestLimiter }],
   // Tag routes must be mounted before sessions to avoid /:id catching "tags" / "by-tag"
-  ["/sessions",     "./routes/tags"],
-  ["/sessions",     "./routes/sessions"],
-  ["/analytics",    "./routes/analytics"],
-  ["/pricing",      "./routes/pricing"],
-  ["/alerts",       "./routes/alerts"],
-  ["/annotations",  "./routes/annotations"],
-  ["/retention",    "./routes/retention"],
-  ["/leaderboard",  "./routes/leaderboard"],
-  ["/errors",       "./routes/errors"],
-  ["/webhooks",     "./routes/webhooks"],
-  ["/bookmarks",    "./routes/bookmarks"],
-  ["/replay",       "./routes/replay"],
-  ["/diff",         "./routes/diff"],
-  // Session-scoped annotation routes
-  ["/sessions",     "./routes/annotations"],
-];
+    ["/sessions",     "./routes/tags"],
+    ["/sessions",     "./routes/sessions"],
+    ["/analytics",    "./routes/analytics"],
+    ["/pricing",      "./routes/pricing"],
+    ["/alerts",       "./routes/alerts"],
+    ["/annotations",  "./routes/annotations"],
+    ["/retention",    "./routes/retention"],
+    ["/leaderboard",  "./routes/leaderboard"],
+    ["/errors",       "./routes/errors"],
+    ["/webhooks",     "./routes/webhooks"],
+    ["/bookmarks",    "./routes/bookmarks"],
+    ["/replay",       "./routes/replay"],
+    ["/diff",         "./routes/diff"],
+    // Session-scoped annotation routes
+    ["/sessions",     "./routes/annotations"],
+  ];
 
-// Deduplicate mount paths for middleware registration (rate-limit + auth
-// only need to be applied once per path prefix).
-const registeredPaths = new Set();
+  // Deduplicate mount paths for middleware registration (rate-limit + auth
+  // only need to be applied once per path prefix).
+  const registeredPaths = new Set();
 
-for (const [mountPath, modulePath, opts = {}] of routeDefs) {
-  if (!registeredPaths.has(mountPath)) {
-    app.use(mountPath, opts.limiter || apiLimiter);
-    if (!opts.noAuth) {
-      app.use(mountPath, authenticateApiKey);
+  for (const [mountPath, , opts = {}] of routeDefs) {
+    if (!registeredPaths.has(mountPath)) {
+      app.use(mountPath, opts.limiter || apiLimiter);
+      if (!opts.noAuth) {
+        app.use(mountPath, authenticateApiKey);
+      }
+      registeredPaths.add(mountPath);
     }
-    registeredPaths.add(mountPath);
   }
-}
 
 // Prevent browsers and proxies from caching sensitive API responses.
 // The in-memory cache handles server-side caching; downstream layers
 // must never store token counts, costs, or session data.
 // Note: static assets are served above (before this middleware) so they
 // are NOT affected by these no-cache headers and can be browser-cached.
-app.use((req, res, next) => {
-  res.set("Cache-Control", "no-store, no-cache, must-revalidate, private");
-  res.set("Pragma", "no-cache");
-  res.set("Expires", "0");
-  next();
-});
-
-// Body parser with size limit (after rate-limit/auth, before route handlers)
-app.use(express.json({ limit: "10mb" }));
-
-// Mount all route handlers
-for (const [mountPath, modulePath] of routeDefs) {
-  app.use(mountPath, require(modulePath));
-}
-
-// Health check (no auth required)
-app.get("/health", (req, res) => {
-  res.json({ status: "ok", timestamp: new Date().toISOString() });
-});
-
-// Dashboard catch-all (SPA-style)
-app.get("/", (req, res) => {
-  res.sendFile(path.join(__dirname, "..", "dashboard", "index.html"));
-});
-
-// ── Global error handler — never leak internals ─────────────────────
-app.use((err, _req, res, _next) => {
-  console.error("Unhandled error:", err);
-  res.status(500).json({ error: "Internal server error" });
-});
-
-// Initialize DB on startup
-getDb();
-
-const server = app.listen(PORT, () => {
-  console.log(`🔍 AgentLens backend running on http://localhost:${PORT}`);
-  console.log(`📊 Dashboard available at http://localhost:${PORT}`);
-  if (hasApiKey) {
-    console.log(`🔑 API key authentication enabled`);
-  } else {
-    console.log(`⚠️  No AGENTLENS_API_KEY set — running without auth (dev mode)`);
-  }
-});
-
-// ── Graceful shutdown ───────────────────────────────────────────────
-// Ensures in-flight requests complete and the SQLite WAL journal is
-// checkpointed before the process exits. Without this, a SIGTERM from
-// Docker/systemd/PM2 could leave the database in an unclean state.
-
-function shutdown(signal) {
-  console.log(`\n🛑 Received ${signal}, shutting down gracefully...`);
-  server.close(() => {
-    console.log("✅ HTTP server closed");
-    closeDb();
-    console.log("✅ Database closed");
-    process.exit(0);
+  app.use((req, res, next) => {
+    res.set("Cache-Control", "no-store, no-cache, must-revalidate, private");
+    res.set("Pragma", "no-cache");
+    res.set("Expires", "0");
+    next();
   });
 
-  // Force exit after 10 seconds if connections don't drain
-  setTimeout(() => {
-    console.error("⚠️  Forcing shutdown after timeout");
-    closeDb();
-    process.exit(1);
-  }, 10000).unref();
+  // Body parser with size limit (after rate-limit/auth, before route handlers)
+  app.use(express.json({ limit: "10mb" }));
+
+  // Mount all route handlers
+  for (const [mountPath, modulePath] of routeDefs) {
+    app.use(mountPath, require(modulePath));
+  }
+
+  // Health check (no auth required)
+  app.get("/health", (req, res) => {
+    res.json({ status: "ok", timestamp: new Date().toISOString() });
+  });
+
+  // Dashboard catch-all (SPA-style)
+  app.get("/", (req, res) => {
+    res.sendFile(path.join(__dirname, "..", "dashboard", "index.html"));
+  });
+
+  // ── Global error handler — never leak internals ───────────────────
+  app.use((err, _req, res, _next) => {
+    console.error("Unhandled error:", err);
+    res.status(500).json({ error: "Internal server error" });
+  });
+
+  return { app, hasApiKey };
 }
 
-process.on("SIGTERM", () => shutdown("SIGTERM"));
-process.on("SIGINT", () => shutdown("SIGINT"));
+// ── Process entry point ─────────────────────────────────────────────
+// Binds the port, opens the database, and installs graceful-shutdown
+// signal handlers. Only runs when this file is executed directly
+// (`node server.js`), never on `require("./server")` — so importing the
+// module for tests has no side effects.
+function start() {
+  const { app, hasApiKey } = createApp();
+
+  // Initialize DB on startup
+  getDb();
+
+  const server = app.listen(PORT, () => {
+  console.log(`🔍 AgentLens backend running on http://localhost:${PORT}`);
+  console.log(`📊 Dashboard available at http://localhost:${PORT}`);
+    if (hasApiKey) {
+      console.log(`🔑 API key authentication enabled`);
+    } else {
+      console.log(`⚠️  No AGENTLENS_API_KEY set — running without auth (dev mode)`);
+    }
+  });
+
+  // ── Graceful shutdown ─────────────────────────────────────────────
+  // Ensures in-flight requests complete and the SQLite WAL journal is
+  // checkpointed before the process exits. Without this, a SIGTERM from
+  // Docker/systemd/PM2 could leave the database in an unclean state.
+  function shutdown(signal) {
+    console.log(`\n🛑 Received ${signal}, shutting down gracefully...`);
+    server.close(() => {
+      console.log("✅ HTTP server closed");
+      closeDb();
+      console.log("✅ Database closed");
+      process.exit(0);
+    });
+
+    // Force exit after 10 seconds if connections don't drain
+    setTimeout(() => {
+      console.error("⚠️  Forcing shutdown after timeout");
+      closeDb();
+      process.exit(1);
+    }, 10000).unref();
+  }
+
+  process.on("SIGTERM", () => shutdown("SIGTERM"));
+  process.on("SIGINT", () => shutdown("SIGINT"));
+
+  return server;
+}
+
+if (require.main === module) {
+  start();
+}
+
+module.exports = { createApp, start };
