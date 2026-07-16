@@ -61,9 +61,7 @@
     "globalSetup": "<rootDir>/tests/jest.globalSetup.js",
     "setupFiles": ["<rootDir>/tests/jest.setup.js"],
     "testPathIgnorePatterns": [
-      "/node_modules/",
-      "/tests/collaboration\\.test\\.js$",
-      "/tests/tempo\\.test\\.js$"
+      "/node_modules/"
     ],
     "collectCoverageFrom": [
       "server.js",
