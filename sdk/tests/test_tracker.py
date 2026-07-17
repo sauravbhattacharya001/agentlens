@@ -1045,3 +1045,28 @@ class TestAnnotationHappyPaths:
         tracker.start_session()
         with pytest.raises(ValueError, match="annotation_id"):
             tracker.update_annotation("", text="test")
+
+
+class TestRepr:
+    def test_repr_no_session(self, tracker):
+        text = repr(tracker)
+        assert "AgentTracker(" in text
+        assert "endpoint='http://test:3000'" in text
+        assert "sessions=0" in text
+        assert "current=None" in text
+
+    def test_repr_reflects_sessions_and_current(self, tracker):
+        session = tracker.start_session(agent_name="repr-agent")
+        text = repr(tracker)
+        assert "sessions=1" in text
+        assert f"current={session.session_id!r}" in text
+
+class TestSpanStatusBranch:
+    def test_span_preexisting_non_active_status_preserved(self, tracker):
+        tracker.start_session()
+        with tracker.span("work") as sp:
+            sp.status = "completed"
+        # Status set inside the block must not be overwritten by the auto-complete.
+        assert sp.status == "completed"
+        assert sp.ended_at is not None
+        assert sp.duration_ms is not None
