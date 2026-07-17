@@ -355,6 +355,43 @@ describe("GET /sessions/:id/export", () => {
     expect(res.text).toContain("evt-c1");
   });
 
+  test("exports session as NDJSON (streaming)", async () => {
+    insertSession("sess-ndj", { agent: "test-agent" });
+    insertEvent("sess-ndj", "evt-n1", { model: "gpt-4" });
+    insertEvent("sess-ndj", "evt-n2", { type: "tool_call" });
+    const res = await request(app).get("/sessions/sess-ndj/export?format=ndjson");
+    expect(res.status).toBe(200);
+    expect(res.headers["content-type"]).toMatch(/application\/x-ndjson/);
+    expect(res.headers["content-disposition"]).toMatch(/\.ndjson"/);
+    const lines = res.text.trim().split("\n").map(l => JSON.parse(l));
+    // First line is the session header, then one line per event.
+    expect(lines[0].session_id).toBe("sess-ndj");
+    const eventLines = lines.filter(l => l._type === "event");
+    expect(eventLines).toHaveLength(2);
+    expect(eventLines.map(e => e.event_id)).toEqual(
+      expect.arrayContaining(["evt-n1", "evt-n2"])
+    );
+  });
+
+  test("exports session as PDF", async () => {
+    insertSession("sess-pdf", { agent: "test-agent" });
+    insertEvent("sess-pdf", "evt-p1", { model: "gpt-4" });
+    const res = await request(app)
+      .get("/sessions/sess-pdf/export?format=pdf")
+      .buffer(true)
+      .parse((r, cb) => {
+        const chunks = [];
+        r.on("data", c => chunks.push(c));
+        r.on("end", () => cb(null, Buffer.concat(chunks)));
+      });
+    expect(res.status).toBe(200);
+    expect(res.headers["content-type"]).toMatch(/application\/pdf/);
+    expect(res.headers["content-disposition"]).toMatch(/\.pdf"/);
+    expect(res.headers["content-length"]).toBeDefined();
+    // A well-formed PDF starts with the "%PDF" magic bytes.
+    expect(res.body.slice(0, 4).toString("latin1")).toBe("%PDF");
+  });
+
   test("rejects invalid format", async () => {
     insertSession("sess-fmt");
     const res = await request(app).get("/sessions/sess-fmt/export?format=xml");
@@ -395,6 +432,14 @@ describe("POST /sessions/compare", () => {
     expect(res.status).toBe(400);
   });
 
+  test("rejects malformed session ID format", async () => {
+    const res = await request(app)
+      .post("/sessions/compare")
+      .send({ session_a: "bad id!", session_b: "also bad!" });
+    expect(res.status).toBe(400);
+    expect(res.body.error).toMatch(/Invalid session ID format/i);
+  });
+
   test("rejects comparing session with itself", async () => {
     insertSession("sess-self");
     const res = await request(app)
@@ -419,6 +464,47 @@ describe("POST /sessions/compare", () => {
       .post("/sessions/compare")
       .send({ session_a: "sess-pa", session_b: "sess-pb" });
     expect(res.body.deltas.tokens_in.percent).toBe(100); // doubled
+  });
+});
+
+// ═════════════════════════════════════════
+// GET /sessions/:id/events — Paginated events
+// ═════════════════════════════════════════
+
+describe("GET /sessions/:id/events", () => {
+  const app = createApp();
+
+  test("returns paginated events with metadata", async () => {
+    insertSession("sess-pg");
+    insertEvent("sess-pg", "evt-pg1");
+    insertEvent("sess-pg", "evt-pg2", { type: "tool_call" });
+    const res = await request(app).get("/sessions/sess-pg/events");
+    expect(res.status).toBe(200);
+    expect(res.body.session_id).toBe("sess-pg");
+    expect(res.body.total).toBe(2);
+    expect(res.body.returned).toBe(2);
+    expect(res.body.limit).toBe(100);
+    expect(res.body.offset).toBe(0);
+    expect(res.body.events).toHaveLength(2);
+  });
+
+  test("honors limit and offset", async () => {
+    insertSession("sess-pg2");
+    insertEvent("sess-pg2", "evt-a", { timestamp: "2026-01-15T10:01:00Z" });
+    insertEvent("sess-pg2", "evt-b", { timestamp: "2026-01-15T10:02:00Z" });
+    insertEvent("sess-pg2", "evt-c", { timestamp: "2026-01-15T10:03:00Z" });
+    const res = await request(app).get("/sessions/sess-pg2/events?limit=1&offset=1");
+    expect(res.status).toBe(200);
+    expect(res.body.total).toBe(3);
+    expect(res.body.returned).toBe(1);
+    expect(res.body.limit).toBe(1);
+    expect(res.body.offset).toBe(1);
+    expect(res.body.events).toHaveLength(1);
+  });
+
+  test("returns 404 for missing session", async () => {
+    const res = await request(app).get("/sessions/nonexistent/events");
+    expect(res.status).toBe(404);
   });
 });
 
