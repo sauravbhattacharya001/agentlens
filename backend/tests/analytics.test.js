@@ -90,6 +90,88 @@ afterAll(() => {
   if (mockDb) mockDb.close();
 });
 
+// ── Overview — null/zero-aggregate fallback branches ────────────────
+//
+// The GET /analytics overview coalesces a large number of SQL aggregates
+// with `|| 0` (and Math.round(... || 0)). Those RHS fallbacks fire in two
+// situations the other suites never reached, so their branches were
+// uncovered:
+//
+//   1. An EMPTY database — COUNT is 0 and every SUM(CASE ...)/AVG(...)
+//      returns SQL NULL, so total_sessions>0 is false (error_rate short-
+//      circuits to 0) and each active/completed/error_sessions,
+//      avg_tokens_per_session and duration min/avg/max coalesces to 0.
+//   2. Rows whose token/duration aggregates are 0 or NULL — a top-agent
+//      and a model_usage entry with zero tokens exercise the `|| 0` on
+//      total_tokens / avg_tokens / avg_duration_ms in the .map() bodies
+//      that only ran with non-zero fixtures before.
+//
+// These assert the SHAPE stays well-formed (numbers, not null/NaN) so the
+// dashboard never renders `null`.
+describe("GET /analytics — overview null/zero fallbacks", () => {
+  test("returns a fully zeroed, non-null overview for an empty database", async () => {
+    const app = createApp();
+    const res = await request(app).get("/analytics").expect(200);
+
+    // Every overview field must be a real number (the `|| 0` fallbacks),
+    // never null/undefined/NaN, even with zero sessions.
+    const o = res.body.overview;
+    for (const key of [
+      "total_sessions", "active_sessions", "completed_sessions",
+      "error_sessions", "error_rate", "total_events", "total_tokens",
+      "total_tokens_in", "total_tokens_out", "avg_tokens_per_session",
+    ]) {
+      expect(typeof o[key]).toBe("number");
+      expect(Number.isNaN(o[key])).toBe(false);
+      expect(o[key]).toBe(0);
+    }
+    // error_rate takes the `: 0` branch (total_sessions > 0 is false).
+    expect(o.error_rate).toBe(0);
+
+    // duration min/avg/max coalesce to 0 when no session has ended_at.
+    expect(res.body.duration).toEqual({ avg_ms: 0, min_ms: 0, max_ms: 0 });
+
+    // Empty collections, not null.
+    expect(res.body.top_agents).toEqual([]);
+    expect(res.body.model_usage).toEqual([]);
+    expect(res.body.event_types).toEqual([]);
+    expect(res.body.sessions_over_time).toEqual([]);
+  });
+
+  test("coalesces zero-token agent/model aggregates to 0 (not null/NaN)", async () => {
+    // A session with zero tokens => top_agents avg_tokens/total_tokens are 0.
+    mockDb.prepare(
+      `INSERT INTO sessions (session_id, agent_name, started_at, status, total_tokens_in, total_tokens_out)
+       VALUES ('zero-s1', 'zero-agent', '2026-01-01T12:00:00Z', 'completed', 0, 0)`
+    ).run();
+    // An event with a model but zero tokens and NULL duration_ms => model_usage
+    // total_tokens*=0 and avg_duration_ms is NULL, exercising the `|| 0`.
+    mockDb.prepare(
+      `INSERT INTO events (event_id, session_id, event_type, model, tokens_in, tokens_out, timestamp, duration_ms)
+       VALUES ('zero-e1', 'zero-s1', 'llm_call', 'zero-model', 0, 0, '2026-01-01T12:00:00Z', NULL)`
+    ).run();
+
+    const app = createApp();
+    const res = await request(app).get("/analytics").expect(200);
+
+    const agent = res.body.top_agents.find((a) => a.agent_name === "zero-agent");
+    expect(agent).toBeDefined();
+    expect(agent.session_count).toBe(1);
+    expect(agent.total_tokens).toBe(0);
+    expect(agent.avg_tokens).toBe(0);
+    expect(Number.isNaN(agent.avg_tokens)).toBe(false);
+
+    const model = res.body.model_usage.find((m) => m.model === "zero-model");
+    expect(model).toBeDefined();
+    expect(model.call_count).toBe(1);
+    expect(model.total_tokens).toBe(0);
+    expect(model.total_tokens_in).toBe(0);
+    expect(model.total_tokens_out).toBe(0);
+    expect(model.avg_duration_ms).toBe(0);
+    expect(Number.isNaN(model.avg_duration_ms)).toBe(false);
+  });
+});
+
 describe("GET /analytics — sessionsOverTime", () => {
   test("returns data in chronological (ASC) order for the frontend", async () => {
     // Insert sessions on 3 known dates (out of order to be thorough)
