@@ -376,6 +376,114 @@ describe("Alert Rules API", () => {
 
   // ── Edge cases ──────────────────────────────────────────────────────
 
+  describe("Path parameter validation (400)", () => {
+    it("should reject a malformed ruleId on PUT", async () => {
+      const res = await request(app).put("/alerts/rules/bad$id").send({ name: "x" });
+      expect(res.status).toBe(400);
+      expect(res.body.error).toMatch(/rule ID format|ruleId format/i);
+    });
+
+    it("should reject a malformed ruleId on DELETE", async () => {
+      const res = await request(app).delete("/alerts/rules/bad$id");
+      expect(res.status).toBe(400);
+      expect(res.body.error).toMatch(/rule ID format|ruleId format/i);
+    });
+
+    it("should reject a malformed alertId on acknowledge", async () => {
+      const res = await request(app).put("/alerts/events/bad$id/acknowledge");
+      expect(res.status).toBe(400);
+      expect(res.body.error).toMatch(/alert ID format|alertId format/i);
+    });
+  });
+
+  describe("POST /alerts/rules validation edges", () => {
+    it("should reject an over-long agent_filter", async () => {
+      const res = await request(app).post("/alerts/rules").send({
+        name: "BadFilter", metric: "total_tokens", operator: ">", threshold: 1,
+        agent_filter: "a".repeat(300),
+      });
+      expect(res.status).toBe(400);
+      expect(res.body.error).toMatch(/agent_filter cannot exceed/);
+    });
+
+    it("should reject creation once the rule limit is reached", async () => {
+      await request(app).get("/alerts/rules"); // ensureAlertsTable
+      const { getDb } = require("../db");
+      const db = getDb();
+      const { MAX_ALERT_RULES } = require("../lib/alert-rules");
+      const now = new Date().toISOString();
+      const stmt = db.prepare(`
+        INSERT INTO alert_rules (rule_id, name, metric, operator, threshold, window_minutes, agent_filter, cooldown_minutes, created_at, updated_at)
+        VALUES (?, 'bulk', 'total_tokens', '>', 1, 60, NULL, 15, ?, ?)`);
+      const before = db.prepare("SELECT COUNT(*) AS c FROM alert_rules").get().c;
+      for (let i = before; i < MAX_ALERT_RULES; i++) {
+        stmt.run(`limit-fill-${i}`, now, now);
+      }
+      const res = await request(app).post("/alerts/rules").send({
+        name: "OneTooMany", metric: "total_tokens", operator: ">", threshold: 1,
+      });
+      expect(res.status).toBe(409);
+      expect(res.body.error).toMatch(/Maximum of/);
+      db.exec("DELETE FROM alert_rules");
+    });
+  });
+
+  describe("PUT /alerts/rules/:ruleId validation edges", () => {
+    let ruleId;
+    beforeEach(async () => {
+      const c = await request(app).post("/alerts/rules").send({
+        name: "PutTarget", metric: "total_tokens", operator: ">", threshold: 100,
+      });
+      ruleId = c.body.rule.rule_id;
+    });
+
+    it("should reject an empty name", async () => {
+      const res = await request(app).put(`/alerts/rules/${ruleId}`).send({ name: "   " });
+      expect(res.status).toBe(400);
+      expect(res.body.error).toMatch(/non-empty string/);
+    });
+
+    it("should reject an invalid metric", async () => {
+      const res = await request(app).put(`/alerts/rules/${ruleId}`).send({ metric: "nope" });
+      expect(res.status).toBe(400);
+      expect(res.body.error).toMatch(/Invalid metric/);
+    });
+
+    it("should reject an invalid operator", async () => {
+      const res = await request(app).put(`/alerts/rules/${ruleId}`).send({ operator: "??" });
+      expect(res.status).toBe(400);
+      expect(res.body.error).toMatch(/Invalid operator/);
+    });
+
+    it("should reject a non-numeric threshold", async () => {
+      const res = await request(app).put(`/alerts/rules/${ruleId}`).send({ threshold: "high" });
+      expect(res.status).toBe(400);
+      expect(res.body.error).toMatch(/threshold must be a number/);
+    });
+
+    it("should reject an over-long agent_filter", async () => {
+      const res = await request(app).put(`/alerts/rules/${ruleId}`).send({ agent_filter: "a".repeat(300) });
+      expect(res.status).toBe(400);
+      expect(res.body.error).toMatch(/agent_filter cannot exceed/);
+    });
+
+    it("should accept and persist a valid metric/operator/agent_filter update", async () => {
+      const res = await request(app).put(`/alerts/rules/${ruleId}`).send({
+        metric: "error_rate", operator: "<", agent_filter: "svc-a",
+      });
+      expect(res.status).toBe(200);
+      expect(res.body.rule.metric).toBe("error_rate");
+      expect(res.body.rule.operator).toBe("<");
+      expect(res.body.rule.agent_filter).toBe("svc-a");
+    });
+
+    it("should clear agent_filter when passed an empty string", async () => {
+      const res = await request(app).put(`/alerts/rules/${ruleId}`).send({ agent_filter: "" });
+      expect(res.status).toBe(200);
+      expect(res.body.rule.agent_filter).toBeNull();
+    });
+  });
+
   describe("Edge cases", () => {
     it("should handle multiple rules simultaneously", async () => {
       await request(app).post("/alerts/rules").send({ name: "R1", metric: "total_tokens", operator: ">", threshold: 1, window_minutes: 120 });
