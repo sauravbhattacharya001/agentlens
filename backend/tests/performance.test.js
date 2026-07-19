@@ -157,6 +157,29 @@ describe("GET /analytics/performance", () => {
     expect(res.body.filters.model).toBe("gpt-4o");
   });
 
+  test("filters by agent AND model together (combined 'both' variant)", async () => {
+    // Exercises the agent+model prepared-statement variant
+    // (WHERE ... AND s.agent_name = ? AND e.model = ?), which is a
+    // distinct SQL path from the agent-only and model-only variants.
+    insertSession("s1", "agent-a");
+    insertSession("s2", "agent-b");
+    // agent-a on both models; only the (agent-a, gpt-4o) row must match.
+    insertEvent("e1", "s1", { model: "gpt-4o", duration: 100 });
+    insertEvent("e2", "s1", { model: "claude-3-sonnet", duration: 150 });
+    // agent-b on gpt-4o must be excluded by the agent filter.
+    insertEvent("e3", "s2", { model: "gpt-4o", duration: 200 });
+
+    const app = createApp();
+    const res = await request(app)
+      .get("/analytics/performance?agent=agent-a&model=gpt-4o")
+      .expect(200);
+
+    expect(res.body.sample_size).toBe(1);
+    expect(res.body.filters).toEqual({ agent: "agent-a", model: "gpt-4o" });
+    expect(Object.keys(res.body.by_model)).toEqual(["gpt-4o"]);
+    expect(res.body.by_model["gpt-4o"].count).toBe(1);
+  });
+
   test("includes throughput and efficiency metrics", async () => {
     insertSession("s1");
     insertEvent("e1", "s1", { duration: 500, tokensIn: 100, tokensOut: 50 });
