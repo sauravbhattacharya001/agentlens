@@ -185,4 +185,47 @@ describe("GET /analytics/performance", () => {
     expect(res.body.by_event_type["llm_call"]).toBeDefined();
     expect(res.body.by_event_type["tool_call"]).toBeDefined();
   });
+
+  // ── Zero-token fallback branches ──────────────────────────
+  // Events are kept only when duration_ms > 0 (SQL filter), so the
+  // total_dur === 0 arm is unreachable; but events can legitimately
+  // carry no tokens. When total_tok_in / total tokens are zero, the
+  // efficiency ratios must take their `: 0` fallback rather than
+  // dividing by zero. These cover the previously branch-uncovered
+  // output_input_ratio and avg_duration_per_token_ms fallbacks.
+  test("falls back to 0 for token ratios when all token counts are zero", async () => {
+    insertSession("s1");
+    // duration > 0 (so rows survive the filter) but zero tokens →
+    // g.total_tok_in === 0 and totalTokens === 0.
+    insertEvent("e1", "s1", { model: "gpt-4o", duration: 100, tokensIn: 0, tokensOut: 0 });
+    insertEvent("e2", "s1", { model: "gpt-4o", duration: 200, tokensIn: 0, tokensOut: 0 });
+
+    const app = createApp();
+    const res = await request(app).get("/analytics/performance").expect(200);
+
+    expect(res.body.sample_size).toBe(2);
+    expect(res.body.throughput.total_tokens).toBe(0);
+    // g.total_dur > 0 so tokens_per_second is the computed arm (0/dur = 0)
+    expect(res.body.throughput.tokens_per_second).toBe(0);
+    // efficiency fallbacks: total_tok_in === 0 and totalTokens === 0
+    expect(res.body.efficiency.output_input_ratio).toBe(0);
+    expect(res.body.efficiency.avg_duration_per_token_ms).toBe(0);
+    // per-model: total tokens 0 → tokens_per_second computed arm = 0
+    expect(res.body.by_model["gpt-4o"].tokens_per_second).toBe(0);
+  });
+
+  test("computes output_input_ratio when input tokens exist but output is zero", async () => {
+    insertSession("s1");
+    // input tokens present, output zero → g.total_tok_in > 0 arm taken,
+    // ratio = 0/in = 0; totalTokens > 0 so avg_duration_per_token computed.
+    insertEvent("e1", "s1", { model: "gpt-4o", duration: 100, tokensIn: 60, tokensOut: 0 });
+
+    const app = createApp();
+    const res = await request(app).get("/analytics/performance").expect(200);
+
+    expect(res.body.efficiency.output_input_ratio).toBe(0);
+    // totalTokens (60) > 0 and total_dur (100) > 0
+    expect(res.body.efficiency.avg_duration_per_token_ms).toBeGreaterThan(0);
+    expect(res.body.by_model["gpt-4o"].tokens_per_second).toBeGreaterThan(0);
+  });
 });
