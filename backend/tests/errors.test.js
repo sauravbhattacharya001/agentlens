@@ -297,3 +297,76 @@ describe("Error analytics with no data", () => {
     expect(res.body.top_errors).toEqual([]);
   });
 });
+
+
+// ── Direct unit tests for the pure helpers (via _internals) ─────────
+// These exercise the fallback branches that are awkward to reach through
+// the HTTP route: non-string / non-JSON output_data, JSON payloads with
+// no recognised error field, and MTBF edge cases.
+describe("errors _internals helpers", () => {
+  const { toPercent, extractErrorMessage, computeMtbf } =
+    require("../routes/errors")._internals;
+
+  describe("toPercent", () => {
+    test("computes a rounded percentage", () => {
+      expect(toPercent(1, 4)).toBe(25);
+      expect(toPercent(1, 3)).toBe(33.33);
+    });
+    test("returns 0 when the denominator is 0", () => {
+      expect(toPercent(5, 0)).toBe(0);
+    });
+    test("returns 0 for a negative denominator", () => {
+      expect(toPercent(5, -10)).toBe(0);
+    });
+  });
+
+  describe("extractErrorMessage", () => {
+    test("returns null for non-string, non-JSON output_data", () => {
+      expect(extractErrorMessage(null)).toBeNull();
+      expect(extractErrorMessage(undefined)).toBeNull();
+      expect(extractErrorMessage(false)).toBeNull();
+    });
+    test("falls back to the raw string when it is not valid JSON", () => {
+      expect(extractErrorMessage("boom: not json", 200)).toBe("boom: not json");
+      expect(extractErrorMessage("z".repeat(500), 10)).toBe("z".repeat(10));
+    });
+    test("prefers the first present error field", () => {
+      expect(extractErrorMessage(JSON.stringify({ message: "boom" }))).toBe("boom");
+      expect(
+        extractErrorMessage(JSON.stringify({ detail: "d", reason: "r" }))
+      ).toBe("d");
+    });
+    test("stringifies a JSON payload with no recognised error field", () => {
+      const out = extractErrorMessage(JSON.stringify({ code: 42, ok: false }));
+      expect(out).toBe(JSON.stringify({ code: 42, ok: false }));
+    });
+    test("truncates the stringified fallback to maxLen", () => {
+      const payload = { note: "y".repeat(500) };
+      expect(extractErrorMessage(JSON.stringify(payload), 8).length).toBe(8);
+    });
+  });
+
+  describe("computeMtbf", () => {
+    test("returns null when fewer than 2 errors", () => {
+      expect(computeMtbf(null)).toBeNull();
+      expect(computeMtbf({ error_count: 0 })).toBeNull();
+      expect(computeMtbf({ error_count: 1, first_ts: "2026-01-01T00:00:00Z", last_ts: "2026-01-01T00:00:00Z" })).toBeNull();
+    });
+    test("returns null when timestamps are unparseable", () => {
+      expect(
+        computeMtbf({ error_count: 3, first_ts: "not-a-date", last_ts: "also-bad" })
+      ).toBeNull();
+    });
+    test("computes mean gap across the span", () => {
+      const mtbf = computeMtbf({
+        error_count: 3,
+        first_ts: "2026-01-01T00:00:00Z",
+        last_ts: "2026-01-01T00:02:00Z",
+      });
+      // span 120s over (3-1)=2 gaps => 60s mean
+      expect(mtbf.mean_ms).toBe(60000);
+      expect(mtbf.mean_seconds).toBe(60);
+      expect(mtbf.mean_minutes).toBe(1);
+    });
+  });
+});

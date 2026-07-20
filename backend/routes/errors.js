@@ -345,3 +345,7 @@ router.get("/by-agent", wrapRoute("query errors by agent", (req, res) => {
 }));
 
 module.exports = router;
+
+// Exposed for direct unit testing of the pure helpers (same pattern as
+// replay.js). These are internal; the public surface is the router.
+module.exports._internals = { toPercent, extractErrorMessage, computeMtbf };
