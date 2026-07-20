@@ -428,3 +428,87 @@ describe("POST /retention/purge", () => {
     expect(remaining[0].session_id).toBe("s-new");
   });
 });
+
+describe("edge cases & internal branches", () => {
+  test("getConfig falls back to raw string when a stored value is not valid JSON", async () => {
+    // Force the retention_config table to exist, then write a raw
+    // (non-JSON) value directly to exercise the JSON.parse catch branch.
+    mockDb.exec(`
+      CREATE TABLE IF NOT EXISTS retention_config (
+        key TEXT PRIMARY KEY,
+        value TEXT NOT NULL,
+        updated_at TEXT NOT NULL DEFAULT (datetime('now'))
+      );
+    `);
+    mockDb.prepare(
+      "INSERT INTO retention_config (key, value, updated_at) VALUES (?, ?, datetime('now'))"
+    ).run("max_age_days", "not-json");
+
+    const app = createApp();
+    const res = await request(app).get("/retention/config");
+    expect(res.status).toBe(200);
+    // Unparseable value is surfaced verbatim rather than throwing.
+    expect(res.body.config.max_age_days).toBe("not-json");
+  });
+
+  test("purge deletes annotations when the annotations table exists", async () => {
+    mockDb.exec(`
+      CREATE TABLE annotations (
+        annotation_id TEXT PRIMARY KEY,
+        session_id TEXT NOT NULL,
+        note TEXT
+      );
+    `);
+    seedSession("s-ann", daysAgo(120));
+    seedEvent("s-ann", "e-ann-1", daysAgo(120));
+    mockDb.prepare(
+      "INSERT INTO annotations (annotation_id, session_id, note) VALUES (?, ?, ?)"
+    ).run("a1", "s-ann", "keep-until-purge");
+
+    const app = createApp();
+    const res = await request(app).post("/retention/purge").send({});
+    expect(res.status).toBe(200);
+    expect(res.body.purged_sessions).toBe(1);
+
+    const leftover = mockDb
+      .prepare("SELECT COUNT(*) AS c FROM annotations WHERE session_id = ?")
+      .get("s-ann");
+    expect(leftover.c).toBe(0);
+  });
+
+  test("large dry-run reports full eligibility while capping the purge batch at 500", async () => {
+    // Seed more eligible sessions than the per-call purge cap (500) to
+    // verify total_eligible / capped / would_purge_sessions accounting.
+    const N = 620;
+    const insertSession = mockDb.prepare(
+      "INSERT INTO sessions (session_id, agent_name, started_at, status) VALUES (?, 'a', ?, 'completed')"
+    );
+    const insertEvent = mockDb.prepare(
+      "INSERT INTO events (event_id, session_id, event_type, timestamp) VALUES (?, ?, 'generic', ?)"
+    );
+    const old = daysAgo(200);
+    const seedAll = mockDb.transaction(() => {
+      for (let i = 0; i < N; i++) {
+        insertSession.run(`bulk-${i}`, old);
+        // Give even-indexed sessions one event, odd-indexed none, so we
+        // also exercise the "0 events" fill path in each chunk.
+        if (i % 2 === 0) insertEvent.run(`ev-${i}`, `bulk-${i}`, old);
+      }
+    });
+    seedAll();
+
+    const app = createApp();
+    const res = await request(app).post("/retention/purge?dry_run=true");
+    expect(res.status).toBe(200);
+    expect(res.body.dry_run).toBe(true);
+    // Purge is capped at 500 per call; total_eligible reflects the full set.
+    expect(res.body.total_eligible).toBe(N);
+    expect(res.body.would_purge_sessions).toBe(500);
+    expect(res.body.capped).toBe(true);
+    // Every returned detail carries an events count (0 or 1 here).
+    expect(res.body.details).toHaveLength(500);
+    for (const d of res.body.details) {
+      expect(typeof d.events).toBe("number");
+    }
+  });
+});

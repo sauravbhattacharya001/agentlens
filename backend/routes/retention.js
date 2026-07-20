@@ -174,38 +174,11 @@ function getEligibleSessions(config) {
 }
 
 /**
- * Purge a single session and all related data.
- * Returns count of deleted events.
- */
-function purgeSession(sessionId) {
-  const stmts = getRetentionStatements();
-  const db = getDb();
-
-  let eventCount = 0;
-  const doPurge = db.transaction(() => {
-    eventCount = stmts.eventCountBySession.get(sessionId).count;
-    stmts.deleteEvents.run(sessionId);
-    stmts.deleteTags.run(sessionId);
-
-    // Also delete annotations if table exists
-    try {
-      db.prepare("DELETE FROM annotations WHERE session_id = ?").run(sessionId);
-    } catch {
-      // annotations table may not exist yet
-    }
-
-    stmts.deleteSession.run(sessionId);
-  });
-  doPurge();
-  return eventCount;
-}
-
-/**
  * Batch-purge multiple sessions in a single transaction.
  * Returns array of { session_id, events_deleted } and total event count.
  *
- * Compared to calling purgeSession() in a loop, this runs one transaction
- * instead of N, avoiding per-session WAL sync overhead.
+ * Runs one transaction for the whole batch instead of one per session,
+ * avoiding per-session WAL sync overhead.
  */
 function purgeSessions(sessionIds) {
   if (sessionIds.length === 0) return { details: [], totalEvents: 0 };
