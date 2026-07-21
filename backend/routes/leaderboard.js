@@ -147,20 +147,15 @@ router.get("/", leaderboardCacheMw, wrapRoute("build agent leaderboard", (req, r
 
     // Build leaderboard from combined CTE results (single pass)
     const agents = agentRows.map((a) => {
-      const errorRate =
-        a.total_sessions > 0
-          ? Math.round((a.errors / a.total_sessions) * 10000) / 100
-          : 0;
-      const successRate =
-        a.total_sessions > 0
-          ? Math.round((a.completed / a.total_sessions) * 10000) / 100
-          : 0;
+      // total_sessions is structurally >= 1 here: the CTE groups by
+      // agent and filters `HAVING COUNT(*) >= minSessions` where
+      // minSessions is clamped to >= 1, so every row has at least one
+      // session. The rate denominators are therefore always non-zero.
+      const errorRate = Math.round((a.errors / a.total_sessions) * 10000) / 100;
+      const successRate = Math.round((a.completed / a.total_sessions) * 10000) / 100;
 
       const cost = Math.round((a.total_cost || 0) * 10000) / 10000;
-      const costPerSession =
-        a.total_sessions > 0
-          ? Math.round((cost / a.total_sessions) * 10000) / 10000
-          : 0;
+      const costPerSession = Math.round((cost / a.total_sessions) * 10000) / 10000;
 
       const efficiency =
         a.tokens_in > 0

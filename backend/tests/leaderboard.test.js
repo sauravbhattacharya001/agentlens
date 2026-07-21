@@ -296,3 +296,102 @@ describe("GET /leaderboard", () => {
     expect(res.body.agents).toEqual([]);
   });
 });
+
+// ── Zero-value fallback branches ───────────────────────────────────
+// The per-agent metric computation guards each division with a `> 0`
+// check (efficiency needs tokens_in > 0, tokens_per_ms needs
+// avg_duration_ms > 0) and defaults null aggregates via `|| 0`. The
+// primary fixtures always have positive tokens and durations, so these
+// false branches were never exercised. Seed a degenerate agent that has
+// sessions but zero input tokens and no measurable duration.
+describe("GET /leaderboard — zero-value metric fallbacks", () => {
+  let app;
+
+  beforeAll(() => {
+    app = createApp();
+    const db = getDb();
+    const already = db
+      .prepare("SELECT COUNT(*) as c FROM sessions WHERE agent_name = 'lb-agent-zero'")
+      .get();
+    if (already.c > 0) return;
+
+    const insertSession = db.prepare(
+      `INSERT INTO sessions (session_id, agent_name, started_at, ended_at, total_tokens_in, total_tokens_out, status)
+       VALUES (?, ?, ?, ?, ?, ?, ?)`
+    );
+    // Two sessions, zero input tokens, and ended_at = null so the
+    // avg_duration_ms CTE column comes back NULL for this agent.
+    for (let i = 0; i < 2; i++) {
+      const start = new Date(Date.now() - 86400000 * (i + 1));
+      insertSession.run(
+        `lb-agent-zero-s-${i}`,
+        "lb-agent-zero",
+        start.toISOString(),
+        null, // no ended_at → avg_duration_ms is NULL
+        0, // zero tokens_in → efficiency falls back to 0
+        0, // zero tokens_out
+        "completed"
+      );
+      // No events for this agent → avg_event_duration_ms is NULL too.
+    }
+  });
+
+  test("zero tokens_in yields efficiency_ratio 0 (division guarded)", async () => {
+    const res = await request(app).get("/leaderboard?min_sessions=1&days=365");
+    expect(res.status).toBe(200);
+    const zero = res.body.agents.find((a) => a.agent_name === "lb-agent-zero");
+    expect(zero).toBeDefined();
+    expect(zero.tokens_in).toBe(0);
+    expect(zero.efficiency_ratio).toBe(0);
+  });
+
+  test("null avg_duration_ms yields tokens_per_ms 0 and duration 0", async () => {
+    const res = await request(app).get("/leaderboard?min_sessions=1&days=365");
+    const zero = res.body.agents.find((a) => a.agent_name === "lb-agent-zero");
+    expect(zero).toBeDefined();
+    // avg_duration_ms is NULL → guarded branch returns 0, and the
+    // `Math.round(a.avg_duration_ms || 0)` fallback also returns 0.
+    expect(zero.tokens_per_ms).toBe(0);
+    expect(zero.avg_session_duration_ms).toBe(0);
+  });
+
+  test("missing events yield zero event aggregates via COALESCE/|| 0", async () => {
+    const res = await request(app).get("/leaderboard?min_sessions=1&days=365");
+    const zero = res.body.agents.find((a) => a.agent_name === "lb-agent-zero");
+    expect(zero).toBeDefined();
+    expect(zero.total_events).toBe(0);
+    expect(zero.tool_calls).toBe(0);
+    expect(zero.error_events).toBe(0);
+    expect(zero.avg_event_duration_ms).toBe(0);
+    expect(zero.avg_tokens_per_session).toBe(0);
+    expect(zero.total_cost_usd).toBe(0);
+    expect(zero.cost_per_session_usd).toBe(0);
+  });
+});
+
+// ── Production cache middleware wiring ─────────────────────────────
+// The router picks its cache middleware at module load: a no-op in
+// NODE_ENV=test, the real cacheMiddleware otherwise (line 12 ternary).
+// The suite always runs under NODE_ENV=test, so the production branch
+// was never loaded. Re-require the module in isolation with a
+// non-test NODE_ENV to exercise and smoke-test that path.
+describe("GET /leaderboard — production cache middleware branch", () => {
+  test("serves cached responses when NODE_ENV is not 'test'", async () => {
+    const prevEnv = process.env.NODE_ENV;
+    process.env.NODE_ENV = "production";
+    let prodApp;
+    jest.isolateModules(() => {
+      const prodRouter = require("../routes/leaderboard");
+      prodApp = express();
+      prodApp.use("/leaderboard", prodRouter);
+    });
+    process.env.NODE_ENV = prevEnv;
+
+    // First request populates the cache, second is served from it.
+    const first = await request(prodApp).get("/leaderboard?min_sessions=1&days=365");
+    expect(first.status).toBe(200);
+    const second = await request(prodApp).get("/leaderboard?min_sessions=1&days=365");
+    expect(second.status).toBe(200);
+    expect(second.body).toEqual(first.body);
+  });
+});
