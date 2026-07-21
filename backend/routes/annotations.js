@@ -391,3 +391,11 @@ router.get("/", wrapRoute("fetch recent annotations", (req, res) => {
 module.exports = router;
 module.exports.ensureAnnotationsTable = ensureAnnotationsTable;
 module.exports.VALID_TYPES = VALID_TYPES;
+
+// Exposed for direct unit testing of pure helpers (no Express/DB needed).
+module.exports._internals = {
+  validateAnnotation,
+  requireValidSessionId,
+  MAX_TEXT_LENGTH,
+  MAX_AUTHOR_LENGTH,
+};

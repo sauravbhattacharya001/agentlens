@@ -450,3 +450,152 @@ describe("Edge cases", () => {
     });
   });
 });
+
+// ── Pure helper unit tests (via _internals, no HTTP/DB) ─────────────
+
+describe("_internals.validateAnnotation", () => {
+  const { validateAnnotation, MAX_TEXT_LENGTH, MAX_AUTHOR_LENGTH } =
+    annotationsRouter._internals;
+
+  it("accepts a minimal valid body", () => {
+    expect(validateAnnotation({ text: "hello" })).toEqual([]);
+  });
+
+  it("rejects missing/empty/whitespace text", () => {
+    expect(validateAnnotation({})).toContain(
+      "text is required and must be a non-empty string"
+    );
+    expect(validateAnnotation({ text: "   " })).toContain(
+      "text is required and must be a non-empty string"
+    );
+    expect(validateAnnotation({ text: 123 })).toContain(
+      "text is required and must be a non-empty string"
+    );
+  });
+
+  it("rejects over-length text", () => {
+    const errs = validateAnnotation({ text: "x".repeat(MAX_TEXT_LENGTH + 1) });
+    expect(errs).toContain(`text must be at most ${MAX_TEXT_LENGTH} characters`);
+  });
+
+  it("rejects non-string author (line 75 branch)", () => {
+    const errs = validateAnnotation({ text: "ok", author: 42 });
+    expect(errs).toContain("author must be a non-empty string");
+  });
+
+  it("rejects empty/whitespace author", () => {
+    const errs = validateAnnotation({ text: "ok", author: "   " });
+    expect(errs).toContain("author must be a non-empty string");
+  });
+
+  it("rejects over-length author (line 77 branch)", () => {
+    const errs = validateAnnotation({
+      text: "ok",
+      author: "a".repeat(MAX_AUTHOR_LENGTH + 1),
+    });
+    expect(errs).toContain(
+      `author must be at most ${MAX_AUTHOR_LENGTH} characters`
+    );
+  });
+
+  it("accepts a valid author within bounds", () => {
+    expect(validateAnnotation({ text: "ok", author: "alice" })).toEqual([]);
+  });
+
+  it("rejects an invalid type", () => {
+    const errs = validateAnnotation({ text: "ok", type: "nope" });
+    expect(errs.some((e) => e.startsWith("type must be one of"))).toBe(true);
+  });
+});
+
+describe("_internals.requireValidSessionId", () => {
+  const { requireValidSessionId } = annotationsRouter._internals;
+
+  function runMiddleware(id) {
+    const req = { params: { id } };
+    let statusCode = null;
+    let jsonBody = null;
+    const res = {
+      status(code) {
+        statusCode = code;
+        return this;
+      },
+      json(body) {
+        jsonBody = body;
+        return this;
+      },
+    };
+    let nextCalled = false;
+    requireValidSessionId(req, res, () => {
+      nextCalled = true;
+    });
+    return { statusCode, jsonBody, nextCalled };
+  }
+
+  it("400s on a missing id (line 17 falsy branch)", () => {
+    const r = runMiddleware(undefined);
+    expect(r.statusCode).toBe(400);
+    expect(r.jsonBody.error).toBe("Invalid session ID format");
+    expect(r.nextCalled).toBe(false);
+  });
+
+  it("400s on an empty id", () => {
+    const r = runMiddleware("");
+    expect(r.statusCode).toBe(400);
+    expect(r.nextCalled).toBe(false);
+  });
+
+  it("calls next() on a well-formed id", () => {
+    const r = runMiddleware("valid-session-id");
+    expect(r.nextCalled).toBe(true);
+    expect(r.statusCode).toBeNull();
+  });
+});
+
+describe("PUT validation branches", () => {
+  let annId;
+
+  beforeAll(async () => {
+    const res = await request(app)
+      .post(`/sessions/${SESSION_ID}/annotations`)
+      .send({ text: "seed for put branch tests" });
+    annId = res.body.annotation_id;
+  });
+
+  it("rejects over-length text on update (line 269 branch)", async () => {
+    const res = await request(app)
+      .put(`/sessions/${SESSION_ID}/annotations/${annId}`)
+      .send({ text: "x".repeat(4001) });
+    expect(res.status).toBe(400);
+    expect(res.body.error).toMatch(/at most 4000 characters/);
+  });
+
+  it("rejects non-string author on update (line 285 branch)", async () => {
+    const res = await request(app)
+      .put(`/sessions/${SESSION_ID}/annotations/${annId}`)
+      .send({ author: 123 });
+    expect(res.status).toBe(400);
+    expect(res.body.error).toBe("author must be a non-empty string");
+  });
+});
+
+describe("type filter with only-invalid types (empty-filter branches)", () => {
+  it("GET list ignores an all-invalid type filter (lines 178/206)", async () => {
+    const res = await request(app)
+      .get(`/sessions/${SESSION_ID}/annotations?type=bogus,nope`);
+    expect(res.status).toBe(200);
+    // All-invalid filter collapses to a no-op, so it matches the
+    // unfiltered listing for this session.
+    const unfiltered = await request(app).get(
+      `/sessions/${SESSION_ID}/annotations`
+    );
+    expect(res.body.total).toBe(unfiltered.body.total);
+    expect(Array.isArray(res.body.annotations)).toBe(true);
+  });
+
+  it("GET recent ignores an all-invalid type filter (line 364)", async () => {
+    const res = await request(app).get(`/annotations?type=bogus`);
+    expect(res.status).toBe(200);
+    expect(Array.isArray(res.body.annotations)).toBe(true);
+  });
+});
