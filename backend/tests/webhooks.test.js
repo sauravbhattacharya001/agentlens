@@ -407,3 +407,80 @@ describe("Webhook signature scheme (issue #185)", () => {
     );
   });
 });
+
+
+// Validation-branch coverage (create/update guards + param middleware)
+describe("Webhooks API - validation branches", () => {
+  it("rejects an invalid webhook ID format via the :webhookId param middleware", async () => {
+    const res = await request("GET", "/webhooks/bad$id/deliveries");
+    assert.equal(res.status, 400);
+    assert.match(res.body.error, /Invalid webhook ID format/);
+  });
+
+  it("POST /webhooks - rejects missing url", async () => {
+    const res = await request("POST", "/webhooks", { name: "no-url" });
+    assert.equal(res.status, 400);
+    assert.match(res.body.error, /url is required/);
+  });
+
+  it("POST /webhooks - rejects an invalid format", async () => {
+    const res = await request("POST", "/webhooks", {
+      name: "bad-fmt", url: "https://example.com", format: "xml",
+    });
+    assert.equal(res.status, 400);
+    assert.match(res.body.error, /format must be one of/);
+  });
+
+  it("POST /webhooks - rejects non-array rule_ids", async () => {
+    const res = await request("POST", "/webhooks", {
+      name: "bad-rules", url: "https://example.com", rule_ids: "not-an-array",
+    });
+    assert.equal(res.status, 400);
+    assert.match(res.body.error, /rule_ids must be an array/);
+  });
+
+  it("PUT /webhooks/:id - rejects an empty-string name", async () => {
+    const created = await request("POST", "/webhooks", { name: "orig", url: "https://example.com" });
+    const id = created.body.webhook.webhook_id;
+    const res = await request("PUT", `/webhooks/${id}`, { name: "   " });
+    assert.equal(res.status, 400);
+    assert.match(res.body.error, /name must be a non-empty string/);
+  });
+
+  it("PUT /webhooks/:id - rejects an invalid url", async () => {
+    const created = await request("POST", "/webhooks", { name: "orig2", url: "https://example.com" });
+    const id = created.body.webhook.webhook_id;
+    const res = await request("PUT", `/webhooks/${id}`, { url: "not-a-url" });
+    assert.equal(res.status, 400);
+  });
+
+  it("PUT /webhooks/:id - updates url, secret and rule_ids together", async () => {
+    const created = await request("POST", "/webhooks", { name: "orig3", url: "https://example.com" });
+    const id = created.body.webhook.webhook_id;
+    const res = await request("PUT", `/webhooks/${id}`, {
+      url: "https://example.com/new", secret: "s3cr3t", rule_ids: ["rule-a", "rule-b"],
+    });
+    assert.equal(res.status, 200);
+    assert.equal(res.body.webhook.secret.length, 6, "secret should be masked to 6 bullet chars");
+    assert.deepEqual(res.body.webhook.rule_ids, ["rule-a", "rule-b"]);
+  });
+
+  it("PUT /webhooks/:id - rejects rule_ids exceeding the max on update", async () => {
+    const created = await request("POST", "/webhooks", { name: "orig4", url: "https://example.com" });
+    const id = created.body.webhook.webhook_id;
+    const tooMany = Array.from({ length: 51 }, (_, i) => `r${i}`);
+    const res = await request("PUT", `/webhooks/${id}`, { rule_ids: tooMany });
+    assert.equal(res.status, 400);
+    assert.match(res.body.error, /rule_ids cannot exceed/);
+  });
+
+  it("PUT /webhooks/:id - clears rule_ids when passed a falsy value", async () => {
+    const created = await request("POST", "/webhooks", {
+      name: "orig5", url: "https://example.com", rule_ids: ["x"],
+    });
+    const id = created.body.webhook.webhook_id;
+    const res = await request("PUT", `/webhooks/${id}`, { rule_ids: null });
+    assert.equal(res.status, 200);
+    assert.equal(res.body.webhook.rule_ids, null);
+  });
+});
