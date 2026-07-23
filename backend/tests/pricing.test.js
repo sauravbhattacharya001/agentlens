@@ -413,6 +413,47 @@ describe("GET /pricing/costs/:sessionId", () => {
     expect(res.body.unmatched_models).toContain("unknown-model-xyz");
   });
 
+  it("should fuzzy-match a versioned model to its pricing key at a delimiter boundary", async () => {
+    // Event model "gpt-4o-2024-05-13" has no exact pricing row, but the key
+    // "gpt-4o" prefix-matches with a '-' boundary → costs are computed, matched=true.
+    insertPricing("gpt-4o", 2.5, 10.0);
+    insertSession("sess-fuzzy");
+    insertEvent("evt-fuzzy", "sess-fuzzy", "gpt-4o-2024-05-13", 1000000, 0);
+
+    const res = await request(app).get("/pricing/costs/sess-fuzzy");
+    expect(res.status).toBe(200);
+    expect(res.body.total_input_cost).toBe(2.5);
+    expect(res.body.event_costs[0].pricing_matched).toBe(true);
+    expect(res.body.unmatched_models).not.toContain("gpt-4o-2024-05-13");
+  });
+
+  it("should pick the longest boundary-matching pricing key", async () => {
+    // Both "claude-3" and "claude-3-opus" boundary-match "claude-3-opus-20240229";
+    // the longest key (claude-3-opus) must win the fuzzy match.
+    insertPricing("claude-3", 3.0, 15.0);
+    insertPricing("claude-3-opus", 15.0, 75.0);
+    insertSession("sess-fuzzy-longest");
+    insertEvent("evt-fl", "sess-fuzzy-longest", "claude-3-opus-20240229", 1000000, 0);
+
+    const res = await request(app).get("/pricing/costs/sess-fuzzy-longest");
+    // claude-3-opus input = $15/1M, NOT claude-3's $3/1M
+    expect(res.body.total_input_cost).toBe(15.0);
+    expect(res.body.event_costs[0].pricing_matched).toBe(true);
+  });
+
+  it("should NOT fuzzy-match when the prefix is not at a delimiter boundary", async () => {
+    // "gpt-4" prefix-matches "gpt-4o" textually, but the next char 'o' is not a
+    // delimiter → boundary check fails, so the model stays unmatched.
+    insertPricing("gpt-4", 30.0, 60.0);
+    insertSession("sess-fuzzy-noboundary");
+    insertEvent("evt-fnb", "sess-fuzzy-noboundary", "gpt-4only", 1000000, 0);
+
+    const res = await request(app).get("/pricing/costs/sess-fuzzy-noboundary");
+    expect(res.body.total_cost).toBe(0);
+    expect(res.body.event_costs[0].pricing_matched).toBe(false);
+    expect(res.body.unmatched_models).toContain("gpt-4only");
+  });
+
   it("should handle session with zero events", async () => {
     insertSession("sess-empty-events");
 
