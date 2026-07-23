@@ -269,6 +269,32 @@ describe("DELETE /sessions/:id/tags", () => {
     expect(res.body.removed).toBe(0);
     expect(res.body.tags).toEqual(["exists"]);
   });
+
+  test("should reject a non-empty tags array that is entirely invalid", async () => {
+    await request(app)
+      .post("/sessions/sess-1/tags")
+      .send({ tags: ["keep-me"] });
+
+    const res = await request(app)
+      .delete("/sessions/sess-1/tags")
+      .send({ tags: ["<invalid>", "@@@"] });
+
+    expect(res.status).toBe(400);
+    expect(res.body.error).toBe("Invalid tags array");
+
+    // The invalid delete must not have touched existing tags.
+    const after = await request(app).get("/sessions/sess-1/tags");
+    expect(after.body.tags).toEqual(["keep-me"]);
+  });
+
+  test("should reject a non-array tags value", async () => {
+    const res = await request(app)
+      .delete("/sessions/sess-1/tags")
+      .send({ tags: "not-an-array" });
+
+    expect(res.status).toBe(400);
+    expect(res.body.error).toBe("Invalid tags array");
+  });
 });
 
 // ── List All Tags ───────────────────────────────────────────────────
