@@ -353,6 +353,55 @@ describe("replaySummaryFromRawEvents (equivalence with replaySummary)", () => {
   });
 });
 
+// Direct branch coverage for the pure delay/summary helpers.  These pin
+// the edge branches the HTTP tests don't reach: a non-positive speed
+// multiplier (division skipped), a blank event_type (fallback key), a
+// null model (Set never grows), and every speed-recommendation tier on
+// the raw path.  They also keep the two summary paths in lockstep on
+// those branches so a future refactor can't silently diverge.
+describe("buildFrames / replaySummaryFromRawEvents — edge branches", () => {
+  const twoEvents = (gapMs) => [
+    { event_id: "a", event_type: "llm_call", timestamp: "2026-01-01T00:00:00Z", model: "gpt-4", tokens_in: 1, tokens_out: 1 },
+    { event_id: "b", event_type: "tool_use", timestamp: new Date(Date.parse("2026-01-01T00:00:00Z") + gapMs).toISOString(), model: null, tokens_in: 0, tokens_out: 0 },
+  ];
+
+  test("speedMultiplier <= 0 skips the division (raw delay preserved, capped)", () => {
+    const events = twoEvents(4000);
+    // speed 0 => the `speedMultiplier > 0` guard is false on both paths,
+    // so the delay stays the raw (capped) value rather than being divided.
+    const frames = buildFrames(events, { speedMultiplier: 0, maxDelayMs: 30000 });
+    expect(frames[1].delay_ms).toBe(4000);
+
+    const raw = replaySummaryFromRawEvents(events, null, { speedMultiplier: 0, maxDelayMs: 30000 });
+    expect(raw.max_delay_ms).toBe(4000);
+    expect(raw.total_duration_ms).toBe(4000);
+  });
+
+  test("blank event_type falls back to a generic aggregate key on the raw path", () => {
+    const events = [
+      { event_id: "x", event_type: "", timestamp: "2026-01-01T00:00:00Z", model: null, tokens_in: 0, tokens_out: 0 },
+    ];
+    const raw = replaySummaryFromRawEvents(events, null);
+    // event_type "" is counted under the empty-string key (the `|| ""` fallback);
+    // classifyEvent("") yields "generic".
+    expect(raw.event_types[""]).toBe(1);
+    expect(raw.categories.generic).toBe(1);
+    expect(raw.models_used).toEqual([]); // null model never joins the Set
+  });
+
+  test("raw path hits every speed-recommendation tier", () => {
+    // cumulativeMs (post-cap, speed 1) drives the tier; set maxDelay high
+    // enough that the gap is never clamped, so gap == cumulativeMs.
+    const tier = (gapMs) =>
+      replaySummaryFromRawEvents(twoEvents(gapMs), null, { maxDelayMs: gapMs }).speed_recommendation;
+    expect(tier(500)).toBe("0.5x");   // < 2000
+    expect(tier(5000)).toBe("1x");    // 2000..10000
+    expect(tier(30000)).toBe("2x");   // > 10000
+    expect(tier(120000)).toBe("5x");  // > 60000
+    expect(tier(400000)).toBe("10x"); // > 300000
+  });
+});
+
 describe("GET /replay/:sessionId", () => {
   test("returns full replay for valid session", async () => {
     const res = await request(app).get("/replay/replay-s1");
@@ -400,6 +449,20 @@ describe("GET /replay/:sessionId", () => {
     expect(res.body.replay.frames[0].index).toBe(1);
   });
 
+  test("range slicing with only `from` set slices to the end", async () => {
+    // Exercises the `isNaN(to) ? frames.length : ...` branch.
+    const res = await request(app).get("/replay/replay-s1?from=3");
+    expect(res.body.replay.frames).toHaveLength(2); // indexes 3 and 4
+    expect(res.body.replay.frames[0].index).toBe(3);
+  });
+
+  test("range slicing with only `to` set slices from the start", async () => {
+    // Exercises the `isNaN(from) ? 0 : ...` branch.
+    const res = await request(app).get("/replay/replay-s1?to=2");
+    expect(res.body.replay.frames).toHaveLength(2); // indexes 0 and 1
+    expect(res.body.replay.frames[0].index).toBe(0);
+  });
+
   test("handles empty session", async () => {
     const res = await request(app).get("/replay/replay-empty");
     expect(res.body.replay.frames).toHaveLength(0);
@@ -433,6 +496,9 @@ describe("GET /replay/:sessionId/frame/:index", () => {
     expect(res.body.total_frames).toBe(5);
     expect(res.body.has_next).toBe(true);
     expect(res.body.has_previous).toBe(true);
+    // frame 2 is re3, which has a populated duration_ms (the `|| null`
+    // short-circuit's truthy branch).
+    expect(res.body.frame.duration_ms).toBe(2000);
   });
 
   test("first frame has no previous", async () => {
