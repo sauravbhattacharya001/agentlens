@@ -16,10 +16,24 @@ const router = express.Router();
 // prevents redundant re-computation while keeping data reasonably fresh.
 // Disabled in test environment to avoid stale data between test cases.
 const analyticsCache = createCache({ ttlMs: 30000, maxEntries: 100 });
-const isTest = process.env.NODE_ENV === "test";
-const analyticsCacheMw = isTest
-  ? function (_req, _res, next) { next(); }
-  : cacheMiddleware(analyticsCache);
+
+// Single source of truth for wiring the analytics response cache onto a
+// route. In the test environment caching is disabled (returns a pass-through
+// middleware) so cases never see stale data between assertions; otherwise it
+// returns the real cache middleware, optionally overriding the per-route TTL.
+// Centralizing the isTest branch here removes the three near-identical
+// `isTest ? passthrough : cacheMiddleware(...)` expressions that previously
+// lived at each route and keeps the behaviour verifiable in one place.
+// NODE_ENV is read at call time (route construction) so both arms are
+// exercisable in tests without module-cache juggling.
+function analyticsCacheMw(ttlMs) {
+  if (process.env.NODE_ENV === "test") {
+    return function (_req, _res, next) { next(); };
+  }
+  return typeof ttlMs === "number"
+    ? cacheMiddleware(analyticsCache, { ttlMs: ttlMs })
+    : cacheMiddleware(analyticsCache);
+}
 
 // ── Cached prepared statements for /performance endpoint ────────────
 // The performance endpoint has 4 possible filter combinations (none,
@@ -186,7 +200,7 @@ const getAnalyticsStatements = createLazyStatements((db) => ({
 }));
 
 // GET /analytics — Aggregate statistics across all sessions
-router.get("/", analyticsCacheMw, wrapRoute("fetch analytics", (req, res) => {
+router.get("/", analyticsCacheMw(), wrapRoute("fetch analytics", (req, res) => {
   const db = getDb();
   const stmts = getAnalyticsStatements();
 
@@ -266,7 +280,7 @@ router.get("/", analyticsCacheMw, wrapRoute("fetch analytics", (req, res) => {
 // calculations that require the full distribution.  This reduces memory
 // from O(rows × 6 columns) to O(rows × 1 column) for the heavy path,
 // and eliminates JS-side reduce/map for totals and group stats entirely.
-router.get("/performance", isTest ? analyticsCacheMw : cacheMiddleware(analyticsCache, { ttlMs: 15000 }), wrapRoute("fetch performance analytics", (req, res) => {
+router.get("/performance", analyticsCacheMw(15000), wrapRoute("fetch performance analytics", (req, res) => {
   // Optional filters
   const agentName = req.query.agent;
   const model = req.query.model;
@@ -425,7 +439,7 @@ const getHeatmapStatements = createLazyStatements((db) => ({
 }));
 
 // GET /analytics/heatmap — Day-of-week × hour-of-day activity matrix
-router.get("/heatmap", isTest ? analyticsCacheMw : cacheMiddleware(analyticsCache, { ttlMs: 60000 }), wrapRoute("fetch heatmap data", (req, res) => {
+router.get("/heatmap", analyticsCacheMw(60000), wrapRoute("fetch heatmap data", (req, res) => {
   const days = parseDays(req.query.days);
     const metric = ["events", "tokens", "sessions"].includes(req.query.metric)
       ? req.query.metric
@@ -469,7 +483,7 @@ const getCostStatements = createLazyStatements((db) => ({
   `),
 }));
 
-router.get("/costs", analyticsCacheMw, wrapRoute("fetch cost analytics", (req, res) => {
+router.get("/costs", analyticsCacheMw(), wrapRoute("fetch cost analytics", (req, res) => {
   const days = parseDays(req.query.days);
   const cutoff = daysAgoCutoff(days);
 
@@ -494,3 +508,6 @@ router.get("/cache", wrapRoute("fetch cache stats", (req, res) => {
 
 module.exports = router;
 module.exports.analyticsCache = analyticsCache;
+// Exposed for unit tests: verify the cache-wiring helper returns a pass-through
+// under NODE_ENV=test and a real cache middleware otherwise.
+module.exports._internals = { analyticsCacheMw };
