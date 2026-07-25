@@ -123,6 +123,25 @@ describe("webhook delivery — SSRF DNS block at delivery time", () => {
     assert.equal(hist.body.deliveries[0].status, "failed");
     assert.equal(hist.body.deliveries[0].status_code, null);
   });
+
+  it("records 'SSRF check failed' (no fetch) when the delivery URL is malformed", async () => {
+    // A webhook whose stored URL cannot be parsed by `new URL()` reaches the
+    // delivery path (direct DB insert bypasses registration-time validation).
+    // The delivery-time SSRF guard wraps `new URL(webhook.url)` in a try/catch
+    // whose catch arm blocks the send with an "SSRF check failed" error rather
+    // than proceeding without the rebinding check — exercising the throw branch
+    // (distinct from the { safe: false } return covered above).
+    const id = insertWebhook({ url: "ht!tp://[malformed-delivery-url" });
+    const res = await request("POST", `/webhooks/${id}/test`);
+    assert.equal(res.status, 200);
+    assert.equal(res.body.status, "failed");
+    assert.match(res.body.error, /SSRF check failed/);
+    assert.equal(fetchCalls.length, 0, "fetch must not fire when URL parsing fails");
+
+    const hist = await request("GET", `/webhooks/${id}/deliveries`);
+    assert.equal(hist.body.deliveries[0].status, "failed");
+    assert.equal(hist.body.deliveries[0].status_code, null);
+  });
 });
 
 describe("webhook delivery — HTTP failure and retries", () => {
