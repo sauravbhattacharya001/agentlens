@@ -200,6 +200,18 @@ describe("Alert Rules API", () => {
       expect(res.body.rule.enabled).toBe(false);
     });
 
+    it("should update window_minutes and cooldown_minutes (clamped)", async () => {
+      const c = await request(app).post("/alerts/rules").send({
+        name: "Timing", metric: "total_tokens", operator: ">", threshold: 100,
+      });
+      const res = await request(app).put(`/alerts/rules/${c.body.rule.rule_id}`).send({
+        window_minutes: 240, cooldown_minutes: 30,
+      });
+      expect(res.status).toBe(200);
+      expect(res.body.rule.window_minutes).toBe(240);
+      expect(res.body.rule.cooldown_minutes).toBe(30);
+    });
+
     it("should return 404 for non-existent rule", async () => {
       const res = await request(app).put("/alerts/rules/nonexistent").send({ name: "test" });
       expect(res.status).toBe(404);
@@ -344,6 +356,29 @@ describe("Alert Rules API", () => {
       expect(unacked.body.events.length).toBe(1);
       const acked = await request(app).get("/alerts/events?acknowledged=true");
       expect(acked.body.events.length).toBe(0);
+    });
+
+    it("should filter events by rule_id and by after/before time window", async () => {
+      const c = await request(app).post("/alerts/rules").send({
+        name: "Filterable", metric: "total_tokens", operator: ">", threshold: 1, window_minutes: 120,
+      });
+      const ruleId = c.body.rule.rule_id;
+      await request(app).post("/alerts/evaluate");
+
+      // rule_id filter: matching id returns the event, a different id returns none.
+      const byRule = await request(app).get(`/alerts/events?rule_id=${ruleId}`);
+      expect(byRule.body.events.length).toBe(1);
+      const byOtherRule = await request(app).get("/alerts/events?rule_id=does-not-exist");
+      expect(byOtherRule.body.events.length).toBe(0);
+
+      // after/before time-window filters bound triggered_at.
+      const wideOpen = await request(app)
+        .get("/alerts/events?after=2000-01-01T00:00:00.000Z&before=2999-01-01T00:00:00.000Z");
+      expect(wideOpen.body.events.length).toBe(1);
+      const future = await request(app).get("/alerts/events?after=2999-01-01T00:00:00.000Z");
+      expect(future.body.events.length).toBe(0);
+      const past = await request(app).get("/alerts/events?before=2000-01-01T00:00:00.000Z");
+      expect(past.body.events.length).toBe(0);
     });
   });
 
