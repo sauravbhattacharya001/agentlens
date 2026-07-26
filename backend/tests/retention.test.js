@@ -476,6 +476,78 @@ describe("edge cases & internal branches", () => {
     expect(leftover.c).toBe(0);
   });
 
+  test("count-based policy under the limit purges nothing (max_sessions not exceeded)", async () => {
+    // max_sessions set but total session count is at/under the limit, so the
+    // count-based eligibility branch is entered yet yields no sessions.
+    seedSession("s1", daysAgo(3));
+    seedSession("s2", daysAgo(1));
+
+    const app = createApp();
+    await request(app).put("/retention/config").send({ max_sessions: 5, max_age_days: 0 });
+
+    const res = await request(app).post("/retention/purge").send({});
+    expect(res.status).toBe(200);
+    expect(res.body.purged_sessions).toBe(0);
+    expect(res.body.message).toContain("No sessions eligible");
+  });
+
+  test("age + count eligibility overlap is de-duplicated (session counted once)", async () => {
+    // Both age-based and count-based policies target the same oldest session;
+    // it must appear once, tagged with its first (age) reason.
+    seedSession("s-oldest", daysAgo(200));
+    seedSession("s-mid", daysAgo(2));
+    seedSession("s-new", daysAgo(1));
+
+    const app = createApp();
+    // Age purges s-oldest; count (max 2, 3 total) also targets the oldest.
+    await request(app).put("/retention/config").send({ max_age_days: 90, max_sessions: 2 });
+
+    const res = await request(app).post("/retention/purge").send({});
+    expect(res.status).toBe(200);
+    // s-oldest should be purged exactly once, not double-counted.
+    expect(res.body.purged_sessions).toBe(1);
+    const ids = res.body.details.map(d => d.session_id);
+    expect(ids).toEqual(["s-oldest"]);
+    expect(res.body.details[0].reason).toBe("age");
+  });
+
+  test("rejects an array request body (not a plain object of updates)", async () => {
+    const app = createApp();
+    const res = await request(app)
+      .put("/retention/config")
+      .set("Content-Type", "application/json")
+      .send("[1,2,3]");
+    expect(res.status).toBe(400);
+    expect(res.body.error).toBeDefined();
+  });
+
+  test("real purge over the 500-cap reports capped accounting and remaining backlog", async () => {
+    // A non-dry-run purge of more than MAX_PURGE_BATCH eligible sessions must
+    // cap the delete at 500, report `capped`, and leave the remainder.
+    const N = 540;
+    const insertSession = mockDb.prepare(
+      "INSERT INTO sessions (session_id, agent_name, started_at, status) VALUES (?, 'a', ?, 'completed')"
+    );
+    const old = daysAgo(200);
+    const seedAll = mockDb.transaction(() => {
+      for (let i = 0; i < N; i++) insertSession.run(`bulk-${i}`, old);
+    });
+    seedAll();
+
+    const app = createApp();
+    const res = await request(app).post("/retention/purge").send({});
+    expect(res.status).toBe(200);
+    expect(res.body.dry_run).toBe(false);
+    expect(res.body.purged_sessions).toBe(500);
+    expect(res.body.total_eligible).toBe(N);
+    expect(res.body.remaining).toBe(N - 500);
+    expect(res.body.message).toContain("remaining");
+
+    // Exactly 500 sessions were deleted; the backlog survives for the next call.
+    const left = mockDb.prepare("SELECT COUNT(*) AS c FROM sessions").get().c;
+    expect(left).toBe(N - 500);
+  });
+
   test("large dry-run reports full eligibility while capping the purge batch at 500", async () => {
     // Seed more eligible sessions than the per-call purge cap (500) to
     // verify total_eligible / capped / would_purge_sessions accounting.
