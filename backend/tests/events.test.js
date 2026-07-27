@@ -861,3 +861,132 @@ describe("POST /events", () => {
     expect(output.choices[0].text).toBe("hello");
   });
 });
+
+// ── Reachable-branch coverage: random-ID pool refill, truncation header, DB error ──
+describe("POST /events — edge branches", () => {
+  test("refills the random-ID pool after >512 auto-generated IDs", async () => {
+    const app = buildApp();
+    // The pre-allocated pool holds POOL_SIZE / ID_BYTES = 512 IDs. Two full
+    // batches of 500 auto-ID events (no event_id supplied) forces the pool
+    // past 512, exercising the crypto.randomBytes() refill branch.
+    const makeBatch = (prefix) =>
+      Array.from({ length: 500 }, (_, i) => ({
+        session_id: "pool-refill-sess",
+        event_type: "llm_call",
+        // no event_id → fastRandomId() is used
+        timestamp: `2026-01-01T00:00:${String(i % 60).padStart(2, "0")}Z`,
+      }));
+
+    const r1 = await request(app).post("/events").send({ events: makeBatch("a") });
+    expect(r1.status).toBe(200);
+    expect(r1.body.processed).toBe(500);
+    const r2 = await request(app).post("/events").send({ events: makeBatch("b") });
+    expect(r2.status).toBe(200);
+    expect(r2.body.processed).toBe(500);
+
+    // 1000 events, all with distinct generated IDs → all stored.
+    const count = mockDb
+      .prepare("SELECT COUNT(*) AS c FROM events WHERE session_id = ?")
+      .get("pool-refill-sess").c;
+    expect(count).toBe(1000);
+  });
+
+  test("sets X-AgentLens-Truncated header when a field exceeds the size cap", async () => {
+    // safeJsonStringify truncates payloads whose serialized form exceeds
+    // MAX_DATA_LENGTH (256 KB). Build an app with a body limit above that cap
+    // so the oversized field reaches the route (the default express.json()
+    // limit would reject it with 413 before the handler runs).
+    const eventsRouter = require("../routes/events");
+    const app = express();
+    app.use(express.json({ limit: "1mb" }));
+    app.use("/events", eventsRouter);
+
+    const huge = "x".repeat(300 * 1024);
+    const res = await request(app)
+      .post("/events")
+      .send({
+        events: [
+          {
+            session_id: "trunc-sess",
+            event_type: "llm_call",
+            event_id: "trunc-evt",
+            timestamp: "2026-01-01T00:00:00Z",
+            output_data: { blob: huge },
+          },
+        ],
+      });
+
+    expect(res.status).toBe(200);
+    expect(res.body.truncated_fields).toBeGreaterThan(0);
+    expect(res.headers["x-agentlens-truncated"]).toBe(
+      String(res.body.truncated_fields)
+    );
+
+    // The stored payload is the truncation stub, not the raw blob.
+    const evt = mockDb
+      .prepare("SELECT output_data FROM events WHERE event_id = ?")
+      .get("trunc-evt");
+    expect(JSON.parse(evt.output_data)._truncated).toBe(true);
+  });
+
+  test("returns 500 when the ingest transaction throws", async () => {
+    const app = buildApp();
+    // Force a DB-layer failure inside the transaction by dropping the events
+    // table after the router (and its prepared statements) are wired up. The
+    // prepared INSERT then fails at run() time, exercising the catch → 500 arm.
+    const errSpy = jest.spyOn(console, "error").mockImplementation(() => {});
+    // Warm the lazily-prepared statements with one valid request so they
+    // prepare against the live table, THEN drop the table. The inner
+    // transaction's insertEvent.run() now throws at execution time, which is
+    // exactly the path caught by the route's try/catch → 500 arm.
+    await request(app)
+      .post("/events")
+      .send({
+        events: [
+          {
+            session_id: "warm-sess",
+            event_type: "llm_call",
+            event_id: "warm-evt",
+            timestamp: "2026-01-01T00:00:00Z",
+          },
+        ],
+      });
+    mockDb.exec("DROP TABLE events");
+    try {
+      const res = await request(app)
+        .post("/events")
+        .send({
+          events: [
+            {
+              session_id: "err-sess",
+              event_type: "llm_call",
+              event_id: "err-evt",
+              timestamp: "2026-01-01T00:00:00Z",
+            },
+          ],
+        });
+      expect(res.status).toBe(500);
+      expect(res.body.error).toMatch(/Failed to ingest events/i);
+    } finally {
+      // Recreate the events table so later tests (and afterEach cleanup) are unaffected.
+      mockDb.exec(`
+        CREATE TABLE IF NOT EXISTS events (
+          event_id TEXT PRIMARY KEY,
+          session_id TEXT NOT NULL,
+          event_type TEXT NOT NULL DEFAULT 'generic',
+          timestamp TEXT NOT NULL,
+          input_data TEXT,
+          output_data TEXT,
+          model TEXT,
+          tokens_in INTEGER DEFAULT 0,
+          tokens_out INTEGER DEFAULT 0,
+          tool_call TEXT,
+          decision_trace TEXT,
+          duration_ms REAL,
+          FOREIGN KEY (session_id) REFERENCES sessions(session_id)
+        );
+      `);
+      errSpy.mockRestore();
+    }
+  });
+});
