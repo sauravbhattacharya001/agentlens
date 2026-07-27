@@ -345,6 +345,23 @@ describe("GET /sessions/:id/export", () => {
     expect(res.headers["content-disposition"]).toMatch(/attachment/);
   });
 
+  test("falls back to 'unknown' filename when agent_name is empty", async () => {
+    // sanitizeFilename() maps a falsy/blank agent_name to "unknown" so the
+    // Content-Disposition header stays well-formed. insertSession()'s
+    // `opts.agent || ...` fallback can't produce a blank name, so insert one
+    // directly.
+    mockDb
+      .prepare(
+        `INSERT INTO sessions (session_id, agent_name, started_at, ended_at, status, total_tokens_in, total_tokens_out, metadata)
+         VALUES (?, ?, ?, ?, ?, ?, ?, ?)`
+      )
+      .run("sess-noagent", "", "2026-01-15T10:00:00Z", "2026-01-15T10:05:00Z", "completed", 100, 50, "{}");
+    insertEvent("sess-noagent", "evt-na1", { model: "gpt-4" });
+    const res = await request(app).get("/sessions/sess-noagent/export?format=json");
+    expect(res.status).toBe(200);
+    expect(res.headers["content-disposition"]).toMatch(/agentlens-unknown-/);
+  });
+
   test("exports session as CSV", async () => {
     insertSession("sess-csv");
     insertEvent("sess-csv", "evt-c1");
@@ -455,6 +472,19 @@ describe("POST /sessions/compare", () => {
       .post("/sessions/compare")
       .send({ session_a: "missing", session_b: "sess-only-b" });
     expect(res.status).toBe(404);
+    expect(res.body.error).toMatch(/missing/);
+  });
+
+  test("returns 404 (naming session_b) if session_b missing but session_a exists", async () => {
+    // Mirrors the session_a case: exercises the `sessB ? ... : []` false
+    // branch (no events fetched for the absent B) and the `!sessB` 404 path.
+    insertSession("sess-only-a");
+    insertEvent("sess-only-a", "evt-oa1", { model: "gpt-4", tokensIn: 10, tokensOut: 5 });
+    const res = await request(app)
+      .post("/sessions/compare")
+      .send({ session_a: "sess-only-a", session_b: "missing-b" });
+    expect(res.status).toBe(404);
+    expect(res.body.error).toMatch(/missing-b/);
   });
 
   test("computes percent deltas correctly", async () => {
