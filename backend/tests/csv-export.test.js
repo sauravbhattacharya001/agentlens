@@ -1,4 +1,4 @@
-const { csvEscape, eventsToCsv, buildJsonExport, ndjsonSessionLine, toExportEvent } = require("../lib/csv-export");
+const { csvEscape, eventsToCsv, buildJsonExport, ndjsonSessionLine, toExportEvent, eventToCsvRow } = require("../lib/csv-export");
 
 describe("csv-export", () => {
   const mockParseEventRow = (e) => ({
@@ -57,6 +57,22 @@ describe("csv-export", () => {
       // legitimate user content and must not get an apostrophe.
       expect(csvEscape(" hello")).toBe(" hello");
       expect(csvEscape("  some note")).toBe("  some note");
+    });
+
+    test("numeric value containing a delimiter is quote-wrapped, not prefixed", () => {
+      // Exercises the numeric branch's CSV-quoting path: isFinite(Number(str))
+      // is true (JS parses these as numbers) yet the raw text carries a comma
+      // or newline, so it must be double-quote wrapped without a formula prefix.
+      expect(csvEscape("1,000")).toBe('"1,000"');
+      expect(csvEscape("1e3\n")).toBe('"1e3\n"');
+    });
+
+    test("leading tab/CR with no formula char is still control-escaped", () => {
+      // Exercises the non-formula control-char arm: a value beginning with a
+      // bare tab or CR (and NO =/+/-/@ trigger) is prefixed with an apostrophe
+      // because some importers treat leading control input specially.
+      expect(csvEscape("\tvalue")).toBe("'\tvalue");
+      expect(csvEscape("\rvalue")).toBe("'\rvalue");
     });
 
     test("objects are JSON stringified", () => {
@@ -120,6 +136,42 @@ describe("csv-export", () => {
       expect(result.session.session_id).toBe("s1");
       expect(result.summary.total_events).toBe(1);
       expect(result.summary.total_tokens).toBe(300);
+    });
+  });
+
+  describe("eventToCsvRow", () => {
+    test("omits optional tool_call/decision_trace fields safely", () => {
+      // No tool_call or decision_trace: the optional-chaining arms yield
+      // undefined, which csvEscape maps to empty trailing cells.
+      const row = eventToCsvRow({
+        event_id: "e1",
+        event_type: "model_call",
+        timestamp: 1,
+        model: "gpt-4",
+        tokens_in: 1,
+        tokens_out: 2,
+        duration_ms: 3,
+        input_data: "in",
+        output_data: "out",
+      });
+      expect(row).toBe("e1,model_call,1,gpt-4,1,2,3,in,out,,,,");
+    });
+
+    test("includes nested tool_call and decision_trace fields when present", () => {
+      const row = eventToCsvRow({
+        event_id: "e2",
+        event_type: "tool_call",
+        timestamp: 2,
+        model: "",
+        tokens_in: 0,
+        tokens_out: 0,
+        duration_ms: 0,
+        input_data: "",
+        output_data: "",
+        tool_call: { tool_name: "search", tool_input: "q", tool_output: "r" },
+        decision_trace: { reasoning: "why" },
+      });
+      expect(row).toBe("e2,tool_call,2,,0,0,0,,,search,q,r,why");
     });
   });
 
