@@ -315,6 +315,53 @@ describe("pdf-export", () => {
     });
   });
 
+  describe("PdfBuilder._addLine - option handling", () => {
+    // _addLine is the single primitive every public draw method funnels through.
+    // These pin its option defaulting directly so each arm (explicit size/bold/
+    // spacing vs. the instance-default fallbacks, and the no-opts call) is exercised.
+    test("falls back to instance defaults when called with no opts", () => {
+      const b = new PdfBuilder();
+      const startY = b.y;
+      b._addLine("bare");
+      const line = b.currentPageContent[0];
+      // default font is F1 (non-bold) at the instance fontSize (10)
+      expect(line).toContain("/F1 10 Tf");
+      expect(line).toContain("(bare)");
+      // default spacing is lineHeight (14)
+      expect(startY - b.y).toBe(b.lineHeight);
+    });
+
+    test("explicit size, bold, and spacing override the defaults", () => {
+      const b = new PdfBuilder();
+      const startY = b.y;
+      b._addLine("big", { size: 16, bold: true, spacing: 22 });
+      const line = b.currentPageContent[0];
+      expect(line).toContain("/F2 16 Tf"); // bold => F2, explicit size 16
+      expect(startY - b.y).toBe(22); // explicit spacing wins over lineHeight
+    });
+
+    test("a falsy explicit size still falls back to the instance default", () => {
+      const b = new PdfBuilder();
+      b._addLine("zero", { size: 0 });
+      expect(b.currentPageContent[0]).toContain(`/F1 ${b.fontSize} Tf`);
+    });
+  });
+
+  describe("buildPdfExport - per-model token fallback on reuse", () => {
+    test("a repeated model with missing tokens contributes zero, not NaN", () => {
+      // Two events share a model; the second omits tokens_in/tokens_out, so the
+      // reuse path must apply the `|| 0` fallback rather than adding undefined.
+      const events = [
+        { event_type: "call", model: "gpt-x", tokens_in: 10, tokens_out: 5 },
+        { event_type: "call", model: "gpt-x" },
+      ];
+      const s = decode(buildPdfExport({ id: "x" }, events));
+      // Aggregated per-model line: 2 calls, tokens unchanged by the tokenless event.
+      expect(s).toContain(escPdf("  gpt-x: 2 calls, 10 in / 5 out"));
+      expect(s).not.toContain("NaN");
+    });
+  });
+
   describe("PdfBuilder - pagination", () => {
     test("overflowing content spills onto a second page (Count == 2)", () => {
       const b = new PdfBuilder();
@@ -325,6 +372,15 @@ describe("pdf-export", () => {
       // Both the first and a later line survive across the page break.
       expect(s).toContain("(line 0)");
       expect(s).toContain("(line 79)");
+    });
+
+    test("_newPage on an empty page does not flush a blank page", () => {
+      const b = new PdfBuilder();
+      b._newPage(); // no content buffered => the length>0 guard is false
+      b.text("only line");
+      const s = decode(b.build());
+      expect(s).toContain("/Count 1 "); // exactly one real page, no blank spilled
+      expect(s).toContain("(only line)");
     });
 
     test("an empty builder still produces a structurally valid one-page PDF", () => {
