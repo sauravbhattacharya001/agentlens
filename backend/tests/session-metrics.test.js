@@ -175,6 +175,36 @@ describe("computeSessionMetrics", () => {
     expect(m.agent_name).toBe("test-agent");
     expect(m.status).toBe("completed");
   });
+
+  test("treats missing duration_ms/tokens fields as 0 during aggregation", () => {
+    // Events with absent duration_ms/tokens_in/tokens_out exercise the
+    // `|| 0` fallbacks in the model, tool, and duration accumulators —
+    // an agent that emitted an incompletely-instrumented span must not
+    // produce NaN totals or crash the metric computation.
+    const events = [
+      // model event with NO duration_ms, tokens_in, or tokens_out
+      { event_type: "llm_call", model: "gpt-4o" },
+      // tool event with NO duration_ms
+      { event_type: "tool_call", tool_call: { tool_name: "grep" } },
+    ];
+    const m = computeSessionMetrics(baseSession, events);
+
+    expect(m.models["gpt-4o"]).toEqual({ calls: 1, tokens_in: 0, tokens_out: 0 });
+    expect(m.tools["grep"]).toEqual({ calls: 1, total_duration: 0 });
+    expect(m.total_processing_ms).toBe(0);
+    expect(m.avg_event_duration_ms).toBe(0);
+  });
+
+  test("ignores tool_call objects that carry no tool_name", () => {
+    // A malformed/partial tool span (object present but tool_name missing)
+    // must not create a phantom tool bucket — covers the tc.tool_name arm
+    // of the tool-usage guard.
+    const events = [
+      { event_type: "tool_call", duration_ms: 10, tool_call: {} },
+    ];
+    const m = computeSessionMetrics(baseSession, events);
+    expect(m.tools).toEqual({});
+  });
 });
 
 // ── computeDeltas ──────────────────────────────────────────
