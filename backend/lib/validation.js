@@ -299,6 +299,14 @@ function validateWebhookUrl(url) {
 
   // Block non-standard IP representations that bypass regex checks:
   // decimal (2130706433 = 127.0.0.1), octal (0177.0.0.1), hex (0x7f.0.0.1)
+  //
+  // NOTE (defense-in-depth): under Node's WHATWG `URL` parser these integer/
+  // octal/hex hostnames are already normalized to dotted-decimal (e.g.
+  // `http://2130706433/` -> hostname `127.0.0.1`) and caught by the loopback/
+  // private-range checks above, so these two blocks are not reachable via the
+  // current parser. They are retained intentionally as a safety net in case the
+  // URL parser is ever swapped for one that preserves the raw hostname — do not
+  // delete them as "dead code".
   if (/^(0x[0-9a-f]+|0[0-7]+|\d{5,})$/i.test(hostname)) {
     return { valid: false, error: "url must use standard dotted-decimal IP notation" };
   }

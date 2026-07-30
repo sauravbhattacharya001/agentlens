@@ -626,6 +626,37 @@ describe("validateWebhookUrl", () => {
     expect(validateWebhookUrl("http://8.8.8.8/hook").valid).toBe(true);
     expect(validateWebhookUrl("https://203.0.113.1/hook").valid).toBe(true);
   });
+
+  // In production, plaintext HTTP must be rejected so webhook secrets and
+  // HMAC signatures are never sent in the clear. HTTP is allowed only when
+  // NODE_ENV !== "production" (local dev). This exercises the production guard.
+  describe("production HTTPS enforcement", () => {
+    const savedEnv = process.env.NODE_ENV;
+    afterEach(() => {
+      if (savedEnv === undefined) {
+        delete process.env.NODE_ENV;
+      } else {
+        process.env.NODE_ENV = savedEnv;
+      }
+    });
+
+    test("rejects plaintext http:// to a public host in production", () => {
+      process.env.NODE_ENV = "production";
+      const r = validateWebhookUrl("http://example.com/hook");
+      expect(r.valid).toBe(false);
+      expect(r.error).toMatch(/https in production/i);
+    });
+
+    test("still accepts https:// to a public host in production", () => {
+      process.env.NODE_ENV = "production";
+      expect(validateWebhookUrl("https://example.com/hook").valid).toBe(true);
+    });
+
+    test("allows plaintext http:// outside production (dev)", () => {
+      process.env.NODE_ENV = "development";
+      expect(validateWebhookUrl("http://example.com/hook").valid).toBe(true);
+    });
+  });
 });
 
 /* ================================================================
