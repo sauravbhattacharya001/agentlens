@@ -195,6 +195,16 @@ describe("POST /sessions/:id/tags", () => {
     expect(res.status).toBe(200);
     expect(res.body.tags).toContain("padded");
   });
+
+  // Covers the `req.body || {}` fallback: a POST with no parseable JSON body
+  // leaves req.body undefined, so { tags } destructures to undefined and the
+  // route must reject with the validation error rather than throwing.
+  test("should reject when the request has no body", async () => {
+    const res = await request(app).post("/sessions/sess-1/tags");
+
+    expect(res.status).toBe(400);
+    expect(res.body.error).toMatch(/Invalid tags/);
+  });
 });
 
 // ── Get Tags ────────────────────────────────────────────────────────
@@ -294,6 +304,21 @@ describe("DELETE /sessions/:id/tags", () => {
 
     expect(res.status).toBe(400);
     expect(res.body.error).toBe("Invalid tags array");
+  });
+
+  // Covers the `req.body || {}` fallback: a DELETE with no parseable JSON
+  // body leaves req.body undefined (express.json only populates it for a
+  // matching content-type). The route must treat that as "remove all".
+  test("should remove all tags when the request has no body", async () => {
+    await request(app)
+      .post("/sessions/sess-1/tags")
+      .send({ tags: ["gone-1", "gone-2"] });
+
+    const res = await request(app).delete("/sessions/sess-1/tags");
+
+    expect(res.status).toBe(200);
+    expect(res.body.removed).toBe(2);
+    expect(res.body.tags).toEqual([]);
   });
 });
 

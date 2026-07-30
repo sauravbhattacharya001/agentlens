@@ -6,6 +6,8 @@ const {
   parseLimit,
   parseOffset,
   parsePagination,
+  parseDays,
+  daysAgoCutoff,
   requireSessionId,
   wrapRoute,
 } = require("../lib/request-helpers");
@@ -185,5 +187,78 @@ describe("wrapRoute", () => {
 
     const res = await request(app).get("/not-found");
     expect(res.status).toBe(404);
+  });
+
+  // Covers the `!res.headersSent` FALSE branch: a sync handler that
+  // responds and THEN throws must not attempt a second (500) send, which
+  // would crash with ERR_HTTP_HEADERS_SENT.
+  test("does not double-send when a sync handler throws after responding", async () => {
+    const app = express();
+    app.get("/late-sync-throw", wrapRoute("late sync", (req, res) => {
+      res.status(200).json({ ok: true });
+      throw new Error("thrown after response already sent");
+    }));
+
+    const res = await request(app).get("/late-sync-throw");
+    expect(res.status).toBe(200);
+    expect(res.body.ok).toBe(true);
+  });
+
+  // Same guard on the async-rejection path.
+  test("does not double-send when an async handler rejects after responding", async () => {
+    const app = express();
+    app.get("/late-async-throw", wrapRoute("late async", async (req, res) => {
+      res.status(200).json({ ok: true });
+      throw new Error("rejected after response already sent");
+    }));
+
+    const res = await request(app).get("/late-async-throw");
+    expect(res.status).toBe(200);
+    expect(res.body.ok).toBe(true);
+  });
+});
+
+// ── parseDays ───────────────────────────────────────────────────────
+
+describe("parseDays", () => {
+  test("returns default (30) when missing or NaN", () => {
+    expect(parseDays(undefined)).toBe(30);
+    expect(parseDays("abc")).toBe(30);
+  });
+
+  test("returns a custom default", () => {
+    expect(parseDays(undefined, 7)).toBe(7);
+  });
+
+  test("clamps below 1 up to 1", () => {
+    expect(parseDays("-5")).toBe(1);
+    expect(parseDays("0")).toBe(30); // 0 is falsy -> falls back to default, then clamps
+  });
+
+  test("clamps above the max down to the max", () => {
+    expect(parseDays("9999")).toBe(365);
+    expect(parseDays("9999", 30, 90)).toBe(90);
+  });
+
+  test("returns a valid in-range value", () => {
+    expect(parseDays("14")).toBe(14);
+  });
+});
+
+// ── daysAgoCutoff ───────────────────────────────────────────────────
+
+describe("daysAgoCutoff", () => {
+  test("returns an ISO timestamp roughly `days` days in the past", () => {
+    const before = Date.now() - 7 * 86400000;
+    const iso = daysAgoCutoff(7);
+    const parsed = Date.parse(iso);
+    expect(Number.isNaN(parsed)).toBe(false);
+    // Within a 2s window of the expected cutoff.
+    expect(Math.abs(parsed - before)).toBeLessThan(2000);
+  });
+
+  test("0 days yields approximately now", () => {
+    const iso = daysAgoCutoff(0);
+    expect(Math.abs(Date.parse(iso) - Date.now())).toBeLessThan(2000);
   });
 });

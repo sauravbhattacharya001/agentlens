@@ -55,6 +55,9 @@ router.get("/by-tag/:tag", wrapRoute("list sessions by tag", (req, res) => {
   const enriched = sessions.map((s) => ({
     ...s,
     metadata: safeJsonParse(s.metadata),
+    // `|| []` is defence-in-depth: every session returned by sessionsByTag
+    // carries at least the search tag, so batchGetTags always maps it. The
+    // fallback only guards against a future batchGetTags contract change.
     tags: tagMap[s.session_id] || [],
   }));
 
