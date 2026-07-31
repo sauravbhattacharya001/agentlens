@@ -447,5 +447,29 @@ describe("response-cache", () => {
       expect(cache.has("/api/data/1")).toBe(false);
       expect(cache.has("/api/data/2")).toBe(false);
     });
+
+    test("falls back to req.url when originalUrl is absent", () => {
+      const cache = createCache();
+      cache.set("/only-url", 200, {}, "payload");
+
+      const mw = cacheMiddleware(cache);
+      // No originalUrl on the request — the key must be built from req.url.
+      const req = { method: "GET", url: "/only-url", headers: {} };
+      const res = mockRes();
+      mw(req, res, () => {});
+
+      expect(res._headers["X-Cache"]).toBe("HIT");
+      expect(res._json).toBe("payload");
+    });
+  });
+
+  describe("set() header normalization", () => {
+    test("stores an empty headers object when headers is falsy", () => {
+      const cache = createCache();
+      cache.set("/no-headers", 200, null, "body");
+      const entry = cache.get("/no-headers");
+      expect(entry).not.toBeNull();
+      expect(entry.headers).toEqual({});
+    });
   });
 });
