@@ -583,4 +583,35 @@ describe("edge cases & internal branches", () => {
       expect(typeof d.events).toBe("number");
     }
   });
+
+  test("reuses the retention table across calls on the same db (memoized fast-path)", async () => {
+    // ensureRetentionTable() memoizes the db it last created the table on. The
+    // first write establishes the table and caches the db handle; a second
+    // write on the SAME db must take the cached fast-path (verify the existing
+    // table instead of re-running CREATE TABLE) and still succeed. Every other
+    // test uses a fresh db in beforeEach, so this is the only case that hits the
+    // `_retentionTableReadyDb === db` branch. Spy on db.exec to prove the second
+    // write does NOT re-issue the CREATE TABLE DDL.
+    const app = createApp();
+
+    const first = await request(app).put("/retention/config").send({ max_age_days: 30 });
+    expect(first.status).toBe(200);
+
+    const execSpy = jest.spyOn(mockDb, "exec");
+    try {
+      const second = await request(app).put("/retention/config").send({ max_sessions: 7 });
+      expect(second.status).toBe(200);
+      expect(second.body.config.max_age_days).toBe(30); // first write persisted
+      expect(second.body.config.max_sessions).toBe(7);
+
+      // The cached fast-path returns before the CREATE TABLE exec runs, so no
+      // exec call during the second write should contain the retention DDL.
+      const ranCreate = execSpy.mock.calls.some(
+        ([sql]) => typeof sql === "string" && /CREATE TABLE[\s\S]*retention_config/.test(sql)
+      );
+      expect(ranCreate).toBe(false);
+    } finally {
+      execSpy.mockRestore();
+    }
+  });
 });
