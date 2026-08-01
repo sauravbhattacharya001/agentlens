@@ -278,6 +278,102 @@ describe("fireWebhooks — rule scoping fan-out", () => {
   });
 });
 
+describe("deliverWebhook — alertData without an alert_id", () => {
+  // fireWebhooks/deliverWebhook default a missing alert_id to null (the
+  // `alertData.alert_id || null` fallback appears twice: once when recording a
+  // failed delivery and once on the success INSERT). The /test route always
+  // supplies a synthetic alert_id, so these falsy branches are only reachable
+  // via a direct fireWebhooks() call whose payload omits alert_id — e.g. an
+  // ad-hoc/manual fire that isn't tied to a persisted alert row.
+  it("records a successful delivery with a null alert_id", async () => {
+    fetchImpl = async () => ({ ok: true, status: 200, text: async () => "ok" });
+    const id = insertWebhook({ name: "no-alert-ok", retry_count: 1 });
+
+    // No alert_id, no rule_id → unscoped webhook fires and succeeds.
+    const results = await fireWebhooks({ rule_name: "manual" });
+    const mine = results.find((r) => r.webhook_id === id);
+    assert.ok(mine, "the unscoped webhook should have fired");
+    assert.equal(mine.status, "success");
+
+    const hist = await request("GET", `/webhooks/${id}/deliveries`);
+    assert.equal(hist.body.deliveries[0].status, "success");
+    assert.equal(hist.body.deliveries[0].alert_id, null,
+      "a missing alert_id must be stored as null");
+  });
+
+  it("records a failed delivery with a null alert_id", async () => {
+    // Malformed URL → `new URL()` throws → SSRF-catch → recordFailedDelivery,
+    // still with alert_id null. Uses a parse failure (not DNS) so it is
+    // deterministic and never touches the network.
+    const id = insertWebhook({
+      name: "no-alert-fail",
+      url: "ht!tp://[malformed-fire-url",
+    });
+
+    const results = await fireWebhooks({ rule_name: "manual-fail" });
+    const mine = results.find((r) => r.webhook_id === id);
+    assert.ok(mine, "the malformed-URL webhook should have been attempted");
+    assert.equal(mine.status, "failed");
+
+    const hist = await request("GET", `/webhooks/${id}/deliveries`);
+    assert.equal(hist.body.deliveries[0].status, "failed");
+    assert.equal(hist.body.deliveries[0].alert_id, null,
+      "a missing alert_id must be stored as null on the failure path too");
+  });
+});
+
+describe("PUT /webhooks/:id — falsy-value update branches", () => {
+  it("clears the secret when passed an empty string", async () => {
+    const created = await request("POST", "/webhooks", {
+      name: "clear-secret",
+      url: "https://example.com/hook",
+      secret: "initial-secret",
+    });
+    const id = created.body.webhook.webhook_id;
+
+    // secret: "" is a valid (non-oversized) string, so it passes the length
+    // guard and hits `updates.secret = secret || null` with a falsy value,
+    // clearing the stored secret.
+    const res = await request("PUT", `/webhooks/${id}`, { secret: "" });
+    assert.equal(res.status, 200);
+    assert.equal(res.body.webhook.secret, null,
+      "an empty-string secret must clear the stored secret");
+  });
+
+  it("stores enabled=false as 0", async () => {
+    const created = await request("POST", "/webhooks", {
+      name: "toggle-enabled",
+      url: "https://example.com/hook",
+    });
+    const id = created.body.webhook.webhook_id;
+
+    const res = await request("PUT", `/webhooks/${id}`, { enabled: false });
+    assert.equal(res.status, 200);
+    assert.equal(res.body.webhook.enabled, false,
+      "enabled:false must persist as a disabled webhook");
+  });
+
+  it("stores enabled=true as 1", async () => {
+    const created = await request("POST", "/webhooks", {
+      name: "toggle-enabled-on",
+      url: "https://example.com/hook",
+    });
+    const id = created.body.webhook.webhook_id;
+
+    await request("PUT", `/webhooks/${id}`, { enabled: false });
+    const res = await request("PUT", `/webhooks/${id}`, { enabled: true });
+    assert.equal(res.status, 200);
+    assert.equal(res.body.webhook.enabled, true,
+      "enabled:true must persist as an enabled webhook");
+  });
+
+  it("404s a PUT to a webhook id that does not exist", async () => {
+    const res = await request("PUT", "/webhooks/wh-nope-put-999", { name: "x" });
+    assert.equal(res.status, 404);
+    assert.match(res.body.error, /Webhook not found/);
+  });
+});
+
 describe("GET /webhooks/:id/deliveries — status filter validation", () => {
   it("rejects an invalid status value", async () => {
     const id = insertWebhook({});

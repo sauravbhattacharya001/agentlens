@@ -483,4 +483,10 @@ describe("Webhooks API - validation branches", () => {
     assert.equal(res.status, 200);
     assert.equal(res.body.webhook.rule_ids, null);
   });
+
+  it("POST /webhooks/:id/test - 404 for a webhook id that does not exist", async () => {
+    const res = await request("POST", "/webhooks/wh-nope-12345/test");
+    assert.equal(res.status, 404);
+    assert.match(res.body.error, /Webhook not found/);
+  });
 });
