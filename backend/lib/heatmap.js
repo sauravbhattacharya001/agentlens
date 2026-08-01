@@ -35,7 +35,13 @@ const DAY_NAMES = [
  * with no activity are simply absent from `rows` and default to 0 in the
  * matrix.  `day` values are expected in 0-6 (Sun-Sat) and `hour` in 0-23, as
  * produced by `strftime('%w'|'%H', ...)`; out-of-range indices are ignored
- * defensively so a malformed row can never throw.
+ * defensively so a malformed row can never throw.  The SQL `GROUP BY dow, hour`
+ * guarantees one row per bucket, so if a caller ever passes two rows for the
+ * same slot the matrix assignment is last-write-wins (the later row's value
+ * replaces the earlier one) - values are never summed.  Note that `max_value`
+ * tracks the running maximum over every scanned row, so a larger *earlier*
+ * duplicate is still reported as `max_value` even though its matrix cell was
+ * overwritten by a smaller later row.
  *
  * @param {Array<{ dow: number, hour: number, value: number }>} rows
  *   Grouped activity buckets from SQL (already filtered to the time window).

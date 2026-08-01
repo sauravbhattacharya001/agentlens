@@ -77,6 +77,31 @@ describe("buildHeatmap - matrix placement", () => {
     const nonZero = out.matrix.flat().filter((v) => v !== 0);
     expect(nonZero).toEqual([5]);
   });
+
+  test("duplicate (dow,hour) buckets are last-write-wins in the matrix", () => {
+    // SQL GROUP BY dow, hour guarantees one row per bucket, so this never
+    // happens on the real query path. But the exported pure function assigns
+    // (matrix[dow][hour] = value), so a caller that passes two rows for the
+    // same slot gets the LAST row's value in the matrix, not the sum. Pin that
+    // contract so a future refactor to += (silent double-count) can't slip
+    // through. NOTE: max_value tracks the running max over ALL scanned rows
+    // (not the surviving matrix cell), so a larger earlier duplicate is
+    // retained as max_value even though its matrix cell was overwritten - this
+    // asserts that documented quirk too.
+    const out = buildHeatmap(
+      [cell(2, 5, 10), cell(2, 5, 3)],
+      { days: 30, metric: "events" }
+    );
+    // matrix cell is the LAST write (3), not the sum (13) or the max (10)
+    expect(out.matrix[2][5]).toBe(3);
+    // exactly one populated cell (both rows collapsed onto the same slot)
+    expect(out.cells).toHaveLength(1);
+    expect(out.cells[0]).toMatchObject({ day: 2, hour: 5, value: 3 });
+    // max_value is the running scan max, so the overwritten 10 survives here
+    expect(out.max_value).toBe(10);
+    // and intensity normalizes the surviving cell (3) against that max (10)
+    expect(out.cells[0].intensity).toBe(0.3);
+  });
 });
 
 describe("buildHeatmap - cells and intensity", () => {
