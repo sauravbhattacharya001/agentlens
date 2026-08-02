@@ -167,6 +167,134 @@ describe("server.js createApp() wiring", () => {
     spy.mockRestore();
   });
 
+  describe("start() process entry point", () => {
+    // start() binds a port, opens the DB, and installs signal handlers.
+    // We drive it with an ephemeral port (PORT=0) and the top-of-file db
+    // mock so no real database is opened, then assert the side effects and
+    // exercise the graceful-shutdown path without killing the test process.
+    let signalListeners;
+    let openServers;
+    let logSpy;
+    let errSpy;
+
+    beforeEach(() => {
+      // Silence banner/shutdown logging for the whole block so a listen
+      // callback that fires after a test settles can't "log after tests".
+      logSpy = jest.spyOn(console, "log").mockImplementation(() => {});
+      errSpy = jest.spyOn(console, "error").mockImplementation(() => {});
+      const db = require("../db");
+      db.getDb.mockClear();
+      db.closeDb.mockClear();
+      openServers = [];
+      // Snapshot signal listeners so start()'s additions can be removed.
+      signalListeners = {
+        SIGTERM: process.listeners("SIGTERM").slice(),
+        SIGINT: process.listeners("SIGINT").slice(),
+      };
+    });
+
+    afterEach(async () => {
+      // Force every server this test opened fully closed BEFORE restoring
+      // the console spies, so no late listen/close callback logs escape.
+      for (const s of openServers) {
+        if (s && typeof s.close === "function" && s.listening) {
+          await new Promise((r) => s.close(r));
+        }
+      }
+      await new Promise((r) => setImmediate(r));
+      for (const sig of ["SIGTERM", "SIGINT"]) {
+        for (const l of process.listeners(sig)) {
+          if (!signalListeners[sig].includes(l)) process.removeListener(sig, l);
+        }
+      }
+      logSpy.mockRestore();
+      errSpy.mockRestore();
+    });
+
+    function startServer(env = {}) {
+      const saved = { PORT: process.env.PORT };
+      process.env.PORT = "0"; // ephemeral port — never collides
+      for (const [k, v] of Object.entries(env)) {
+        saved[k] = process.env[k];
+        if (v === undefined) delete process.env[k];
+        else process.env[k] = v;
+      }
+      let server;
+      jest.isolateModules(() => {
+        server = require("../server").start();
+      });
+      for (const [k, v] of Object.entries(saved)) {
+        if (v === undefined) delete process.env[k];
+        else process.env[k] = v;
+      }
+      openServers.push(server);
+      // The db module is mocked at the top of this file; return the SAME
+      // mock instance server.js bound its getDb/closeDb references to.
+      return { server, dbMock: require("../db") };
+    }
+
+    function waitListening(server) {
+      return new Promise((resolve) => {
+        if (server.listening) resolve();
+        else server.once("listening", resolve);
+      });
+    }
+
+    test("binds a listening server and opens the DB", async () => {
+      const { server, dbMock } = startServer({ AGENTLENS_API_KEY: undefined });
+      await waitListening(server);
+      expect(server.listening).toBe(true);
+      expect(dbMock.getDb).toHaveBeenCalledTimes(1);
+    });
+
+    test("logs the auth-enabled banner when AGENTLENS_API_KEY is set", async () => {
+      const { server } = startServer({ AGENTLENS_API_KEY: "k" });
+      await waitListening(server);
+      await new Promise((r) => setImmediate(r));
+      const logged = logSpy.mock.calls.map((c) => String(c[0])).join("\n");
+      expect(logged).toMatch(/API key authentication enabled/);
+    });
+
+    test("SIGTERM triggers graceful shutdown: closes server + DB, exits 0", async () => {
+      const exitSpy = jest.spyOn(process, "exit").mockImplementation(() => {});
+      try {
+        const { server, dbMock } = startServer({ AGENTLENS_API_KEY: undefined });
+        await waitListening(server);
+        // start() registered a handler that calls server.close(cb) then
+        // closeDb() + process.exit(0) in the callback.
+        const closed = new Promise((resolve) => server.on("close", resolve));
+        process.emit("SIGTERM");
+        await closed;
+        await new Promise((r) => setImmediate(r));
+        expect(dbMock.closeDb).toHaveBeenCalled();
+        expect(exitSpy).toHaveBeenCalledWith(0);
+      } finally {
+        exitSpy.mockRestore();
+      }
+    });
+
+    test("shutdown force-exits with code 1 if the server never drains", async () => {
+      const exitSpy = jest.spyOn(process, "exit").mockImplementation(() => {});
+      const { server, dbMock } = startServer({ AGENTLENS_API_KEY: undefined });
+      await waitListening(server);
+      jest.useFakeTimers();
+      try {
+        // Stub server.close so its callback NEVER fires (connections stuck),
+        // forcing the 10s watchdog timer to be the thing that exits.
+        server.close = jest.fn();
+        process.emit("SIGTERM");
+        jest.advanceTimersByTime(10000);
+        expect(dbMock.closeDb).toHaveBeenCalled();
+        expect(exitSpy).toHaveBeenCalledWith(1);
+      } finally {
+        jest.useRealTimers();
+        exitSpy.mockRestore();
+        // Real close so afterEach can drain it (we stubbed .close above).
+        delete server.close;
+      }
+    });
+  });
+
   describe("trust proxy configuration", () => {
     test("unset → trust proxy stays disabled (default false)", () => {
       const { app } = buildApp({ AGENTLENS_TRUST_PROXY: undefined });
