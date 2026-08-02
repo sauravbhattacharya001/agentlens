@@ -156,6 +156,20 @@ class TestFormatDuration:
         # The helper coerces with float(), so numeric strings work.
         assert _utils.format_duration("250") == "250ms"
 
+    def test_non_finite_returns_sentinel(self):
+        # Durations come from span deltas; a malformed/absent span can yield
+        # NaN or inf. These render as the same em-dash sentinel as None,
+        # never a garbage "nanh"/"infh" string.
+        assert _utils.format_duration(float("nan")) == "\u2014"
+        assert _utils.format_duration(float("inf")) == "\u2014"
+        assert _utils.format_duration(float("-inf")) == "\u2014"
+
+    def test_negative_clamps_to_zero(self):
+        # Consistent with format_duration_seconds: negatives clamp to zero
+        # rather than emitting a "-5ms" string.
+        assert _utils.format_duration(-5) == "0ms"
+        assert _utils.format_duration(-90_000) == "0ms"
+
 
 # ---------------------------------------------------------------------------
 # format_duration_seconds (coarse Ns / Nm Ns / Nh Nm vocabulary)

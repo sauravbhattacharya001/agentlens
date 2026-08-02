@@ -7,6 +7,7 @@ duplication.
 
 from __future__ import annotations
 
+import math
 import uuid
 from datetime import datetime, timezone
 from typing import Any, Optional
@@ -126,10 +127,21 @@ def format_duration(ms: Any) -> str:
         '2.0h'
         >>> format_duration(None)
         '—'
+
+    Robustness: durations are computed from span deltas (e.g. an average over
+    LLM calls, or ``end - start``), so a malformed/absent span can yield a
+    non-finite (``NaN``/``inf``) or negative value.  Non-finite input returns
+    the same ``"—"`` sentinel as ``None`` (rather than rendering ``"nanh"``),
+    and negatives are clamped to zero (``"0ms"``) — matching the clamp
+    behaviour of :func:`format_duration_seconds`.
     """
     if ms is None:
         return "\u2014"
     ms = float(ms)
+    if not math.isfinite(ms):
+        return "\u2014"
+    if ms < 0:
+        ms = 0.0
     if ms < 1000:
         return f"{ms:.0f}ms"
     secs = ms / 1000
