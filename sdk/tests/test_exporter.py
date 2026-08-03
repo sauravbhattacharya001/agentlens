@@ -117,6 +117,22 @@ class TestSessionStats:
         assert stats["tool_calls"] == 0
         assert stats["session_duration_ms"] is None
 
+    def test_zero_duration_session_reports_zero_not_none(self):
+        # Regression: a session whose ended_at == started_at has a KNOWN
+        # duration of 0 ms. A naive truthiness guard (`x if x else None`)
+        # would collapse that real zero into None ("unknown"), conflating a
+        # bounded instantaneous session with one whose timestamps are missing.
+        instant = datetime(2026, 3, 7, 10, 0, 0, tzinfo=timezone.utc)
+        s = Session(
+            session_id="instant-001",
+            agent_name="instant-agent",
+            started_at=instant,
+            ended_at=instant,
+        )
+        stats = _session_stats(s)
+        assert stats["session_duration_ms"] == 0.0
+        assert stats["session_duration_ms"] is not None
+
     def test_events_without_model_or_duration(self):
         # Exercises the false side of `if ev.model` and `if ev.duration_ms`:
         # a bare event contributes to the count but not to models_used or

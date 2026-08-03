@@ -112,7 +112,9 @@ def _session_stats(session: Session) -> dict[str, Any]:
         "event_types": event_types,
         "error_count": error_count,
         "total_event_duration_ms": round(total_duration_ms, 1),
-        "session_duration_ms": round(session_duration_ms, 1) if session_duration_ms else None,
+        "session_duration_ms": (
+            round(session_duration_ms, 1) if session_duration_ms is not None else None
+        ),
     }
 
 
