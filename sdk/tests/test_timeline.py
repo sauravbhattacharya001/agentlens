@@ -567,6 +567,19 @@ class TestHelpers:
         assert _format_timestamp_offset(123) == "00:00.123"
         assert _format_timestamp_offset(61000) == "01:01.000"
 
+    def test_format_timestamp_offset_negative(self):
+        # Clock skew can put an event before the session start; render a signed,
+        # zero-padded magnitude instead of the old int-floor artefact.
+        assert _format_timestamp_offset(-1) == "-00:00.001"
+        assert _format_timestamp_offset(-61000) == "-01:01.000"
+
+    def test_format_timestamp_offset_non_finite(self):
+        # A missing/malformed timestamp can yield non-finite offset math; the
+        # pure formatter must not raise ValueError.
+        assert _format_timestamp_offset(float("inf")) == "--:--.---"
+        assert _format_timestamp_offset(float("-inf")) == "--:--.---"
+        assert _format_timestamp_offset(float("nan")) == "--:--.---"
+
     def test_is_error_event_type(self):
         assert TimelineRenderer._is_error({"event_type": "error"}) is True
 

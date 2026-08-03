@@ -15,6 +15,8 @@ unchanged.
 
 from __future__ import annotations
 
+import math
+
 from agentlens._utils import format_duration as _format_duration_impl
 
 
@@ -50,8 +52,19 @@ def _format_duration(ms: float | None) -> str:
 
 
 def _format_timestamp_offset(ms: float) -> str:
-    """Format millisecond offset as MM:SS.mmm."""
-    total_s = ms / 1000.0
+    """Format a millisecond offset as ``MM:SS.mmm``.
+
+    Offsets come from ``event_ts - session_start`` timestamp math, so a missing
+    or malformed timestamp can legitimately yield a non-finite value; guard it
+    rather than raising ``ValueError`` deep inside a pure formatter. A negative
+    offset (event before the session start, e.g. clock skew) is rendered with a
+    leading sign and zero-padded, magnitude-based ``MM:SS.mmm`` instead of the
+    previous ``int`` floor artefact (``-1:59.999`` for ``-1``).
+    """
+    if not math.isfinite(ms):
+        return "--:--.---"
+    sign = "-" if ms < 0 else ""
+    total_s = abs(ms) / 1000.0
     minutes = int(total_s // 60)
     seconds = total_s - minutes * 60
-    return f"{minutes:02d}:{seconds:06.3f}"
+    return f"{sign}{minutes:02d}:{seconds:06.3f}"
