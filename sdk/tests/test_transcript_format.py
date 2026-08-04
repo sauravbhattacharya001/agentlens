@@ -108,3 +108,130 @@ def test_fmt_duration_minutes_at_or_above_ninety():
     start = datetime(2026, 1, 1, 0, 0, 0, tzinfo=timezone.utc)
     end = datetime(2026, 1, 1, 0, 5, 0, tzinfo=timezone.utc)
     assert _fmt_duration(start, end).endswith("(5 minutes)")
+
+
+# ---------------------------------------------------------------------------
+# _summarize (compact single-line rendering of an input/output value)
+# ---------------------------------------------------------------------------
+
+
+def test_summarize_none_is_empty():
+    from agentlens.transcript_format import _summarize
+
+    assert _summarize(None) == ""
+
+
+def test_summarize_passes_short_string_through():
+    from agentlens.transcript_format import _summarize
+
+    assert _summarize("hello world") == "hello world"
+
+
+def test_summarize_collapses_internal_whitespace_and_newlines():
+    from agentlens.transcript_format import _summarize
+
+    assert _summarize("a\tb\n\n  c   d") == "a b c d"
+
+
+def test_summarize_serializes_non_string_json():
+    from agentlens.transcript_format import _summarize
+
+    # Falsy-but-not-None scalars must still render, not vanish.
+    assert _summarize(0) == "0"
+    assert _summarize(False) == "false"
+    assert _summarize({"a": 1}) == '{"a": 1}'
+
+
+def test_summarize_falls_back_to_str_for_unserializable():
+    from agentlens.transcript_format import _summarize
+
+    class NotJson:
+        def __repr__(self):
+            return "NOTJSON"
+
+    assert _summarize(NotJson()) == "NOTJSON"
+
+
+def test_summarize_truncates_long_text_to_200_chars_with_ellipsis():
+    from agentlens.transcript_format import _summarize
+
+    out = _summarize("x" * 500)
+    assert len(out) == 200
+    assert out.endswith("\u2026")
+    assert out[:-1] == "x" * 199
+
+
+def test_summarize_does_not_truncate_at_exactly_200_chars():
+    from agentlens.transcript_format import _summarize
+
+    text = "y" * 200
+    assert _summarize(text) == text
+
+
+# ---------------------------------------------------------------------------
+# _get_tool (extract a tool_call dict from an event, incl. inline fields)
+# ---------------------------------------------------------------------------
+
+
+def test_get_tool_reads_nested_tool_call_dict():
+    from agentlens.transcript_format import _get_tool
+
+    tc = {"tool_name": "grep", "tool_input": {"q": "x"}}
+    assert _get_tool({"tool_call": tc}) is tc
+
+
+def test_get_tool_synthesizes_from_inline_fields():
+    from agentlens.transcript_format import _get_tool
+
+    got = _get_tool(
+        {"tool_name": "bash", "tool_input": {"cmd": "ls"}, "tool_output": {"rc": 0}}
+    )
+    assert got == {
+        "tool_name": "bash",
+        "tool_input": {"cmd": "ls"},
+        "tool_output": {"rc": 0},
+    }
+
+
+def test_get_tool_returns_none_when_no_tool_present():
+    from agentlens.transcript_format import _get_tool
+
+    assert _get_tool({"event_type": "llm_call"}) is None
+    assert _get_tool({"tool_name": ""}) is None
+
+
+def test_get_tool_ignores_non_dict_tool_call_and_uses_inline():
+    from agentlens.transcript_format import _get_tool
+
+    # A non-dict tool_call is skipped; inline tool_name still wins.
+    got = _get_tool({"tool_call": "oops", "tool_name": "read"})
+    assert got == {"tool_name": "read", "tool_input": None, "tool_output": None}
+
+
+# ---------------------------------------------------------------------------
+# _as_event_dict (normalize a model OR a plain dict into a dict)
+# ---------------------------------------------------------------------------
+
+
+def test_as_event_dict_passes_plain_dict_through():
+    from agentlens.transcript_format import _as_event_dict
+
+    d = {"event_type": "generic", "session_id": "s1"}
+    assert _as_event_dict(d) is d
+
+
+def test_as_event_dict_dumps_model_with_nested_tool_call():
+    from agentlens.models import AgentEvent, ToolCall
+    from agentlens.transcript_format import _as_event_dict, _get_tool
+
+    ev = AgentEvent(
+        event_type="tool_call",
+        tool_call=ToolCall(tool_name="grep", tool_input={"q": "x"}),
+    )
+    out = _as_event_dict(ev)
+    assert isinstance(out, dict)
+    assert out["event_type"] == "tool_call"
+    # The nested model dumped to a dict, so _get_tool can read it.
+    tool = _get_tool(out)
+    assert tool is not None
+    assert tool["tool_name"] == "grep"
