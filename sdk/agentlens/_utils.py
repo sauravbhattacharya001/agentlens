@@ -98,7 +98,16 @@ def format_duration_seconds(seconds: float) -> str:
         '2m 5s'
         >>> format_duration_seconds(3725)
         '1h 2m'
+
+    Robustness: durations are derived from span deltas, so a malformed/absent
+    span can yield a non-finite (``NaN``/``inf``) value.  Non-finite input is
+    clamped to ``"0s"`` (rather than raising ``ValueError``/``OverflowError``
+    from ``int()``), matching the non-finite handling of :func:`format_duration`
+    and the negative-clamp behaviour below.
     """
+    seconds = float(seconds)
+    if not math.isfinite(seconds):
+        seconds = 0.0
     s = int(seconds)
     if s < 0:
         s = 0

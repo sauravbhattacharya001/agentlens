@@ -201,3 +201,13 @@ class TestFormatDurationSeconds:
         # Whole-second granularity: fractional input is truncated, not rounded.
         assert _utils.format_duration_seconds(45.9) == "45s"
         assert _utils.format_duration_seconds(125.4) == "2m 5s"
+
+    def test_non_finite_clamps_to_zero(self):
+        # A malformed/absent span delta can yield a non-finite duration.
+        # `int(float('nan'))` raises ValueError and `int(float('inf'))`
+        # raises OverflowError, so the helper must clamp non-finite input to
+        # `"0s"` (mirroring format_duration's non-finite handling) rather
+        # than propagating the exception up through the narrative renderers.
+        assert _utils.format_duration_seconds(float("nan")) == "0s"
+        assert _utils.format_duration_seconds(float("inf")) == "0s"
+        assert _utils.format_duration_seconds(float("-inf")) == "0s"

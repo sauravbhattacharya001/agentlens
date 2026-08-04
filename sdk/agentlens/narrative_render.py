@@ -17,6 +17,8 @@ There is no session-traversal orchestration here (that stays on
 
 from __future__ import annotations
 
+import math
+
 from agentlens.models import AgentEvent, Session
 from agentlens._utils import format_duration_seconds as _fmt_seconds
 from agentlens.narrative_types import (
@@ -310,8 +312,10 @@ def fmt_dur(seconds: float) -> str:
     Delegates the ``Ns`` / ``Nm Ns`` / ``Nh Nm`` formatting to the shared
     :func:`agentlens._utils.format_duration_seconds` helper; the only extra
     behaviour here is suppressing zero/negative durations to an empty string
-    so summaries omit the duration clause entirely.
+    so summaries omit the duration clause entirely.  Non-finite input
+    (``NaN``/``inf`` from a malformed span delta) is likewise suppressed to
+    ``""`` rather than rendered.
     """
-    if seconds <= 0:
+    if not math.isfinite(seconds) or seconds <= 0:
         return ""
     return _fmt_seconds(seconds)

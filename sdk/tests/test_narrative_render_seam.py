@@ -120,6 +120,14 @@ class TestNarrativeRenderSeam(unittest.TestCase):
         self.assertEqual(narrative_render.fmt_dur(125), "2m 5s")
         self.assertEqual(narrative_render.fmt_dur(3725), "1h 2m")
 
+    def test_fmt_dur_suppresses_non_finite(self):
+        # A non-finite duration_s (from a malformed span delta) must be
+        # suppressed to "" like zero/negative, not crash on int(nan)/int(inf)
+        # or render a "nan"/"inf" clause into the summary.
+        self.assertEqual(narrative_render.fmt_dur(float("nan")), "")
+        self.assertEqual(narrative_render.fmt_dur(float("inf")), "")
+        self.assertEqual(narrative_render.fmt_dur(float("-inf")), "")
+
     def test_render_module_has_no_generator_dependency(self):
         # The engine consumes events/config but must not import the orchestrator
         # (that would invert the dependency the split establishes).
