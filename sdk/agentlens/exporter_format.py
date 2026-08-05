@@ -19,6 +19,7 @@ are unchanged.
 
 from __future__ import annotations
 
+import math
 import tempfile
 from datetime import datetime
 from pathlib import Path
@@ -33,6 +34,7 @@ __all__ = [
     "_duration_human",
     "_escape",
     "_event_to_row",
+    "_finite_ms",
     "_iso",
     "_session_stats",
     "_validate_output_path",
@@ -72,6 +74,27 @@ def _validate_output_path(path: str) -> Path:
     )
 
 
+def _finite_ms(value: Any) -> float:
+    """Coerce a raw event ``duration_ms`` to a safe, non-negative finite float.
+
+    Bad instrumentation can hand us a non-numeric value or a non-finite float
+    (``inf``/``nan``) for an event ``duration_ms``.  If such a value is summed
+    into ``total_event_duration_ms`` it poisons the running total, which then
+    serialises (via the CSV/HTML report and ``json.dumps``) as the bare tokens
+    ``Infinity``/``NaN`` — invalid JSON and a meaningless duration.  Normalising
+    at the single accumulation point keeps the reported total finite.  Mirrors
+    ``agentlens.flamegraph._finite_ms``; kept local so the two formatters stay
+    independent.
+    """
+    try:
+        f = float(value)
+    except (TypeError, ValueError):
+        return 0.0
+    if not math.isfinite(f):  # NaN or ±inf
+        return 0.0
+    return f if f > 0 else 0.0
+
+
 def _iso(dt: datetime | None) -> str | None:
     """Convert datetime to ISO string or None."""
     return dt.isoformat() if dt else None
@@ -93,7 +116,7 @@ def _session_stats(session: Session) -> dict[str, Any]:
         if ev.tool_call:
             tool_calls.append(ev.tool_call.tool_name)
         if ev.duration_ms:
-            total_duration_ms += ev.duration_ms
+            total_duration_ms += _finite_ms(ev.duration_ms)
         if ev.event_type == "error":
             error_count += 1
 

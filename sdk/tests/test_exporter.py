@@ -5,6 +5,7 @@ from __future__ import annotations
 import csv
 import io
 import json
+import math
 import os
 import tempfile
 from datetime import datetime, timezone, timedelta
@@ -21,6 +22,7 @@ from agentlens.exporter import (
     _escape,
     _validate_output_path,
 )
+from agentlens.exporter_format import _finite_ms
 
 
 # ── Fixtures ────────────────────────────────────────────────────────
@@ -153,6 +155,41 @@ class TestSessionStats:
         stats = _session_stats(s)
         assert stats["error_count"] == 1
         assert stats["event_types"]["error"] == 1
+
+    def test_non_finite_event_duration_does_not_poison_total(self):
+        # Regression: bad instrumentation can hand an event a non-finite
+        # duration_ms (inf/nan). A naive `total += ev.duration_ms` would make
+        # total_event_duration_ms itself inf/nan, which then serialises via the
+        # report/json.dumps as the bare tokens Infinity/NaN (invalid JSON, a
+        # meaningless duration). The _finite_ms guard coerces such values to 0
+        # so the reported total stays finite and additive.
+        s = Session(session_id="badur-001", agent_name="badur-agent")
+        s.add_event(AgentEvent(event_id="e0", event_type="llm_call", duration_ms=100.0))
+        s.add_event(AgentEvent(event_id="e1", event_type="llm_call", duration_ms=float("inf")))
+        s.add_event(AgentEvent(event_id="e2", event_type="llm_call", duration_ms=float("nan")))
+        s.add_event(AgentEvent(event_id="e3", event_type="llm_call", duration_ms=-50.0))
+        stats = _session_stats(s)
+        # Only the single valid 100ms event contributes; inf/nan/negative -> 0.
+        assert stats["total_event_duration_ms"] == 100.0
+        assert math.isfinite(stats["total_event_duration_ms"])
+
+
+class TestFiniteMs:
+    def test_valid_positive_passes_through(self):
+        assert _finite_ms(250.0) == 250.0
+
+    def test_non_finite_coerced_to_zero(self):
+        assert _finite_ms(float("inf")) == 0.0
+        assert _finite_ms(float("-inf")) == 0.0
+        assert _finite_ms(float("nan")) == 0.0
+
+    def test_negative_and_zero_coerced_to_zero(self):
+        assert _finite_ms(-5.0) == 0.0
+        assert _finite_ms(0.0) == 0.0
+
+    def test_non_numeric_coerced_to_zero(self):
+        assert _finite_ms(None) == 0.0
+        assert _finite_ms("not-a-number") == 0.0
 
 
 class TestValidateOutputPath:
