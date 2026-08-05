@@ -6,9 +6,10 @@ import json
 import os
 import tempfile
 import unittest
+from math import isfinite as math_isfinite
 from datetime import datetime, timedelta, timezone
 
-from agentlens.flamegraph import Flamegraph, flamegraph_html, _FGNode, _event_label, _parse_ts, _HTML_TEMPLATE
+from agentlens.flamegraph import Flamegraph, flamegraph_html, _FGNode, _event_label, _parse_ts, _finite_ms, _HTML_TEMPLATE
 from agentlens.models import AgentEvent, Session, ToolCall
 from agentlens.span import Span
 
@@ -481,6 +482,63 @@ class TestFlamegraphBuildBranches(unittest.TestCase):
         fg = Flamegraph(events=[], spans=[span])
         node = fg.to_data()["nodes"][0]
         self.assertEqual(node["attrs"], {"region": "us-east", "retries": 2})
+
+
+class TestFiniteMs(unittest.TestCase):
+    def test_finite_positive_passes_through(self):
+        self.assertEqual(_finite_ms(123.5), 123.5)
+
+    def test_none_and_non_numeric_become_zero(self):
+        self.assertEqual(_finite_ms(None), 0.0)
+        self.assertEqual(_finite_ms("nope"), 0.0)
+
+    def test_non_finite_becomes_zero(self):
+        self.assertEqual(_finite_ms(float("inf")), 0.0)
+        self.assertEqual(_finite_ms(float("-inf")), 0.0)
+        self.assertEqual(_finite_ms(float("nan")), 0.0)
+
+    def test_negative_becomes_zero(self):
+        self.assertEqual(_finite_ms(-42.0), 0.0)
+
+    def test_numeric_string_is_coerced(self):
+        self.assertEqual(_finite_ms("250"), 250.0)
+
+
+class TestNonFiniteDurationHardening(unittest.TestCase):
+    """Non-finite event/span durations must never reach the serialized data.
+
+    A raw ``duration_ms`` of inf/nan used to poison ``_total_ms`` and be
+    emitted by ``json.dumps`` as the bare tokens ``Infinity``/``NaN`` —
+    invalid JSON that breaks the dashboard's ``JSON.parse``.
+    """
+
+    def test_infinite_event_duration_keeps_total_finite(self):
+        e = _make_event(offset_ms=0, duration_ms=float("inf"))
+        fg = Flamegraph(events=[e])
+        data = fg.to_data()
+        self.assertTrue(math_isfinite(data["totalMs"]))
+        for n in data["nodes"]:
+            self.assertTrue(math_isfinite(n["duration"]))
+
+    def test_nan_span_duration_keeps_output_finite(self):
+        span = Span(
+            name="broken",
+            started_at=_ts(0),
+            ended_at=_ts(100),
+            duration_ms=float("nan"),
+        )
+        fg = Flamegraph(events=[], spans=[span])
+        data = fg.to_data()
+        self.assertTrue(math_isfinite(data["totalMs"]))
+        for n in data["nodes"]:
+            self.assertTrue(math_isfinite(n["duration"]))
+
+    def test_render_html_is_valid_json_with_non_finite_input(self):
+        e = _make_event(offset_ms=0, duration_ms=float("inf"))
+        html = Flamegraph(events=[e]).render_html()
+        # The embedded literal must be parseable JSON — no bare Infinity/NaN.
+        self.assertNotIn("Infinity", html)
+        self.assertNotIn("NaN", html)
 
 
 if __name__ == "__main__":

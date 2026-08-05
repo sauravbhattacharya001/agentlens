@@ -97,6 +97,26 @@ def _parse_ts(ts: datetime | str | None) -> float | None:
     return ts.timestamp() * 1000
 
 
+def _finite_ms(value: Any) -> float:
+    """Coerce a raw duration to a safe, non-negative, finite millisecond float.
+
+    Bad instrumentation can hand us ``None``, a non-numeric value, or a
+    non-finite float (``inf``/``nan``) for an event or span ``duration_ms``.
+    If any of those reaches the node tree it poisons ``_total_ms`` and, via
+    :meth:`Flamegraph.to_data`, is serialized by ``json.dumps`` as the bare
+    tokens ``Infinity``/``NaN`` — invalid JSON that breaks the browser
+    dashboard's ``JSON.parse``.  Normalising here (the single point where a
+    raw duration enters a node) keeps every downstream number finite.
+    """
+    try:
+        f = float(value)
+    except (TypeError, ValueError):
+        return 0.0
+    if f != f or f in (float("inf"), float("-inf")):  # NaN or ±inf
+        return 0.0
+    return f if f > 0 else 0.0
+
+
 def _event_label(event: AgentEvent) -> str:
     """Generate a readable label for an event."""
     if event.tool_call:
@@ -181,7 +201,7 @@ class Flamegraph:
                 event_times.append((t, e))
                 if t < t_min:
                     t_min = t
-                end_t = t + (e.duration_ms or 0)
+                end_t = t + _finite_ms(e.duration_ms)
                 if end_t > t_max:
                     t_max = end_t
 
@@ -210,7 +230,7 @@ class Flamegraph:
 
         def _build_span_node(span: Span, depth: int) -> _FGNode:
             st = _parse_ts(span.started_at)
-            dur = span.duration_ms or 0
+            dur = _finite_ms(span.duration_ms)
             if st is None:
                 st = origin
             node = _FGNode(
@@ -243,7 +263,7 @@ class Flamegraph:
             node = _FGNode(
                 name=_event_label(e),
                 start_ms=et - origin,
-                duration_ms=e.duration_ms or max(self._total_ms * 0.01, 1),
+                duration_ms=_finite_ms(e.duration_ms) or max(self._total_ms * 0.01, 1),
                 depth=0,
                 event_type=e.event_type,
                 model=e.model,
