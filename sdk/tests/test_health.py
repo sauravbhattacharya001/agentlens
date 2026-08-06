@@ -2,6 +2,7 @@
 
 from __future__ import annotations
 
+import math
 from unittest.mock import MagicMock
 
 import pytest
@@ -944,3 +945,79 @@ class TestScoreSessionToolCallBranches:
         assert report.session_id == "sparse"
         assert report.event_count == 1
         assert report.total_tokens == 0
+
+
+# ---------------------------------------------------------------------------
+# Non-finite / negative duration_ms hardening (regression)
+#
+# duration_ms is derived from span deltas, so a malformed/absent span can
+# yield NaN/inf or a negative value. Left unguarded a single NaN poisons
+# total_duration, the average, and the P95 (all NaN), and hence the reported
+# total_duration_ms; a negative understates them. _aggregate must drop such
+# samples, matching the SDK-wide ingest-guard convention.
+# ---------------------------------------------------------------------------
+
+class TestDurationRobustness:
+    def _ev(self, dur):
+        return {
+            "event_type": "llm_call",
+            "duration_ms": dur,
+            "tokens_in": 10,
+            "tokens_out": 10,
+            "tool_call": None,
+        }
+
+    def test_nan_duration_does_not_poison_total(self):
+        report = HealthScorer().score(
+            [self._ev(float("nan")), self._ev(100.0)]
+        )
+        # NaN sample dropped -> only the 100ms sample counts.
+        assert report.total_duration_ms == pytest.approx(100.0)
+        assert math.isfinite(report.overall_score)
+
+    def test_inf_duration_is_dropped(self):
+        report = HealthScorer().score(
+            [self._ev(float("inf")), self._ev(200.0)]
+        )
+        assert report.total_duration_ms == pytest.approx(200.0)
+        assert math.isfinite(report.overall_score)
+
+    def test_negative_duration_is_dropped(self):
+        report = HealthScorer().score(
+            [self._ev(-500.0), self._ev(100.0)]
+        )
+        assert report.total_duration_ms == pytest.approx(100.0)
+
+    def test_non_numeric_duration_is_dropped(self):
+        report = HealthScorer().score(
+            [self._ev("oops"), self._ev(None), self._ev(50.0)]
+        )
+        assert report.total_duration_ms == pytest.approx(50.0)
+
+    def test_latency_metrics_ignore_bad_samples(self):
+        # avg + p95 must be finite and reflect only the clean 100ms sample.
+        report = HealthScorer().score(
+            [self._ev(float("nan")), self._ev(-1.0), self._ev(100.0)]
+        )
+        avg = next(m for m in report.metrics if m.name == "avg_latency")
+        p95 = next(m for m in report.metrics if m.name == "p95_latency")
+        assert avg.value == pytest.approx(100.0)
+        assert p95.value == pytest.approx(100.0)
+        assert math.isfinite(avg.score) and math.isfinite(p95.score)
+
+    def test_all_durations_bad_falls_back_to_no_data(self):
+        # If every duration is unusable, treat it like "no duration data".
+        report = HealthScorer().score(
+            [self._ev(float("nan")), self._ev(float("-inf")), self._ev(-3.0)]
+        )
+        assert report.total_duration_ms == pytest.approx(0.0)
+        avg = next(m for m in report.metrics if m.name == "avg_latency")
+        assert "No duration data" in avg.detail
+        assert avg.score == pytest.approx(100.0)
+
+    def test_zero_duration_is_kept(self):
+        # 0.0 is a valid (finite, non-negative) sample and must be counted.
+        report = HealthScorer().score([self._ev(0.0), self._ev(100.0)])
+        assert report.total_duration_ms == pytest.approx(100.0)
+        avg = next(m for m in report.metrics if m.name == "avg_latency")
+        assert avg.value == pytest.approx(50.0)

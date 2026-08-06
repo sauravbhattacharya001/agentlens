@@ -12,6 +12,7 @@ paths (``agentlens.health`` and ``agentlens``) are unchanged.
 
 from __future__ import annotations
 
+import math
 from typing import Any
 
 from agentlens.health_types import (
@@ -66,11 +67,24 @@ class HealthScorer:
                     if isinstance(out, dict) and out.get("error"):
                         error_count += 1
 
-            # Duration
+            # Duration. Durations are derived from span deltas, so a
+            # malformed/absent span can yield a non-finite (``NaN``/``inf``)
+            # or negative value. Left unguarded these poison the aggregates:
+            # a single ``NaN`` makes ``total_duration``, the average, and the
+            # P95 all ``NaN`` (and hence the reported ``total_duration_ms``),
+            # while a negative understates them. Coerce to a clean float and
+            # drop non-finite/negative samples — matching the ingest-guard
+            # convention used across the SDK (``format_duration``,
+            # ``exporter``/``_session_stats``, ``flamegraph``).
             dur = e.get("duration_ms")
             if dur is not None:
-                durations.append(dur)
-                total_duration += dur
+                try:
+                    dur = float(dur)
+                except (TypeError, ValueError):
+                    dur = None
+                if dur is not None and math.isfinite(dur) and dur >= 0.0:
+                    durations.append(dur)
+                    total_duration += dur
 
             # Tokens
             total_tokens += (e.get("tokens_in") or 0) + (e.get("tokens_out") or 0)
