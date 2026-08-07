@@ -291,5 +291,57 @@ class TestBuildErrors(unittest.TestCase):
         self.assertIn("— Unknown error", lines[0])
 
 
+class TestBuildToolSummaries(unittest.TestCase):
+    def _tool(self, name, duration_ms, error=False):
+        return AgentEvent(
+            event_type="tool_call", timestamp=_ts(1),
+            tool_call=ToolCall(tool_name=name, duration_ms=duration_ms),
+            output_data={"error": "x"} if error else None,
+        )
+
+    def test_aggregates_counts_and_average_duration(self):
+        summaries = nr.build_tool_summaries([
+            self._tool("search", 10.0),
+            self._tool("search", 30.0, error=True),
+        ])
+        s = summaries["search"]
+        self.assertEqual(s.call_count, 2)
+        self.assertEqual(s.success_count, 1)
+        self.assertEqual(s.failure_count, 1)
+        self.assertEqual(s.total_duration_ms, 40.0)
+        self.assertEqual(s.avg_duration_ms, 20.0)
+
+    def test_skips_event_without_tool_call(self):
+        summaries = nr.build_tool_summaries([
+            AgentEvent(event_type="tool_call", timestamp=_ts(1), tool_call=None),
+        ])
+        self.assertEqual(summaries, {})
+
+    def test_non_finite_duration_excluded_from_totals(self):
+        # Dirty ingest: inf/nan/negative durations must NOT poison the
+        # accumulated total or the derived average. Same guard as health/
+        # exporter/flamegraph. The call itself still counts.
+        for bad in (float("inf"), float("-inf"), float("nan"), -5.0):
+            summaries = nr.build_tool_summaries([
+                self._tool("search", 10.0),
+                self._tool("search", bad),
+            ])
+            s = summaries["search"]
+            self.assertEqual(s.call_count, 2)
+            self.assertEqual(s.total_duration_ms, 10.0)
+            # avg stays finite (10/2), never inf/nan/negative.
+            self.assertEqual(s.avg_duration_ms, 5.0)
+
+    def test_all_durations_bad_leaves_zero_total(self):
+        summaries = nr.build_tool_summaries([
+            self._tool("search", float("nan")),
+            self._tool("search", -1.0),
+        ])
+        s = summaries["search"]
+        self.assertEqual(s.call_count, 2)
+        self.assertEqual(s.total_duration_ms, 0.0)
+        self.assertEqual(s.avg_duration_ms, 0.0)
+
+
 if __name__ == "__main__":
     unittest.main()

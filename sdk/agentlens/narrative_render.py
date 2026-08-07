@@ -74,8 +74,15 @@ def build_tool_summaries(
             ts.failure_count += 1
         else:
             ts.success_count += 1
-        if tc.duration_ms:
-            ts.total_duration_ms += tc.duration_ms
+        # Only fold in a finite, non-negative duration.  Bad ingest data
+        # (a non-finite or negative ``duration_ms``) would otherwise poison
+        # ``total_duration_ms`` and propagate inf/nan/negative into
+        # ``avg_duration_ms`` and the rendered narrative -- the same class of
+        # dirty-duration guard applied across the SDK (health, exporter,
+        # flamegraph, timeline).
+        dur = tc.duration_ms
+        if dur and math.isfinite(dur) and dur > 0:
+            ts.total_duration_ms += dur
     for ts in tool_map.values():
         if ts.call_count:
             ts.avg_duration_ms = ts.total_duration_ms / ts.call_count
