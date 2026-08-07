@@ -123,6 +123,30 @@ class TestPercentile:
         # p=37.5: k = 0.375*4 = 1.5 → halfway between 1.0 and 2.0
         assert _utils.percentile([0.0, 1.0, 2.0, 3.0, 4.0], 37.5) == 1.5
 
+    def test_p_above_100_clamps_to_max(self):
+        # p > 100 would send k past the last rank and raise IndexError; it is
+        # clamped to p=100 → the maximum, identical to an in-range p100 call.
+        data = [1.0, 2.0, 3.0, 4.0]
+        assert _utils.percentile(data, 150) == _utils.percentile(data, 100) == 4.0
+
+    def test_p_below_0_clamps_to_min(self):
+        # p < 0 would make k negative and silently wrap to a negative index
+        # (the wrong tail); it is clamped to p=0 → the minimum.
+        data = [1.0, 2.0, 3.0, 4.0]
+        assert _utils.percentile(data, -10) == _utils.percentile(data, 0) == 1.0
+
+    def test_non_finite_p_treated_as_zero(self):
+        # A NaN/inf rank must not poison the index math; treated as p=0.
+        data = [1.0, 2.0, 3.0, 4.0]
+        assert _utils.percentile(data, float("nan")) == 1.0
+        assert _utils.percentile(data, float("inf")) == 1.0  # non-finite → p=0 → min
+        assert _utils.percentile(data, float("-inf")) == 1.0
+
+    def test_out_of_range_p_on_single_and_empty(self):
+        # Empty/single-element short-circuits are unaffected by the clamp.
+        assert _utils.percentile([], 150) == 0.0
+        assert _utils.percentile([42.0], -5) == 42.0
+
 
 # ---------------------------------------------------------------------------
 # format_duration

@@ -64,6 +64,12 @@ def percentile(sorted_values: list[float], p: float) -> float:
     Uses linear interpolation between the two nearest ranks.
     Returns ``0.0`` for empty input.
 
+    *p* is clamped to the closed range ``[0, 100]`` (and non-finite *p* is
+    treated as ``0``): an out-of-range rank would otherwise send ``k`` past the
+    ends of the list, silently wrapping to a negative index (``p < 0``) or
+    raising ``IndexError`` (``p > 100``).  Clamping keeps the helper total for
+    any caller-supplied rank while leaving every in-range result unchanged.
+
     .. note:: *sorted_values* must already be sorted in ascending order.
        For unsorted input, use ``percentile(sorted(data), p)``.
     """
@@ -72,6 +78,12 @@ def percentile(sorted_values: list[float], p: float) -> float:
         return 0.0
     if n == 1:
         return sorted_values[0]
+    if not math.isfinite(p):
+        p = 0.0
+    elif p < 0.0:
+        p = 0.0
+    elif p > 100.0:
+        p = 100.0
     k = (p / 100.0) * (n - 1)
     lo = int(k)
     hi = min(lo + 1, n - 1)
