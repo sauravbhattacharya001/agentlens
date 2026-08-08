@@ -194,6 +194,19 @@ class TestFormatDuration:
         assert _utils.format_duration(-5) == "0ms"
         assert _utils.format_duration(-90_000) == "0ms"
 
+    def test_unparseable_input_returns_sentinel(self):
+        # `ms` is typed `Any` and durations come from possibly-malformed span
+        # data, so a non-numeric string or an unrelated object must not crash
+        # the caller with the `ValueError`/`TypeError` that `float()` raises.
+        # It returns the same em-dash sentinel as None (mirroring parse_iso's
+        # tolerance of malformed input).
+        assert _utils.format_duration("abc") == "\u2014"
+        assert _utils.format_duration("") == "\u2014"
+        assert _utils.format_duration(object()) == "\u2014"
+        assert _utils.format_duration([1, 2]) == "\u2014"
+        # A numeric string still parses (regression guard for the float() path).
+        assert _utils.format_duration("250") == "250ms"
+
 
 # ---------------------------------------------------------------------------
 # format_duration_seconds (coarse Ns / Nm Ns / Nh Nm vocabulary)
@@ -220,6 +233,18 @@ class TestFormatDurationSeconds:
     def test_negative_clamps_to_zero(self):
         # Negative input is clamped rather than producing a "-1s" string.
         assert _utils.format_duration_seconds(-5) == "0s"
+
+    def test_unparseable_input_clamps_to_zero(self):
+        # `seconds` is derived from span deltas that may be malformed, so a
+        # non-numeric string or an unrelated object must clamp to "0s" rather
+        # than propagating the `ValueError`/`TypeError` that `float()` raises
+        # (mirroring format_duration's sentinel and parse_iso's tolerance).
+        assert _utils.format_duration_seconds("abc") == "0s"
+        assert _utils.format_duration_seconds("") == "0s"
+        assert _utils.format_duration_seconds(object()) == "0s"
+        assert _utils.format_duration_seconds([1, 2]) == "0s"
+        # A numeric string still parses (regression guard for the float() path).
+        assert _utils.format_duration_seconds("45") == "45s"
 
     def test_truncates_fractional_seconds(self):
         # Whole-second granularity: fractional input is truncated, not rounded.

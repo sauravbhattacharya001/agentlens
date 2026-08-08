@@ -59,7 +59,7 @@ def parse_iso(value: str | Any) -> Optional[datetime]:
 
 
 def percentile(sorted_values: list[float], p: float) -> float:
-    """Compute the *p*-th percentile (0–100) of pre-sorted *values*.
+    """Compute the *p*-th percentile (0-100) of pre-sorted *values*.
 
     Uses linear interpolation between the two nearest ranks.
     Returns ``0.0`` for empty input.
@@ -115,9 +115,15 @@ def format_duration_seconds(seconds: float) -> str:
     span can yield a non-finite (``NaN``/``inf``) value.  Non-finite input is
     clamped to ``"0s"`` (rather than raising ``ValueError``/``OverflowError``
     from ``int()``), matching the non-finite handling of :func:`format_duration`
-    and the negative-clamp behaviour below.
+    and the negative-clamp behaviour below.  Likewise, an unparseable
+    value (a non-numeric string or an unrelated object) is treated as ``"0s"``
+    rather than propagating the ``ValueError``/``TypeError`` from ``float()`` -
+    matching :func:`parse_iso`'s tolerance of malformed input.
     """
-    seconds = float(seconds)
+    try:
+        seconds = float(seconds)
+    except (ValueError, TypeError):
+        seconds = 0.0
     if not math.isfinite(seconds):
         seconds = 0.0
     s = int(seconds)
@@ -135,7 +141,7 @@ def format_duration_seconds(seconds: float) -> str:
 def format_duration(ms: Any) -> str:
     """Format milliseconds into a human-readable duration string.
 
-    Returns ``"—"`` for ``None`` values.  Handles the full range from
+    Returns ``"-"`` for ``None`` values.  Handles the full range from
     sub-second to hours::
 
         >>> format_duration(42)
@@ -147,18 +153,25 @@ def format_duration(ms: Any) -> str:
         >>> format_duration(7_200_000)
         '2.0h'
         >>> format_duration(None)
-        '—'
+        '-'
 
     Robustness: durations are computed from span deltas (e.g. an average over
     LLM calls, or ``end - start``), so a malformed/absent span can yield a
     non-finite (``NaN``/``inf``) or negative value.  Non-finite input returns
-    the same ``"—"`` sentinel as ``None`` (rather than rendering ``"nanh"``),
-    and negatives are clamped to zero (``"0ms"``) — matching the clamp
-    behaviour of :func:`format_duration_seconds`.
+    the same ``"-"`` sentinel as ``None`` (rather than rendering ``"nanh"``),
+    and negatives are clamped to zero (``"0ms"``) - matching the clamp
+    behaviour of :func:`format_duration_seconds`.  An unparseable value (a
+    non-numeric string or an unrelated object) returns the same ``"-"``
+    sentinel as ``None`` rather than propagating the ``ValueError``/
+    ``TypeError`` from ``float()`` - matching :func:`parse_iso`'s tolerance of
+    malformed input.
     """
     if ms is None:
         return "\u2014"
-    ms = float(ms)
+    try:
+        ms = float(ms)
+    except (ValueError, TypeError):
+        return "\u2014"
     if not math.isfinite(ms):
         return "\u2014"
     if ms < 0:
