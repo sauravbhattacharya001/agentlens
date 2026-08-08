@@ -19,6 +19,7 @@ Usage:
 from __future__ import annotations
 
 import json
+import math
 from typing import Any, Callable
 from collections.abc import Iterator
 
@@ -40,6 +41,25 @@ BreakpointFn = Callable[[AgentEvent], bool]
 CallbackFn = Callable[["ReplayFrame"], None]
 
 
+def _validate_speed(speed: float) -> float:
+    """Return *speed* if it is a finite, strictly-positive playback multiplier.
+
+    The multiplier divides every inter-event gap (``gap_ms / speed``), so it
+    must be ``> 0``.  A bare ``speed <= 0`` check is *not* sufficient: ``NaN``
+    compares ``False`` against every ordering operator, so a non-finite speed
+    would slip through and poison the timing math -- ``gap_ms / NaN`` yields
+    ``NaN`` wall-delays and elapsed times, and :meth:`SessionReplayer.to_json`
+    would then emit bare ``NaN`` tokens (invalid JSON for strict parsers).
+    ``inf`` is likewise rejected rather than silently collapsing every delay to
+    ``0``.  Rejecting non-finite input keeps the replayer's timing total for
+    any caller-supplied speed, matching the non-finite hardening elsewhere in
+    the SDK (see ``_utils.format_duration``).
+    """
+    if not math.isfinite(speed) or speed <= 0:
+        raise ValueError("speed must be a finite positive number")
+    return speed
+
+
 class SessionReplayer:
     """Replay an agent session event-by-event with speed control and filters.
 
@@ -52,10 +72,8 @@ class SessionReplayer:
     """
 
     def __init__(self, session: Session, *, speed: float = 1.0) -> None:
-        if speed <= 0:
-            raise ValueError("speed must be positive")
         self._session = session
-        self._speed = speed
+        self._speed = _validate_speed(speed)
         self._filters: set[str] = set()
         self._exclude_filters: set[str] = set()
         self._breakpoints: list[BreakpointFn] = []
@@ -68,9 +86,7 @@ class SessionReplayer:
     # -- Configuration -----------------------------------------------------
 
     def set_speed(self, speed: float) -> SessionReplayer:
-        if speed <= 0:
-            raise ValueError("speed must be positive")
-        self._speed = speed
+        self._speed = _validate_speed(speed)
         return self
 
     def add_filter(self, *event_types: str) -> SessionReplayer:

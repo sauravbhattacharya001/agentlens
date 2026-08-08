@@ -215,6 +215,18 @@ class TestSessionReplayer:
         with pytest.raises(ValueError):
             SessionReplayer(session, speed=-1)
 
+    def test_non_finite_speed_raises(self):
+        # NaN/inf compare False against ``<= 0`` and would otherwise slip past
+        # the guard, poisoning the gap/speed timing math and emitting bare
+        # ``NaN`` tokens from to_json (invalid JSON).
+        session = _make_session(1)
+        for bad in (float("nan"), float("inf"), float("-inf")):
+            with pytest.raises(ValueError):
+                SessionReplayer(session, speed=bad)
+            replayer = SessionReplayer(session)
+            with pytest.raises(ValueError):
+                replayer.set_speed(bad)
+
     def test_set_speed(self):
         session = _make_session(1)
         replayer = SessionReplayer(session)
