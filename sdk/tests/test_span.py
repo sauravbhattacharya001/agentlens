@@ -82,6 +82,28 @@ class TestSpanModel:
         assert d["error"] == "boom"
         assert d["status"] == "error"
 
+    @pytest.mark.parametrize("bad", [float("nan"), float("inf"), float("-inf")])
+    def test_to_dict_drops_non_finite_duration(self, bad):
+        # ``duration_ms`` is a public field a reconstructed span can carry a
+        # non-finite value in.  It must NOT be serialized: json.dumps would
+        # emit the non-standard Infinity/NaN tokens the Node collector rejects.
+        import json
+
+        s = Span(name="weird", session_id="s1")
+        s.duration_ms = bad
+        d = s.to_dict()
+        assert "duration_ms" not in d
+        # The whole dict must round-trip through strict JSON.
+        json.loads(json.dumps(d))
+
+    def test_to_dict_keeps_finite_zero_duration(self):
+        # A legitimate 0.0 duration is finite and must survive (regression
+        # guard so the non-finite filter doesn't over-reach to falsy values).
+        s = Span(name="instant", session_id="s1")
+        s.duration_ms = 0.0
+        d = s.to_dict()
+        assert d["duration_ms"] == 0.0
+
 
 class TestTrackerSpan:
     def test_basic_span(self):

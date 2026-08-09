@@ -17,6 +17,7 @@ session timeline and can be queried.
 
 from __future__ import annotations
 
+import math
 from dataclasses import dataclass, field
 from datetime import datetime
 from functools import partial
@@ -87,7 +88,13 @@ class Span:
             self.error = error
 
     def to_dict(self) -> dict[str, Any]:
-        """Serialize to a JSON-compatible dict."""
+        """Serialize to a JSON-compatible dict.
+
+        Optional fields are omitted when unset.  A non-finite ``duration_ms``
+        (``NaN``/``inf``, which a directly-constructed or reconstructed span
+        can carry) is dropped rather than serialized, so the emitted
+        ``span_end`` payload always parses as strict JSON.
+        """
         d: dict[str, Any] = {
             "span_id": self.span_id,
             "name": self.name,
@@ -101,7 +108,16 @@ class Span:
             d["parent_id"] = self.parent_id
         if self.ended_at:
             d["ended_at"] = self.ended_at.isoformat()
-        if self.duration_ms is not None:
+        # ``duration_ms`` is a wall-clock delta, but ``Span`` is a public
+        # dataclass whose fields can be reconstructed/set directly (e.g. by a
+        # replayer or an exporter rebuilding a span from stored data), so the
+        # value is not guaranteed finite.  A non-finite duration must never
+        # reach the serialized dict: ``json.dumps`` would emit the non-standard
+        # ``Infinity``/``NaN`` tokens into the ``span_end`` event, producing
+        # output a strict JSON parser (the Node collector) rejects.  Omit it
+        # instead - matching how the flamegraph/timeline renderers and the
+        # ``_utils`` duration formatters drop non-finite durations to a sentinel.
+        if self.duration_ms is not None and math.isfinite(self.duration_ms):
             d["duration_ms"] = round(self.duration_ms, 2)
         if self.attributes:
             d["attributes"] = self.attributes
