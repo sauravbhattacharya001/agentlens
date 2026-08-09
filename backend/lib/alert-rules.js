@@ -77,10 +77,20 @@ function compareValue(value, operator, threshold) {
  * range.  Callers apply their own default (e.g. `Number(x) || 60`) before
  * clamping so the create/update semantics are preserved.
  *
+ * A non-finite input (`NaN`/`±Infinity`) collapses to the low bound (`1`)
+ * rather than propagating: PUT /rules/:ruleId clamps `Number(window_minutes)`
+ * with no `|| default`, so a defined-but-non-numeric body value (e.g.
+ * `window_minutes: "abc"`) reaches here as `NaN`.  Without this guard
+ * `Math.min(Math.max(1, NaN), MAX)` returns `NaN`, which would be written into
+ * the rule row and later multiplied into cooldown/window math — a poisoned,
+ * meaningless value.  `NaN`/`Infinity` are guarded first (mirrors the
+ * fail-safe `Number.isFinite`-first pattern used across the fleet).
+ *
  * @param {number} value - Numeric minutes (already defaulted by the caller).
- * @returns {number} The clamped window size.
+ * @returns {number} The clamped window size (always finite, in `[1, MAX]`).
  */
 function clampWindowMinutes(value) {
+  if (!Number.isFinite(value)) return 1;
   return Math.min(Math.max(1, value), MAX_WINDOW_MINUTES);
 }
 
@@ -88,10 +98,17 @@ function clampWindowMinutes(value) {
  * Clamp a cooldown-minutes input into the safe `[0, MAX_COOLDOWN_MINUTES]`
  * range.  A zero cooldown (fire every evaluation) is intentionally allowed.
  *
+ * A non-finite input (`NaN`/`±Infinity`) collapses to the low bound (`0`)
+ * rather than propagating: PUT /rules/:ruleId clamps `Number(cooldown_minutes)`
+ * with no `|| default`, so a defined-but-non-numeric body value reaches here as
+ * `NaN` and, unguarded, `Math.min(Math.max(0, NaN), MAX)` would return `NaN`
+ * and be persisted.  Guard `NaN`/`Infinity` first (fail-safe to the low bound).
+ *
  * @param {number} value - Numeric minutes (already defaulted by the caller).
- * @returns {number} The clamped cooldown.
+ * @returns {number} The clamped cooldown (always finite, in `[0, MAX]`).
  */
 function clampCooldownMinutes(value) {
+  if (!Number.isFinite(value)) return 0;
   return Math.min(Math.max(0, value), MAX_COOLDOWN_MINUTES);
 }
 

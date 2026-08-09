@@ -193,6 +193,18 @@ describe("clampWindowMinutes", () => {
     const fromString = clampWindowMinutes(Number("120") || 60);
     expect(fromString).toBe(120);
   });
+
+  test("collapses non-finite input to the low bound (1) instead of NaN", () => {
+    // The PUT path clamps Number(window_minutes) with NO `|| default`, so a
+    // defined-but-non-numeric body value reaches here as NaN. Unguarded,
+    // Math.min(Math.max(1, NaN), MAX) === NaN would be persisted into the rule
+    // row. Guard NaN/Infinity to the floor so the stored window is always finite.
+    expect(clampWindowMinutes(NaN)).toBe(1);
+    expect(clampWindowMinutes(Infinity)).toBe(1);
+    expect(clampWindowMinutes(-Infinity)).toBe(1);
+    // Reproduce the exact PUT composition with a non-numeric string body value.
+    expect(clampWindowMinutes(Number("abc"))).toBe(1);
+  });
 });
 
 // ===================================================================
@@ -235,5 +247,15 @@ describe("clampCooldownMinutes", () => {
     // PUT /rules/:ruleId computes clampCooldownMinutes(Number(cooldown_minutes));
     // an explicit 0 there must survive as 0 (no debounce), unlike the POST idiom.
     expect(clampCooldownMinutes(Number(0))).toBe(0);
+  });
+
+  test("collapses non-finite input to the low bound (0) instead of NaN", () => {
+    // Same PUT hazard as the window clamp: Number(cooldown_minutes) with no
+    // `|| default` yields NaN for a defined-but-non-numeric body value, and an
+    // unguarded clamp would persist NaN. Guard NaN/Infinity to the 0 floor.
+    expect(clampCooldownMinutes(NaN)).toBe(0);
+    expect(clampCooldownMinutes(Infinity)).toBe(0);
+    expect(clampCooldownMinutes(-Infinity)).toBe(0);
+    expect(clampCooldownMinutes(Number("abc"))).toBe(0);
   });
 });
