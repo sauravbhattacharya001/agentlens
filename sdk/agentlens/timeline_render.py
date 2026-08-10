@@ -18,6 +18,7 @@ to these functions; the per-event styling vocabulary itself lives in
 from __future__ import annotations
 
 import html as _html
+import math
 from typing import Any
 
 from agentlens.timeline_format import (
@@ -362,8 +363,16 @@ def render_html(
         parts.append(f"<div class='meta'>{' | '.join(meta_parts)}</div>")
     parts.append("</div>")
 
-    # Find max duration for bar scaling
-    max_dur = max((e.get("duration_ms") or 0 for e in events), default=1) or 1
+    # Find max duration for bar scaling. Ignore non-finite durations (inf/nan)
+    # so the bar-width division below can never produce nan/OverflowError.
+    _finite_durs = [
+        d
+        for e in events
+        if isinstance((d := e.get("duration_ms")), (int, float))
+        and math.isfinite(d)
+        and d > 0
+    ]
+    max_dur = max(_finite_durs, default=1) or 1
 
     for ev in events:
         etype = ev.get("event_type", "generic")
@@ -386,9 +395,20 @@ def render_html(
 
         dur = ev.get("duration_ms")
         if show_duration and dur is not None:
-            bar_w = max(2, int(80 * dur / max_dur))
-            parts.append(f"<span class='event-duration'>{_format_duration(dur)}</span>")
-            parts.append(f"<span class='duration-bar' style='width:{bar_w}px'></span>")
+            # Only scale a bar for a finite, positive duration; a non-finite
+            # value still renders its (guarded) label but no width-broken bar.
+            if isinstance(dur, (int, float)) and math.isfinite(dur) and dur > 0:
+                bar_w = max(2, int(80 * dur / max_dur))
+                parts.append(
+                    f"<span class='event-duration'>{_format_duration(dur)}</span>"
+                )
+                parts.append(
+                    f"<span class='duration-bar' style='width:{bar_w}px'></span>"
+                )
+            else:
+                parts.append(
+                    f"<span class='event-duration'>{_format_duration(dur)}</span>"
+                )
 
         if show_tokens:
             tin = ev.get("tokens_in", 0) or 0

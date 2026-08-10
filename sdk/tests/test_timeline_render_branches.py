@@ -158,6 +158,55 @@ class TestRenderHtmlBranches(unittest.TestCase):
         out = _rendered("html", events=events)
         self.assertNotIn("<p>Models:", out)
 
+    def test_non_finite_duration_does_not_crash_bar_scaling(self):
+        # A non-finite duration_ms (inf/nan) must not reach ``int(80 * dur /
+        # max_dur)`` -- that cast raises OverflowError (inf) or ValueError
+        # (nan). The label still renders (via the guarded _format_duration),
+        # but no width-broken duration-bar span is emitted for that event.
+        events = [
+            {"event_type": "session_start", "timestamp": "2026-03-16T12:00:00+00:00"},
+            {
+                "event_type": "llm_call",
+                "timestamp": "2026-03-16T12:00:01+00:00",
+                "model": "gpt-x",
+                "duration_ms": float("inf"),
+            },
+            {
+                "event_type": "tool_call",
+                "timestamp": "2026-03-16T12:00:02+00:00",
+                "tool_call": {"tool_name": "search"},
+                "duration_ms": float("nan"),
+            },
+        ]
+        # Must not raise despite inf/nan durations feeding max_dur + bar scaling.
+        out = _rendered("html", events=events)
+        self.assertIn("gpt-x", out)
+        # No finite positive duration exists, so no scaled bar span should be
+        # produced (the .duration-bar CSS rule is always in the <style> block;
+        # a rendered bar is identified by its inline width).
+        self.assertNotIn("style='width:", out)
+
+    def test_finite_bar_still_scales_when_a_non_finite_sibling_exists(self):
+        # A non-finite sibling must be ignored when picking max_dur, so a finite
+        # event still gets the full ~80px bar rather than a nan-poisoned width.
+        events = [
+            {"event_type": "session_start", "timestamp": "2026-03-16T12:00:00+00:00"},
+            {
+                "event_type": "llm_call",
+                "timestamp": "2026-03-16T12:00:01+00:00",
+                "model": "gpt-x",
+                "duration_ms": 1500.0,
+            },
+            {
+                "event_type": "tool_call",
+                "timestamp": "2026-03-16T12:00:03+00:00",
+                "tool_call": {"tool_name": "search"},
+                "duration_ms": float("inf"),
+            },
+        ]
+        out = _rendered("html", events=events)
+        self.assertIn("width:80px", out)
+
     def test_custom_title_used_in_head_and_heading(self):
         out = _rendered("html", title="My Run")
         self.assertIn("<title>My Run</title>", out)
