@@ -43,6 +43,7 @@ from agentlens.transcript_format import (
     _STATUS_TO_EXIT_STATUS,
     _STATUS_TO_OUTCOME,
     _as_event_dict,
+    _finite_duration_ms,
     _fmt_duration,
     _fmt_ts,
     _get_tool,
@@ -241,11 +242,20 @@ class TranscriptExporter:
                 meta["endedAt"] = meta["endedAt"].isoformat()
 
         # Prefer an explicit duration_ms; otherwise derive from start/end.
+        # A raw duration_ms comes straight from instrumentation, so it can be
+        # non-numeric, non-finite (NaN/inf), or negative. Taking float(dur)
+        # blindly would either raise (non-numeric) or emit a poisoned
+        # durationMs that json.dumps serializes as the bare tokens
+        # ``NaN``/``Infinity`` - invalid JSON that breaks any RunMetadata
+        # consumer (e.g. agent-eval's verification check). Coerce to a safe,
+        # non-negative, finite float here, matching the start/end-derived
+        # branch's guarantee; fall through to that branch when it can't be.
         dur = sess_dict.get("duration_ms")
         start_dt = _parse_iso(started)
         end_dt = _parse_iso(ended)
-        if dur is not None:
-            meta["durationMs"] = float(dur)
+        dur_ms = _finite_duration_ms(dur)
+        if dur_ms is not None:
+            meta["durationMs"] = dur_ms
         elif start_dt is not None and end_dt is not None:
             meta["durationMs"] = max(0.0, (end_dt - start_dt).total_seconds() * 1000.0)
 

@@ -52,6 +52,28 @@ _STATUS_TO_EXIT_STATUS: dict[str, str] = {
 _MAX_VALUE_LEN = 200
 
 
+def _finite_duration_ms(value: Any) -> float | None:
+    """Coerce a raw ``duration_ms`` to a safe, non-negative, finite float.
+
+    Instrumentation-supplied durations can be non-numeric, non-finite
+    (``NaN``/``inf``), or negative. Returning any of those as a RunMetadata
+    ``durationMs`` either poisons JSON serialization (``json.dumps`` emits the
+    bare tokens ``NaN``/``Infinity``, which are invalid JSON) or misleads a
+    consumer with a negative wall-clock. Returns ``None`` when the value is
+    absent or cannot be made into a usable duration, so the caller can fall
+    back to the trusted start/end-derived value.
+    """
+    if value is None:
+        return None
+    try:
+        f = float(value)
+    except (TypeError, ValueError):
+        return None
+    if f != f or f in (float("inf"), float("-inf")):  # NaN or ±inf
+        return None
+    return f if f > 0 else 0.0
+
+
 def _fmt_ts(ts: datetime | str | None) -> str:
     """Format a timestamp as a compact, human-readable UTC string.
 

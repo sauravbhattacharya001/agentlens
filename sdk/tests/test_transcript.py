@@ -8,6 +8,7 @@ session/event data rather than self-reported prose.
 from __future__ import annotations
 
 import re
+import math
 from datetime import datetime, timedelta, timezone
 
 import pytest
@@ -421,6 +422,51 @@ def test_run_metadata_prefers_explicit_duration_ms():
     meta = export_run_metadata(session_dict)
     # Explicit duration_ms wins over the start/end-derived value.
     assert meta["durationMs"] == 12345.0
+
+
+@pytest.mark.parametrize("bad", [float("nan"), float("inf"), float("-inf"), "not-a-number", object()])
+def test_run_metadata_bad_explicit_duration_falls_back_to_clock(bad):
+    """A non-finite / non-numeric explicit duration_ms must NOT poison the
+    output (json.dumps would emit invalid ``NaN``/``Infinity`` tokens, or
+    float() would raise). It falls back to the trusted start/end-derived ms."""
+    session_dict = {
+        "agent_name": "builder",
+        "started_at": BASE.isoformat(),
+        "ended_at": (BASE + timedelta(minutes=5)).isoformat(),
+        "status": "completed",
+        "duration_ms": bad,
+        "events": [],
+    }
+    meta = export_run_metadata(session_dict)
+    assert meta["durationMs"] == pytest.approx(5 * 60_000)
+    assert math.isfinite(meta["durationMs"])
+
+
+def test_run_metadata_bad_explicit_duration_and_no_clock_omits_key():
+    """With a poisoned duration_ms and no usable start/end, durationMs is
+    omitted rather than serialized as a non-finite value."""
+    session_dict = {
+        "agent_name": "x",
+        "status": "completed",
+        "duration_ms": float("inf"),
+        "events": [],
+    }
+    meta = export_run_metadata(session_dict)
+    assert "durationMs" not in meta
+
+
+def test_run_metadata_negative_explicit_duration_clamped_to_zero():
+    """A negative explicit duration_ms is clamped to 0.0, never emitted raw."""
+    session_dict = {
+        "agent_name": "x",
+        "started_at": BASE.isoformat(),
+        "ended_at": (BASE + timedelta(minutes=5)).isoformat(),
+        "status": "completed",
+        "duration_ms": -42,
+        "events": [],
+    }
+    meta = export_run_metadata(session_dict)
+    assert meta["durationMs"] == 0.0
 
 
 def test_run_metadata_omits_timing_when_absent():
