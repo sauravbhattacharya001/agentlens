@@ -151,7 +151,12 @@ def _event_to_row(ev: AgentEvent) -> dict[str, Any]:
         "model": ev.model or "",
         "tokens_in": ev.tokens_in,
         "tokens_out": ev.tokens_out,
-        "duration_ms": ev.duration_ms if ev.duration_ms is not None else "",
+        # A non-finite/non-numeric ``duration_ms`` from bad instrumentation would
+        # otherwise land in the CSV cell verbatim as ``inf``/``nan`` (mirroring the
+        # poisoned-total risk that ``_session_stats`` already normalises via
+        # ``_finite_ms``).  Coerce to a safe finite value so the exported table
+        # stays parseable; ``None`` still renders as an empty cell.
+        "duration_ms": _finite_ms(ev.duration_ms) if ev.duration_ms is not None else "",
         "tool_name": ev.tool_call.tool_name if ev.tool_call else "",
         "reasoning": ev.decision_trace.reasoning if ev.decision_trace else "",
         "confidence": ev.decision_trace.confidence if ev.decision_trace else "",

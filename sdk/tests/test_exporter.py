@@ -289,6 +289,44 @@ class TestCsvExport:
         lines = raw.strip().split("\n")
         assert len(lines) == 1  # header only
 
+    def test_non_finite_duration_ms_coerced(self):
+        """A non-finite ``duration_ms`` must not leak ``inf``/``nan`` into the CSV.
+
+        Bad instrumentation can hand an event an ``inf``/``nan`` duration; without
+        coercion ``csv`` would write the bare token ``inf``/``nan`` into the cell,
+        producing an un-parseable / meaningless duration column.  It should be
+        normalised to ``0`` (mirroring the ``_finite_ms`` guard used for the
+        aggregate ``total_event_duration_ms``).
+        """
+        s = _empty_session()
+        base = datetime(2026, 3, 7, 10, 0, 0, tzinfo=timezone.utc)
+        for i, bad in enumerate((float("inf"), float("-inf"), float("nan"), -5.0)):
+            s.add_event(AgentEvent(
+                event_id=f"bad-{i}",
+                event_type="llm_call",
+                duration_ms=bad,
+                timestamp=base + timedelta(seconds=i),
+            ))
+        raw = SessionExporter(s).as_csv()
+        assert "inf" not in raw.lower()
+        assert "nan" not in raw.lower()
+        rows = list(csv.DictReader(io.StringIO(raw)))
+        assert len(rows) == 4
+        for row in rows:
+            assert row["duration_ms"] == "0.0"
+
+    def test_none_duration_ms_stays_empty(self):
+        """A ``None`` duration still renders as an empty cell (unchanged behavior)."""
+        s = _empty_session()
+        s.add_event(AgentEvent(
+            event_id="no-dur",
+            event_type="llm_call",
+            duration_ms=None,
+            timestamp=datetime(2026, 3, 7, 10, 0, 0, tzinfo=timezone.utc),
+        ))
+        rows = list(csv.DictReader(io.StringIO(SessionExporter(s).as_csv())))
+        assert rows[0]["duration_ms"] == ""
+
 
 # ── HTML export ─────────────────────────────────────────────────────
 
