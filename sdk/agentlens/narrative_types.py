@@ -23,6 +23,7 @@ from enum import Enum
 from typing import Any
 
 from agentlens._utils import format_duration_seconds as _fmt_seconds
+from agentlens._utils import md_cell as _md_cell
 from agentlens._utils import utcnow as _utcnow
 
 
@@ -116,7 +117,7 @@ class Narrative:
             lines.append("|------|-------|---------|--------|-------------|")
             for ts in sorted(self.tool_summaries, key=lambda t: -t.call_count):
                 lines.append(
-                    f"| {ts.tool_name} | {ts.call_count} | {ts.success_count} | "
+                    f"| {_md_cell(ts.tool_name)} | {ts.call_count} | {ts.success_count} | "
                     f"{ts.failure_count} | {ts.avg_duration_ms:.0f}ms |"
                 )
             lines.append("")

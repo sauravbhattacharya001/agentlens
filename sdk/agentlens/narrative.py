@@ -42,6 +42,7 @@ existing import paths stay unchanged.
 from __future__ import annotations
 
 from agentlens import narrative_render as _render
+from agentlens._utils import md_cell as _md_cell
 from agentlens.models import Session
 from agentlens.narrative_types import (
     Narrative,
@@ -186,8 +187,8 @@ class NarrativeGenerator:
             "",
             "| Metric | Session A | Session B |",
             "|--------|-----------|-----------|",
-            f"| ID | {na.session_id} | {nb.session_id} |",
-            f"| Agent | {na.agent_name} | {nb.agent_name} |",
+            f"| ID | {_md_cell(na.session_id)} | {_md_cell(nb.session_id)} |",
+            f"| Agent | {_md_cell(na.agent_name)} | {_md_cell(nb.agent_name)} |",
             f"| Events | {na.total_events} | {nb.total_events} |",
             f"| Tokens | {na.total_tokens:,} | {nb.total_tokens:,} |",
             f"| Cost | ${na.total_cost_usd:.4f} | ${nb.total_cost_usd:.4f} |",
@@ -207,7 +208,7 @@ class NarrativeGenerator:
                 at = a_map.get(tool)
                 bt = b_map.get(tool)
                 lines.append(
-                    f"| {tool} | {at.call_count if at else 0} | {bt.call_count if bt else 0} | "
+                    f"| {_md_cell(tool)} | {at.call_count if at else 0} | {bt.call_count if bt else 0} | "
                     f"{at.failure_count if at else 0} | {bt.failure_count if bt else 0} |"
                 )
 

@@ -15,11 +15,32 @@ from typing import Any, Optional
 __all__ = [
     "format_duration",
     "format_duration_seconds",
+    "md_cell",
     "new_id",
     "parse_iso",
     "percentile",
     "utcnow",
 ]
+
+
+def md_cell(text: str) -> str:
+    """Sanitize a string for safe use inside a Markdown table cell.
+
+    A raw ``|`` terminates a table column and an embedded newline splits the
+    row into pieces, so a tool/agent name, session id, or error message that
+    contains either would silently corrupt the table's structure.  Escape
+    pipes and fold any CR/LF run into a single space so arbitrary content
+    stays inside its own cell.  Content-preserving: no characters are dropped.
+
+    Single home for Markdown-cell escaping across the SDK (timeline, narrative,
+    replayer renderers) so the rule never drifts between builders.
+    """
+    return (
+        text.replace("\\", "\\\\")
+        .replace("|", "\\|")
+        .replace("\r", " ")
+        .replace("\n", " ")
+    )
 
 
 def new_id(length: int = 12) -> str:

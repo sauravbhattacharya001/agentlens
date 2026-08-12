@@ -21,6 +21,7 @@ import html as _html
 import math
 from typing import Any
 
+from agentlens._utils import md_cell as _md_cell
 from agentlens.timeline_format import (
     _HTML_COLORS,
     _format_duration,
@@ -47,20 +48,6 @@ def _error_message(event: dict) -> str:
     if isinstance(err, dict):
         err = err.get("error", err.get("message", ""))
     return str(err) if err else ""
-
-
-def _md_cell(text: str) -> str:
-    """Sanitize a string for safe use inside a Markdown table cell.
-
-    Raw ``|`` characters terminate a table column and embedded newlines break
-    the row into pieces, so a model/tool name or error message that contains
-    either would silently corrupt the table's structure.  Escape pipes and
-    fold any newline run into a single space so arbitrary event content stays
-    inside its own cell.  Content-preserving: no characters are dropped.
-    """
-    return text.replace("\\", "\\\\").replace("|", "\\|").replace("\r", " ").replace(
-        "\n", " "
-    )
 
 
 def render_text(
