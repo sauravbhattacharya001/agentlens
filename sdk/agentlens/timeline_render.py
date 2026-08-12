@@ -49,6 +49,20 @@ def _error_message(event: dict) -> str:
     return str(err) if err else ""
 
 
+def _md_cell(text: str) -> str:
+    """Sanitize a string for safe use inside a Markdown table cell.
+
+    Raw ``|`` characters terminate a table column and embedded newlines break
+    the row into pieces, so a model/tool name or error message that contains
+    either would silently corrupt the table's structure.  Escape pipes and
+    fold any newline run into a single space so arbitrary event content stays
+    inside its own cell.  Content-preserving: no characters are dropped.
+    """
+    return text.replace("\\", "\\\\").replace("|", "\\|").replace("\r", " ").replace(
+        "\n", " "
+    )
+
+
 def render_text(
     events: list[dict],
     session: dict,
@@ -264,9 +278,9 @@ def render_markdown(
             err = _error_message(ev)
             if err:
                 detail_parts.append(err)
-        detail = ", ".join(detail_parts) if detail_parts else "-"
+        detail = _md_cell(", ".join(detail_parts)) if detail_parts else "-"
 
-        row = [ts, f"{icon} {etype.upper()}", detail]
+        row = [ts, f"{icon} {_md_cell(etype.upper())}", detail]
         if show_duration:
             dur = ev.get("duration_ms")
             row.append(_format_duration(dur) if dur else "-")

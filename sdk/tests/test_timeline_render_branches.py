@@ -129,6 +129,37 @@ class TestRenderMarkdownBranches(unittest.TestCase):
         out = _rendered("markdown", events=events)
         self.assertNotIn("**Models:**", out)
 
+    def test_pipe_in_error_detail_is_escaped_and_row_stays_intact(self):
+        # An error message containing a raw '|' must not spill into extra table
+        # columns: the pipe is escaped and the row keeps its 3 base + duration/
+        # tokens delimiters (the cell content stays in the Details column).
+        events = [
+            {
+                "event_type": "error",
+                "timestamp": "2026-03-16T12:00:00+00:00",
+                "output_data": {"error": "bad a|b\nc"},
+            }
+        ]
+        out = _rendered("markdown", events=events)
+        row = [ln for ln in out.splitlines() if "ERROR" in ln][0]
+        # Pipe escaped; newline folded to a space; no raw pipe leaked into a cell.
+        self.assertIn(r"bad a\|b c", row)
+        # 5 columns (Time|Type|Details|Duration|Tokens) => 6 unescaped '|' fences.
+        self.assertEqual(row.count("|") - row.count(r"\|"), 6)
+
+    def test_pipe_in_tool_name_is_escaped(self):
+        events = [
+            {
+                "event_type": "tool_call",
+                "timestamp": "2026-03-16T12:00:00+00:00",
+                "tool_call": {"tool_name": "a|b", "tool_output": {"ok": True}},
+            }
+        ]
+        out = _rendered("markdown", events=events)
+        row = [ln for ln in out.splitlines() if "TOOL_CALL" in ln][0]
+        self.assertIn(r"tool: a\|b", row)
+        self.assertEqual(row.count("|") - row.count(r"\|"), 6)
+
 
 class TestRenderHtmlBranches(unittest.TestCase):
     def test_dark_mode_palette(self):
