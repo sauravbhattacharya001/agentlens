@@ -398,6 +398,67 @@ class TestHtmlExport:
         assert "<script>document" not in html
         assert "&lt;script&gt;" in html
 
+    # ── Per-row escaping (events / models / tools tables) ───────────
+    # The whole-session fields (agent_name / session_id / status) are
+    # covered above; these guard the PER-ROW cells that render
+    # agent-controlled content and were previously untested.
+
+    def test_xss_safe_event_model(self):
+        """An event's model name is escaped in the events table row."""
+        s = _make_session()
+        s.events[0].model = '<img src=x onerror=alert(1)>'
+        html = SessionExporter(s).as_html()
+        assert "<img src=x onerror" not in html
+        assert "&lt;img src=x onerror=alert(1)&gt;" in html
+
+    def test_xss_safe_tool_name(self):
+        """A tool_call's tool_name is escaped in the events table row."""
+        s = _make_session()
+        ev = s.events[1]
+        ev.event_type = "tool_call"
+        ev.tool_call = ToolCall(tool_name='<script>alert("t")</script>', tool_input={})
+        html = SessionExporter(s).as_html()
+        assert '<script>alert("t")' not in html
+        assert "&lt;script&gt;alert(" in html
+
+    def test_xss_safe_decision_reasoning(self):
+        """A decision_trace's reasoning is escaped in the events table row."""
+        s = _make_session()
+        ev = s.events[2]
+        ev.event_type = "decision"
+        ev.decision_trace = DecisionTrace(reasoning='<b>x</b>&"quote"', confidence=0.5)
+        html = SessionExporter(s).as_html()
+        assert "<b>x</b>" not in html
+        assert "&lt;b&gt;x&lt;/b&gt;" in html
+        assert "&amp;" in html and "&quot;" in html
+
+    def test_xss_safe_event_type(self):
+        """An event_type is escaped in the badge cell (defensive)."""
+        s = _make_session()
+        s.events[0].event_type = '<i>evt</i>'
+        html = SessionExporter(s).as_html()
+        assert "<i>evt</i>" not in html
+        assert "&lt;i&gt;evt&lt;/i&gt;" in html
+
+    def test_xss_safe_model_table(self):
+        """Model names are escaped in the Models summary table."""
+        s = _make_session()
+        s.events[0].model = '<u>m</u>'
+        html = SessionExporter(s).as_html()
+        # Models summary table renders each distinct model name.
+        assert "<u>m</u>" not in html
+        assert "&lt;u&gt;m&lt;/u&gt;" in html
+
+    def test_xss_safe_tools_list(self):
+        """Tool names are escaped in the Tools Used pill list."""
+        s = _make_session()
+        ev = s.events[1]
+        ev.event_type = "tool_call"
+        ev.tool_call = ToolCall(tool_name='<span onclick=x>t</span>', tool_input={})
+        html = SessionExporter(s).as_html()
+        assert "<span onclick=x>" not in html
+        assert "&lt;span onclick=x&gt;t&lt;/span&gt;" in html
+
 
 # ── Round-trip ──────────────────────────────────────────────────────
 
