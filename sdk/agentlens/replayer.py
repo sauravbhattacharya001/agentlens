@@ -25,6 +25,7 @@ from collections.abc import Iterator
 
 from agentlens.models import AgentEvent, Session
 from agentlens.replayer_types import ReplayFrame, ReplayStats
+from agentlens._utils import md_cell
 
 __all__ = [
     "ReplayFrame",
@@ -314,9 +315,10 @@ class SessionReplayer:
             if frame.is_breakpoint:
                 notes = ("⏸ " + notes) if notes else "⏸"
             lines.append(
-                f"| {frame.index + 1} | {e.event_type} | {e.model or ''} "
-                f"| {tool} | {tokens} | {dur} | +{frame.wall_delay_ms:.0f}ms "
-                f"| {notes} |"
+                f"| {frame.index + 1} | {md_cell(e.event_type)} "
+                f"| {md_cell(e.model or '')} | {md_cell(tool)} "
+                f"| {tokens} | {dur} | +{frame.wall_delay_ms:.0f}ms "
+                f"| {md_cell(notes)} |"
             )
         lines.append("")
         lines.append("## Stats")

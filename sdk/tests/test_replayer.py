@@ -440,6 +440,35 @@ class TestSessionReplayer:
         md = replayer.to_markdown()
         assert "⏸" in md
 
+    def test_to_markdown_escapes_pipe_and_newline_cells(self):
+        # A tool name / event type / annotation containing a raw '|' or a
+        # newline would otherwise corrupt the Markdown table structure.
+        session = Session(session_id="sess-esc", agent_name="a")
+        evt = AgentEvent(
+            event_id="e0",
+            event_type="tool|call\ncontinued",
+            model="gpt|4o",
+            timestamp=_ts(0),
+            duration_ms=10.0,
+        )
+        evt.tool_call = ToolCall(tool_name="shell|rm\n-rf")
+        session.add_event(evt)
+        replayer = SessionReplayer(session)
+        replayer.annotate("e0", "noisy|note\nline2")
+        md = replayer.to_markdown()
+
+        # Inspect only the Markdown table rows (the fenced Stats block echoes
+        # raw values, which is fine — it is not a table).
+        rows = [ln for ln in md.splitlines() if ln.startswith("| ")]
+        table = "\n".join(rows)
+        # Raw pipes from cell content must be escaped so they don't add columns.
+        assert "tool|call" not in table
+        assert "shell|rm" not in table
+        assert "gpt|4o" not in table
+        assert "noisy|note" not in table
+        assert r"tool\|call" in table
+        assert r"shell\|rm" in table
+
     # -- Diff -----------------------------------------------------------
 
     def test_diff(self):
