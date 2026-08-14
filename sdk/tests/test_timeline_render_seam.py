@@ -175,6 +175,45 @@ class TestTimelineRenderSeam(unittest.TestCase):
         self.assertNotIn("<script>alert(1)</script>", out)
         self.assertIn("&lt;script&gt;", out)
 
+    def test_render_html_escapes_all_user_controlled_fields(self):
+        # Every attacker-influenced string interpolated into the HTML document
+        # must be routed through the escaper, not just the error message. A
+        # regression that drops ``h()`` on any of these (title / agent /
+        # session id / model / tool name / models-used summary) would ship a
+        # stored-XSS hole, so pin each field explicitly.
+        xss = "<img src=x onerror=alert(1)>"
+        events = [
+            {
+                "event_type": "llm_call",
+                "timestamp": "2026-03-16T12:00:00+00:00",
+                "_offset_ms": 0.0,
+                "model": xss,
+                "duration_ms": 5.0,
+            },
+            {
+                "event_type": "tool_call",
+                "timestamp": "2026-03-16T12:00:01+00:00",
+                "_offset_ms": 1000.0,
+                "tool_call": {"tool_name": xss},
+                "duration_ms": 5.0,
+            },
+        ]
+        summary = {
+            "total_events": 2, "total_duration_ms": 10.0, "total_tokens": 0,
+            "error_count": 0, "models_used": [xss],
+        }
+        session = {"session_id": xss, "agent_name": xss}
+        out = timeline_render.render_html(
+            events, session, summary, title=xss,
+        )
+        # Raw markup must never survive for any field.
+        self.assertNotIn(xss, out)
+        # And the escaped form must be present (proves the field was rendered,
+        # not merely dropped).
+        self.assertIn("&lt;img src=x onerror=alert(1)&gt;", out)
+        # No unescaped onerror attribute leaked through anywhere.
+        self.assertNotIn("onerror=alert(1)>", out)
+
     # -- shared error helpers ------------------------------------------------
 
     def test_is_error_event(self):
