@@ -395,6 +395,23 @@ class TestEventVolumeScorer:
         ms = HealthScorer()._score_event_volume(_perfect_events(100))
         assert ms.score == 100.0
 
+    def test_degenerate_zero_range_empty_scores_full(self):
+        # ideal_events_range=(0, 0): an empty session has count == lo == hi,
+        # so it lands in the in-range branch and scores 100. Pins that a
+        # zero-width ideal band does not accidentally penalise a zero-event
+        # session.
+        t = HealthThresholds(ideal_events_range=(0, 0))
+        ms = HealthScorer(t)._score_event_volume([])
+        assert ms.score == 100.0
+
+    def test_degenerate_zero_max_overshoot_scores_zero(self):
+        # ideal_events_range=(0, 0): any event overshoots hi == 0, which makes
+        # penalty_range (== hi) zero. Exercises the guarded else-branch that
+        # avoids a divide-by-zero and returns 0.0 instead of NaN/exploding.
+        t = HealthThresholds(ideal_events_range=(0, 0))
+        ms = HealthScorer(t)._score_event_volume(_perfect_events(5))
+        assert ms.score == 0.0
+
 
 # ---------------------------------------------------------------------------
 # Custom thresholds
