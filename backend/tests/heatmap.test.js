@@ -191,4 +191,37 @@ describe("buildHeatmap - peak detection", () => {
       value: 0,
     });
   });
+
+  test("negative bucket values are placed and summed but never peak or emit a cell", () => {
+    // Bucket values come from SQL aggregates (COUNT/SUM). COUNT can't go
+    // negative, but a signed SUM metric (e.g. a cost column with refunds)
+    // could in principle yield a negative bucket. Pin the current behaviour so
+    // a refactor can't silently change it: a negative value IS written into
+    // the matrix (and therefore counts toward the signed day/hour totals), but
+    // - it is excluded from `cells` (the emit guard is `> 0`, not `!== 0`),
+    // - it never becomes `max_value` (seeded at 0, only a strictly-greater
+    //   value replaces it), and
+    // - it never becomes the `peak` (same `> peakValue` guard from 0), so an
+    //   all-non-positive input keeps the origin/zero peak.
+    const out = buildHeatmap(
+      [cell(1, 1, -5), cell(2, 2, 0)],
+      { days: 30, metric: "cost" }
+    );
+    // placed in the matrix as-is (not clamped, not dropped)
+    expect(out.matrix[1][1]).toBe(-5);
+    expect(out.matrix[2][2]).toBe(0);
+    // excluded from cells (only strictly-positive slots emit)
+    expect(out.cells).toEqual([]);
+    // signed totals include the negative contribution
+    expect(out.day_totals[1].total).toBe(-5);
+    expect(out.hour_totals[1].total).toBe(-5);
+    // max_value/peak stay at the zero origin (no positive slot exists)
+    expect(out.max_value).toBe(0);
+    expect(out.peak).toEqual({
+      day: 0,
+      day_name: "Sunday",
+      hour: 0,
+      value: 0,
+    });
+  });
 });
