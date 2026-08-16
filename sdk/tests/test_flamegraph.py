@@ -483,6 +483,49 @@ class TestFlamegraphBuildBranches(unittest.TestCase):
         node = fg.to_data()["nodes"][0]
         self.assertEqual(node["attrs"], {"region": "us-east", "retries": 2})
 
+    def test_zero_duration_event_gets_synthetic_minimum_width(self):
+        # An event with no measurable duration would render as a zero-width bar
+        # (invisible). _build() substitutes a synthetic minimum of
+        # max(total_ms * 0.01, 1) so the bar stays clickable. Here total_ms is
+        # 1500 (a second event ends at 1500ms), so the fallback width is 15.
+        zero = _make_event(offset_ms=0, duration_ms=0)
+        anchor = _make_event(event_type="tool_call", offset_ms=1000, duration_ms=500)
+        fg = Flamegraph([zero, anchor])
+        data = fg.to_data()
+        self.assertEqual(data["totalMs"], 1500)
+        zero_node = [n for n in data["nodes"] if n["type"] == "llm_call"][0]
+        # Not zero, and exactly the documented 1% floor.
+        self.assertEqual(zero_node["duration"], 15.0)
+
+    def test_zero_duration_floor_never_below_one_ms(self):
+        # When the session is tiny, total_ms * 0.01 rounds under 1ms; the floor
+        # must clamp to 1 so the bar is still visible.
+        only = _make_event(offset_ms=0, duration_ms=0)
+        fg = Flamegraph([only])
+        node = fg.to_data()["nodes"][0]
+        self.assertEqual(node["duration"], 1)
+
+    def test_span_with_unparseable_start_falls_back_to_origin(self):
+        # A span whose started_at can't be parsed has no anchor of its own; the
+        # build must place it at the session origin (start_ms == 0) rather than
+        # dropping it or emitting a non-finite offset. A parseable event fixes
+        # the origin, and the child event still nests under the span.
+        anchor = _make_event(offset_ms=0, duration_ms=100)
+        span = Span(
+            name="noTS",
+            started_at="not-a-date",
+            ended_at=None,
+            duration_ms=50,
+            parent_id=None,
+        )
+        fg = Flamegraph(events=[anchor], spans=[span])
+        data = fg.to_data()
+        span_node = [n for n in data["nodes"] if n["type"] == "span"][0]
+        self.assertEqual(span_node["start"], 0.0)
+        self.assertEqual(span_node["name"], "span: noTS")
+        # The event within the span's window nests one level deeper.
+        self.assertEqual(data["maxDepth"], 1)
+
 
 class TestFiniteMs(unittest.TestCase):
     def test_finite_positive_passes_through(self):
