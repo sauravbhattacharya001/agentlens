@@ -336,3 +336,33 @@ class TestNarrativeGenerator:
         assert len(serialized) > 0
         parsed = json.loads(serialized)
         assert parsed["session_id"] == "sess-001"
+
+    def test_duration_inferred_from_events_when_no_session_times(self):
+        # When the session lacks both started_at and ended_at, generate()
+        # falls back to the event-timestamp span
+        # (events[-1] - events[0]). Pin that fallback arm's value.
+        gen = NarrativeGenerator()
+        s = _make_session([_llm_event(10), _llm_event(40)], status="active")
+        s.started_at = None
+        s.ended_at = None
+        n = gen.generate(s)
+        assert n.duration_seconds == 30.0
+
+    def test_duration_inferred_when_only_started_at_present(self):
+        # ended_at is None so the `and` guard fails and the event-span
+        # fallback is used, not (ended_at - started_at).
+        gen = NarrativeGenerator()
+        s = _make_session([_llm_event(5), _llm_event(25)], status="active")
+        s.ended_at = None
+        n = gen.generate(s)
+        assert n.duration_seconds == 20.0
+
+    def test_duration_zero_when_no_times_and_no_events(self):
+        # Neither session times nor events -> both duration branches skipped,
+        # duration stays at the 0.0 default.
+        gen = NarrativeGenerator()
+        s = _make_session([], status="active")
+        s.started_at = None
+        s.ended_at = None
+        n = gen.generate(s)
+        assert n.duration_seconds == 0.0
