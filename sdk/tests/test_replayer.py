@@ -361,6 +361,19 @@ class TestSessionReplayer:
         assert frames[0].index == 1
         assert frames[1].index == 2
 
+    def test_play_range_default_end_yields_to_last(self):
+        # end=None must never trigger the `end is not None` break: every
+        # frame from `start` onward is yielded (the open-ended slice path).
+        session = _make_session(5)
+        replayer = SessionReplayer(session)
+        frames = list(replayer.play_range(start=2))
+        assert [f.index for f in frames] == [2, 3, 4]
+
+    def test_play_range_start_zero_default_end_is_full_play(self):
+        session = _make_session(4)
+        replayer = SessionReplayer(session)
+        assert [f.index for f in replayer.play_range()] == [0, 1, 2, 3]
+
     def test_step_through(self):
         session = _make_session(3)
         replayer = SessionReplayer(session)
@@ -490,6 +503,19 @@ class TestSessionReplayer:
         assert result["event_count"]["a"] == 0
         assert result["event_count"]["b"] == 0
         assert result["duration_ms"]["a"] == 0.0
+
+    def test_diff_single_event_session_has_zero_duration(self):
+        # `_duration` returns 0.0 for any session with < 2 events, but the
+        # single-event case is a distinct boundary from the empty case: the
+        # event still appears in counts and the type distribution.
+        a = Session(session_id="a")
+        a.add_event(AgentEvent(event_id="e0", event_type="llm_call", timestamp=_ts(0)))
+        b = _make_session(3)
+        result = SessionReplayer.diff(a, b)
+        assert result["event_count"]["a"] == 1
+        assert result["duration_ms"]["a"] == 0.0
+        assert result["duration_ms"]["b"] > 0.0
+        assert result["event_types"]["llm_call"]["a"] == 1
 
     def test_diff_tokens(self):
         session_a = _make_session(3)
