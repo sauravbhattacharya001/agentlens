@@ -117,6 +117,21 @@ class TestSessionStats:
         stats = _session_stats(s)
         assert stats["event_count"] == 0
         assert stats["tool_calls"] == 0
+        # ``Session.started_at`` has a default factory but ``ended_at`` defaults
+        # to None, so this exercises the FIRST-operand-falsy arm of the
+        # ``session.ended_at and session.started_at`` guard (ended_at is None).
+        assert stats["session_duration_ms"] is None
+
+    def test_started_at_none_ended_at_set(self):
+        # The complementary asymmetry: a reconstructed/imported Session can
+        # carry ``ended_at`` while ``started_at`` was cleared to None. This
+        # exercises the SECOND-operand-falsy arm of the ``and`` guard, which
+        # ``test_empty_session`` (ended_at None) never reaches. The duration
+        # must stay None rather than attempting ``ended_at - None``.
+        s = _empty_session()
+        s.started_at = None
+        s.ended_at = datetime(2026, 1, 1, tzinfo=timezone.utc)
+        stats = _session_stats(s)
         assert stats["session_duration_ms"] is None
 
     def test_zero_duration_session_reports_zero_not_none(self):
