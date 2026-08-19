@@ -475,6 +475,64 @@ class TestHtmlExport:
         assert "&lt;span onclick=x&gt;t&lt;/span&gt;" in html
 
 
+# ── Events-table detail cell (truncation + precedence) ──────────────
+# The per-row ``detail`` cell in ``_render_events_table`` picks its content
+# with a precedence chain (decision reasoning > tool name > model) and
+# truncates long decision reasoning to 60 chars + "…". The XSS tests above
+# use short reasoning, so only the *non*-truncated arm was exercised; these
+# pin the truncation boundary and the precedence order directly.
+
+class TestEventsTableDetail:
+    def _decision_session(self, reasoning: str) -> Session:
+        s = _empty_session()
+        s.add_event(AgentEvent(
+            event_type="decision",
+            timestamp=datetime(2026, 1, 1, tzinfo=timezone.utc),
+            decision_trace=DecisionTrace(reasoning=reasoning),
+        ))
+        return s
+
+    def test_long_reasoning_truncated_with_ellipsis(self):
+        """Reasoning over 60 chars is sliced to 60 and gets a trailing '…'."""
+        reasoning = "R" * 100
+        html = SessionExporter(self._decision_session(reasoning)).as_html()
+        assert ("R" * 60 + "\u2026") in html
+        # The full (untruncated) string must NOT appear anywhere.
+        assert ("R" * 61) not in html
+
+    def test_reasoning_exactly_60_not_truncated(self):
+        """Boundary: len == 60 uses the ``else r`` arm (no ellipsis added)."""
+        reasoning = "B" * 60
+        html = SessionExporter(self._decision_session(reasoning)).as_html()
+        assert ("B" * 60) in html
+        assert ("B" * 60 + "\u2026") not in html
+
+    def test_detail_precedence_decision_over_tool_and_model(self):
+        """A decision_trace wins the detail cell over tool_call/model."""
+        s = _empty_session()
+        s.add_event(AgentEvent(
+            event_type="decision",
+            timestamp=datetime(2026, 1, 1, tzinfo=timezone.utc),
+            model="model-should-lose",
+            tool_call=ToolCall(tool_name="tool-should-lose", tool_input={}),
+            decision_trace=DecisionTrace(reasoning="decision-wins"),
+        ))
+        html = SessionExporter(s).as_html()
+        assert "decision-wins" in html
+
+    def test_detail_precedence_tool_over_model(self):
+        """With no decision_trace, tool_call name wins over the model detail."""
+        s = _empty_session()
+        s.add_event(AgentEvent(
+            event_type="tool_call",
+            timestamp=datetime(2026, 1, 1, tzinfo=timezone.utc),
+            model="model-should-lose",
+            tool_call=ToolCall(tool_name="tool-wins", tool_input={}),
+        ))
+        html = SessionExporter(s).as_html()
+        assert "tool-wins" in html
+
+
 # ── Round-trip ──────────────────────────────────────────────────────
 
 class TestRoundTrip:
