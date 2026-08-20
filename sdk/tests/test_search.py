@@ -293,6 +293,42 @@ class TestSearchEvents:
         params = mock_transport.get.call_args[1]["params"]
         assert "min_tokens" not in params
 
+    def test_search_zero_and_negative_max_tokens_not_sent(self, tracker, mock_transport):
+        """max_tokens<=0 is treated as no filter (the `> 0` guard's false arm)."""
+        tracker.start_session(agent_name="test")
+        mock_response = MagicMock()
+        mock_response.json.return_value = make_search_response()
+        mock_transport.get.return_value = mock_response
+
+        for bad in (0, -1):
+            tracker.search_events(max_tokens=bad)
+            params = mock_transport.get.call_args[1]["params"]
+            assert "max_tokens" not in params
+
+    def test_search_zero_and_negative_min_duration_not_sent(self, tracker, mock_transport):
+        """min_duration_ms<=0 is treated as no filter (the `> 0` guard's false arm)."""
+        tracker.start_session(agent_name="test")
+        mock_response = MagicMock()
+        mock_response.json.return_value = make_search_response()
+        mock_transport.get.return_value = mock_response
+
+        for bad in (0, 0.0, -0.5):
+            tracker.search_events(min_duration_ms=bad)
+            params = mock_transport.get.call_args[1]["params"]
+            assert "min_duration_ms" not in params
+
+    def test_search_negative_min_tokens_not_sent(self, tracker, mock_transport):
+        """A present-but-negative min_tokens is omitted, not just 0."""
+        tracker.start_session(agent_name="test")
+        mock_response = MagicMock()
+        mock_response.json.return_value = make_search_response()
+        mock_transport.get.return_value = mock_response
+
+        tracker.search_events(min_tokens=-10)
+
+        params = mock_transport.get.call_args[1]["params"]
+        assert "min_tokens" not in params
+
     def test_search_false_booleans_not_sent(self, tracker, mock_transport):
         """has_tools=False, etc. are not sent as params."""
         tracker.start_session(agent_name="test")
