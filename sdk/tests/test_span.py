@@ -224,3 +224,76 @@ class TestTrackerSpan:
         # Manual status should stick (not overridden to "completed")
         assert s.status == "error"
         assert s.error == "manual error"
+
+    def _span_end_events(self, tracker) -> list[dict]:
+        """Collect every emitted ``span_end`` event payload."""
+        ends: list[dict] = []
+        for call in tracker.transport.send_events.call_args_list:
+            for ev in call[0][0]:
+                if ev.get("event_type") == "span_end":
+                    ends.append(ev)
+        return ends
+
+    def test_manual_error_override_reaches_span_end_event(self):
+        # The span exits WITHOUT raising, but the block manually flagged an
+        # error.  The auto-complete guard (``if sp.status == "active"``) must
+        # NOT overwrite it, and - the point of this test - the manual status +
+        # message must survive into the EMITTED ``span_end`` payload, not just
+        # the in-memory Span.  A collector consuming the event stream sees
+        # ``status="error"`` even though no exception propagated.
+        tracker = _make_tracker()
+        tracker.start_session("agent")
+
+        with tracker.span("work") as s:
+            s.set_status("error", "manual error")
+
+        ends = self._span_end_events(tracker)
+        assert len(ends) == 1
+        assert ends[0]["status"] == "error"
+        assert ends[0]["error"] == "manual error"
+        assert ends[0]["span_id"] == s.span_id
+
+    def test_manual_completed_override_skips_autocomplete_but_matches_default(self):
+        # Pre-setting status to "completed" also skips the auto-complete guard
+        # (the guard only fires while status is still "active").  The emitted
+        # payload is "completed" with no error - identical to the default exit,
+        # so this pins the OTHER (non-"active") arm of the guard.
+        tracker = _make_tracker()
+        tracker.start_session("agent")
+
+        with tracker.span("work") as s:
+            s.set_status("completed")
+
+        ends = self._span_end_events(tracker)
+        assert len(ends) == 1
+        assert ends[0]["status"] == "completed"
+        assert ends[0]["error"] is None
+
+    def test_clean_exit_emits_completed_status_and_no_error(self):
+        # Baseline: an ordinary clean exit takes the ``status == "active"`` arm
+        # and reports "completed" / error=None in the emitted event.
+        tracker = _make_tracker()
+        tracker.start_session("agent")
+
+        with tracker.span("work"):
+            pass
+
+        ends = self._span_end_events(tracker)
+        assert len(ends) == 1
+        assert ends[0]["status"] == "completed"
+        assert ends[0]["error"] is None
+
+    def test_exception_error_reaches_span_end_event(self):
+        # The exception arm sets status="error"/error=str(exc); confirm both
+        # reach the emitted ``span_end`` payload (not just the Span object).
+        tracker = _make_tracker()
+        tracker.start_session("agent")
+
+        with pytest.raises(ValueError, match="boom"):
+            with tracker.span("failing"):
+                raise ValueError("boom")
+
+        ends = self._span_end_events(tracker)
+        assert len(ends) == 1
+        assert ends[0]["status"] == "error"
+        assert ends[0]["error"] == "boom"
