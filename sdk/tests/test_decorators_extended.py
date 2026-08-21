@@ -457,6 +457,46 @@ class TestSensitiveDataRedaction:
             assert len(arg_str) < 500  # truncated
             assert "truncated" in arg_str
 
+    def test_unrepresentable_arg_is_masked(self):
+        """An object whose ``str()`` raises is captured as ``<unrepresentable>``
+        rather than crashing the tracking wrapper (``_safe_repr`` except arm)."""
+        class Boom:
+            def __str__(self):
+                raise RuntimeError("no str")
+
+            def __repr__(self):
+                raise RuntimeError("no repr")
+
+        @track_tool_call
+        def tool(value, payload=None):
+            return "ok"
+
+        with patch("agentlens.track") as mock_track:
+            tool(Boom(), payload=Boom())
+            kw = mock_track.call_args[1]
+            assert kw["tool_input"]["args"][0] == "<unrepresentable>"
+            # A non-sensitive kwarg that can't be stringified is masked too,
+            # not redacted (redaction is by key name, not value failure).
+            assert kw["tool_input"]["kwargs"]["payload"] == "<unrepresentable>"
+
+    def test_unrepresentable_async_arg_is_masked(self):
+        """Same ``_safe_repr`` except arm on the async wrapper path."""
+        class Boom:
+            def __str__(self):
+                raise RuntimeError("no str")
+
+            def __repr__(self):
+                raise RuntimeError("no repr")
+
+        @track_agent
+        async def async_agent(prompt):
+            return "ok"
+
+        with patch("agentlens.track") as mock_track:
+            asyncio.run(async_agent(Boom()))
+            kw = mock_track.call_args[1]
+            assert kw["input_data"]["args"][0] == "<unrepresentable>"
+
     def test_async_redaction(self):
         @track_agent
         async def async_agent(prompt, api_key=None):
