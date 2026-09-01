@@ -297,6 +297,41 @@ html = exporter.as_html();   exporter.to_html("session_report.html")
 The HTML export is self-contained (embedded CSS) — session metadata, event
 timeline, and summary statistics, no external dependencies.
 
+## OpenTelemetry (GenAI semconv)
+
+Emit sessions using the [OpenTelemetry GenAI semantic conventions](https://opentelemetry.io/docs/specs/semconv/gen-ai/)
+(`gen_ai.*` attributes) so traces ship to any OTLP backend (Jaeger, Tempo,
+Grafana, Honeycomb, Arize, Langfuse, …) and correlate with the rest of your
+telemetry.
+
+```bash
+pip install "agentlens[otel]"
+```
+
+```python
+import agentlens
+from agentlens import OTelExporter
+
+# Configure your OpenTelemetry TracerProvider / OTLP exporter as usual, then:
+agentlens.export_otel(system="openai")          # current session
+# or explicitly:
+OTelExporter(system="openai").export(session)
+```
+
+Mapping:
+
+| AgentLens | OpenTelemetry GenAI semconv |
+|---|---|
+| `Session` | root span, `gen_ai.operation.name=invoke_agent` |
+| `llm_call` event | `chat {model}` span (`gen_ai.request.model`, usage tokens) |
+| `tool_call` event | `execute_tool {name}` span (`gen_ai.tool.name`, `gen_ai.tool.call.id`) |
+| `error` event | span status `ERROR` |
+| `tokens_in` / `tokens_out` | `gen_ai.usage.input_tokens` / `gen_ai.usage.output_tokens` |
+
+The pure mappers (`event_attributes`, `session_attributes`,
+`span_name_for_event`) are importable without OpenTelemetry installed, so you
+can build custom exporters too.
+
 ## Spans
 
 Structured tracing spans for fine-grained operation tracking.
@@ -352,6 +387,10 @@ Markdown-formatted explanation of a session.
 ### `agentlens.export_session(session_id=None, format="json")`
 
 Export session data — dict (JSON) or string (CSV).
+
+### `agentlens.export_otel(session_id=None, system=None)`
+
+Emit a session as OpenTelemetry GenAI-semconv spans (requires `agentlens[otel]`).
 
 ### `agentlens.export_transcript(...)` / `agentlens.export_run_metadata(...)`
 

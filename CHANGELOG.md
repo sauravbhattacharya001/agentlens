@@ -9,6 +9,25 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
 
 ### Added
 
+- **OpenTelemetry GenAI semantic-convention export** - AgentLens can now emit
+  sessions using the [OpenTelemetry GenAI semantic conventions](https://opentelemetry.io/docs/specs/semconv/gen-ai/)
+  (`gen_ai.*` attributes) instead of only its own event schema, so traces ship to
+  any OTLP backend (Jaeger, Tempo, Grafana, Honeycomb, Arize, Langfuse, ...).
+  - New `agentlens.otel` module with `OTelExporter` and pure attribute mappers
+    (`event_attributes`, `tool_attributes`, `session_attributes`,
+    `span_name_for_event`).
+  - A `Session` maps to a root `invoke_agent` span; `llm_call` events become
+    `chat {model}` spans and `tool_call` events become `execute_tool {name}`
+    spans, with token usage on `gen_ai.usage.input_tokens` /
+    `gen_ai.usage.output_tokens`, model on `gen_ai.request.model` /
+    `gen_ai.response.model`, and tools on `gen_ai.tool.name` /
+    `gen_ai.tool.call.id`. Error events set the span status to `ERROR`.
+  - Convenience: `agentlens.export_otel(session_id=..., system="openai")`.
+  - Optional dependency: `pip install "agentlens[otel]"` (opentelemetry-api,
+    opentelemetry-sdk, OTLP HTTP exporter). Importing without it raises a clear,
+    actionable error.
+  - 11 new SDK tests.
+
 - **Transcript export (agent-eval bridge)** - Render an AgentLens session as a
   contract-compliant transcript for [agent-eval](https://github.com/sauravbhattacharya001/agent-eval).
   - `agentlens.export_transcript(session=..., session_id=..., timezone_label=...)`

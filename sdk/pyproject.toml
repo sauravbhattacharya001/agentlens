@@ -4,7 +4,7 @@ build-backend = "setuptools.build_meta"
 
 [project]
 name = "agentlens"
-version = "1.65.0"
+version = "1.66.0"
 description = "Observability and Explainability for AI Agents"
 readme = "README.md"
 license = {text = "MIT"}
@@ -54,6 +54,11 @@ Changelog = "https://github.com/sauravbhattacharya001/agentlens/blob/master/CHAN
 dev = [
     "pytest>=8.4.2",
     "pytest-cov",
+]
+otel = [
+    "opentelemetry-api>=1.30.0",
+    "opentelemetry-sdk>=1.30.0",
+    "opentelemetry-exporter-otlp-proto-http>=1.30.0",
 ]
 
 

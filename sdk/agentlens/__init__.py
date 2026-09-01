@@ -17,8 +17,9 @@ from agentlens.narrative import NarrativeGenerator, NarrativeConfig, NarrativeSt
 from agentlens.replayer import SessionReplayer, ReplayFrame, ReplayStats
 from agentlens.flamegraph import Flamegraph, flamegraph_html
 from agentlens.transcript import TranscriptExporter, export_transcript as _render_transcript, export_run_metadata as _extract_run_metadata, TRANSCRIPT_CONTRACT_VERSION
+from agentlens.otel import OTelExporter
 
-__version__ = "1.65.0"
+__version__ = "1.66.0"
 __all__ = [
     "init",
     "start_session",
@@ -61,6 +62,8 @@ __all__ = [
     "ReplayStats",
     "Flamegraph",
     "flamegraph_html",
+    "OTelExporter",
+    "export_otel",
 ]
 
 _tracker: AgentTracker | None = None
@@ -187,6 +190,25 @@ def export_session(session_id: str | None = None, format: str = "json"):
         and summary statistics.
     """
     return _get_tracker("export_session").export_session(session_id=session_id, format=format)
+
+
+def export_otel(session_id: str | None = None, system: str | None = None) -> None:
+    """Emit a session as OpenTelemetry GenAI-semconv spans.
+
+    Converts an in-memory session into a tree of OpenTelemetry spans that
+    follow the GenAI semantic conventions (``gen_ai.*`` attributes) and emits
+    them through the globally-configured ``TracerProvider``. Requires the
+    optional ``otel`` extra (``pip install "agentlens[otel]"``).
+
+    Args:
+        session_id: Session to export. Defaults to the current session.
+        system: Value for ``gen_ai.system`` (e.g. ``"openai"``, ``"anthropic"``).
+    """
+    tracker = _get_tracker("export_otel")
+    sid = session_id or tracker._current_session_id
+    if not sid or sid not in tracker.sessions:
+        raise RuntimeError("No session found to export to OpenTelemetry.")
+    OTelExporter(system=system).export(tracker.sessions[sid])
 
 
 def export_transcript(
