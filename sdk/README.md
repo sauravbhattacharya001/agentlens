@@ -313,9 +313,9 @@ import agentlens
 from agentlens import OTelExporter
 
 # Configure your OpenTelemetry TracerProvider / OTLP exporter as usual, then:
-agentlens.export_otel(system="openai")          # current session
+agentlens.export_otel(provider="openai")         # current session
 # or explicitly:
-OTelExporter(system="openai").export(session)
+OTelExporter(provider="openai").export(session)
 ```
 
 Mapping:
@@ -325,8 +325,23 @@ Mapping:
 | `Session` | root span, `gen_ai.operation.name=invoke_agent` |
 | `llm_call` event | `chat {model}` span (`gen_ai.request.model`, usage tokens) |
 | `tool_call` event | `execute_tool {name}` span (`gen_ai.tool.name`, `gen_ai.tool.call.id`) |
-| `error` event | span status `ERROR` |
-| `tokens_in` / `tokens_out` | `gen_ai.usage.input_tokens` / `gen_ai.usage.output_tokens` |
+| `error` event | span status `ERROR` + `error.type` |
+| `tokens_in` / `tokens_out` | `gen_ai.usage.input_tokens` / `gen_ai.usage.output_tokens` (on the `chat` span only) |
+| provider | `gen_ai.provider.name` |
+
+Notes:
+
+- **Provider attribute:** uses `gen_ai.provider.name` (the semconv v1.37.0 rename
+  of the now-deprecated `gen_ai.system`). Pass `emit_legacy_system=True` to also
+  emit `gen_ai.system` for backends still on the old name.
+- **Token usage is not double-counted:** it lives on the child `chat` spans that
+  consumed the tokens, never mirrored onto the root `invoke_agent` span.
+- **Response model is never fabricated:** `gen_ai.response.model` is emitted only
+  when the SDK actually captured a served model (via `output_data`), so silent
+  model substitution stays visible.
+- **Stability:** the `gen_ai.*` namespace is still *Development* (not Stable);
+  chat attributes are mature, agent/tool-orchestration ones are still settling.
+  See <https://github.com/open-telemetry/semantic-conventions-genai>.
 
 The pure mappers (`event_attributes`, `session_attributes`,
 `span_name_for_event`) are importable without OpenTelemetry installed, so you
@@ -388,7 +403,7 @@ Markdown-formatted explanation of a session.
 
 Export session data — dict (JSON) or string (CSV).
 
-### `agentlens.export_otel(session_id=None, system=None)`
+### `agentlens.export_otel(session_id=None, provider=None, *, emit_legacy_system=False)`
 
 Emit a session as OpenTelemetry GenAI-semconv spans (requires `agentlens[otel]`).
 

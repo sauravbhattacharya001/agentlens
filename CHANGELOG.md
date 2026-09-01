@@ -19,14 +19,21 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
   - A `Session` maps to a root `invoke_agent` span; `llm_call` events become
     `chat {model}` spans and `tool_call` events become `execute_tool {name}`
     spans, with token usage on `gen_ai.usage.input_tokens` /
-    `gen_ai.usage.output_tokens`, model on `gen_ai.request.model` /
-    `gen_ai.response.model`, and tools on `gen_ai.tool.name` /
-    `gen_ai.tool.call.id`. Error events set the span status to `ERROR`.
-  - Convenience: `agentlens.export_otel(session_id=..., system="openai")`.
+    `gen_ai.usage.output_tokens` (on the `chat` span only, never duplicated onto
+    the root span), request model on `gen_ai.request.model`, and tools on
+    `gen_ai.tool.name` / `gen_ai.tool.call.id`. Error events set span status
+    `ERROR` and emit `error.type`.
+  - Provider identity uses `gen_ai.provider.name` (the semconv v1.37.0 rename of
+    the deprecated `gen_ai.system`); pass `emit_legacy_system=True` to also emit
+    the old attribute during backend migration.
+  - `gen_ai.response.model` is emitted only when a served model was actually
+    captured — never mirrored from the request model — so silent model
+    substitution stays observable.
+  - Convenience: `agentlens.export_otel(session_id=..., provider="openai")`.
   - Optional dependency: `pip install "agentlens[otel]"` (opentelemetry-api,
     opentelemetry-sdk, OTLP HTTP exporter). Importing without it raises a clear,
     actionable error.
-  - 11 new SDK tests.
+  - 14 new SDK tests.
 
 - **Transcript export (agent-eval bridge)** - Render an AgentLens session as a
   contract-compliant transcript for [agent-eval](https://github.com/sauravbhattacharya001/agent-eval).

@@ -19,14 +19,34 @@ def test_llm_event_attributes_use_genai_semconv():
         tokens_in=100,
         tokens_out=50,
     )
-    attrs = otel.event_attributes(ev, system="openai")
+    attrs = otel.event_attributes(ev, provider="openai")
     assert attrs[otel.GEN_AI_OPERATION_NAME] == otel.OP_CHAT
-    assert attrs[otel.GEN_AI_SYSTEM] == "openai"
+    assert attrs[otel.GEN_AI_PROVIDER_NAME] == "openai"
+    assert otel.GEN_AI_SYSTEM not in attrs  # deprecated, off by default
     assert attrs[otel.GEN_AI_REQUEST_MODEL] == "gpt-4o"
-    assert attrs[otel.GEN_AI_RESPONSE_MODEL] == "gpt-4o"
+    # response model must NOT be fabricated from the request model
+    assert otel.GEN_AI_RESPONSE_MODEL not in attrs
     assert attrs[otel.GEN_AI_USAGE_INPUT_TOKENS] == 100
     assert attrs[otel.GEN_AI_USAGE_OUTPUT_TOKENS] == 50
     assert attrs[otel.GEN_AI_CONVERSATION_ID] == "sess1"
+
+
+def test_legacy_system_opt_in():
+    ev = AgentEvent(event_type="llm_call", model="gpt-4o")
+    attrs = otel.event_attributes(ev, provider="openai", emit_legacy_system=True)
+    assert attrs[otel.GEN_AI_PROVIDER_NAME] == "openai"
+    assert attrs[otel.GEN_AI_SYSTEM] == "openai"
+
+
+def test_response_model_emitted_only_when_captured():
+    ev = AgentEvent(
+        event_type="llm_call",
+        model="gpt-4o",
+        output_data={"response_model": "gpt-4o-2024-08-06"},
+    )
+    attrs = otel.event_attributes(ev)
+    assert attrs[otel.GEN_AI_REQUEST_MODEL] == "gpt-4o"
+    assert attrs[otel.GEN_AI_RESPONSE_MODEL] == "gpt-4o-2024-08-06"
 
 
 def test_zero_tokens_are_omitted():
@@ -56,11 +76,21 @@ def test_span_names_follow_genai_convention():
 
 def test_session_attributes():
     s = Session(agent_name="planner", total_tokens_in=10, total_tokens_out=5)
-    attrs = otel.session_attributes(s, system="anthropic")
+    attrs = otel.session_attributes(s, provider="anthropic")
     assert attrs[otel.GEN_AI_OPERATION_NAME] == otel.OP_INVOKE_AGENT
     assert attrs[otel.GEN_AI_AGENT_NAME] == "planner"
-    assert attrs[otel.GEN_AI_SYSTEM] == "anthropic"
-    assert attrs[otel.GEN_AI_USAGE_INPUT_TOKENS] == 10
+    assert attrs[otel.GEN_AI_PROVIDER_NAME] == "anthropic"
+    # tokens must NOT be on the root span (avoids trace-wide double-counting)
+    assert otel.GEN_AI_USAGE_INPUT_TOKENS not in attrs
+    assert otel.GEN_AI_USAGE_OUTPUT_TOKENS not in attrs
+
+
+def test_error_event_sets_error_type():
+    ev = AgentEvent(event_type="error", output_data={"error_type": "RateLimitError"})
+    attrs = otel.event_attributes(ev)
+    assert attrs[otel.ERROR_TYPE] == "RateLimitError"
+    # falls back to spec catch-all when nothing captured
+    assert otel.event_attributes(AgentEvent(event_type="error"))[otel.ERROR_TYPE] == "_OTHER"
 
 
 def test_none_attributes_are_stripped():
@@ -103,7 +133,7 @@ def _build_session() -> Session:
 
 
 def test_exporter_emits_root_and_child_spans(span_capture):
-    otel.OTelExporter(system="openai").export(_build_session())
+    otel.OTelExporter(provider="openai").export(_build_session())
     spans = span_capture.get_finished_spans()
     names = sorted(sp.name for sp in spans)
     assert "invoke_agent researcher" in names
@@ -114,12 +144,16 @@ def test_exporter_emits_root_and_child_spans(span_capture):
 
 
 def test_exporter_sets_genai_attributes(span_capture):
-    otel.OTelExporter(system="openai").export(_build_session())
+    otel.OTelExporter(provider="openai").export(_build_session())
     spans = {sp.name: sp for sp in span_capture.get_finished_spans()}
     chat = spans["chat gpt-4o"]
     assert chat.attributes[otel.GEN_AI_OPERATION_NAME] == "chat"
+    assert chat.attributes[otel.GEN_AI_PROVIDER_NAME] == "openai"
     assert chat.attributes[otel.GEN_AI_REQUEST_MODEL] == "gpt-4o"
     assert chat.attributes[otel.GEN_AI_USAGE_INPUT_TOKENS] == 120
+    # tokens live only on the chat span, not duplicated on the root
+    root = spans["invoke_agent researcher"]
+    assert otel.GEN_AI_USAGE_INPUT_TOKENS not in root.attributes
 
 
 def test_error_event_marks_span_error(span_capture):
@@ -128,6 +162,7 @@ def test_error_event_marks_span_error(span_capture):
     otel.OTelExporter().export(_build_session())
     spans = {sp.name: sp for sp in span_capture.get_finished_spans()}
     assert spans["error"].status.status_code == StatusCode.ERROR
+    assert spans["error"].attributes[otel.ERROR_TYPE] == "_OTHER"
 
 
 def test_child_spans_share_root_trace(span_capture):

@@ -192,7 +192,13 @@ def export_session(session_id: str | None = None, format: str = "json"):
     return _get_tracker("export_session").export_session(session_id=session_id, format=format)
 
 
-def export_otel(session_id: str | None = None, system: str | None = None) -> None:
+def export_otel(
+    session_id: str | None = None,
+    provider: str | None = None,
+    *,
+    emit_legacy_system: bool = False,
+    system: str | None = None,
+) -> None:
     """Emit a session as OpenTelemetry GenAI-semconv spans.
 
     Converts an in-memory session into a tree of OpenTelemetry spans that
@@ -202,13 +208,20 @@ def export_otel(session_id: str | None = None, system: str | None = None) -> Non
 
     Args:
         session_id: Session to export. Defaults to the current session.
-        system: Value for ``gen_ai.system`` (e.g. ``"openai"``, ``"anthropic"``).
+        provider: Value for ``gen_ai.provider.name`` (e.g. ``"openai"``).
+            ``system`` is accepted as a deprecated alias.
+        emit_legacy_system: Also emit the deprecated ``gen_ai.system`` for
+            backends not yet migrated to ``gen_ai.provider.name``.
     """
     tracker = _get_tracker("export_otel")
     sid = session_id or tracker._current_session_id
     if not sid or sid not in tracker.sessions:
         raise RuntimeError("No session found to export to OpenTelemetry.")
-    OTelExporter(system=system).export(tracker.sessions[sid])
+    OTelExporter(
+        provider=provider,
+        system=system,
+        emit_legacy_system=emit_legacy_system,
+    ).export(tracker.sessions[sid])
 
 
 def export_transcript(
